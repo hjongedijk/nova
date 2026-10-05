@@ -21,7 +21,7 @@ param(
   [string]$ConfigPath = (Join-Path $PSScriptRoot 'agent.json')
 )
 $ErrorActionPreference = 'Stop'
-$agentVersion = '2026-10-06.4'
+$agentVersion = '2026-10-06.5'
 
 # However the agent is started (task, double-click, a terminal), it runs on without a window: this copy starts
 # a hidden one and ends. (conhost --headless also keeps Windows Terminal from opening a window.)
@@ -282,6 +282,7 @@ public class NovaClick {
   [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, ChildProc proc, IntPtr l);
   [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] static extern short GetKeyState(int vk);
+  [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] static extern IntPtr GetKeyboardLayout(uint thread);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int ToUnicodeEx(uint vk, uint scan, byte[] state, [Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder buf, int size, uint flags, IntPtr layout);
@@ -307,6 +308,9 @@ public class NovaClick {
   static bool leftDown, hovering;
   static int downX, downY;
   static Target armed;
+  // Armed typing swallows every key, so the system never learns that Shift, Ctrl or Alt is down and
+  // GetKeyState stays false ("?" came out as "/"). The modifiers are tracked from the hook's own events.
+  static bool shiftHeld, ctrlHeld, altHeld, capsOn, capsHeld;
   static DateTime armedAt = DateTime.MinValue;
   static DateTime lastMove = DateTime.MinValue;
   static Process assistant;
@@ -629,7 +633,14 @@ public class NovaClick {
   static void Arm(Target t, int x, int y) {
     bool typing;
     InZone(t, x, y, out typing);
-    if (typing) { armed = t; armedAt = DateTime.UtcNow; }
+    if (typing) {
+      armed = t; armedAt = DateTime.UtcNow;
+      shiftHeld = (GetAsyncKeyState(0x10) & 0x8000) != 0;
+      ctrlHeld = (GetAsyncKeyState(0x11) & 0x8000) != 0;
+      altHeld = (GetAsyncKeyState(0x12) & 0x8000) != 0;
+      capsOn = (GetKeyState(0x14) & 1) != 0;
+      capsHeld = false;
+    }
     else armed = null;
   }
 
@@ -666,15 +677,23 @@ public class NovaClick {
     return CallNextHookEx(keyHook, code, wParam, lParam);
   }
 
+  static void TrackModifiers(uint vk, bool down) {
+    if (vk == 0x10 || vk == 0xA0 || vk == 0xA1) shiftHeld = down;
+    else if (vk == 0x11 || vk == 0xA2 || vk == 0xA3) ctrlHeld = down;
+    else if (vk == 0x12 || vk == 0xA4 || vk == 0xA5) altHeld = down;
+    else if (vk == 0x14) { if (down && !capsHeld) capsOn = !capsOn; capsHeld = down; }
+  }
+
   static bool Key(int msg, KBD k) {
     // Only while the desktop itself has the focus, so typing in any window is never taken.
     string foreground = NovaDesk.ClassOf(GetForegroundWindow());
     if (foreground != "Progman" && foreground != "WorkerW") return false;
     bool down = msg == 0x100 || msg == 0x104, up = msg == 0x101 || msg == 0x105;
     if (!down && !up) return false;
+    TrackModifiers(k.vk, down);
     if (k.vk == 0x1B && down) { armed = null; return false; }   // Esc ends typing and still reaches the desktop
     armedAt = DateTime.UtcNow;
-    bool ctrl = (GetKeyState(0x11) & 0x8000) != 0, altKey = (GetKeyState(0x12) & 0x8000) != 0;
+    bool ctrl = ctrlHeld, altKey = altHeld;
     if (Live(armed)) {
       CdpKey(armed, k, down, down && (!ctrl || altKey) ? Typed(k, ctrl, altKey) : null, ctrl && !altKey);
       return true;
@@ -700,8 +719,8 @@ public class NovaClick {
   // The text a key produces with the current keyboard layout and Shift/Caps/AltGr state.
   static string Typed(KBD k, bool control, bool alt) {
     var state = new byte[256];
-    if ((GetKeyState(0x10) & 0x8000) != 0) state[0x10] = 0x80;
-    if ((GetKeyState(0x14) & 1) != 0) state[0x14] = 1;
+    if (shiftHeld) state[0x10] = 0x80;
+    if (capsOn) state[0x14] = 1;
     if (control) state[0x11] = 0x80;
     if (alt) state[0x12] = 0x80;
     uint pid;
