@@ -19,9 +19,40 @@ export interface EntityHost {
   /** Open confirmations plus open warnings: the entity turns red and beats while this is above zero. */
   intensity(): number;
   /** The invisible button over the sphere; it follows the body. */
-  core(): HTMLElement | null;
+  core?(): HTMLElement | null;
   /** The speech stage; the sphere lifts away as the answer grows. */
-  stage(): HTMLElement | null;
+  stage?(): HTMLElement | null;
+  /**
+   * Compact mode (the helper's small orb): the SAME renderer on a small canvas, with fewer particles, without the
+   * HUD instrument, dust and the lift for the stage. `life` adds the character's movement on top, per frame.
+   */
+  compact?: { life: Life };
+}
+
+/** Extra movement for the compact orb, in units of the orb's radius, on top of the state's own look. */
+export interface Modulation {
+  /** Size factor (breathing, blink, hop-less swell). */
+  grow: number;
+  /** Squash and stretch of the cloud. */
+  sx: number;
+  sy: number;
+  /** Offset of the cloud's centre, in radii. */
+  ox: number;
+  oy: number;
+  /** Brightness factor (a blink dims it). */
+  dim: number;
+  /** Overrides on the state's look (waiting is orange, an error red). */
+  look?: Partial<Look>;
+}
+export interface Life {
+  update(t: number, dt: number, level: number): Modulation;
+  /** Drawn over the orb, in canvas pixels around the centre (sparkles). */
+  overlay?(
+    g: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    R: number,
+  ): void;
 }
 
 /** Start the loop on the host's canvas. Returns the function that stops it. */
@@ -33,10 +64,11 @@ export function startEntity(host: EntityHost): () => void {
 
   let W = 0;
   let H = 0;
+  const compact = host.compact ?? null;
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth;
-    H = window.innerHeight;
+    W = compact ? cv.clientWidth || 40 : window.innerWidth;
+    H = compact ? cv.clientHeight || 40 : window.innerHeight;
     cv.width = Math.round(W * dpr);
     cv.height = Math.round(H * dpr);
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -44,7 +76,7 @@ export function startEntity(host: EntityHost): () => void {
   resize();
   window.addEventListener("resize", resize);
 
-  const N = W < 700 ? 750 : 1300;
+  const N = compact ? 240 : W < 700 ? 750 : 1300;
   const px = new Float32Array(N);
   const py = new Float32Array(N);
   const pz = new Float32Array(N);
@@ -93,7 +125,7 @@ export function startEntity(host: EntityHost): () => void {
     }
   }
 
-  const DUST = W < 700 ? 70 : 150;
+  const DUST = compact ? 0 : W < 700 ? 70 : 150;
   const dust = Array.from({ length: DUST }, () => ({
     x: Math.random(),
     y: Math.random(),
@@ -114,8 +146,8 @@ export function startEntity(host: EntityHost): () => void {
   const born = lastT;
 
   const onPointerMove = (e: PointerEvent) => {
-    tx = (e.clientX / W) * 2 - 1;
-    ty = (e.clientY / H) * 2 - 1;
+    tx = (e.clientX / window.innerWidth) * 2 - 1;
+    ty = (e.clientY / window.innerHeight) * 2 - 1;
   };
   window.addEventListener("pointermove", onPointerMove);
 
@@ -124,6 +156,10 @@ export function startEntity(host: EntityHost): () => void {
     const t = nowMs / 1000;
     const dt = Math.max(0, Math.min(0.05, t - lastT));
     lastT = t;
+    if (compact && document.hidden) {
+      raf = requestAnimationFrame(frame);
+      return;
+    }
 
     /* ease parameters toward the target state */
     const uiState = host.state();
@@ -132,8 +168,9 @@ export function startEntity(host: EntityHost): () => void {
     const analyser = spectrum?.analyser ?? null;
     const freq = spectrum?.freq ?? null;
     const base = STATES[uiState] || STATES.ready;
-    const target: Look =
-      intensity > 0
+    const mod = compact ? compact.life.update(t, dt, audioLevel) : null;
+    const target: Look = {
+      ...(intensity > 0
         ? {
             ...base,
             ...ALERT,
@@ -141,7 +178,9 @@ export function startEntity(host: EntityHost): () => void {
             amp: Math.max(base.amp, 0.1),
             glow: 1,
           }
-        : base;
+        : base),
+      ...(mod?.look ?? {}),
+    };
     const k = 1 - Math.exp(-dt * 3);
     for (const key of Object.keys(target) as (keyof Look)[]) {
       if (key === "h") {
@@ -154,7 +193,7 @@ export function startEntity(host: EntityHost): () => void {
 
     const birthRaw = Math.max(
       0,
-      Math.min(1, (t - born) / (reduceMotion ? 0.6 : 3.4)),
+      Math.min(1, (t - born) / (reduceMotion ? 0.6 : compact ? 1.2 : 3.4)),
     );
     const birth = 1 - Math.pow(1 - birthRaw, 3);
 
@@ -176,31 +215,44 @@ export function startEntity(host: EntityHost): () => void {
     const useBands = speaking && analyser && freq;
 
     /* geometry */
-    const cx = W / 2;
-    let cy = H * (W < 700 ? 0.37 : 0.4);
-    const span = W < 700 ? W * 1.5 : Math.min(W, H * 1.15);
+    let cx = W / 2;
+    let cy = compact ? H / 2 : H * (W < 700 ? 0.37 : 0.4);
+    // Compact: the radius is a fixed share of the canvas, so the ready look fills it the way the big one fills the screen.
+    const span = compact
+      ? Math.min(W, H) * 1.4
+      : W < 700
+        ? W * 1.5
+        : Math.min(W, H * 1.15);
     const heartbeat =
       intensity > 0 ? 1 + 0.045 * Math.pow(Math.sin(t * 4.2), 2) : 1;
     const breath = 1 + 0.018 * Math.sin(t * 0.9) * MOTION;
     let R = span * cur.r * heartbeat * breath * (0.35 + 0.65 * birth);
 
     /* make room: it lifts away as the reply grows */
-    const stageTop = host.stage()?.getBoundingClientRect().top ?? H;
-    const baseCy = cy;
-    const wantCy = Math.max(
-      H * 0.3,
-      Math.min(baseCy, stageTop - R * 1.15 - 16),
-    );
-    cyCur =
-      cyCur === null
-        ? wantCy
-        : cyCur + (wantCy - cyCur) * (1 - Math.exp(-dt * 4));
-    if (Math.abs(wantCy - cyCur) < 0.05) cyCur = wantCy;
-    cy = cyCur;
-    R *=
-      1 -
-      0.3 * Math.min(1, Math.max(0, (baseCy - cy) / (baseCy - H * 0.3 + 1)));
-
+    if (!compact) {
+      const stageTop = host.stage?.()?.getBoundingClientRect().top ?? H;
+      const baseCy = cy;
+      const wantCy = Math.max(
+        H * 0.3,
+        Math.min(baseCy, stageTop - R * 1.15 - 16),
+      );
+      cyCur =
+        cyCur === null
+          ? wantCy
+          : cyCur + (wantCy - cyCur) * (1 - Math.exp(-dt * 4));
+      if (Math.abs(wantCy - cyCur) < 0.05) cyCur = wantCy;
+      cy = cyCur;
+      R *=
+        1 -
+        0.3 * Math.min(1, Math.max(0, (baseCy - cy) / (baseCy - H * 0.3 + 1)));
+    } else if (mod) {
+      R *= mod.grow;
+      cx += mod.ox * R;
+      cy += mod.oy * R;
+    }
+    const squashX = mod ? mod.sx : 1;
+    const squashY = mod ? mod.sy : 1;
+    const dim = mod ? mod.dim : 1;
     const yaw = t * cur.spin * MOTION + gx * 0.55;
     const pitch = 0.25 + gy * 0.3;
     const cY = Math.cos(yaw);
@@ -214,7 +266,14 @@ export function startEntity(host: EntityHost): () => void {
 
     /* atmosphere */
     const hue = cur.h;
-    const halo = g.createRadialGradient(cx, cy, 0, cx, cy, R * 2.4);
+    const halo = g.createRadialGradient(
+      cx,
+      cy,
+      0,
+      cx,
+      cy,
+      compact ? Math.min(R * 2.4, W / 2) : R * 2.4,
+    );
     halo.addColorStop(
       0,
       `hsla(${hue},${cur.s}%,${cur.l}%,${0.1 + 0.22 * cur.glow * birth + audioLevel * 0.2})`,
@@ -241,109 +300,114 @@ export function startEntity(host: EntityHost): () => void {
     /* HUD rings, the instrument around the entity */
     const hudA = cur.hud * birth;
     const wide = W >= 1340;
-    const ro = Math.max(R * 1.7, Math.min(R * 2.3, W / 2 - (wide ? 300 : 20)));
+    const ro = compact
+      ? R * 1.5
+      : Math.max(R * 1.7, Math.min(R * 2.3, W / 2 - (wide ? 300 : 20)));
     const spinK = 0.04 + cur.spin * 0.15;
     g.lineCap = "butt";
 
-    /* ticks */
-    const r1 = ro * 0.66;
-    g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.4 * hudA})`;
-    g.lineWidth = 1;
-    g.beginPath();
-    for (let i = 0; i < 120; i++) {
-      const a = (i / 120) * Math.PI * 2 + t * spinK * MOTION;
-      const len = i % 10 === 0 ? 11 : i % 5 === 0 ? 7 : 3.5;
-      g.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
-      g.lineTo(cx + Math.cos(a) * (r1 + len), cy + Math.sin(a) * (r1 + len));
-    }
-    g.stroke();
-
-    /* segmented band */
-    const r2 = ro * 0.79;
-    g.lineWidth = 5;
-    g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(0.14 + 0.1 * cur.glow) * hudA})`;
-    const rot2 = -t * (0.12 + cur.spin * 0.3) * MOTION;
-    for (let i = 0; i < 5; i++) {
-      const a0 = rot2 + (i / 5) * Math.PI * 2;
+    if (!compact) {
+      /* ticks */
+      const r1 = ro * 0.66;
+      g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.4 * hudA})`;
+      g.lineWidth = 1;
       g.beginPath();
-      g.arc(cx, cy, r2, a0, a0 + Math.PI * 2 * 0.15);
+      for (let i = 0; i < 120; i++) {
+        const a = (i / 120) * Math.PI * 2 + t * spinK * MOTION;
+        const len = i % 10 === 0 ? 11 : i % 5 === 0 ? 7 : 3.5;
+        g.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+        g.lineTo(cx + Math.cos(a) * (r1 + len), cy + Math.sin(a) * (r1 + len));
+      }
       g.stroke();
-    }
-    g.lineWidth = 1;
-    g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.25 * hudA})`;
-    g.beginPath();
-    g.arc(cx, cy, r2 - 9, 0, Math.PI * 2);
-    g.stroke();
 
-    /* fine dashes */
-    const r3 = ro * 0.9;
-    g.setLineDash([2, 7]);
-    g.lineDashOffset = -t * 6 * MOTION;
-    g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.32 * hudA})`;
-    g.beginPath();
-    g.arc(cx, cy, r3, 0, Math.PI * 2);
-    g.stroke();
-    g.setLineDash([]);
-
-    /* radar: every virtual machine is a blip; distance from the center is fixed,
-     * size and brightness follow its CPU. The sweep makes a blip flash as it passes. */
-    const vms = guests();
-    if (vms.length) {
-      const rb = ro * 0.845;
-      const sweep = (t * (0.5 + cur.spin * 0.8) * MOTION) % (Math.PI * 2);
-      for (let k = 0; k < 10; k++) {
-        const a1 = sweep - k * 0.07;
+      /* segmented band */
+      const r2 = ro * 0.79;
+      g.lineWidth = 5;
+      g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(0.14 + 0.1 * cur.glow) * hudA})`;
+      const rot2 = -t * (0.12 + cur.spin * 0.3) * MOTION;
+      for (let i = 0; i < 5; i++) {
+        const a0 = rot2 + (i / 5) * Math.PI * 2;
         g.beginPath();
-        g.arc(cx, cy, ro * 0.9, a1 - 0.07, a1);
-        g.arc(cx, cy, ro * 0.7, a1, a1 - 0.07, true);
-        g.closePath();
-        g.fillStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.08 * (1 - k / 10) * hudA})`;
-        g.fill();
+        g.arc(cx, cy, r2, a0, a0 + Math.PI * 2 * 0.15);
+        g.stroke();
       }
       g.lineWidth = 1;
-      g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.4 * hudA})`;
+      g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.25 * hudA})`;
       g.beginPath();
-      g.moveTo(
-        cx + Math.cos(sweep) * ro * 0.7,
-        cy + Math.sin(sweep) * ro * 0.7,
-      );
-      g.lineTo(
-        cx + Math.cos(sweep) * ro * 0.9,
-        cy + Math.sin(sweep) * ro * 0.9,
-      );
+      g.arc(cx, cy, r2 - 9, 0, Math.PI * 2);
       g.stroke();
-      for (let i = 0; i < vms.length; i++) {
-        const vm = vms[i]!;
-        const ang =
-          -Math.PI / 2 + (i / vms.length) * Math.PI * 2 + t * 0.02 * MOTION;
-        const x = cx + Math.cos(ang) * rb;
-        const y = cy + Math.sin(ang) * rb;
-        let behind = (sweep - ang) % (Math.PI * 2);
-        if (behind < 0) behind += Math.PI * 2;
-        const pulse = behind < 1.1 ? 1 - behind / 1.1 : 0;
-        const hot = vm.vmid === dashboard.hotVmid;
-        const up = vm.status === "running";
-        const size = (2.2 + ((vm.cpu || 0) / 100) * 5) * (hot ? 1.7 : 1);
-        if (up) {
-          g.fillStyle = `hsla(${hue},${cur.s}%,${Math.min(92, cur.l + 14)}%,${(0.45 + 0.55 * pulse) * hudA})`;
+
+      /* fine dashes */
+      const r3 = ro * 0.9;
+      g.setLineDash([2, 7]);
+      g.lineDashOffset = -t * 6 * MOTION;
+      g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.32 * hudA})`;
+      g.beginPath();
+      g.arc(cx, cy, r3, 0, Math.PI * 2);
+      g.stroke();
+      g.setLineDash([]);
+    }
+    if (!compact) {
+      /* radar: every virtual machine is a blip; distance from the center is fixed,
+       * size and brightness follow its CPU. The sweep makes a blip flash as it passes. */
+      const vms = guests();
+      if (vms.length) {
+        const rb = ro * 0.845;
+        const sweep = (t * (0.5 + cur.spin * 0.8) * MOTION) % (Math.PI * 2);
+        for (let k = 0; k < 10; k++) {
+          const a1 = sweep - k * 0.07;
           g.beginPath();
-          g.arc(x, y, size + pulse * 1.5, 0, Math.PI * 2);
+          g.arc(cx, cy, ro * 0.9, a1 - 0.07, a1);
+          g.arc(cx, cy, ro * 0.7, a1, a1 - 0.07, true);
+          g.closePath();
+          g.fillStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.08 * (1 - k / 10) * hudA})`;
           g.fill();
-        } else {
-          g.strokeStyle = `hsla(${hue},20%,70%,${0.45 * hudA})`;
-          g.beginPath();
-          g.arc(x, y, 3, 0, Math.PI * 2);
-          g.stroke();
         }
-        if (hot) {
-          g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.8 * hudA})`;
-          g.beginPath();
-          g.arc(x, y, size + 6, 0, Math.PI * 2);
-          g.stroke();
-          g.font = '300 12px "Sora", system-ui, sans-serif';
-          g.fillStyle = `hsla(${hue},30%,95%,${hudA})`;
-          g.textAlign = x < cx ? "right" : "left";
-          g.fillText(vm.name, x + (x < cx ? -14 : 14), y + 4);
+        g.lineWidth = 1;
+        g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.4 * hudA})`;
+        g.beginPath();
+        g.moveTo(
+          cx + Math.cos(sweep) * ro * 0.7,
+          cy + Math.sin(sweep) * ro * 0.7,
+        );
+        g.lineTo(
+          cx + Math.cos(sweep) * ro * 0.9,
+          cy + Math.sin(sweep) * ro * 0.9,
+        );
+        g.stroke();
+        for (let i = 0; i < vms.length; i++) {
+          const vm = vms[i]!;
+          const ang =
+            -Math.PI / 2 + (i / vms.length) * Math.PI * 2 + t * 0.02 * MOTION;
+          const x = cx + Math.cos(ang) * rb;
+          const y = cy + Math.sin(ang) * rb;
+          let behind = (sweep - ang) % (Math.PI * 2);
+          if (behind < 0) behind += Math.PI * 2;
+          const pulse = behind < 1.1 ? 1 - behind / 1.1 : 0;
+          const hot = vm.vmid === dashboard.hotVmid;
+          const up = vm.status === "running";
+          const size = (2.2 + ((vm.cpu || 0) / 100) * 5) * (hot ? 1.7 : 1);
+          if (up) {
+            g.fillStyle = `hsla(${hue},${cur.s}%,${Math.min(92, cur.l + 14)}%,${(0.45 + 0.55 * pulse) * hudA})`;
+            g.beginPath();
+            g.arc(x, y, size + pulse * 1.5, 0, Math.PI * 2);
+            g.fill();
+          } else {
+            g.strokeStyle = `hsla(${hue},20%,70%,${0.45 * hudA})`;
+            g.beginPath();
+            g.arc(x, y, 3, 0, Math.PI * 2);
+            g.stroke();
+          }
+          if (hot) {
+            g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.8 * hudA})`;
+            g.beginPath();
+            g.arc(x, y, size + 6, 0, Math.PI * 2);
+            g.stroke();
+            g.font = '300 12px "Sora", system-ui, sans-serif';
+            g.fillStyle = `hsla(${hue},30%,95%,${hudA})`;
+            g.textAlign = x < cx ? "right" : "left";
+            g.fillText(vm.name, x + (x < cx ? -14 : 14), y + 4);
+          }
         }
       }
     }
@@ -374,16 +438,17 @@ export function startEntity(host: EntityHost): () => void {
     g.lineCap = "butt";
 
     /* north marker */
-    g.fillStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.8 * hudA})`;
-    g.beginPath();
-    g.moveTo(cx, cy - ro - 4);
-    g.lineTo(cx - 5, cy - ro - 13);
-    g.lineTo(cx + 5, cy - ro - 13);
-    g.closePath();
-    g.fill();
-
+    if (!compact) {
+      g.fillStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.8 * hudA})`;
+      g.beginPath();
+      g.moveTo(cx, cy - ro - 4);
+      g.lineTo(cx - 5, cy - ro - 13);
+      g.lineTo(cx + 5, cy - ro - 13);
+      g.closePath();
+      g.fill();
+    }
     /* connectors out to the panels */
-    if (wide) {
+    if (wide && !compact) {
       const lx = 36 + 240 + 12;
       g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.22 * hudA})`;
       g.lineWidth = 1;
@@ -415,7 +480,12 @@ export function startEntity(host: EntityHost): () => void {
         rings.splice(i, 1);
         continue;
       }
-      const rad = ring.dir > 0 ? R * (1.1 + age * 1.2) : R * (2.1 - age * 1.0);
+      // Compact: the rings stay inside the small canvas.
+      const span2 = compact ? 0.45 : 1;
+      const rad =
+        ring.dir > 0
+          ? R * (1.1 + age * 1.2 * span2)
+          : R * (1.1 + (1 - age) * 1.0 * span2 + (compact ? 0 : 0));
       g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(1 - age) * 0.32})`;
       g.beginPath();
       g.arc(cx, cy, rad, 0, Math.PI * 2);
@@ -495,8 +565,8 @@ export function startEntity(host: EntityHost): () => void {
       const z2 = y * sP + z1 * cP;
 
       const persp = 1 / (1 - z2 * d * 0.26);
-      sx[i] = cx + x1 * d * R * persp;
-      sy[i] = cy + y1 * d * R * persp;
+      sx[i] = cx + x1 * d * R * persp * squashX;
+      sy[i] = cy + y1 * d * R * persp * squashY;
       sz[i] = z2;
     }
 
@@ -522,8 +592,10 @@ export function startEntity(host: EntityHost): () => void {
     /* particles */
     for (let i = 0; i < N; i++) {
       const depth = (sz[i] + 1) / 2;
-      const alpha = (0.12 + 0.88 * depth) * (0.4 + 0.6 * cur.glow) * birth;
-      const size = (0.6 + 1.7 * depth) * (1 + audioLevel * 0.6);
+      const alpha =
+        (0.12 + 0.88 * depth) * (0.4 + 0.6 * cur.glow) * birth * dim;
+      const size =
+        (0.6 + 1.7 * depth) * (1 + audioLevel * 0.6) * (compact ? 0.75 : 1);
       g.fillStyle = `hsla(${hue + depth * 24 + seed[i] * 26 - 13},${cur.s}%,${cur.l - 6 + depth * 10}%,${alpha})`;
       g.fillRect(sx[i] - size / 2, sy[i] - size / 2, size, size);
     }
@@ -543,12 +615,13 @@ export function startEntity(host: EntityHost): () => void {
     g.beginPath();
     g.arc(nx, ny, nr * 2.6, 0, Math.PI * 2);
     g.fill();
+    compact?.life.overlay?.(g, cx, cy, R);
     g.globalCompositeOperation = "source-over";
 
     /* click target follows the body */
     // A fixed size in whole pixels: the body breathes, the thing you press does not.
     const hit = Math.round(span * STATES.ready.r * 1.7);
-    const core = host.core();
+    const core = compact ? null : host.core?.();
     if (core) {
       core.style.left = `${Math.round(cx - hit / 2)}px`;
       core.style.top = `${Math.round(cy - hit / 2)}px`;
@@ -557,9 +630,11 @@ export function startEntity(host: EntityHost): () => void {
     }
 
     /* the panels (voice equaliser) read the voice from here */
-    voiceLevel.level = audioLevel;
-    voiceLevel.speaking = speaking;
-    voiceLevel.bands = useBands ? freq : null;
+    if (!compact) {
+      voiceLevel.level = audioLevel;
+      voiceLevel.speaking = speaking;
+      voiceLevel.bands = useBands ? freq : null;
+    }
 
     raf = requestAnimationFrame(frame);
   }

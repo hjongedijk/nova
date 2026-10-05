@@ -59,8 +59,9 @@ body.helper input {
 }
 .hp-core {
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
+  margin-left: -2px;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -69,8 +70,8 @@ body.helper input {
 }
 .hp-orb {
   display: block;
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
 }
 .hp-status {
   flex: 1;
