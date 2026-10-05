@@ -41,11 +41,33 @@ if (-not $failed) {
     # Not Windows: the user32 calls cannot run here, compiling was the check.
     Write-Host 'NovaHelper: compiles (Win32 calls need Windows)'
   } catch { $failed = $true; Write-Host "NovaHelper: $($_.Exception.Message)" }
+  # Chrome offsets: a page of 340 x 100 at (100, 8) with a 32 px caption must give a window that starts 32 px higher and
+  # is 32 px taller, with the region starting below the caption; frames and side chrome add on.
+  $same = { param($a, $b) (($a -join ',') -eq ($b -join ',')) }
+  $l = [NovaHelper]::Layout(100, 8, 340, 100, 0, 0, 0, 0, 0, 32)
+  if (-not (& $same $l @(100, -24, 340, 132, 0, 32))) { $failed = $true; Write-Host "NovaHelper.Layout (caption only): $($l -join ',')" }
+  $l = [NovaHelper]::Layout(100, 8, 340, 100, 1, 2, 3, 4, 10, 48)
+  if (-not (& $same $l @(94, -42, 354, 154, 6, 50))) { $failed = $true; Write-Host "NovaHelper.Layout (frames and side chrome): $($l -join ',')" }
+  else { Write-Host 'NovaHelper.Layout: chrome offsets ok' }
+  # The security flags and the chrome fallback are pure functions of the script: run them from its own source.
+  $ast = [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)
+  foreach ($fn in 'Get-EdgeSecurityArgs', 'Get-HelperChrome') {
+    $def = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $fn }, $true) | Select-Object -First 1
+    if (-not $def) { $failed = $true; Write-Host "jarvis-agent.ps1: function $fn is missing" } else { . ([scriptblock]::Create($def.Extent.Text)) }
+  }
+  if (@(Get-EdgeSecurityArgs 'https://nova.example.nl').Count -ne 0) { $failed = $true; Write-Host 'Edge flags: https must not get the unsupported-flag switch' }
+  elseif ((@(Get-EdgeSecurityArgs 'http://192.168.1.2:8080') -join ' ') -notmatch 'unsafely-treat-insecure-origin-as-secure=http://192.168.1.2:8080 --test-type') { $failed = $true; Write-Host 'Edge flags: http must get the switch with --test-type' }
+  else { Write-Host 'Edge flags: only plain http gets the insecure-origin switch' }
+  if ($text -match '(?m)^\s*"--unsafely-treat') { $failed = $true; Write-Host 'Edge flags: the switch must only come from Get-EdgeSecurityArgs' }
+  $fallback = Get-HelperChrome $null 1.5
+  $real = Get-HelperChrome ([pscustomobject]@{ w = 0; h = 33 }) 1.25
+  if ($fallback.cy -ne 48 -or $real.cy -ne 41 -or $real.cx -ne 0) { $failed = $true; Write-Host "Get-HelperChrome: fallback $($fallback.cy), measured $($real.cy)" }
+  else { Write-Host 'Get-HelperChrome: measured and fallback ok' }
   $example = Get-Content -Raw (Join-Path $root 'agent.example.json') | ConvertFrom-Json
   if (@('wallpaper', 'helper', 'both') -notcontains [string]$example.mode) { $failed = $true; Write-Host 'agent.example.json: mode must be wallpaper, helper or both' }
   else { Write-Host "agent.example.json: mode '$($example.mode)'" }
   # Fully rounded corners: one region over the whole window (no flat top, no DWM rounding that varies by Windows version).
-  if ($text -notmatch 'CreateRoundRectRgn\(0, 0, w \+ 1') { $failed = $true; Write-Host 'NovaHelper: the window must be clipped to a full rounded rectangle' }
+  if ($text -notmatch 'CreateRoundRectRgn\(l\[4\], l\[5\]') { $failed = $true; Write-Host 'NovaHelper: the window must be clipped to a rounded rectangle below the Edge caption' }
   if ($text -match 'DwmSetWindowAttribute\(') { $failed = $true; Write-Host 'NovaHelper: DWM corner rounding is not used' }
   foreach ($route in "'/v1/mode'", "'/v1/helper/size'", "'/v1/status'", "'/v1/displays'") {
     if (-not $text.Contains($route)) { $failed = $true; Write-Host "jarvis-agent.ps1: route $route is missing" }

@@ -21,7 +21,7 @@ param(
   [string]$ConfigPath = (Join-Path $PSScriptRoot 'agent.json')
 )
 $ErrorActionPreference = 'Stop'
-$agentVersion = '2026-10-06.2'
+$agentVersion = '2026-10-06.3'
 
 # However the agent is started (task, double-click, a terminal), it runs on without a window: this copy starts
 # a hidden one and ends. (conhost --headless also keeps Windows Terminal from opening a window.)
@@ -802,29 +802,57 @@ public class NovaHelper {
     ShowWindow(h, 4);   // SW_SHOWNOACTIVATE
   }
 
-  /// <summary>Clip the window to a fully rounded rectangle (a pill when compact). The system owns the region afterwards.
-  /// (A real translucent backdrop or shadow is not used: an Edge window cannot be transparent, so the page paints gradients.)</summary>
-  public static void Round(IntPtr h, int w, int hgt, int radius) {
-    IntPtr region = CreateRoundRectRgn(0, 0, w + 1, hgt + 1, radius * 2, radius * 2);
+  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr h, ref PT p);
+
+  // Edge draws its own title bar inside the window (and Windows adds a frame around it). The page must end up exactly
+  // the size we mean, and only a rounded rectangle over the page may be visible, so the window is made bigger by the
+  // chrome and the region starts below it. nl..nb: the Windows frame; cx, cy: Edge's own chrome (width, caption height).
+  static int nl = 0, nt = 0, nr = 0, nb = 0, cx = 0, cy = 0;
+  static int vx = 0, vy = 0, vw = 0, vh = 0, vr = 0;   // where the visible page is (real pixels)
+
+  /// <summary>Pure: for a visible page rectangle (x, y, w, h) and the chrome, returns { window x, y, width, height, region left, region top }.</summary>
+  public static int[] Layout(int x, int y, int w, int hgt, int frameL, int frameT, int frameR, int frameB, int chromeW, int chromeH) {
+    int left = chromeW / 2;
+    return new int[] { x - left - frameL, y - chromeH - frameT, w + chromeW + frameL + frameR, hgt + chromeH + frameT + frameB, frameL + left, frameT + chromeH };
+  }
+
+  /// <summary>Remember the frame Windows draws and the chrome Edge draws (real pixels). Call with the window shown.</summary>
+  public static void Configure(IntPtr h, int chromeW, int chromeH) {
+    RECT win, client;
+    if (GetWindowRect(h, out win) && GetClientRect(h, out client)) {
+      PT origin = new PT { X = 0, Y = 0 };
+      ClientToScreen(h, ref origin);
+      nl = Math.Max(0, origin.X - win.Left); nt = Math.Max(0, origin.Y - win.Top);
+      nr = Math.Max(0, (win.Right - win.Left) - (client.Right - client.Left) - nl);
+      nb = Math.Max(0, (win.Bottom - win.Top) - (client.Bottom - client.Top) - nt);
+    }
+    cx = Math.Max(0, chromeW); cy = Math.Max(0, chromeH);
+  }
+
+  /// <summary>Put the visible page at (x, y, w, hgt) and clip the window to a rounded rectangle over exactly that.</summary>
+  static void Apply(IntPtr h, int x, int y, int w, int hgt, int radius, uint flags) {
+    vx = x; vy = y; vw = w; vh = hgt; vr = radius;
+    int[] l = Layout(x, y, w, hgt, nl, nt, nr, nb, cx, cy);
+    SetWindowPos(h, TOPMOST, l[0], l[1], l[2], l[3], flags);
+    int r = Math.Max(0, Math.Min(radius, Math.Min(w, hgt) / 2));
+    // The region starts below Edge's caption: that part is neither drawn nor clickable, so it cannot be dragged either.
+    IntPtr region = CreateRoundRectRgn(l[4], l[5], l[4] + w + 1, l[5] + hgt + 1, r * 2, r * 2);
     if (SetWindowRgn(h, region, true) == 0) { /* not applied: the caller keeps the rectangle */ }
   }
 
   public static void Place(IntPtr h, int x, int y, int w, int hgt, int radius) {
     generation++;
-    lastRadius = radius;
-    SetWindowPos(h, TOPMOST, x, y, w, hgt, SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-    Round(h, w, hgt, radius);
+    Apply(h, x, y, w, hgt, radius, SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
   }
 
   public static bool Alive(IntPtr h) { return h != IntPtr.Zero && IsWindow(h); }
 
-  /// <summary>Move, resize and re-round smoothly on a background thread, easing out with a slight overshoot
-  /// (spring-like, ms is about 240); a newer call takes over.</summary>
+  /// <summary>Move, resize and re-round the visible page smoothly on a background thread, easing out with a slight
+  /// overshoot (spring-like, ms is about 240); a newer call takes over.</summary>
   public static void Animate(IntPtr h, int x, int y, int w, int hgt, int radius, int ms) {
-    RECT now;
-    if (!GetWindowRect(h, out now)) { Place(h, x, y, w, hgt, radius); return; }
-    int fromX = now.Left, fromY = now.Top, fromW = now.Right - now.Left, fromH = now.Bottom - now.Top;
-    int fromR = lastRadius;
+    int fromX = vx, fromY = vy, fromW = vw, fromH = vh, fromR = vr;
+    if (fromW <= 0) { Place(h, x, y, w, hgt, radius); return; }
     int mine = ++generation;
     var worker = new Thread(delegate () {
       int steps = Math.Max(1, ms / 16);
@@ -833,19 +861,16 @@ public class NovaHelper {
         double t = (double)i / steps;
         double c = 1.70158, u = t - 1;
         t = 1 + (c + 1) * u * u * u + c * u * u;   // ease out back: overshoots a little, settles at 1
-        int cw = Math.Max(40, fromW + (int)((w - fromW) * t)), ch = Math.Max(24, fromH + (int)((hgt - fromH) * t));
-        int cr = Math.Max(0, fromR + (int)((radius - fromR) * t));
-        SetWindowPos(h, TOPMOST, fromX + (int)((x - fromX) * t), fromY + (int)((y - fromY) * t), cw, ch, SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        Round(h, cw, ch, cr);
+        Apply(h, fromX + (int)((x - fromX) * t), fromY + (int)((y - fromY) * t),
+          Math.Max(40, fromW + (int)((w - fromW) * t)), Math.Max(24, fromH + (int)((hgt - fromH) * t)),
+          Math.Max(0, fromR + (int)((radius - fromR) * t)), SWP_NOACTIVATE | SWP_SHOWWINDOW);
         Thread.Sleep(16);
       }
-      if (generation == mine) { SetWindowPos(h, TOPMOST, x, y, w, hgt, SWP_NOACTIVATE | SWP_SHOWWINDOW); Round(h, w, hgt, radius); }
+      if (generation == mine) Apply(h, x, y, w, hgt, radius, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     });
-    lastRadius = radius;
     worker.IsBackground = true;
     worker.Start();
   }
-  static int lastRadius = 0;
 
   public static string Describe(IntPtr h) {
     RECT r;
@@ -914,13 +939,13 @@ function Set-DisplayWallpaper($screen, [string]$mode, [string]$baseUrl) {
   $all = [System.Windows.Forms.Screen]::AllScreens
   for ($n = 0; $n -lt $all.Count; $n++) { if ($all[$n].DeviceName -eq $screen.DeviceName) { $port = 9331 + $n } }
   # Kiosk: no title bar, no toolbar, the page alone. (An --app window keeps a title bar that pushes the page down.)
-  Start-Process -FilePath $edgeExe -ArgumentList @(
+  Start-Process -FilePath $edgeExe -ArgumentList (@(
     '--kiosk', $address, '--edge-kiosk-type=fullscreen', "--user-data-dir=`"$profileDir`"",
     "--window-position=$($b.X),$($b.Y)", "--window-size=$($b.Width),$($b.Height)",
     '--no-first-run', '--no-default-browser-check', '--disable-extensions',
     '--disable-session-crashed-bubble', '--hide-crash-restore-bubble',
-    "--unsafely-treat-insecure-origin-as-secure=$baseUrl", '--use-fake-ui-for-media-stream', "--remote-debugging-port=$port", '--remote-debugging-address=127.0.0.1'
-  ) | Out-Null
+    '--use-fake-ui-for-media-stream', "--remote-debugging-port=$port", '--remote-debugging-address=127.0.0.1'
+  ) + @(Get-EdgeSecurityArgs $baseUrl)) | Out-Null
   $handle = [IntPtr]::Zero
   for ($i = 0; $i -lt 60 -and $handle -eq [IntPtr]::Zero; $i++) {
     Start-Sleep -Milliseconds 500
@@ -978,7 +1003,7 @@ function Update-ClickRegions {
     New-Item -ItemType Directory -Force -Path $profile | Out-Null
     [NovaClick]::EdgePath = $edgeExe
     # The page is plain http on your own network; this lets the microphone work there without a certificate.
-    [NovaClick]::Arguments = "--app=$base/?assistant=1 --user-data-dir=`"$profile`" --unsafely-treat-insecure-origin-as-secure=$base --no-first-run --no-default-browser-check --disable-extensions --window-size=480,760"
+    [NovaClick]::Arguments = "--app=$base/?assistant=1 --user-data-dir=`"$profile`" $((Get-EdgeSecurityArgs $base) -join ' ') --no-first-run --no-default-browser-check --disable-extensions --window-size=480,760"
   }
 }
 function Set-Wallpaper($display, [string]$mode, [string]$baseUrl) {
@@ -1018,6 +1043,7 @@ function Restore-Wallpapers {
 $modeStore = Join-Path $PSScriptRoot 'mode.json'
 $helperCollapsed = @(340, 100, 50)    # CSS pixels (width, height, bottom corner radius), scaled to the display
 $helperExpanded = @(420, 360, 30)
+$helperPort = 9340    # DevTools port of the helper window, 127.0.0.1 only
 $script:helper = $null
 function Get-ModeState {
   $state = @{ mode = 'wallpaper'; display = 0; url = '' }
@@ -1051,6 +1077,33 @@ function Get-HelperRect($screen, [bool]$expanded) {
   $h = [Math]::Min([int]($size[1] * $scale), $b.Height)
   return @{ x = [int]($b.X + ($b.Width - $w) / 2); y = [int]($b.Y + 8 * $scale); w = $w; h = $h; r = [int]($size[2] * $scale); scale = $scale }
 }
+# Edge's own chrome around the page, in real pixels. measured is { w, h } in CSS pixels from the page
+# (outerWidth - innerWidth, outerHeight - innerHeight) or $null; without it a title bar of 32 px at 100% is assumed.
+function Get-HelperChrome($measured, [double]$scale) {
+  if ($measured -and $measured.h -ge 0 -and $measured.h -le 120 -and $measured.w -ge 0 -and $measured.w -le 60) {
+    return @{ cx = [int][Math]::Round($measured.w * $scale); cy = [int][Math]::Round($measured.h * $scale) }
+  }
+  return @{ cx = 0; cy = [int][Math]::Round(32 * $scale) }
+}
+# Asks the helper page how much room Edge's caption takes (CSS pixels). $null when the page does not answer.
+function Measure-HelperChrome([double]$scale) {
+  try {
+    $targets = @(Invoke-RestMethod -Uri "http://127.0.0.1:$helperPort/json/list" -TimeoutSec 2)
+    $page = $targets | Where-Object { $_.type -eq 'page' -and $_.webSocketDebuggerUrl } | Select-Object -First 1
+    if (-not $page) { return $null }
+    $reply = ConvertFrom-Json ([NovaCdp]::Call([string]$page.webSocketDebuggerUrl, 'Runtime.evaluate', '{"expression":"JSON.stringify({w:window.outerWidth-window.innerWidth,h:window.outerHeight-window.innerHeight})","returnByValue":true}', 3000))
+    $value = ConvertFrom-Json ([string]$reply.result.result.value)
+    if ($null -eq $value.h) { return $null }
+    return [pscustomobject]@{ w = [double]$value.w; h = [double]$value.h }
+  } catch { return $null }
+}
+# Edge shows an infobar for --unsafely-treat-insecure-origin-as-secure ("niet-ondersteunde vlag"). It is only needed
+# for plain http (the microphone needs a secure origin), so https gets no such flag; http gets it with --test-type,
+# which suppresses the bar.
+function Get-EdgeSecurityArgs([string]$baseUrl) {
+  if ($baseUrl -match '^http://') { return @("--unsafely-treat-insecure-origin-as-secure=$baseUrl", '--test-type') }
+  return @()
+}
 function Get-HelperEdge {
   Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*nova-helper*' }
 }
@@ -1067,13 +1120,15 @@ function Open-Helper([string]$baseUrl, [int]$display) {
   $profileDir = Join-Path $PSScriptRoot 'helper-profile\nova-helper'
   New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
   # Its own profile; the page may use the microphone and play speech without a click (it answers "Hey NOVA").
-  Start-Process -FilePath $edgeExe -ArgumentList @(
+  # The DevTools port (this PC only) is used to measure Edge's own caption, which Windows styles cannot remove.
+  Start-Process -FilePath $edgeExe -ArgumentList (@(
     "--app=$baseUrl/helper", "--user-data-dir=`"$profileDir`"",
     "--window-position=$($rect.x),$($rect.y)", "--window-size=$($rect.w),$($rect.h)",
     '--no-first-run', '--no-default-browser-check', '--disable-extensions',
     '--disable-session-crashed-bubble', '--hide-crash-restore-bubble',
-    "--unsafely-treat-insecure-origin-as-secure=$baseUrl", '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'
-  ) | Out-Null
+    '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required',
+    "--remote-debugging-port=$helperPort", '--remote-debugging-address=127.0.0.1'
+  ) + @(Get-EdgeSecurityArgs $baseUrl)) | Out-Null
   $handle = [IntPtr]::Zero
   for ($i = 0; $i -lt 60 -and $handle -eq [IntPtr]::Zero; $i++) {
     Start-Sleep -Milliseconds 500
@@ -1087,14 +1142,28 @@ function Open-Helper([string]$baseUrl, [int]$display) {
     throw "The helper window did not open. Is $baseUrl reachable from this PC?"
   }
   [NovaHelper]::Setup($handle)
+  # First with the default chrome, so something sensible shows at once; then measure the real one once the page is up.
+  $default = Get-HelperChrome $null $rect.scale
+  [NovaHelper]::Configure($handle, $default.cx, $default.cy)
   [NovaHelper]::Place($handle, $rect.x, $rect.y, $rect.w, $rect.h, $rect.r)
   $script:helper = @{ handle = $handle; device = $screen.DeviceName; display = $display; expanded = $false }
+  $measured = $null
+  for ($i = 0; $i -lt 16 -and -not $measured; $i++) { $measured = Measure-HelperChrome $rect.scale; if (-not $measured) { Start-Sleep -Milliseconds 500 } }
+  $chrome = Get-HelperChrome $measured $rect.scale
+  [NovaHelper]::Configure($handle, $chrome.cx, $chrome.cy)
+  [NovaHelper]::Place($handle, $rect.x, $rect.y, $rect.w, $rect.h, $rect.r)
 }
 # Grow the helper window for an answer or a question, or shrink it back to the pill (the page asks for it).
 function Set-HelperSize([bool]$expanded) {
   if (-not $script:helper -or -not [NovaHelper]::Alive([IntPtr]$script:helper.handle)) { throw 'The helper is not open' }
   $screen = Get-HelperScreen ([int]$script:helper.display)
   $rect = Get-HelperRect $screen $expanded
+  # Measure again: the chrome can change (a different display scale, a window state).
+  $measured = Measure-HelperChrome $rect.scale
+  if ($measured) {
+    $chrome = Get-HelperChrome $measured $rect.scale
+    [NovaHelper]::Configure([IntPtr]$script:helper.handle, $chrome.cx, $chrome.cy)
+  }
   [NovaHelper]::Animate([IntPtr]$script:helper.handle, $rect.x, $rect.y, $rect.w, $rect.h, $rect.r, 240)
   $script:helper.expanded = $expanded
 }
