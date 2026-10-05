@@ -66,7 +66,7 @@ export function startEntity(host: EntityHost): () => void {
   let H = 0;
   const compact = host.compact ?? null;
   function resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, compact ? 3 : 2);
     W = compact ? cv.clientWidth || 40 : window.innerWidth;
     H = compact ? cv.clientHeight || 40 : window.innerHeight;
     cv.width = Math.round(W * dpr);
@@ -75,8 +75,11 @@ export function startEntity(host: EntityHost): () => void {
   }
   resize();
   window.addEventListener("resize", resize);
+  // The compact orb changes size between the pill and the open header: follow its box.
+  const watch = compact ? new ResizeObserver(resize) : null;
+  watch?.observe(cv);
 
-  const N = compact ? 240 : W < 700 ? 750 : 1300;
+  const N = compact ? 560 : W < 700 ? 750 : 1300;
   const px = new Float32Array(N);
   const py = new Float32Array(N);
   const pz = new Float32Array(N);
@@ -219,7 +222,7 @@ export function startEntity(host: EntityHost): () => void {
     let cy = compact ? H / 2 : H * (W < 700 ? 0.37 : 0.4);
     // Compact: the radius is a fixed share of the canvas, so the ready look fills it the way the big one fills the screen.
     const span = compact
-      ? Math.min(W, H) * 1.4
+      ? Math.min(W, H) * 1.6
       : W < 700
         ? W * 1.5
         : Math.min(W, H * 1.15);
@@ -301,7 +304,7 @@ export function startEntity(host: EntityHost): () => void {
     const hudA = cur.hud * birth;
     const wide = W >= 1340;
     const ro = compact
-      ? R * 1.5
+      ? Math.min(R * 1.55, Math.min(W, H) * 0.4)
       : Math.max(R * 1.7, Math.min(R * 2.3, W / 2 - (wide ? 300 : 20)));
     const spinK = 0.04 + cur.spin * 0.15;
     g.lineCap = "butt";
@@ -429,7 +432,7 @@ export function startEntity(host: EntityHost): () => void {
       arcLen = Math.PI * (0.5 + 0.25 * Math.sin(t * 2));
       arcRot = -Math.PI / 2 - arcLen / 2;
     }
-    g.lineWidth = 2.5;
+    g.lineWidth = compact ? 1.5 : 2.5;
     g.lineCap = "round";
     g.strokeStyle = `hsla(${hue},${cur.s}%,${Math.min(90, cur.l + 12)}%,${0.85 * hudA})`;
     g.beginPath();
@@ -571,8 +574,8 @@ export function startEntity(host: EntityHost): () => void {
     }
 
     /* filaments */
-    g.lineWidth = 0.7;
-    g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(0.05 + 0.09 * cur.glow) * birth})`;
+    g.lineWidth = compact ? 0.6 : 0.7;
+    g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(0.05 + 0.09 * cur.glow) * (compact ? 2.4 : 1) * birth})`;
     g.beginPath();
     for (let i = 0; i < N; i++) {
       if (sz[i] < -0.15) continue;
@@ -595,7 +598,9 @@ export function startEntity(host: EntityHost): () => void {
       const alpha =
         (0.12 + 0.88 * depth) * (0.4 + 0.6 * cur.glow) * birth * dim;
       const size =
-        (0.6 + 1.7 * depth) * (1 + audioLevel * 0.6) * (compact ? 0.75 : 1);
+        (0.6 + 1.7 * depth) *
+        (1 + audioLevel * 0.6) *
+        (compact ? Math.max(0.35, Math.min(W, H) / 80) * 0.42 : 1);
       g.fillStyle = `hsla(${hue + depth * 24 + seed[i] * 26 - 13},${cur.s}%,${cur.l - 6 + depth * 10}%,${alpha})`;
       g.fillRect(sx[i] - size / 2, sy[i] - size / 2, size, size);
     }
@@ -603,7 +608,10 @@ export function startEntity(host: EntityHost): () => void {
     /* nucleus: it looks where you look */
     const nx = cx + gx * R * 0.14;
     const ny = cy + gy * R * 0.14;
-    const nr = R * (0.2 + 0.1 * audioLevel + 0.025 * Math.sin(t * 1.7)) * birth;
+    const nr =
+      R *
+      ((compact ? 0.3 : 0.2) + 0.1 * audioLevel + 0.025 * Math.sin(t * 1.7)) *
+      birth;
     const nuc = g.createRadialGradient(nx, ny, 0, nx, ny, nr * 2.6);
     nuc.addColorStop(
       0,
@@ -642,6 +650,7 @@ export function startEntity(host: EntityHost): () => void {
   raf = requestAnimationFrame(frame);
   return () => {
     cancelAnimationFrame(raf);
+    watch?.disconnect();
     window.removeEventListener("resize", resize);
     window.removeEventListener("pointermove", onPointerMove);
   };

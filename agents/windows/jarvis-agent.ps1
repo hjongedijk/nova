@@ -1016,7 +1016,7 @@ function Restore-Wallpapers {
 # The mode comes from agent.json ("mode") until NOVA sets it at runtime (POST /v1/mode); the runtime choice is kept
 # in mode.json and survives a restart. The helper is a small Edge app window floating just below the top edge of one display.
 $modeStore = Join-Path $PSScriptRoot 'mode.json'
-$helperCollapsed = @(300, 44, 22)    # CSS pixels (width, height, bottom corner radius), scaled to the display
+$helperCollapsed = @(340, 100, 50)    # CSS pixels (width, height, bottom corner radius), scaled to the display
 $helperExpanded = @(420, 360, 30)
 $script:helper = $null
 function Get-ModeState {

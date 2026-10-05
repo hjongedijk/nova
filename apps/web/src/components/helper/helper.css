@@ -1,10 +1,10 @@
 /* The helper island: a floating, fully rounded glass-like pill in NOVA's navy and indigo with an orange accent
-   (the Windows agent clips the window to the same radius). 300 x 44 compact, 420 x 360 open. */
+   (the Windows agent clips the window to the same radius). 340 x 100 compact, 420 x 360 open. */
 body.helper {
   --ink: #f5f6f8;
   --dim: #9398a1;
   --tint: #6b6fe0;
-  --island: 22px;
+  --island: 50px;
   background: #06070f;
   color: var(--ink);
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
@@ -23,7 +23,7 @@ body.helper[data-state="executing"] {
   --tint: #7c6cf2;
 }
 body.helper[data-state="speaking"] {
-  --tint: #ff7a45;
+  --tint: #f0709f;
 }
 body.helper input {
   user-select: text;
@@ -33,7 +33,10 @@ body.helper input {
   position: fixed;
   inset: 0;
   display: grid;
-  grid-template-rows: 44px minmax(0, 1fr);
+  grid-template-rows: 100px minmax(0, 1fr);
+  transition:
+    grid-template-rows 0.3s cubic-bezier(0.3, 1.2, 0.4, 1),
+    border-radius 0.3s cubic-bezier(0.3, 1.2, 0.4, 1);
   background:
     radial-gradient(
       120% 90% at 0% 0%,
@@ -44,7 +47,9 @@ body.helper input {
   border: 1px solid rgba(233, 230, 245, 0.14);
   border-radius: var(--island);
   overflow: hidden;
-  transition: border-radius 0.3s cubic-bezier(0.3, 1.2, 0.4, 1);
+}
+.hp.open {
+  grid-template-rows: 56px minmax(0, 1fr);
 }
 .hp.err {
   --tint: #ff4d4d;
@@ -54,24 +59,31 @@ body.helper input {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 42px;
-  padding: 0 8px 0 10px;
+  height: 100%;
+  padding: 0 16px 0 10px;
+  gap: 10px;
 }
 .hp-core {
   flex: none;
-  width: 40px;
-  height: 40px;
-  margin-left: -2px;
+  width: 80px;
+  height: 80px;
+  transition:
+    width 0.3s cubic-bezier(0.3, 1.2, 0.4, 1),
+    height 0.3s cubic-bezier(0.3, 1.2, 0.4, 1);
   padding: 0;
   border: 0;
   border-radius: 50%;
   background: transparent;
   cursor: pointer;
 }
+.hp.open .hp-core {
+  width: 46px;
+  height: 46px;
+}
 .hp-orb {
   display: block;
-  width: 40px;
-  height: 40px;
+  width: 100%;
+  height: 100%;
 }
 .hp-status {
   flex: 1;
@@ -80,7 +92,7 @@ body.helper input {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12.5px;
+  font-size: 15px;
   color: var(--dim);
   white-space: nowrap;
   overflow: hidden;
@@ -136,10 +148,9 @@ body.helper input {
   color: #06070f;
 }
 .hp-mic-compact {
-  width: 28px;
-  height: 28px;
-  padding: 6px;
-  background: transparent;
+  width: 40px;
+  height: 40px;
+  padding: 10px;
 }
 .hp.open .hp-mic-compact {
   opacity: 0;
@@ -302,7 +313,8 @@ input:focus-visible {
   .hp,
   .hp-card,
   .hp-glow,
-  .dot {
+  .dot,
+  .hp-core {
     transition: none;
   }
 }

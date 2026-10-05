@@ -16,6 +16,7 @@ const ALLOWED_TOPIC =
 @Injectable()
 export class MqttService implements OnModuleInit, OnModuleDestroy {
   private client?: MqttClient;
+  private watchdog?: NodeJS.Timeout;
   private readonly log = new Logger("MQTT");
 
   constructor(
@@ -28,6 +29,8 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     this.client = mqtt.connect(this.config.mqttUrl, {
       clientId: `nova-${process.pid}`,
       reconnectPeriod: 5000,
+      keepalive: 30,
+      connectTimeout: 10_000,
       will: {
         topic: "jarvis/status/api",
         payload: Buffer.from(
@@ -45,10 +48,26 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     this.client.on("offline", () =>
       this.state.update("mqtt", { connected: false }),
     );
+    this.client.on("close", () => {
+      this.state.update("mqtt", { connected: false });
+      this.log.warn("connection closed, reconnecting");
+    });
     this.client.on("error", () => this.log.warn("connection error"));
+    // The status must not go stale while the connection is quietly up, and a
+    // client that stopped retrying is pushed to reconnect.
+    this.watchdog = setInterval(() => {
+      const connected = this.connected;
+      this.state.update("mqtt", { connected });
+      if (!connected && this.client && !this.client.reconnecting) {
+        this.log.warn("not connected, forcing a reconnect");
+        this.client.reconnect();
+      }
+    }, 20_000);
+    this.watchdog.unref();
   }
 
   async onModuleDestroy(): Promise<void> {
+    clearInterval(this.watchdog);
     await this.client?.endAsync(true);
   }
 
