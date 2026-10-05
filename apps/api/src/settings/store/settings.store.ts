@@ -3,6 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { NovaConfig } from "../../core/config/nova-config.js";
 
+export interface HelperChoice {
+  mode: "wallpaper" | "helper" | "both";
+  /** 0 = the primary display. */
+  display: number;
+}
+
 export interface QuickAction {
   label: string;
   prompt: string;
@@ -22,6 +28,8 @@ export interface NovaSettings {
   skills: Record<string, unknown>[];
   widgets: Record<string, unknown>[];
   sidebar: { items: Record<string, unknown>[] } | null;
+  /** What the Windows PC shows: the wallpaper (default), the helper overlay, or both. */
+  helper: HelperChoice;
 }
 
 export const DEFAULT_QUICK_ACTIONS: QuickAction[] = [
@@ -45,6 +53,7 @@ const blank = (): NovaSettings => ({
   skills: [],
   widgets: [],
   sidebar: null,
+  helper: { mode: "wallpaper", display: 0 },
 });
 
 /**
@@ -82,6 +91,7 @@ export class SettingsStore {
     this.cache.toolOverrides ||= {};
     this.cache.skills ||= [];
     this.cache.widgets ||= [];
+    this.cache.helper = { ...blank().helper, ...this.cache.helper };
     return this.cache;
   }
 

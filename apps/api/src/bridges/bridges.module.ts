@@ -49,13 +49,25 @@ import {
         async displays() {
           const outcome = await windows.displays();
           return outcome.ok
-            ? { ok: true, displays: outcome.result.displays }
+            ? { ok: true, ...outcome.result }
             : { ok: false, error: outcome.error };
         },
         async setWallpaper(display, mode) {
           const outcome = await windows.setWallpaper(display, mode);
           return outcome.ok
-            ? { ok: true, displays: outcome.result.displays }
+            ? { ok: true, ...outcome.result }
+            : { ok: false, error: outcome.error };
+        },
+        async setMode(mode, display) {
+          const outcome = await windows.setMode(mode, display);
+          return outcome.ok
+            ? { ok: true, ...outcome.result }
+            : { ok: false, error: outcome.error };
+        },
+        async helperSize(expanded) {
+          const outcome = await windows.helperSize(expanded);
+          return outcome.ok
+            ? { ok: true }
             : { ok: false, error: outcome.error };
         },
       }),

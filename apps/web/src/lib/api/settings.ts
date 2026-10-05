@@ -13,6 +13,8 @@ import type {
   Widget,
   WidgetInput,
   WidgetPreviewResult,
+  HelperMode,
+  HelperState,
   WallpaperMode,
   WallpaperState,
   QuickAction,
@@ -107,6 +109,10 @@ export const resetSidebar = () =>
 export const getWallpaper = () => read<WallpaperState>("/wallpaper");
 export const setWallpaper = (display: number, mode: WallpaperMode) =>
   write<WallpaperState>("POST", "/wallpaper", { display, mode });
+
+export const getHelper = () => read<HelperState>("/helper");
+export const setHelper = (mode: HelperMode, display: number) =>
+  write<HelperState>("POST", "/helper", { mode, display });
 
 export const exportSettings = () => read<SettingsBackup>("/export");
 export const importSettings = (data: unknown, mode: "merge" | "replace") =>

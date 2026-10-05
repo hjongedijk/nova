@@ -1,5 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import type { WallpaperDisplay, WallpaperMode } from "@nova/contracts";
+import type {
+  HelperMode,
+  WallpaperDisplay,
+  WallpaperMode,
+} from "@nova/contracts";
 import { NovaConfig } from "../../core/config/nova-config.js";
 import { requestJson } from "../../core/http/http-json.js";
 import { publicOrigin } from "../../core/public-url.js";
@@ -27,7 +31,16 @@ const ROUTES: Record<string, ["GET" | "POST", string]> = {
   windows_lock: ["POST", "/v1/lock"],
   windows_displays: ["GET", "/v1/displays"],
   windows_wallpaper: ["POST", "/v1/wallpaper"],
+  windows_mode: ["POST", "/v1/mode"],
+  windows_helper_size: ["POST", "/v1/helper/size"],
 };
+
+/** The displays plus what the agent runs (wallpaper, helper or both). */
+export interface DesktopState {
+  displays: WallpaperDisplay[];
+  mode?: HelperMode;
+  helperDisplay?: number;
+}
 
 interface AgentBody {
   ok?: boolean;
@@ -60,12 +73,12 @@ export class WindowsPcService {
   }
 
   /** The displays with their wallpaper mode. */
-  async displays(
-    signal?: AbortSignal,
-  ): Promise<AgentOutcome<{ displays: WallpaperDisplay[] }>> {
-    return (await this.call("windows_displays", {}, signal)) as AgentOutcome<{
-      displays: WallpaperDisplay[];
-    }>;
+  async displays(signal?: AbortSignal): Promise<AgentOutcome<DesktopState>> {
+    return (await this.call(
+      "windows_displays",
+      {},
+      signal,
+    )) as AgentOutcome<DesktopState>;
   }
 
   /** Show NOVA as living wallpaper on one display (0 = all) or take it off again. */
@@ -73,12 +86,33 @@ export class WindowsPcService {
     display: number,
     mode: WallpaperMode,
     signal?: AbortSignal,
-  ): Promise<AgentOutcome<{ displays: WallpaperDisplay[] }>> {
+  ): Promise<AgentOutcome<DesktopState>> {
     return (await this.call(
       "windows_wallpaper",
       { display, mode },
       signal,
-    )) as AgentOutcome<{ displays: WallpaperDisplay[] }>;
+    )) as AgentOutcome<DesktopState>;
+  }
+
+  /** Wallpaper, helper overlay or both; display is the helper's display (0 = primary). */
+  async setMode(
+    mode: HelperMode,
+    display: number,
+    signal?: AbortSignal,
+  ): Promise<AgentOutcome<DesktopState>> {
+    return (await this.call(
+      "windows_mode",
+      { mode, display },
+      signal,
+    )) as AgentOutcome<DesktopState>;
+  }
+
+  /** Grow or shrink the helper window (the helper page asks for it). */
+  async helperSize(
+    expanded: boolean,
+    signal?: AbortSignal,
+  ): Promise<AgentOutcome> {
+    return this.call("windows_helper_size", { expanded }, signal);
   }
 
   /** Runs one of the agent's own tools (everything except search and YouTube, which build on it). */
@@ -89,7 +123,8 @@ export class WindowsPcService {
   ): Promise<AgentOutcome> {
     const route = ROUTES[name];
     if (!route) return { ok: false, error: "Unknown Windows tool" };
-    const wallpaper = name === "windows_wallpaper";
+    // These open or close windows on the PC, which takes a few seconds.
+    const wallpaper = name === "windows_wallpaper" || name === "windows_mode";
     const origin = publicOrigin(this.config.publicUrl);
     const response = await requestJson<AgentBody>(this.url + route[1], {
       method: route[0],
@@ -108,7 +143,10 @@ export class WindowsPcService {
           )
         : signal,
     });
-    if (response.status === 404 && /displays|wallpaper/.test(route[1]))
+    if (
+      response.status === 404 &&
+      /displays|wallpaper|mode|helper/.test(route[1])
+    )
       return {
         ok: false,
         error:

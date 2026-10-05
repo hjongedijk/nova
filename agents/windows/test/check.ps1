@@ -30,6 +30,33 @@ try {
   Write-Host "embedded C#: $($_.Exception.Message)"
 }
 
+# The helper overlay: the C# Win32 helpers compile (checked above), degrade without Windows (no display, no DPI API:
+# scale 1.0, no window), and agent.example.json plus the script carry the mode setting and its endpoints.
+if (-not $failed) {
+  try {
+    if ([NovaHelper]::Scale(0, 0) -ne 1.0) { $failed = $true; Write-Host 'NovaHelper: scale without a display should be 1.0' }
+    elseif ([NovaHelper]::Alive([IntPtr]::Zero)) { $failed = $true; Write-Host 'NovaHelper: a null window should not be alive' }
+    else { Write-Host 'NovaHelper: scale and window checks ok' }
+  } catch [System.DllNotFoundException], [System.EntryPointNotFoundException] {
+    # Not Windows: the user32 calls cannot run here, compiling was the check.
+    Write-Host 'NovaHelper: compiles (Win32 calls need Windows)'
+  } catch { $failed = $true; Write-Host "NovaHelper: $($_.Exception.Message)" }
+  $example = Get-Content -Raw (Join-Path $root 'agent.example.json') | ConvertFrom-Json
+  if (@('wallpaper', 'helper', 'both') -notcontains [string]$example.mode) { $failed = $true; Write-Host 'agent.example.json: mode must be wallpaper, helper or both' }
+  else { Write-Host "agent.example.json: mode '$($example.mode)'" }
+  foreach ($route in "'/v1/mode'", "'/v1/helper/size'", "'/v1/status'", "'/v1/displays'") {
+    if (-not $text.Contains($route)) { $failed = $true; Write-Host "jarvis-agent.ps1: route $route is missing" }
+  }
+  if ($text -notmatch "\$agentVersion = '\d{4}-\d{2}-\d{2}\.\d+'") { $failed = $true; Write-Host 'jarvis-agent.ps1: agent version string not found' }
+  # Every mode the agent accepts must be one NOVA sends (contracts: HelperMode).
+  # (Skipped when only the agent folder is mounted, as in the docker one-liner.)
+  $contractsFile = Join-Path $root '../../packages/contracts/src/settings.ts'
+  if (Test-Path $contractsFile) {
+    if ((Get-Content -Raw $contractsFile) -notmatch 'HelperMode = "wallpaper" \| "helper" \| "both"') { $failed = $true; Write-Host 'contracts: HelperMode differs from the agent modes' }
+    else { Write-Host 'mode names agree with NOVA (contracts)' }
+  }
+}
+
 # The browser tools talk to Edge through NovaCdp. Run it against a fake DevTools page socket: it must skip events,
 # return the reply with its id, and fail (not hang) when nothing answers.
 if (-not $failed) {

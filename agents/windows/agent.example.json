@@ -1,6 +1,8 @@
 {
   "token": "generated-by-install.ps1",
   "allowedIps": [],
+  "mode": "wallpaper",
+  "helperDisplay": 0,
   "browser": {
     "port": 9322,
     "defaultEngine": "google",

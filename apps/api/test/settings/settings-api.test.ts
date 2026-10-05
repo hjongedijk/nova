@@ -523,6 +523,8 @@ describe("the wallpaper screen", () => {
           if (display === 0 || display === screen.index) screen.mode = mode;
         return { ok: true, displays: structuredClone(state) as never };
       },
+      setMode: async () => ({ ok: true, displays: [] }),
+      helperSize: async () => ({ ok: true }),
     };
     const wallpaper = await createApp({ wallpaper: port });
     try {
@@ -569,6 +571,113 @@ describe("the wallpaper screen", () => {
       ).toBe(true);
     } finally {
       await wallpaper.app.close();
+    }
+  });
+});
+
+describe("the helper overlay choice", () => {
+  const port = (
+    log: unknown[],
+    failure: { error: string | null },
+  ): WallpaperPort => ({
+    configured: true,
+    displays: async () => ({
+      ok: true,
+      displays: [],
+      mode: "wallpaper",
+      helperDisplay: 0,
+    }),
+    setWallpaper: async () => ({ ok: true, displays: [] }),
+    setMode: async (mode, display) => {
+      log.push({ mode, display });
+      return failure.error
+        ? { ok: false, error: failure.error }
+        : { ok: true, displays: [], mode, helperDisplay: display };
+    },
+    helperSize: async (expanded) => {
+      log.push({ expanded });
+      return { ok: true };
+    },
+  });
+
+  it("defaults to the wallpaper and says there is no agent without one", async () => {
+    const app = await createApp();
+    try {
+      const got = await app.api.get("/api/settings/helper").set(ADMIN);
+      expect(got.body.settings).toEqual({ mode: "wallpaper", display: 0 });
+      expect(got.body.desktop).toMatchObject({ reason: "no-agent" });
+      const set = await app.api
+        .post("/api/settings/helper")
+        .set(ADMIN)
+        .send({ mode: "helper", display: 2 });
+      // Saved, but not applied.
+      expect(set.body).toMatchObject({
+        settings: { mode: "helper", display: 2 },
+        applied: false,
+      });
+      const again = await app.api.get("/api/settings/helper").set(ADMIN);
+      expect(again.body.settings).toEqual({ mode: "helper", display: 2 });
+    } finally {
+      await app.app.close();
+    }
+  });
+
+  it("validates, saves and applies the choice through the port", async () => {
+    const log: unknown[] = [];
+    const failure = { error: null as string | null };
+    const app = await createApp({ wallpaper: port(log, failure) });
+    try {
+      const post = (body: object, headers: Record<string, string> = ADMIN) =>
+        app.api.post("/api/settings/helper").set(headers).send(body);
+      const ok = await post({ mode: "both", display: 1 });
+      expect(ok.status).toBe(200);
+      expect(ok.body).toMatchObject({
+        applied: true,
+        settings: { mode: "both", display: 1 },
+        desktop: { available: true, mode: "both", helperDisplay: 1 },
+      });
+      expect(log.at(-1)).toEqual({ mode: "both", display: 1 });
+      expect((await post({ mode: "scherm" })).status).toBe(400);
+      expect((await post({ mode: "helper", display: 99 })).status).toBe(400);
+      expect((await post({ mode: "helper", display: 1.5 })).status).toBe(400);
+      expect((await post({ mode: "helper" }, {})).status).toBe(403);
+      // An agent that cannot be reached: the choice is still kept.
+      failure.error = "geen verbinding";
+      const down = await post({ mode: "helper", display: 0 });
+      expect(down.body).toMatchObject({
+        applied: false,
+        error: "geen verbinding",
+        settings: { mode: "helper", display: 0 },
+      });
+      expect(
+        (await app.api.get("/api/settings/helper").set(ADMIN)).body.settings,
+      ).toEqual({ mode: "helper", display: 0 });
+      expect(
+        app.audits.some(
+          (row) => (row.arguments as { what?: string }).what === "helper",
+        ),
+      ).toBe(true);
+    } finally {
+      await app.app.close();
+    }
+  });
+
+  it("lets the helper page resize its window without a PIN, and only with a boolean", async () => {
+    const log: unknown[] = [];
+    const app = await createApp({
+      env: { NOVA_ADMIN_PIN: "1234" },
+      wallpaper: port(log, { error: null }),
+    });
+    try {
+      const size = (body: object) =>
+        app.api.post("/api/settings/helper/size").send(body);
+      expect((await size({ expanded: true })).body).toEqual({ ok: true });
+      expect(log.at(-1)).toEqual({ expanded: true });
+      expect((await size({ expanded: "ja" })).status).toBe(400);
+      // The choice itself still needs the PIN.
+      expect((await app.api.get("/api/settings/helper")).status).toBe(401);
+    } finally {
+      await app.app.close();
     }
   });
 });

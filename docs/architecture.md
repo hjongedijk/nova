@@ -31,7 +31,7 @@ One folder per domain under `apps/api/src/`. Everything is ported from the proto
 | `tts`                           | speech with Microsoft's neural voices, in Node                                                                                                                                                            |
 | `proxmox`, `planning`, `checks` | the tools that used to run in Node-RED: guests and storage, timers and lists, reachability and alerts                                                                                                     |
 | `home`                          | Home Assistant: catalog, tools, risk rules, verification, `/api/entities`                                                                                                                                 |
-| `integrations/*`                | `world`, `mcp`, `termix` (with direct SSH fallback), `windows` (programs, wallpaper) and `browser-agent` (the browser_* tools, served by the same Windows agent), `pangolin`, `youtube`                   |
+| `integrations/*`                | `world`, `mcp`, `termix` (with direct SSH fallback), `windows` (programs, wallpaper, helper overlay) and `browser-agent` (the browser_* tools, served by the same Windows agent), `pangolin`, `youtube`   |
 | `downloads`                     | the Windows agent and the CA certificate, for devices that need them                                                                                                                                      |
 | `bridges`                       | the glue where one module needs something another owns by an agreed shape (language model, wallpaper, learned names, home location)                                                                       |
 
@@ -45,8 +45,18 @@ Node-RED is no longer part of NOVA. It stays available as an optional container 
 - `lib/entity/`: the particle sphere (canvas).
 - `lib/voice/`: speaking, listening, "Hey NOVA", mobile audio unlock.
 - `lib/modes/`: wallpaper mode and device detection.
+- `routes/helper`: the compact helper page (see below).
 - `lib/stores/`: shared state.
 - `components/shell`, `components/hud`, `components/settings`, `components/admin`: one component per part of the screen.
+
+### Helper overlay
+
+A third way to show NOVA on the Windows PC next to the wallpaper: a small always-on-top pill at the top of the screen. The idea is a notch companion; the character is NOVA's own orb (`lib/entity/orb.ts`, a ~110-particle version of the entity), no third-party code or assets.
+
+- The route `/helper` reuses the chat stream (`ask`), voice (tap-to-talk, "Hey NOVA", speech) and the confirmation cards (`ConfirmationCard`, 60 s single use) of the main page, with only a compact layout of its own. It opens by itself for an answer or a question to confirm and collapses after 12 s of quiet or on Esc.
+- The Windows agent runs it as an Edge `--app` window with its own profile and a `mode` of `wallpaper`, `helper` or `both` (`POST /v1/mode`). The window is positioned, made topmost and hidden from the taskbar with Win32 calls in the agent's embedded C#.
+- The page cannot hold the agent's token, so a resize goes page, `POST /api/settings/helper/size` (open: it can only resize this window), `WindowsPcService.helperSize`, agent `POST /v1/helper/size`.
+- The choice (mode, display) is saved in `settings.json` (`helper`) and applied through `WALLPAPER_PORT`; it is kept even when the PC is off. Settings: Instellingen, Meer.
 
 The prototype is one 9,500-line `web/index.html`; it is split into these parts as they are ported.
 

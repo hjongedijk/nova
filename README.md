@@ -13,7 +13,7 @@ This repository holds NOVA itself. It is released as one Docker image, `ghcr.io/
 | `apps/api`           | NestJS backend. One module per domain (chat, tools, settings, dashboard, ...). Serves the web app in production. |
 | `apps/web`           | SvelteKit interface, built to static files.                                                                      |
 | `packages/contracts` | Types shared by API and web (types only).                                                                        |
-| `agents/windows`     | PowerShell agent for the Windows PC: programs, wallpaper per display, browser.                                   |
+| `agents/windows`     | PowerShell agent for the Windows PC: programs, wallpaper per display or a small helper overlay, browser.         |
 | `deploy`             | Production `docker-compose.yml`.                                                                                 |
 | `docs`               | Architecture and background.                                                                                     |
 

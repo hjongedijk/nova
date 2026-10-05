@@ -9,6 +9,10 @@ It can also hang NOVA behind the desktop icons as a living wallpaper, per displa
 page in a window that is parented to the desktop. The real wallpaper setting is never
 changed. What is set is remembered in wallpaper.json and restored when the agent starts.
 
+A "mode" (wallpaper, helper or both) chooses what NOVA shows: the wallpaper, a small always-on-top helper pill docked
+top-centre on one display (an Edge app window, /helper), or both. agent.json sets the default; POST /v1/mode changes it
+at runtime and is remembered in mode.json.
+
 It also gives NOVA a browser of its own (/v1/browser/*): a separate, visible Edge window with its own profile
 (browser-profile) that NOVA can search, read, click and type in, driven through Edge's DevTools channel.
 #>
@@ -17,7 +21,7 @@ param(
   [string]$ConfigPath = (Join-Path $PSScriptRoot 'agent.json')
 )
 $ErrorActionPreference = 'Stop'
-$agentVersion = '2026-10-05.4'
+$agentVersion = '2026-10-06.1'
 
 # However the agent is started (task, double-click, a terminal), it runs on without a window: this copy starts
 # a hidden one and ends. (conhost --headless also keeps Windows Terminal from opening a window.)
@@ -753,6 +757,86 @@ public class NovaClick {
     } catch (Exception) { }
   }
 }
+// The helper overlay: a small borderless Edge app window, always on top, without a taskbar button, docked top-centre.
+public class NovaHelper {
+  [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
+  [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int index, int value);
+  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(PT p, uint flags);
+  [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
+  [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attribute, ref int value, int size);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct PT { public int X, Y; }
+  static readonly IntPtr TOPMOST = new IntPtr(-1);
+  const int GWL_STYLE = -16, GWL_EXSTYLE = -20;
+  const int WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_MINIMIZEBOX = 0x00020000, WS_MAXIMIZEBOX = 0x00010000, WS_SYSMENU = 0x00080000;
+  const int WS_EX_TOOLWINDOW = 0x00000080, WS_EX_APPWINDOW = 0x00040000;
+  const uint SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040;
+  static int generation = 0;
+
+  /// <summary>Scale of the display that contains this real-pixel point (1.0 = 96 dpi, 1.5 = 150%).</summary>
+  public static double Scale(int x, int y) {
+    try {
+      uint dx, dy;
+      IntPtr monitor = MonitorFromPoint(new PT { X = x, Y = y }, 2);
+      if (GetDpiForMonitor(monitor, 0, out dx, out dy) == 0 && dx > 0) return dx / 96.0;
+    } catch (Exception) { }
+    return 1.0;
+  }
+
+  /// <summary>No title bar or border, rounded corners where Windows 11 supports it, no taskbar button, always on top.</summary>
+  public static void Setup(IntPtr h) {
+    int style = GetWindowLong(h, GWL_STYLE);
+    style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
+    SetWindowLong(h, GWL_STYLE, style);
+    // A window gets or loses its taskbar button when it is shown, so hide it while the style changes.
+    ShowWindow(h, 0);
+    int ex = GetWindowLong(h, GWL_EXSTYLE);
+    ex = (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW;
+    SetWindowLong(h, GWL_EXSTYLE, ex);
+    try { int round = 2; DwmSetWindowAttribute(h, 33, ref round, 4); } catch (Exception) { }
+    ShowWindow(h, 4);   // SW_SHOWNOACTIVATE
+  }
+
+  public static void Place(IntPtr h, int x, int y, int w, int hgt) {
+    generation++;
+    SetWindowPos(h, TOPMOST, x, y, w, hgt, SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+  }
+
+  public static bool Alive(IntPtr h) { return h != IntPtr.Zero && IsWindow(h); }
+
+  /// <summary>Move and resize smoothly (about 160 ms) on a background thread; a newer call takes over.</summary>
+  public static void Animate(IntPtr h, int x, int y, int w, int hgt, int ms) {
+    RECT now;
+    if (!GetWindowRect(h, out now)) { Place(h, x, y, w, hgt); return; }
+    int fromX = now.Left, fromY = now.Top, fromW = now.Right - now.Left, fromH = now.Bottom - now.Top;
+    int mine = ++generation;
+    var worker = new Thread(delegate () {
+      int steps = Math.Max(1, ms / 16);
+      for (int i = 1; i <= steps; i++) {
+        if (generation != mine) return;
+        double t = (double)i / steps;
+        t = 1 - Math.Pow(1 - t, 3);   // ease out
+        SetWindowPos(h, TOPMOST, fromX + (int)((x - fromX) * t), fromY + (int)((y - fromY) * t),
+          fromW + (int)((w - fromW) * t), fromH + (int)((hgt - fromH) * t), SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        Thread.Sleep(16);
+      }
+      if (generation == mine) SetWindowPos(h, TOPMOST, x, y, w, hgt, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    });
+    worker.IsBackground = true;
+    worker.Start();
+  }
+
+  public static string Describe(IntPtr h) {
+    RECT r;
+    if (!Alive(h) || !GetWindowRect(h, out r)) return "gone";
+    return r.Left + "," + r.Top + "," + (r.Right - r.Left) + "x" + (r.Bottom - r.Top) + " exstyle=0x" + GetWindowLong(h, GWL_EXSTYLE).ToString("x");
+  }
+}
+
 '@ -IgnoreWarnings
 [NovaDesk]::RealPixels()
 Add-Type -AssemblyName System.Windows.Forms
@@ -803,7 +887,9 @@ function Set-DisplayWallpaper($screen, [string]$mode, [string]$baseUrl) {
   $taskbar = [Math]::Max(0, $b.Height - $screen.WorkingArea.Height)
   if ($taskbar -eq 0) { $taskbar = 48 }
   # talk=1: the page keeps its input field and microphone; taskbarpx lifts the field above the taskbar.
-  $address = "$baseUrl/?wallpaper=1&talk=1&taskbarpx=$taskbar" + $(if ($mode -eq 'sphere') { '&panels=0' } else { '' })
+  # With the helper on top (mode both) the wallpaper stays quiet: the helper does the listening and typing.
+  $talk = $(if ((Get-ModeState).mode -eq 'both') { '' } else { '&talk=1' })
+  $address = "$baseUrl/?wallpaper=1$talk&taskbarpx=$taskbar" + $(if ($mode -eq 'sphere') { '&panels=0' } else { '' })
   $profileDir = Join-Path $PSScriptRoot ('wallpaper-profiles\' + (Get-Tag $screen))
   New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
   # Each display's window gets its own control port, reachable from this PC only.
@@ -857,7 +943,8 @@ function Set-DisplayWallpaper($screen, [string]$mode, [string]$baseUrl) {
 
 function Update-ClickRegions {
   [NovaClick]::Forward = ([string]$config.wallpaperInput -ne 'window')
-  $state = Get-WallpaperState
+  # Without a wallpaper on screen (helper mode) no click on the desktop may be taken over.
+  $state = if (Test-WallpaperWanted) { Get-WallpaperState } else { @{} }
   $regions = New-Object System.Collections.Generic.List[int]
   $base = ''
   foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
@@ -889,8 +976,10 @@ function Set-Wallpaper($display, [string]$mode, [string]$baseUrl) {
     $chosen = @($screens[$n - 1])
   }
   $state = Get-WallpaperState
+  $wanted = Test-WallpaperWanted
   foreach ($screen in $chosen) {
-    Set-DisplayWallpaper $screen $mode $baseUrl
+    # In helper mode the choice is only remembered; it shows when the mode brings the wallpaper back.
+    if ($mode -eq 'off' -or $wanted) { Set-DisplayWallpaper $screen $mode $baseUrl }
     if ($mode -eq 'off') { $state.Remove($screen.DeviceName) }
     else { $state[$screen.DeviceName] = @{ mode = $mode; url = $baseUrl } }
   }
@@ -904,6 +993,116 @@ function Restore-Wallpapers {
     if ($entry) { try { Set-DisplayWallpaper $screen ([string]$entry.mode) ([string]$entry.url) } catch { Write-Host "Wallpaper: $($_.Exception.Message)" } }
   }
   Update-ClickRegions
+}
+
+# ---------- mode: wallpaper, helper overlay, or both ----------
+# The mode comes from agent.json ("mode") until NOVA sets it at runtime (POST /v1/mode); the runtime choice is kept
+# in mode.json and survives a restart. The helper is a small Edge app window docked top-centre on one display.
+$modeStore = Join-Path $PSScriptRoot 'mode.json'
+$helperCollapsed = @(360, 64)    # CSS pixels, scaled to the display
+$helperExpanded = @(420, 360)
+$script:helper = $null
+function Get-ModeState {
+  $state = @{ mode = 'wallpaper'; display = 0; url = '' }
+  if (@('wallpaper', 'helper', 'both') -contains [string]$config.mode) { $state.mode = [string]$config.mode }
+  if ($config.helperDisplay) { $state.display = [int]$config.helperDisplay }
+  if ($config.novaUrl -match '^https?://[^\s/]+$') { $state.url = [string]$config.novaUrl }
+  if (Test-Path $modeStore) {
+    try {
+      $saved = Get-Content -Raw $modeStore | ConvertFrom-Json
+      if (@('wallpaper', 'helper', 'both') -contains [string]$saved.mode) { $state.mode = [string]$saved.mode }
+      $state.display = [int]$saved.display
+      if ([string]$saved.url -match '^https?://[^\s/]+$') { $state.url = [string]$saved.url }
+    } catch { }
+  }
+  return $state
+}
+function Save-ModeState($state) { $state | ConvertTo-Json -Depth 3 | Set-Content -Path $modeStore -Encoding UTF8 }
+function Test-WallpaperWanted { return @('wallpaper', 'both') -contains (Get-ModeState).mode }
+function Get-HelperScreen([int]$display) {
+  $screens = [System.Windows.Forms.Screen]::AllScreens
+  if ($display -ge 1 -and $display -le $screens.Count) { return $screens[$display - 1] }
+  return [System.Windows.Forms.Screen]::PrimaryScreen
+}
+# Window rectangle in real pixels: centred at the top of the display's work area, sized per display scale.
+function Get-HelperRect($screen, [bool]$expanded) {
+  $wa = $screen.WorkingArea
+  $scale = [NovaHelper]::Scale([int]($wa.X + $wa.Width / 2), [int]($wa.Y + 8))
+  $size = if ($expanded) { $helperExpanded } else { $helperCollapsed }
+  $w = [Math]::Min([int]($size[0] * $scale), $wa.Width)
+  $h = [Math]::Min([int]($size[1] * $scale), $wa.Height)
+  return @{ x = [int]($wa.X + ($wa.Width - $w) / 2); y = [int]($wa.Y + 6 * $scale); w = $w; h = $h; scale = $scale }
+}
+function Get-HelperEdge {
+  Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*nova-helper*' }
+}
+function Close-Helper {
+  Get-HelperEdge | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  $script:helper = $null
+}
+function Open-Helper([string]$baseUrl, [int]$display) {
+  Close-Helper
+  if (-not $edgeExe) { throw 'Microsoft Edge is not installed on this PC' }
+  if ($baseUrl -notmatch '^https?://[^\s/]+$') { throw 'Invalid NOVA address' }
+  $screen = Get-HelperScreen $display
+  $rect = Get-HelperRect $screen $false
+  $profileDir = Join-Path $PSScriptRoot 'helper-profile\nova-helper'
+  New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+  # Its own profile; the page may use the microphone and play speech without a click (it answers "Hey NOVA").
+  Start-Process -FilePath $edgeExe -ArgumentList @(
+    "--app=$baseUrl/helper", "--user-data-dir=`"$profileDir`"",
+    "--window-position=$($rect.x),$($rect.y)", "--window-size=$($rect.w),$($rect.h)",
+    '--no-first-run', '--no-default-browser-check', '--disable-extensions',
+    '--disable-session-crashed-bubble', '--hide-crash-restore-bubble',
+    "--unsafely-treat-insecure-origin-as-secure=$baseUrl", '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'
+  ) | Out-Null
+  $handle = [IntPtr]::Zero
+  for ($i = 0; $i -lt 60 -and $handle -eq [IntPtr]::Zero; $i++) {
+    Start-Sleep -Milliseconds 500
+    $ids = @(Get-HelperEdge | ForEach-Object { $_.ProcessId })
+    if ($ids.Count -eq 0) { continue }
+    $window = Get-Process -Id $ids -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+    if ($window) { $handle = $window.MainWindowHandle }
+  }
+  if ($handle -eq [IntPtr]::Zero) {
+    Close-Helper
+    throw "The helper window did not open. Is $baseUrl reachable from this PC?"
+  }
+  [NovaHelper]::Setup($handle)
+  [NovaHelper]::Place($handle, $rect.x, $rect.y, $rect.w, $rect.h)
+  $script:helper = @{ handle = $handle; device = $screen.DeviceName; display = $display; expanded = $false }
+}
+# Grow the helper window for an answer or a question, or shrink it back to the pill (the page asks for it).
+function Set-HelperSize([bool]$expanded) {
+  if (-not $script:helper -or -not [NovaHelper]::Alive([IntPtr]$script:helper.handle)) { throw 'The helper is not open' }
+  $screen = Get-HelperScreen ([int]$script:helper.display)
+  $rect = Get-HelperRect $screen $expanded
+  [NovaHelper]::Animate([IntPtr]$script:helper.handle, $rect.x, $rect.y, $rect.w, $rect.h, 160)
+  $script:helper.expanded = $expanded
+}
+# Make the running windows match the mode: wallpaper windows from wallpaper.json, and the helper.
+function Apply-Mode {
+  $state = Get-ModeState
+  $wallpaperWanted = @('wallpaper', 'both') -contains $state.mode
+  $helperWanted = @('helper', 'both') -contains $state.mode
+  if ($wallpaperWanted) { Restore-Wallpapers }
+  else {
+    # The choices in wallpaper.json stay, so switching back brings the wallpaper back.
+    foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) { Stop-WallpaperEdge $screen; [NovaClick]::RemoveTarget([int]$screen.Bounds.X, [int]$screen.Bounds.Y) }
+    Update-ClickRegions
+  }
+  if ($helperWanted) {
+    if (-not $state.url) { throw 'The NOVA address is not known yet: set the mode from NOVA once' }
+    Open-Helper $state.url ([int]$state.display)
+  } else { Close-Helper }
+}
+function Set-AgentMode([string]$mode, $display, [string]$baseUrl) {
+  if (@('wallpaper', 'helper', 'both') -notcontains $mode) { throw 'mode must be wallpaper, helper or both' }
+  if ($baseUrl -notmatch '^https?://[^\s/]+$') { throw 'Invalid NOVA address' }
+  $n = if ($null -ne $display -and "$display" -ne '') { [int]$display } else { 0 }
+  if ($n -lt 0 -or $n -gt [System.Windows.Forms.Screen]::AllScreens.Count) { throw "There is no display $n (this PC has $([System.Windows.Forms.Screen]::AllScreens.Count))" }
+  Save-ModeState @{ mode = $mode; display = $n; url = $baseUrl }
+  Apply-Mode
 }
 
 # ---------- browser: a separate, visible Edge window that NOVA can search, read and click in ----------
@@ -1284,7 +1483,7 @@ $listener.Prefixes.Add("http://+:$Port/")
 $listener.Start()
 Write-Host "Jarvis agent listening on port $Port"
 try { if (-not [NovaClick]::Start()) { Write-Host 'Click hook not available' } } catch { Write-Host "Click hook: $($_.Exception.Message)" }
-Restore-Wallpapers
+try { Apply-Mode } catch { Write-Host "Mode: $($_.Exception.Message)" }
 while ($listener.IsListening) {
   $ctx = $listener.GetContext()
   try {
@@ -1296,7 +1495,7 @@ while ($listener.IsListening) {
       '/v1/status' {
         $running = @($apps.Keys | Where-Object { $p = $apps[$_].process; $p -and (Get-Process -Name $p -ErrorAction SilentlyContinue) })
         $os = Get-CimInstance Win32_OperatingSystem
-        Send $ctx 200 @{ ok = $true; hostname = $env:COMPUTERNAME; user = $env:USERNAME; uptimeHours = [Math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1); features = @('wallpaper', 'browser'); agent = $agentVersion; apps = @($apps.Keys | Sort-Object); running = $running }
+        Send $ctx 200 @{ ok = $true; hostname = $env:COMPUTERNAME; user = $env:USERNAME; uptimeHours = [Math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1); features = @('wallpaper', 'browser', 'helper'); mode = (Get-ModeState).mode; helperDisplay = (Get-ModeState).display; helperOpen = [bool]($script:helper -and [NovaHelper]::Alive([IntPtr]$script:helper.handle)); agent = $agentVersion; apps = @($apps.Keys | Sort-Object); running = $running }
       }
       '/v1/open-app' {
         $app = Get-App (Read-Body $ctx).app
@@ -1330,7 +1529,20 @@ while ($listener.IsListening) {
         Send $ctx 200 @{ ok = $true; agent = $agentVersion; build = $os.BuildNumber; version = $os.Version; forward = [NovaClick]::Forward; corrections = [NovaDesk]::Corrections; input = [NovaClick]::State(); placed = $details }
       }
       '/v1/displays' {
-        Send $ctx 200 @{ ok = $true; displays = @(Get-Displays) }
+        $m = Get-ModeState
+        Send $ctx 200 @{ ok = $true; displays = @(Get-Displays); mode = $m.mode; helperDisplay = $m.display }
+      }
+      '/v1/mode' {
+        $body = Read-Body $ctx
+        $base = if ($body.url) { [string]$body.url } else { "http://${remote}:$novaPort" }
+        Set-AgentMode ([string]$body.mode) $body.display $base
+        $m = Get-ModeState
+        Send $ctx 200 @{ ok = $true; displays = @(Get-Displays); mode = $m.mode; helperDisplay = $m.display }
+      }
+      '/v1/helper/size' {
+        $body = Read-Body $ctx
+        Set-HelperSize ([bool]$body.expanded)
+        Send $ctx 200 @{ ok = $true; expanded = [bool]$script:helper.expanded }
       }
       '/v1/wallpaper' {
         $body = Read-Body $ctx

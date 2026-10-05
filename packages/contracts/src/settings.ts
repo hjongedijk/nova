@@ -338,10 +338,34 @@ export interface WallpaperDisplay {
   mode: WallpaperMode;
 }
 
+/** What the Windows PC shows: NOVA as wallpaper, as a small helper overlay at the top, or both. */
+export type HelperMode = "wallpaper" | "helper" | "both";
+
+/** display 0 = the primary display, otherwise the display number (1, 2, ...). */
+export interface HelperSettings {
+  mode: HelperMode;
+  display: number;
+}
+
 export type WallpaperState =
-  | { available: true; displays: WallpaperDisplay[] }
+  | {
+      available: true;
+      displays: WallpaperDisplay[];
+      /** What the agent is running now (absent on an agent that predates the helper). */
+      mode?: HelperMode;
+      helperDisplay?: number;
+    }
   | {
       available: false;
       reason: "no-agent" | "old-agent" | "unreachable";
       error?: string;
     };
+
+/** The helper choice as saved in NOVA, next to what the agent on the PC reports. */
+export interface HelperState {
+  settings: HelperSettings;
+  desktop: WallpaperState;
+  /** False when the choice was saved but the agent could not apply it (PC off, agent too old). */
+  applied?: boolean;
+  error?: string;
+}

@@ -216,3 +216,37 @@ describe("WindowsPcService displays and wallpaper", () => {
     expect((await pc.displays()).ok).toBe(false);
   });
 });
+
+describe("the helper overlay on the agent", () => {
+  it("sends the mode with NOVA's address and the helper size without it", async () => {
+    const { fake, pc } = await agent(
+      "agent-token",
+      (_seen, send) =>
+        send(200, { ok: true, displays: [], mode: "both", helperDisplay: 2 }),
+      "https://nova.example.nl",
+    );
+    const set = await pc.setMode("both", 2);
+    expect(set).toMatchObject({
+      ok: true,
+      result: { mode: "both", helperDisplay: 2 },
+    });
+    expect(fake.requests.at(-1)?.url).toBe("/v1/mode");
+    expect(JSON.parse(fake.requests.at(-1)!.body)).toEqual({
+      mode: "both",
+      display: 2,
+      url: "https://nova.example.nl",
+    });
+    await pc.helperSize(true);
+    expect(fake.requests.at(-1)?.url).toBe("/v1/helper/size");
+    expect(JSON.parse(fake.requests.at(-1)!.body)).toEqual({ expanded: true });
+  });
+
+  it("says the agent is old when it does not know the route", async () => {
+    const { pc } = await agent("agent-token", (_seen, send) =>
+      send(404, { ok: false, error: "Not found" }),
+    );
+    const out = await pc.setMode("helper", 0);
+    expect(out.ok).toBe(false);
+    expect(!out.ok && out.error).toMatch(/oud/);
+  });
+});

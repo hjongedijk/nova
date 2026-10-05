@@ -23,6 +23,7 @@ import type {
   SkillTestResult,
   ToolOverride,
   Widget,
+  HelperState,
   WallpaperState,
 } from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
@@ -431,7 +432,14 @@ export class SettingsController {
         reason: /oud/.test(outcome.error) ? "old-agent" : "unreachable",
         error: outcome.error,
       };
-    return { available: true, displays: outcome.displays };
+    return {
+      available: true,
+      displays: outcome.displays,
+      ...(outcome.mode ? { mode: outcome.mode } : {}),
+      ...(outcome.helperDisplay !== undefined
+        ? { helperDisplay: outcome.helperDisplay }
+        : {}),
+    };
   }
 
   @Post("wallpaper")
@@ -449,6 +457,78 @@ export class SettingsController {
     if (!outcome.ok) throw new ValidationError([outcome.error]);
     this.log("wallpaper", { display, mode });
     return { available: true, displays: outcome.displays };
+  }
+
+  /* ---------- the helper overlay on the Windows PC ---------- */
+
+  /** The saved choice, and what the agent reports it is running. */
+  @Get("helper")
+  async getHelper(): Promise<HelperState> {
+    return {
+      settings: this.settings.get().helper,
+      desktop: await this.getWallpaper(),
+    };
+  }
+
+  /**
+   * Save the choice (wallpaper, helper or both, and the helper's display) and apply it on the PC. The choice is
+   * kept when the PC cannot be reached, so it is not lost while the PC is off; the answer says whether it was applied.
+   */
+  @Post("helper")
+  @HttpCode(200)
+  async setHelper(@Body() body: Body_): Promise<HelperState> {
+    const mode = body?.mode;
+    const display = Number(body?.display ?? 0);
+    if (mode !== "wallpaper" && mode !== "helper" && mode !== "both")
+      throw new ValidationError(["Kies achtergrond, helper of beide."]);
+    if (!Number.isInteger(display) || display < 0 || display > 8)
+      throw new ValidationError(["Kies een beeldscherm."]);
+    this.settings.update((next) => {
+      next.helper = { mode, display };
+    });
+    this.log("helper", { mode, display });
+    if (!this.wallpaper?.configured)
+      return {
+        settings: { mode, display },
+        desktop: { available: false, reason: "no-agent" },
+        applied: false,
+        error: "Er is geen Windows-agent ingesteld.",
+      };
+    const outcome = await this.wallpaper.setMode(mode, display);
+    if (!outcome.ok)
+      return {
+        settings: { mode, display },
+        desktop: await this.getWallpaper(),
+        applied: false,
+        error: outcome.error,
+      };
+    return {
+      settings: { mode, display },
+      desktop: {
+        available: true,
+        displays: outcome.displays,
+        ...(outcome.mode ? { mode: outcome.mode } : {}),
+        ...(outcome.helperDisplay !== undefined
+          ? { helperDisplay: outcome.helperDisplay }
+          : {}),
+      },
+      applied: true,
+    };
+  }
+
+  /**
+   * The helper page asks for its window to grow (an answer, a question to confirm) or shrink back to the pill.
+   * Open like the public list: the page has no PIN, and all this can do is resize NOVA's own helper window.
+   */
+  @Post("helper/size")
+  @PublicRoute()
+  @HttpCode(200)
+  async helperSize(@Body() body: Body_): Promise<{ ok: boolean }> {
+    if (typeof body?.expanded !== "boolean")
+      throw new ValidationError(["expanded moet true of false zijn."]);
+    if (!this.wallpaper?.configured) return { ok: false };
+    const outcome = await this.wallpaper.helperSize(body.expanded);
+    return { ok: outcome.ok };
   }
 
   /* ---------- backup ---------- */
