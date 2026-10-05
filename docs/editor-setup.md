@@ -32,11 +32,11 @@ the development services as described in the root README before running the app.
 These recommendations target Claude Code, including its VS Code extension.
 They have not been installed or enabled automatically.
 
-| Plugin                                                                                                         | Why it fits NOVA                                                                                                                                                                          |
-| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [typescript-lsp](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/typescript-lsp)       | Definitions, references, and diagnostics for the NestJS API, shared contracts, and browser agent. Its listed file types do not include `.svelte`; keep using svelte-check for components. |
-| [frontend-design](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/frontend-design)     | UI design help for NOVA's dashboard and settings screens. Ask it to retain SvelteKit and the existing visual style.                                                                       |
-| [pr-review-toolkit](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/pr-review-toolkit) | Focused reviews of error handling, test coverage, and shared type design.                                                                                                                 |
+| Plugin                                                                                                         | Why it fits NOVA                                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [typescript-lsp](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/typescript-lsp)       | Definitions, references, and diagnostics for the NestJS API, and shared contracts. Its listed file types do not include `.svelte`; keep using svelte-check for components. |
+| [frontend-design](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/frontend-design)     | UI design help for NOVA's dashboard and settings screens. Ask it to retain SvelteKit and the existing visual style.                                                        |
+| [pr-review-toolkit](https://github.com/anthropics/claude-plugins-official/tree/main/plugins/pr-review-toolkit) | Focused reviews of error handling, test coverage, and shared type design.                                                                                                  |
 
 Start with these three. Run the following inside a Claude Code terminal session,
 then choose **Install for you, in this repo only** if you want a local setup:

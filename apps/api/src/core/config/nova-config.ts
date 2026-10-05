@@ -120,10 +120,6 @@ export class NovaConfig {
     url: url("WINDOWS_AGENT_URL", ""),
     token: text("WINDOWS_AGENT_TOKEN"),
   };
-  readonly browserAgent = {
-    url: url("BROWSER_AGENT_URL", ""),
-    token: text("BROWSER_AGENT_TOKEN"),
-  };
   readonly termix = {
     url: url("TERMIX_URL", ""),
     apiKey: text("TERMIX_API_KEY"),

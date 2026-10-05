@@ -10,10 +10,11 @@ import {
 } from "../../tools/tool.types.js";
 
 /*
- * Lets NOVA use the browser on the Windows PC through the NOVA browser agent
- * (integrations/browser-agent). The agent does the safety checks; this side maps tools
- * to its endpoints and turns failures into something the model can say out loud.
- * The model drives it step by step: search, read, click, read again.
+ * Lets NOVA use the browser on the Windows PC. The browser lives in the Windows agent
+ * (agents/windows, /v1/browser/*): a separate Edge window of its own, so there is one agent
+ * and one URL and token (WINDOWS_AGENT_URL and WINDOWS_AGENT_TOKEN). The agent does the
+ * safety checks; this side maps tools to its endpoints and turns failures into something
+ * the model can say out loud. The model drives it step by step: search, read, click, read again.
  */
 const ENGINES = [
   "google",
@@ -54,10 +55,10 @@ export class BrowserAgentService implements ToolSource {
   constructor(private readonly config: NovaConfig) {}
 
   private get url() {
-    return this.config.browserAgent.url;
+    return this.config.windowsAgent.url;
   }
   private get token() {
-    return this.config.browserAgent.token;
+    return this.config.windowsAgent.token;
   }
   get configured(): boolean {
     return Boolean(this.url && this.token);
@@ -228,26 +229,35 @@ export class BrowserAgentService implements ToolSource {
       name === "browser_click_confirmed" ? { ...args, confirmed: true } : args;
     let response;
     try {
-      response = await requestJson<AgentBody>(`${this.url}/v1/${route[1]}`, {
-        method: route[0],
-        headers: { authorization: `Bearer ${this.token}` },
-        body: route[0] === "POST" ? body : undefined,
-        signal,
-      });
+      response = await requestJson<AgentBody>(
+        `${this.url}/v1/browser/${route[1]}`,
+        {
+          method: route[0],
+          headers: { authorization: `Bearer ${this.token}` },
+          body: route[0] === "POST" ? body : undefined,
+          signal,
+        },
+      );
     } catch (error) {
       if (signal?.aborted || (error as Error)?.name === "AbortError")
         return { ok: false, error: "De browser reageerde niet op tijd." };
       return {
         ok: false,
         error:
-          "De browser op de Windows-pc is niet bereikbaar. Staat de pc aan en draait de NOVA browser-agent?",
+          "De browser op de Windows-pc is niet bereikbaar. Staat de pc aan en draait de Windows-agent?",
       };
     }
     if (response.status === 401)
       return {
         ok: false,
         error:
-          "De browser-agent weigert het token. Controleer BROWSER_AGENT_TOKEN.",
+          "De Windows-agent weigert het token. Controleer WINDOWS_AGENT_TOKEN.",
+      };
+    if (response.status === 404 && response.data?.error === "Not found")
+      return {
+        ok: false,
+        error:
+          "De Windows-agent op je pc is nog oud en kent de browser niet. Werk jarvis-agent.ps1 bij en start de taak JarvisAgent opnieuw.",
       };
     const { ok, ...rest } = response.data ?? {};
     if (response.status !== 200 || ok !== true)

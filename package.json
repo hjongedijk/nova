@@ -9,8 +9,7 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/*",
-    "agents/browser"
+    "packages/*"
   ],
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev -w @nova/api\" \"npm run dev -w @nova/web\"",
@@ -18,7 +17,7 @@
     "dev:stop": "pkill -f \"[c]oncurrently -k -n api,web\"; pkill -f \"[n]est start --watch\"; pkill -f \"[v]ite dev\"; pkill -f \"[a]pps/api/dist/main\"; echo \"NOVA dev stopped\"",
     "build": "npm run build -w @nova/web && npm run build -w @nova/api",
     "start": "npm run start -w @nova/api",
-    "test": "npm run test -w @nova/api && npm run test -w @nova/browser-agent",
+    "test": "npm run test -w @nova/api",
     "lint": "eslint .",
     "typecheck": "npm run typecheck -w @nova/contracts && npm run typecheck -w @nova/api && npm run check -w @nova/web",
     "format": "prettier --write .",

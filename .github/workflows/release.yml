@@ -47,11 +47,9 @@ jobs:
       - run: |
           cd agents
           zip -r ../nova-windows-agent.zip windows -x "windows/test/*"
-          zip -r ../nova-browser-agent.zip browser -x "browser/test/*" "browser/node_modules/*"
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             nova-windows-agent.zip
-            nova-browser-agent.zip
             deploy/docker-compose.yml
           generate_release_notes: true

@@ -77,7 +77,7 @@ export const ABILITIES: AbilityDefinition[] = [
     id: "browser",
     name: "Browser op je pc",
     description:
-      "Zelf zoeken, lezen en klikken in de browser op je pc. Werkt zodra de browser-agent is geïnstalleerd.",
+      "Zelf zoeken, lezen en klikken in de browser op je pc. Werkt zodra de Windows-agent draait.",
     example: "Zoek op Google naar de beste pizza in de buurt en open de eerste",
     changes: true,
     match: /^browser_/,

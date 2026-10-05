@@ -12,7 +12,7 @@ let reply: () => { status: number; body: unknown } = () => ({
 let fake: Awaited<ReturnType<typeof listen>>;
 let browser: BrowserAgentService;
 const make = (url: string, token = TOKEN) =>
-  new BrowserAgentService(fakeConfig({ browserAgent: { url, token } }));
+  new BrowserAgentService(fakeConfig({ windowsAgent: { url, token } }));
 
 beforeAll(async () => {
   fake = await listen((_seen, send) => {
@@ -50,53 +50,53 @@ describe("BrowserAgentService", () => {
     expect(browser.definitions().every((item) => item.enabled)).toBe(true);
   });
 
-  it("each tool reaches the right agent endpoint with the token", async () => {
+  it("each tool reaches the right Windows agent browser endpoint with the token", async () => {
     const cases: [string, Record<string, unknown>, string, string, unknown][] =
       [
-        ["browser_status", {}, "GET", "/v1/status", null],
+        ["browser_status", {}, "GET", "/v1/browser/status", null],
         [
           "browser_search",
           { query: "auto", engine: "youtube" },
           "POST",
-          "/v1/search",
+          "/v1/browser/search",
           { query: "auto", engine: "youtube" },
         ],
         [
           "browser_open",
           { url: "https://nl.wikipedia.org" },
           "POST",
-          "/v1/open",
+          "/v1/browser/open",
           { url: "https://nl.wikipedia.org" },
         ],
-        ["browser_read", {}, "POST", "/v1/read", {}],
-        ["browser_click", { id: 4 }, "POST", "/v1/click", { id: 4 }],
+        ["browser_read", {}, "POST", "/v1/browser/read", {}],
+        ["browser_click", { id: 4 }, "POST", "/v1/browser/click", { id: 4 }],
         [
           "browser_type",
           { id: 2, text: "hallo", submit: true },
           "POST",
-          "/v1/type",
+          "/v1/browser/type",
           { id: 2, text: "hallo", submit: true },
         ],
         [
           "browser_press",
           { key: "Enter" },
           "POST",
-          "/v1/press",
+          "/v1/browser/press",
           { key: "Enter" },
         ],
         [
           "browser_scroll",
           { direction: "down" },
           "POST",
-          "/v1/scroll",
+          "/v1/browser/scroll",
           { direction: "down" },
         ],
-        ["browser_back", {}, "POST", "/v1/back", {}],
+        ["browser_back", {}, "POST", "/v1/browser/back", {}],
         [
           "browser_tab",
           { action: "list" },
           "POST",
-          "/v1/tab",
+          "/v1/browser/tab",
           { action: "list" },
         ],
       ];
@@ -171,6 +171,16 @@ describe("BrowserAgentService", () => {
       /Browser-agent fout \(502\)/,
     );
     expect((await browser.execute("browser_nope", {}, call())).ok).toBe(false);
+  });
+
+  it("an old Windows agent without the browser is told to update", async () => {
+    reply = () => ({
+      status: 404,
+      body: { ok: false, error: "Not found" },
+    });
+    const out = await browser.execute("browser_read", {}, call());
+    expect(out.ok).toBe(false);
+    expect(out.error).toMatch(/jarvis-agent\.ps1/);
   });
 
   it("a timeout is reported as the browser not answering", async () => {

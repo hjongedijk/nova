@@ -7,7 +7,6 @@ COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY packages/contracts/package.json packages/contracts/
-COPY agents/browser/package.json agents/browser/
 RUN npm ci --workspace @nova/api --workspace @nova/web --workspace @nova/contracts --include-workspace-root
 COPY tsconfig.base.json ./
 COPY packages ./packages
@@ -26,7 +25,6 @@ COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY packages/contracts/package.json packages/contracts/
-COPY agents/browser/package.json agents/browser/
 RUN npm ci --omit=dev --workspace @nova/api && npm cache clean --force
 COPY --from=build /src/apps/api/dist apps/api/dist
 COPY --from=build /src/apps/web/build web

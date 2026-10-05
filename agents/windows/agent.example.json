@@ -1,6 +1,13 @@
 {
   "token": "generated-by-install.ps1",
   "allowedIps": [],
+  "browser": {
+    "port": 9322,
+    "defaultEngine": "google",
+    "maxActionsPerMinute": 60,
+    "blockedHosts": [],
+    "allowedHosts": []
+  },
   "apps": {
     "notepad": { "path": "notepad.exe", "process": "notepad" },
     "calculator": { "path": "calc.exe", "process": "CalculatorApp" },

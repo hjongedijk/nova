@@ -1,6 +1,7 @@
 {
   "recommendations": [
     "svelte.svelte-vscode",
+    "oouo-diogo-perdigao.docthis",
     "dbaeumer.vscode-eslint",
     "esbenp.prettier-vscode",
     "EditorConfig.EditorConfig",

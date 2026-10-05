@@ -31,7 +31,7 @@ One folder per domain under `apps/api/src/`. Everything is ported from the proto
 | `tts`                           | speech with Microsoft's neural voices, in Node                                                                                                                                                            |
 | `proxmox`, `planning`, `checks` | the tools that used to run in Node-RED: guests and storage, timers and lists, reachability and alerts                                                                                                     |
 | `home`                          | Home Assistant: catalog, tools, risk rules, verification, `/api/entities`                                                                                                                                 |
-| `integrations/*`                | `world`, `mcp`, `termix` (with direct SSH fallback), `windows`, `browser-agent`, `pangolin`, `youtube`                                                                                                    |
+| `integrations/*`                | `world`, `mcp`, `termix` (with direct SSH fallback), `windows` (programs, wallpaper) and `browser-agent` (the browser_* tools, served by the same Windows agent), `pangolin`, `youtube`                   |
 | `downloads`                     | the Windows agent and the CA certificate, for devices that need them                                                                                                                                      |
 | `bridges`                       | the glue where one module needs something another owns by an agreed shape (language model, wallpaper, learned names, home location)                                                                       |
 
@@ -53,6 +53,5 @@ The prototype is one 9,500-line `web/index.html`; it is split into these parts a
 ## Tests
 
 - `apps/api/test`: Vitest. The prototype's tests (`server/test/*.test.js`) are ported along with their module.
-- `agents/browser/test`: `node --test`. The contract test against the API client comes back when `integrations/browser-agent` is ported.
 - `agents/windows/test/check.ps1`: PowerShell syntax and the embedded C#, also in CI.
 - The interface is tested by hand and with the Playwright plugin; there is no e2e suite in the repository.

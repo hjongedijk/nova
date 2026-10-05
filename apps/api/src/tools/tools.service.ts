@@ -222,7 +222,7 @@ export class ToolsService implements OnModuleInit {
         ok: false,
         error: "Unknown tool or integration unavailable",
         hint: /^browser_/.test(name)
-          ? "De browser-agent is niet geinstalleerd, dus browser_* bestaat niet. Gebruik windows_search om de zoekopdracht op de pc te openen, of web_search om zelf het antwoord te zoeken."
+          ? "De Windows-agent is niet ingesteld, dus browser_* bestaat niet. Gebruik windows_search om de zoekopdracht op de pc te openen, of web_search om zelf het antwoord te zoeken."
           : "Deze tool bestaat niet of staat uit. Gebruik alleen tools uit je lijst.",
       });
     risk = tool.definition.risk;

@@ -43,8 +43,4 @@ export default tseslint.config(
     files: ["apps/web/static/sw.js"],
     languageOptions: { globals: { ...globals.serviceworker } },
   },
-  {
-    files: ["agents/browser/**/*.mjs"],
-    languageOptions: { globals: { ...globals.node, ...globals.browser } },
-  },
 );
