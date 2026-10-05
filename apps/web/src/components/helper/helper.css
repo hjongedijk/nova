@@ -1,9 +1,29 @@
-/* The helper: a pill at the top of the screen that opens for an answer. Sized by its window (360 x 64 collapsed,
-   420 x 360 open), so everything here fills the viewport. */
+/* The helper island: a floating, fully rounded glass-like pill in NOVA's navy and indigo with an orange accent
+   (the Windows agent clips the window to the same radius). 300 x 44 compact, 420 x 360 open. */
 body.helper {
-  background: var(--air);
+  --ink: #f5f6f8;
+  --dim: #9398a1;
+  --tint: #6b6fe0;
+  --island: 22px;
+  background: #06070f;
+  color: var(--ink);
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
   overflow: hidden;
   user-select: none;
+}
+body.helper.expanded {
+  --island: 30px;
+}
+body.helper[data-state="listening"] {
+  --tint: #45c8e8;
+}
+body.helper[data-state="thinking"],
+body.helper[data-state="executing"] {
+  --tint: #7c6cf2;
+}
+body.helper[data-state="speaking"] {
+  --tint: #ff7a45;
 }
 body.helper input {
   user-select: text;
@@ -13,31 +33,34 @@ body.helper input {
   position: fixed;
   inset: 0;
   display: grid;
-  grid-template-rows: 64px minmax(0, 1fr);
-  border: 1px solid color-mix(in srgb, var(--glow) 38%, transparent);
+  grid-template-rows: 44px minmax(0, 1fr);
   background:
     radial-gradient(
-      ellipse 90% 120% at 12% 0%,
-      color-mix(in srgb, var(--glow) 16%, transparent),
-      transparent 70%
+      120% 90% at 0% 0%,
+      rgba(255, 122, 69, 0.14),
+      transparent 55%
     ),
-    var(--air);
+    linear-gradient(155deg, #1b1e48 0%, #0e1030 48%, #0a0b1e 100%);
+  border: 1px solid rgba(233, 230, 245, 0.14);
+  border-radius: var(--island);
   overflow: hidden;
-  transition: border-color 0.4s;
+  transition: border-radius 0.3s cubic-bezier(0.3, 1.2, 0.4, 1);
+}
+.hp.err {
+  --tint: #ff4d4d;
 }
 
 .hp-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 64px;
-  padding: 0 12px 0 10px;
+  gap: 8px;
+  height: 42px;
+  padding: 0 8px 0 10px;
 }
-
 .hp-core {
   flex: none;
-  width: 46px;
-  height: 46px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -46,86 +69,123 @@ body.helper input {
 }
 .hp-orb {
   display: block;
-  width: 46px;
-  height: 46px;
-}
-
-.hp-mid {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  width: 28px;
+  height: 28px;
 }
 .hp-status {
+  flex: 1;
+  min-width: 0;
   margin: 0;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--glow);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.hp-status.bad {
-  color: var(--amber);
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4a4e56;
+  transition: background 0.4s;
 }
-.hp-mid input {
-  width: 100%;
-  min-width: 0;
-  font: 400 14px/1.2 var(--sans);
-  color: var(--mist);
-  background: rgba(233, 230, 245, 0.06);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 6px 10px;
+.dot.on {
+  background: var(--tint);
 }
-.hp-mid input:focus {
-  outline: none;
-  border-color: var(--glow);
-}
-.hp-mid input:disabled {
-  opacity: 0.55;
+.hp.err .hp-status {
+  color: #ff8a8a;
 }
 
-.hp-mic {
+.hp-icon {
   flex: none;
-  width: 34px;
-  height: 34px;
-  padding: 7px;
-  color: var(--mist);
-  background: transparent;
-  border: 1px solid var(--line);
+  width: 32px;
+  height: 32px;
+  padding: 8px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.08);
+  border: 0;
   border-radius: 50%;
   cursor: pointer;
+  transition:
+    background 0.15s,
+    opacity 0.2s;
 }
-.hp-mic[hidden] {
+.hp-icon:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.hp-icon[hidden] {
   display: none;
 }
-.hp-mic svg {
+.hp-icon svg {
+  display: block;
   width: 100%;
   height: 100%;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
-.hp-mic.on {
-  color: var(--glow);
-  border-color: var(--glow);
+.hp-icon.on {
+  background: var(--tint);
+  color: #06070f;
+}
+.hp-mic-compact {
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  background: transparent;
+}
+.hp.open .hp-mic-compact {
+  opacity: 0;
+  pointer-events: none;
 }
 
-.hp-body {
+/* The dark card inside the island, with a soft glow in the colour of NOVA's state. */
+.hp-card {
+  position: relative;
   min-height: 0;
+  margin: 0 8px 8px;
+  padding: 14px 14px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 0 14px 12px;
+  overflow: hidden;
+  border-radius: 22px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.08),
+    rgba(255, 255, 255, 0.035)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 28px rgba(140, 140, 255, 0.06);
   opacity: 0;
   transition: opacity 0.2s;
 }
-body.expanded .hp-body {
+.hp.open .hp-card {
   opacity: 1;
+}
+.hp-glow {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: -46px;
+  height: 90px;
+  border-radius: 50%;
+  background: var(--tint);
+  filter: blur(36px);
+  opacity: 0.5;
+  pointer-events: none;
+  transition: background 0.4s;
+}
+.hp-card > :not(.hp-glow) {
+  position: relative;
 }
 .hp-you {
   flex: none;
@@ -140,9 +200,10 @@ body.expanded .hp-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  font-size: 14px;
+  font-size: 14.5px;
   line-height: 1.5;
   scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 .hp-answer p,
 .hp-answer ul {
@@ -151,36 +212,96 @@ body.expanded .hp-body {
 .hp-answer ul {
   padding-left: 18px;
 }
-.hp-answer .h {
-  font-weight: 600;
-  color: var(--glow);
-}
+.hp-answer .h,
 .hp-answer .b {
   font-weight: 600;
 }
 .hp-answer .c {
   font-family: ui-monospace, Consolas, monospace;
   font-size: 12.5px;
-  color: var(--amber);
+  color: #ffb27a;
 }
 .hp-empty {
   color: var(--dim);
 }
 .hp-cards {
   flex: none;
-  max-height: 50%;
+  max-height: 55%;
   overflow-y: auto;
+  display: grid;
+  gap: 8px;
 }
-.hp-cards .dock-card {
-  padding: 12px 14px 14px;
-  margin-bottom: 8px;
+
+.hp-form {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.hp-cards .dock-card span {
-  font-size: 13px;
+.hp-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 14px;
+  background: rgba(6, 7, 15, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+}
+.hp-field input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+.hp-field input::placeholder {
+  color: var(--dim);
+}
+.hp-field input:disabled {
+  opacity: 0.55;
+}
+.hp-send {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 7px;
+  color: #111;
+  background: #fff;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.hp-send:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.hp-send svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--tint);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hp-body {
+  .hp,
+  .hp-card,
+  .hp-glow,
+  .dot {
     transition: none;
   }
 }

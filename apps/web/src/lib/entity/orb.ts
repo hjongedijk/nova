@@ -99,13 +99,10 @@ export function startOrb(host: OrbHost): () => void {
       const z = p.x * sin + p.z * cos;
       const depth = (z + 1) / 2;
       g.fillStyle = `hsla(${hue} ${look.s}% ${lightness}% / ${0.25 + depth * 0.75})`;
-      const dot = 0.6 + depth * 1.1;
-      g.fillRect(
-        middle + x * radius - dot / 2,
-        middle + p.y * radius - dot / 2,
-        dot,
-        dot,
-      );
+      const dot = 0.9 + depth * 1.3;
+      g.beginPath();
+      g.arc(middle + x * radius, middle + p.y * radius, dot / 2, 0, 6.2832);
+      g.fill();
     }
   };
   frame = requestAnimationFrame(draw);

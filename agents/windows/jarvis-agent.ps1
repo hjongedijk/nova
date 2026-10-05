@@ -21,7 +21,7 @@ param(
   [string]$ConfigPath = (Join-Path $PSScriptRoot 'agent.json')
 )
 $ErrorActionPreference = 'Stop'
-$agentVersion = '2026-10-06.1'
+$agentVersion = '2026-10-06.2'
 
 # However the agent is started (task, double-click, a terminal), it runs on without a window: this copy starts
 # a hidden one and ends. (conhost --headless also keeps Windows Terminal from opening a window.)
@@ -767,7 +767,8 @@ public class NovaHelper {
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(PT p, uint flags);
   [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
-  [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attribute, ref int value, int size);
+  [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr h, IntPtr region, bool redraw);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int ellipseW, int ellipseH);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   [StructLayout(LayoutKind.Sequential)] public struct PT { public int X, Y; }
   static readonly IntPtr TOPMOST = new IntPtr(-1);
@@ -797,38 +798,54 @@ public class NovaHelper {
     int ex = GetWindowLong(h, GWL_EXSTYLE);
     ex = (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW;
     SetWindowLong(h, GWL_EXSTYLE, ex);
-    try { int round = 2; DwmSetWindowAttribute(h, 33, ref round, 4); } catch (Exception) { }
+    // Corner rounding is a window region (Round), the same on every Windows version.
     ShowWindow(h, 4);   // SW_SHOWNOACTIVATE
   }
 
-  public static void Place(IntPtr h, int x, int y, int w, int hgt) {
+  /// <summary>Clip the window to a fully rounded rectangle (a pill when compact). The system owns the region afterwards.
+  /// (A real translucent backdrop or shadow is not used: an Edge window cannot be transparent, so the page paints gradients.)</summary>
+  public static void Round(IntPtr h, int w, int hgt, int radius) {
+    IntPtr region = CreateRoundRectRgn(0, 0, w + 1, hgt + 1, radius * 2, radius * 2);
+    if (SetWindowRgn(h, region, true) == 0) { /* not applied: the caller keeps the rectangle */ }
+  }
+
+  public static void Place(IntPtr h, int x, int y, int w, int hgt, int radius) {
     generation++;
+    lastRadius = radius;
     SetWindowPos(h, TOPMOST, x, y, w, hgt, SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    Round(h, w, hgt, radius);
   }
 
   public static bool Alive(IntPtr h) { return h != IntPtr.Zero && IsWindow(h); }
 
-  /// <summary>Move and resize smoothly (about 160 ms) on a background thread; a newer call takes over.</summary>
-  public static void Animate(IntPtr h, int x, int y, int w, int hgt, int ms) {
+  /// <summary>Move, resize and re-round smoothly on a background thread, easing out with a slight overshoot
+  /// (spring-like, ms is about 240); a newer call takes over.</summary>
+  public static void Animate(IntPtr h, int x, int y, int w, int hgt, int radius, int ms) {
     RECT now;
-    if (!GetWindowRect(h, out now)) { Place(h, x, y, w, hgt); return; }
+    if (!GetWindowRect(h, out now)) { Place(h, x, y, w, hgt, radius); return; }
     int fromX = now.Left, fromY = now.Top, fromW = now.Right - now.Left, fromH = now.Bottom - now.Top;
+    int fromR = lastRadius;
     int mine = ++generation;
     var worker = new Thread(delegate () {
       int steps = Math.Max(1, ms / 16);
       for (int i = 1; i <= steps; i++) {
         if (generation != mine) return;
         double t = (double)i / steps;
-        t = 1 - Math.Pow(1 - t, 3);   // ease out
-        SetWindowPos(h, TOPMOST, fromX + (int)((x - fromX) * t), fromY + (int)((y - fromY) * t),
-          fromW + (int)((w - fromW) * t), fromH + (int)((hgt - fromH) * t), SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        double c = 1.70158, u = t - 1;
+        t = 1 + (c + 1) * u * u * u + c * u * u;   // ease out back: overshoots a little, settles at 1
+        int cw = Math.Max(40, fromW + (int)((w - fromW) * t)), ch = Math.Max(24, fromH + (int)((hgt - fromH) * t));
+        int cr = Math.Max(0, fromR + (int)((radius - fromR) * t));
+        SetWindowPos(h, TOPMOST, fromX + (int)((x - fromX) * t), fromY + (int)((y - fromY) * t), cw, ch, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        Round(h, cw, ch, cr);
         Thread.Sleep(16);
       }
-      if (generation == mine) SetWindowPos(h, TOPMOST, x, y, w, hgt, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+      if (generation == mine) { SetWindowPos(h, TOPMOST, x, y, w, hgt, SWP_NOACTIVATE | SWP_SHOWWINDOW); Round(h, w, hgt, radius); }
     });
+    lastRadius = radius;
     worker.IsBackground = true;
     worker.Start();
   }
+  static int lastRadius = 0;
 
   public static string Describe(IntPtr h) {
     RECT r;
@@ -997,10 +1014,10 @@ function Restore-Wallpapers {
 
 # ---------- mode: wallpaper, helper overlay, or both ----------
 # The mode comes from agent.json ("mode") until NOVA sets it at runtime (POST /v1/mode); the runtime choice is kept
-# in mode.json and survives a restart. The helper is a small Edge app window docked top-centre on one display.
+# in mode.json and survives a restart. The helper is a small Edge app window floating just below the top edge of one display.
 $modeStore = Join-Path $PSScriptRoot 'mode.json'
-$helperCollapsed = @(360, 64)    # CSS pixels, scaled to the display
-$helperExpanded = @(420, 360)
+$helperCollapsed = @(300, 44, 22)    # CSS pixels (width, height, bottom corner radius), scaled to the display
+$helperExpanded = @(420, 360, 30)
 $script:helper = $null
 function Get-ModeState {
   $state = @{ mode = 'wallpaper'; display = 0; url = '' }
@@ -1024,14 +1041,15 @@ function Get-HelperScreen([int]$display) {
   if ($display -ge 1 -and $display -le $screens.Count) { return $screens[$display - 1] }
   return [System.Windows.Forms.Screen]::PrimaryScreen
 }
-# Window rectangle in real pixels: centred at the top of the display's work area, sized per display scale.
+# Window rectangle in real pixels: floating 8 CSS pixels below the top edge of the display (not the work area), centred,
+# sized per display scale. r is the corner radius (all four corners).
 function Get-HelperRect($screen, [bool]$expanded) {
-  $wa = $screen.WorkingArea
-  $scale = [NovaHelper]::Scale([int]($wa.X + $wa.Width / 2), [int]($wa.Y + 8))
+  $b = $screen.Bounds
+  $scale = [NovaHelper]::Scale([int]($b.X + $b.Width / 2), [int]($b.Y + 8))
   $size = if ($expanded) { $helperExpanded } else { $helperCollapsed }
-  $w = [Math]::Min([int]($size[0] * $scale), $wa.Width)
-  $h = [Math]::Min([int]($size[1] * $scale), $wa.Height)
-  return @{ x = [int]($wa.X + ($wa.Width - $w) / 2); y = [int]($wa.Y + 6 * $scale); w = $w; h = $h; scale = $scale }
+  $w = [Math]::Min([int]($size[0] * $scale), $b.Width)
+  $h = [Math]::Min([int]($size[1] * $scale), $b.Height)
+  return @{ x = [int]($b.X + ($b.Width - $w) / 2); y = [int]($b.Y + 8 * $scale); w = $w; h = $h; r = [int]($size[2] * $scale); scale = $scale }
 }
 function Get-HelperEdge {
   Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*nova-helper*' }
@@ -1069,7 +1087,7 @@ function Open-Helper([string]$baseUrl, [int]$display) {
     throw "The helper window did not open. Is $baseUrl reachable from this PC?"
   }
   [NovaHelper]::Setup($handle)
-  [NovaHelper]::Place($handle, $rect.x, $rect.y, $rect.w, $rect.h)
+  [NovaHelper]::Place($handle, $rect.x, $rect.y, $rect.w, $rect.h, $rect.r)
   $script:helper = @{ handle = $handle; device = $screen.DeviceName; display = $display; expanded = $false }
 }
 # Grow the helper window for an answer or a question, or shrink it back to the pill (the page asks for it).
@@ -1077,7 +1095,7 @@ function Set-HelperSize([bool]$expanded) {
   if (-not $script:helper -or -not [NovaHelper]::Alive([IntPtr]$script:helper.handle)) { throw 'The helper is not open' }
   $screen = Get-HelperScreen ([int]$script:helper.display)
   $rect = Get-HelperRect $screen $expanded
-  [NovaHelper]::Animate([IntPtr]$script:helper.handle, $rect.x, $rect.y, $rect.w, $rect.h, 160)
+  [NovaHelper]::Animate([IntPtr]$script:helper.handle, $rect.x, $rect.y, $rect.w, $rect.h, $rect.r, 240)
   $script:helper.expanded = $expanded
 }
 # Make the running windows match the mode: wallpaper windows from wallpaper.json, and the helper.

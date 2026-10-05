@@ -51,7 +51,7 @@ Node-RED is no longer part of NOVA. It stays available as an optional container 
 
 ### Helper overlay
 
-A third way to show NOVA on the Windows PC next to the wallpaper: a small always-on-top pill at the top of the screen. The idea is a notch companion; the character is NOVA's own orb (`lib/entity/orb.ts`, a ~110-particle version of the entity), no third-party code or assets.
+A third way to show NOVA on the Windows PC next to the wallpaper: a small always-on-top rounded island floating just below the top edge of the screen (glass-like gradients in NOVA's navy; the agent clips the window to a rounded rectangle with `SetWindowRgn`, the page matches it with CSS). The idea is a notch companion; the character is NOVA's own orb (`lib/entity/orb.ts`, a ~110-particle version of the entity), no third-party code or assets.
 
 - The route `/helper` reuses the chat stream (`ask`), voice (tap-to-talk, "Hey NOVA", speech) and the confirmation cards (`ConfirmationCard`, 60 s single use) of the main page, with only a compact layout of its own. It opens by itself for an answer or a question to confirm and collapses after 12 s of quiet or on Esc.
 - The Windows agent runs it as an Edge `--app` window with its own profile and a `mode` of `wallpaper`, `helper` or `both` (`POST /v1/mode`). The window is positioned, made topmost and hidden from the taskbar with Win32 calls in the agent's embedded C#.

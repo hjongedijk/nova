@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import Orb from "#components/helper/Orb.svelte";
-  import ConfirmationCard from "#components/shell/ConfirmationCard.svelte";
+  import HelperConfirm from "#components/helper/HelperConfirm.svelte";
   import { requestHelperSize } from "#lib/api/helper.ts";
-  import { cards } from "#lib/chat/cards.svelte.ts";
+  import { answerCard, cards } from "#lib/chat/cards.svelte.ts";
   import "#lib/chat/ask.ts";
   import { loadPublicConfig } from "#lib/chat/index.ts";
   import { parseReply } from "#lib/chat/markdown.ts";
@@ -112,9 +112,32 @@
   }
 
   function onKey(event: KeyboardEvent): void {
-    if (event.key !== "Escape") return;
-    if (!expanded && chat.uiState === "speaking") stopSpeaking();
-    close();
+    if (event.key === "Escape") {
+      if (!expanded && chat.uiState === "speaking") stopSpeaking();
+      close();
+      return;
+    }
+    // Y / N answer the question on the screen, unless you are typing.
+    const key = event.key.toLowerCase();
+    const typing = event.target instanceof HTMLInputElement;
+    const open = cards.find((card) => !card.locked);
+    if (
+      open &&
+      !typing &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      (key === "y" || key === "n")
+    ) {
+      event.preventDefault();
+      void answerCard(open.id, key === "y");
+    }
+  }
+
+  /** A click on the island opens it and puts the cursor in the field. */
+  function press(): void {
+    open();
+    void tick().then(() => input?.focus());
   }
 
   onMount(() => {
@@ -136,51 +159,40 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="hp"
-  onpointerdown={open}
+  class:open={expanded}
+  class:err={!!problem}
   onpointermove={() => expanded && keepOpen()}
 >
-  <form class="hp-bar" onsubmit={submit}>
+  <div class="hp-bar" onpointerdown={() => !expanded && press()}>
     <button
       type="button"
       class="hp-core"
       aria-label="Spreken of spraak stoppen"
       title="Tik om te spreken"
-      onclick={pressCore}><Orb /></button
+      onclick={(event) => {
+        event.stopPropagation();
+        pressCore();
+      }}
+      onpointerdown={(event) => event.stopPropagation()}><Orb /></button
     >
-    <div class="hp-mid">
-      <p class="hp-status" role="status" class:bad={!!problem}>{status}</p>
-      <input
-        bind:this={input}
-        bind:value={shell.draft}
-        autocomplete="off"
-        aria-label="Bericht aan NOVA"
-        placeholder={shell.wakeActive
-          ? "Zeg “Hey NOVA” of typ…"
-          : "Zeg of typ iets…"}
-        disabled={chat.busy}
-        onfocus={open}
-      />
-    </div>
+    <p class="hp-status" role="status">
+      <i class="dot" class:on={chat.uiState !== "ready"}></i>{status}
+    </p>
     <button
       type="button"
-      class="hp-mic"
+      class="hp-icon hp-mic-compact"
       aria-label="Spreek met NOVA"
       hidden={!shell.speechSupported}
       class:on={chat.uiState === "listening"}
+      onpointerdown={(event) => event.stopPropagation()}
       onclick={pressCore}
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="9" y="3" width="6" height="12" rx="3" />
-        <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-      </svg>
+      {@render micIcon()}
     </button>
-  </form>
+  </div>
 
-  <section
-    class="hp-body"
-    aria-label="Laatste antwoord"
-    aria-hidden={!expanded}
-  >
+  <section class="hp-card" aria-label="NOVA" inert={!expanded}>
+    <div class="hp-glow" aria-hidden="true"></div>
     {#if lastYou}<p class="hp-you">{lastYou}</p>{/if}
     <div class="hp-answer" aria-live="polite">
       {#each blocks as block, b (b)}
@@ -202,14 +214,67 @@
           </p>
         {/if}
       {:else}
-        <p class="hp-empty">Vraag me iets. Zeg “Hey NOVA” of typ hierboven.</p>
+        <p class="hp-empty">Vraag me iets. Zeg “Hey NOVA” of typ hieronder.</p>
       {/each}
       {#if chat.streaming}<span class="caret"></span>{/if}
     </div>
     <div class="hp-cards">
       {#each cards as card (card.id)}
-        <ConfirmationCard {card} />
+        <HelperConfirm {card} />
       {/each}
     </div>
+    <form class="hp-form" onsubmit={submit}>
+      <div class="hp-field">
+        <input
+          bind:this={input}
+          bind:value={shell.draft}
+          autocomplete="off"
+          aria-label="Bericht aan NOVA"
+          placeholder={shell.wakeActive
+            ? "Zeg “Hey NOVA” of typ…"
+            : "Zeg of typ iets…"}
+          disabled={chat.busy}
+          onfocus={open}
+        />
+        <button
+          type="submit"
+          class="hp-send"
+          aria-label="Verstuur"
+          disabled={chat.busy || !shell.draft.trim()}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"
+            ><path d="M12 19V5M5 12l7-7 7 7" /></svg
+          >
+        </button>
+      </div>
+      <button
+        type="button"
+        class="hp-icon"
+        aria-label="Spreek met NOVA"
+        hidden={!shell.speechSupported}
+        class:on={chat.uiState === "listening"}
+        onclick={pressCore}
+      >
+        {@render micIcon()}
+      </button>
+      <button
+        type="button"
+        class="hp-icon"
+        aria-label="Sluiten"
+        title="Sluiten (Esc)"
+        onclick={close}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"
+          ><path d="M6 6l12 12M18 6L6 18" /></svg
+        >
+      </button>
+    </form>
   </section>
 </div>
+
+{#snippet micIcon()}
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="9" y="3" width="6" height="12" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+  </svg>
+{/snippet}

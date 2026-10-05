@@ -44,6 +44,9 @@ if (-not $failed) {
   $example = Get-Content -Raw (Join-Path $root 'agent.example.json') | ConvertFrom-Json
   if (@('wallpaper', 'helper', 'both') -notcontains [string]$example.mode) { $failed = $true; Write-Host 'agent.example.json: mode must be wallpaper, helper or both' }
   else { Write-Host "agent.example.json: mode '$($example.mode)'" }
+  # Fully rounded corners: one region over the whole window (no flat top, no DWM rounding that varies by Windows version).
+  if ($text -notmatch 'CreateRoundRectRgn\(0, 0, w \+ 1') { $failed = $true; Write-Host 'NovaHelper: the window must be clipped to a full rounded rectangle' }
+  if ($text -match 'DwmSetWindowAttribute\(') { $failed = $true; Write-Host 'NovaHelper: DWM corner rounding is not used' }
   foreach ($route in "'/v1/mode'", "'/v1/helper/size'", "'/v1/status'", "'/v1/displays'") {
     if (-not $text.Contains($route)) { $failed = $true; Write-Host "jarvis-agent.ps1: route $route is missing" }
   }
