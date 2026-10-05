@@ -214,7 +214,9 @@ export class OmniRouteClient {
       }
       for (const fragment of delta.tool_calls ?? []) {
         const index = fragment.index ?? 0;
-        if (index < 0 || index > 7) throw new Error("Too many tool calls");
+        if (index < 0) throw new Error("Malformed tool call");
+        // Calls past the eighth are dropped; the orchestrator answers with the first eight.
+        if (index > 7) continue;
         const current = calls.get(index) ?? {
           id: "",
           type: "function" as const,

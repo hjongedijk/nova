@@ -180,7 +180,10 @@ export class OrchestratorService {
               tools: modelTools,
             });
       const assistant = last.assistant;
-      const calls = assistant.tool_calls ?? [];
+      // A model that asks for more than eight calls at once gets its first eight run.
+      const calls = (assistant.tool_calls ?? []).slice(0, 8);
+      if (assistant.tool_calls && assistant.tool_calls.length > calls.length)
+        assistant.tool_calls = calls;
       const base = {
         model: last.model,
         usage: last.usage,
@@ -199,7 +202,6 @@ export class OrchestratorService {
         return { reply, ...base };
       }
       if (!calls.length) return { reply: assistant.content ?? "", ...base };
-      if (calls.length > 8) throw new Error("Too many tool calls");
       if (round === rounds - 1)
         throw new Error("Maximum tool-call rounds reached");
 
