@@ -1,0 +1,17 @@
+{
+  "token": "generated-by-install.ps1",
+  "allowedIps": [],
+  "apps": {
+    "notepad": { "path": "notepad.exe", "process": "notepad" },
+    "calculator": { "path": "calc.exe", "process": "CalculatorApp" },
+    "paint": { "path": "mspaint.exe", "process": "mspaint" },
+    "explorer": { "path": "explorer.exe" },
+    "task-manager": { "path": "taskmgr.exe", "process": "Taskmgr" },
+    "settings": { "path": "ms-settings:" },
+    "snipping-tool": { "path": "snippingtool.exe", "process": "SnippingTool" },
+    "terminal": { "path": "wt.exe", "process": "WindowsTerminal" },
+    "edge": { "path": "msedge.exe", "process": "msedge" },
+    "chrome": { "path": "chrome.exe", "process": "chrome" },
+    "vscode": { "path": "code", "process": "Code" }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "nova",
+  "private": true,
+  "description": "NOVA: a personal AI assistant for home and servers.",
+  "license": "MIT",
+  "packageManager": "npm@10.9.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "agents/browser"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev -w @nova/api\" \"npm run dev -w @nova/web\"",
+    "dev:background": "mkdir -p dev-data && setsid nohup npm run dev > dev-data/dev.log 2>&1 < /dev/null & echo \"NOVA dev: $( [ -f dev-data/certs/cert.pem ] && echo https || echo http )://$(hostname -I | cut -d' ' -f1):5173  (log: dev-data/dev.log, stop: npm run dev:stop)\"",
+    "dev:stop": "pkill -f \"[c]oncurrently -k -n api,web\"; pkill -f \"[n]est start --watch\"; pkill -f \"[v]ite dev\"; pkill -f \"[a]pps/api/dist/main\"; echo \"NOVA dev stopped\"",
+    "build": "npm run build -w @nova/web && npm run build -w @nova/api",
+    "start": "npm run start -w @nova/api",
+    "test": "npm run test -w @nova/api && npm run test -w @nova/browser-agent",
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck -w @nova/contracts && npm run typecheck -w @nova/api && npm run check -w @nova/web",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "concurrently": "^10.0.5",
+    "eslint": "^10.12.0",
+    "eslint-plugin-svelte": "^3.23.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.9",
+    "prettier-plugin-svelte": "^4.1.1",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.0"
+  }
+}

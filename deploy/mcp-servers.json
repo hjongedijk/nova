@@ -1,0 +1,18 @@
+{
+  "_comment": "MCP servers NOVA can use. Picked from github.com/punkpeye/awesome-mcp-servers. risk is the default for tools that do not declare readOnlyHint; CONFIRM means the user approves each call. Set enabled=false to switch a server off. env values may reference ${VARS} from .env; a server whose variables are unset stays offline.",
+  "servers": {
+    "sequential-thinking": {
+      "command": "mcp-server-sequential-thinking",
+      "risk": "READ_ONLY"
+    },
+    "context7": {
+      "command": "context7-mcp",
+      "risk": "READ_ONLY"
+    },
+    "filesystem": {
+      "command": "mcp-server-filesystem",
+      "args": ["/data/workspace"],
+      "risk": "CONFIRM"
+    }
+  }
+}

@@ -1,0 +1,91 @@
+# NOVA production stack. Put this file in e.g. /opt/nova, with .env and the *-data folders next to it.
+# Update: set NOVA_VERSION in .env, then: docker compose pull && docker compose up -d
+# Once: chown -R 1000:1000 nova-data   (NOVA runs as user node)
+name: nova
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  nova:
+    <<: *restart
+    image: ghcr.io/${NOVA_OWNER:-hjongedijk}/nova:${NOVA_VERSION:-latest}
+    container_name: nova
+    env_file: .env
+    environment:
+      # Internal wiring: fixed, not from .env.
+      PORT: 8080
+      HTTPS_PORT: 8443
+      NOVA_DATA_DIR: /data
+      OMNIROUTE_URL: http://omniroute:20128/v1
+      OMNIROUTE_DATABASE: /omniroute/storage.sqlite
+      MQTT_URL: mqtt://mqtt:1883
+      QDRANT_URL: http://qdrant:6333
+      NODE_RED_URL: http://node-red:1880
+      HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-http://host.docker.internal:8123}
+    ports:
+      - "8080:8080" # http (behind a reverse proxy: only this one)
+      - "8443:8443" # https with nova-data/certs (microphone and app install on the LAN)
+    volumes:
+      - ./nova-data:/data
+      - ./omniroute-data:/omniroute:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [omniroute, mqtt, qdrant]
+    networks: [nova]
+
+  # Optional: only for your own flows; NOVA does not need it.
+  node-red:
+    <<: *restart
+    image: nodered/node-red:4.1
+    container_name: nova-node-red
+    environment:
+      TZ: ${TZ:-Europe/Amsterdam}
+    ports: ["1880:1880"]
+    volumes: ["./nodered-data:/data"]
+    networks: [nova]
+
+  omniroute:
+    <<: *restart
+    image: diegosouzapw/omniroute@sha256:8bd462c9f60d8eda79329cfbb6ea7ea723505fe7721beb944f3d43835409e218
+    container_name: nova-omniroute
+    stop_grace_period: 40s
+    environment:
+      DATA_DIR: /app/data
+      NODE_ENV: production
+      PORT: 20128
+      OMNIROUTE_AUTO_FREE_FALLBACK_TO_FULL_POOL: "false"
+    ports: ["20128:20128"]
+    volumes: ["./omniroute-data:/app/data"]
+    networks: [nova]
+
+  mqtt:
+    <<: *restart
+    image: eclipse-mosquitto:2
+    container_name: nova-mqtt
+    ports: ["1883:1883"]
+    volumes:
+      - ./mosquitto-data/config:/mosquitto/config
+      - ./mosquitto-data/data:/mosquitto/data
+      - ./mosquitto-data/log:/mosquitto/log
+    networks: [nova]
+
+  qdrant:
+    <<: *restart
+    image: qdrant/qdrant:v1.17.0
+    container_name: nova-qdrant
+    volumes: ["./qdrant-data:/qdrant/storage"]
+    networks: [nova]
+
+  home-assistant:
+    <<: *restart
+    image: ghcr.io/home-assistant/home-assistant:2026.9.4
+    container_name: nova-home-assistant
+    network_mode: host
+    environment:
+      TZ: ${TZ:-Europe/Amsterdam}
+    volumes: ["./home-assistant-data:/config"]
+
+networks:
+  nova:
+    name: nova

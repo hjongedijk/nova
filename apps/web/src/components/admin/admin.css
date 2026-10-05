@@ -1,0 +1,101 @@
+/* The admin dialog, carried over from the current interface. Everything is scoped to #adminDialog. */
+
+#adminDialog {
+  width: min(820px, calc(100vw - 24px));
+  max-height: 86vh;
+  overflow: auto;
+  background: rgba(10, 11, 28, 0.96);
+  color: var(--mist);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 24px;
+  font-family: var(--sans);
+  font-size: 14px;
+}
+
+#adminDialog::backdrop {
+  background: rgba(3, 3, 9, 0.7);
+  backdrop-filter: blur(6px);
+}
+
+#adminDialog :focus-visible {
+  outline: 2px solid var(--glow);
+  outline-offset: 3px;
+}
+
+#adminDialog .admin-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+#adminDialog .admin-heading h2 {
+  margin: 0;
+  font: 300 21px/1 var(--sans);
+}
+
+#adminDialog .admin-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+#adminDialog .admin-nav .btn[aria-current="true"] {
+  border-color: var(--glow);
+  color: var(--glow);
+}
+
+#adminMessage {
+  color: var(--dim);
+  font-size: 13px;
+  min-height: 1.2em;
+  margin: 0 0 6px;
+}
+
+#adminContent {
+  min-height: 120px;
+}
+
+#adminContent .admin-row {
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+  overflow-wrap: anywhere;
+}
+
+#adminContent .admin-row p {
+  margin: 5px 0;
+  font-size: 14px;
+  color: var(--dim);
+}
+
+#adminContent .admin-row .btn {
+  margin-top: 6px;
+}
+
+#memoryText {
+  width: 100%;
+  min-height: 80px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--mist);
+  border: 1px solid var(--line);
+  font: inherit;
+  margin: 12px 0 8px;
+  padding: 10px;
+}
+
+#adminDialog summary {
+  cursor: pointer;
+  margin-top: 12px;
+}
+
+#adminContent .confirmation-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 14px;
+}

@@ -1,0 +1,26 @@
+# dependencies and builds
+node_modules/
+dist/
+build/
+.svelte-kit/
+*.tsbuildinfo
+
+
+# local state and secrets: never in git
+.env
+.env.*
+!.env.example
+dev-data/
+*.pem
+*.key
+agents/windows/agent.json
+agents/browser/agent.json
+
+# editors and OS
+.DS_Store
+!.vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+.idea/

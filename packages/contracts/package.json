@@ -1,0 +1,16 @@
+{
+  "name": "@nova/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Types shared by the NOVA API and web app. Types only: import them with `import type`.",
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  }
+}

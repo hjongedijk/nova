@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/build
+**/.svelte-kit
+.git
+.github
+dev-data
+agents/browser/*
+!agents/browser/package.json
+docs
+coverage
+.env
+.env.*
