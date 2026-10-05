@@ -1,7 +1,7 @@
 # One NOVA image: NestJS API + the built Svelte app (+ TTS and tools once ported).
 # Build: docker build -t ghcr.io/hjongedijk/nova:dev .
 
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
@@ -13,7 +13,7 @@ COPY packages ./packages
 COPY apps ./apps
 RUN npm run build -w @nova/web && npm run build -w @nova/api
 
-FROM node:22-alpine AS runtime
+FROM node:24-alpine AS runtime
 ENV NODE_ENV=production \
     NOVA_AGENTS_DIR=/app/agents \
     PORT=8080 \

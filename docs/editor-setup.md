@@ -1,6 +1,6 @@
 # Editor setup
 
-Open the repository root in VS Code and run `npm install` using Node 22 or newer.
+Open the repository root in VS Code and run `npm install` using Node 24 or newer.
 Open Extensions and search `@recommended` to install the workspace recommendations.
 
 ## VS Code

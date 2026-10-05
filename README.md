@@ -19,7 +19,7 @@ This repository holds NOVA itself. It is released as one Docker image, `ghcr.io/
 
 ## Development
 
-Requirements: Node 22, Docker.
+Requirements: Node 24, Docker.
 
 ```sh
 cp .env.example .env                              # fill in the keys you have
