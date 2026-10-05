@@ -491,7 +491,13 @@ export function startEntity(host: EntityHost): () => void {
           : R * (1.1 + (1 - age) * 1.0 * span2 + (compact ? 0 : 0));
       g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(1 - age) * 0.32})`;
       g.beginPath();
-      g.arc(cx, cy, rad, 0, Math.PI * 2);
+      g.arc(
+        cx,
+        cy,
+        compact ? Math.min(rad, Math.min(W, H) * 0.46) : rad,
+        0,
+        Math.PI * 2,
+      );
       g.stroke();
     }
 
@@ -501,7 +507,9 @@ export function startEntity(host: EntityHost): () => void {
         g.save();
         g.translate(cx, cy);
         g.rotate(t * (0.45 + 0.25 * k) * (k ? -1 : 1) * MOTION + k * 1.3);
-        const orx = R * (1.3 + 0.22 * k);
+        const orx = compact
+          ? Math.min(R * (1.3 + 0.22 * k), Math.min(W, H) * 0.44)
+          : R * (1.3 + 0.22 * k);
         const ory = orx * (0.3 + 0.12 * k);
         const a0 = t * (1.6 + k * 0.7) * MOTION;
         const len = Math.PI * (0.9 + 0.3 * Math.sin(t * 0.7 + k));

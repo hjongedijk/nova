@@ -21,7 +21,7 @@ param(
   [string]$ConfigPath = (Join-Path $PSScriptRoot 'agent.json')
 )
 $ErrorActionPreference = 'Stop'
-$agentVersion = '2026-10-06.3'
+$agentVersion = '2026-10-06.4'
 
 # However the agent is started (task, double-click, a terminal), it runs on without a window: this copy starts
 # a hidden one and ends. (conhost --headless also keeps Windows Terminal from opening a window.)
@@ -798,11 +798,20 @@ public class NovaHelper {
     int ex = GetWindowLong(h, GWL_EXSTYLE);
     ex = (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW;
     SetWindowLong(h, GWL_EXSTYLE, ex);
-    // Corner rounding is a window region (Round), the same on every Windows version.
+    // No Windows-drawn frame colour, rounding or non-client rendering: the region is the only shape.
+    try { int none = unchecked((int)0xFFFFFFFE); DwmSetWindowAttribute(h, 34, ref none, 4); } catch (Exception) { }   // DWMWA_BORDER_COLOR = none
+    try { int square = 1; DwmSetWindowAttribute(h, 33, ref square, 4); } catch (Exception) { }                       // DWMWCP_DONOTROUND
+    try { int off = 1; DwmSetWindowAttribute(h, 2, ref off, 4); } catch (Exception) { }                              // DWMNCRP_DISABLED
     ShowWindow(h, 4);   // SW_SHOWNOACTIVATE
   }
 
   [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] static extern int GetWindowRgn(IntPtr h, IntPtr region);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateRectRgn(int l, int t, int r, int b);
+  [DllImport("gdi32.dll")] static extern int GetRgnBox(IntPtr region, out RECT r);
+  [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
+  [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attribute, out RECT value, int size);
+  [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attribute, ref int value, int size);
   [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr h, ref PT p);
 
   // Edge draws its own title bar inside the window (and Windows adds a frame around it). The page must end up exactly
@@ -817,17 +826,70 @@ public class NovaHelper {
     return new int[] { x - left - frameL, y - chromeH - frameT, w + chromeW + frameL + frameR, hgt + chromeH + frameT + frameB, frameL + left, frameT + chromeH };
   }
 
-  /// <summary>Remember the frame Windows draws and the chrome Edge draws (real pixels). Call with the window shown.</summary>
+  /// <summary>Pure: the invisible border Windows adds around a window (about 7 to 8 px on Windows 10 and 11):
+  /// the window rectangle against the extended frame bounds. Returns { left, top, right, bottom }.</summary>
+  public static int[] InvisibleBorders(int wl, int wt, int wr, int wb, int el, int et, int er, int eb) {
+    return new int[] { Math.Max(0, el - wl), Math.Max(0, et - wt), Math.Max(0, wr - er), Math.Max(0, wb - eb) };
+  }
+
+  /// <summary>Remember the invisible border Windows draws around the window and the chrome Edge draws (real pixels).
+  /// Call with the window shown. The page sits inside the extended frame bounds, below Edge's caption.</summary>
   public static void Configure(IntPtr h, int chromeW, int chromeH) {
-    RECT win, client;
-    if (GetWindowRect(h, out win) && GetClientRect(h, out client)) {
-      PT origin = new PT { X = 0, Y = 0 };
-      ClientToScreen(h, ref origin);
-      nl = Math.Max(0, origin.X - win.Left); nt = Math.Max(0, origin.Y - win.Top);
-      nr = Math.Max(0, (win.Right - win.Left) - (client.Right - client.Left) - nl);
-      nb = Math.Max(0, (win.Bottom - win.Top) - (client.Bottom - client.Top) - nt);
+    RECT win, ext, client;
+    if (GetWindowRect(h, out win)) {
+      if (DwmGetWindowAttribute(h, 9, out ext, 16) == 0) {   // DWMWA_EXTENDED_FRAME_BOUNDS
+        int[] b = InvisibleBorders(win.Left, win.Top, win.Right, win.Bottom, ext.Left, ext.Top, ext.Right, ext.Bottom);
+        nl = b[0]; nt = b[1]; nr = b[2]; nb = b[3];
+      } else if (GetClientRect(h, out client)) {
+        PT origin = new PT { X = 0, Y = 0 };
+        ClientToScreen(h, ref origin);
+        nl = Math.Max(0, origin.X - win.Left); nt = Math.Max(0, origin.Y - win.Top);
+        nr = Math.Max(0, (win.Right - win.Left) - (client.Right - client.Left) - nl);
+        nb = Math.Max(0, (win.Bottom - win.Top) - (client.Bottom - client.Top) - nt);
+      }
     }
     cx = Math.Max(0, chromeW); cy = Math.Max(0, chromeH);
+    keep = h;
+    if (keeper == null) {
+      keeper = new Thread(delegate () {
+        // Chromium or DWM may reset the region or the size now and then: check twice a second and put it back.
+        while (true) {
+          Thread.Sleep(500);
+          try { if (Alive(keep) && !animating && vw > 0) Reassert(keep); } catch (Exception) { }
+        }
+      });
+      keeper.IsBackground = true;
+      keeper.Start();
+    }
+  }
+  static IntPtr keep = IntPtr.Zero;
+  static Thread keeper = null;
+  static volatile bool animating = false;
+  public static int Reasserted = 0;
+
+  static void Reassert(IntPtr h) {
+    int[] l = Layout(vx, vy, vw, vh, nl, nt, nr, nb, cx, cy);
+    RECT win, box;
+    IntPtr probe = CreateRectRgn(0, 0, 0, 0);
+    bool regionOk = false;
+    if (GetWindowRgn(h, probe) != 0 && GetRgnBox(probe, out box) != 0)
+      regionOk = box.Left == l[4] && box.Top == l[5] && box.Right == l[4] + vw + 1 && box.Bottom == l[5] + vh + 1;
+    DeleteObject(probe);
+    bool placed = GetWindowRect(h, out win) && win.Left == l[0] && win.Top == l[1] && win.Right - win.Left == l[2] && win.Bottom - win.Top == l[3];
+    if (!regionOk || !placed) { Reasserted++; Apply(h, vx, vy, vw, vh, vr, SWP_NOACTIVATE | SWP_SHOWWINDOW); }
+  }
+
+  /// <summary>What the window looks like to Windows, for the debug endpoint.</summary>
+  public static string Debug(IntPtr h) {
+    if (!Alive(h)) return "gone";
+    RECT win, ext, box;
+    GetWindowRect(h, out win);
+    string extText = DwmGetWindowAttribute(h, 9, out ext, 16) == 0 ? ext.Left + "," + ext.Top + "," + ext.Right + "," + ext.Bottom : "n/a";
+    IntPtr probe = CreateRectRgn(0, 0, 0, 0);
+    string rgn = GetWindowRgn(h, probe) != 0 && GetRgnBox(probe, out box) != 0 ? box.Left + "," + box.Top + "," + box.Right + "," + box.Bottom : "none";
+    DeleteObject(probe);
+    return "window=" + win.Left + "," + win.Top + "," + win.Right + "," + win.Bottom + " extended=" + extText + " region=" + rgn +
+      " frame=" + nl + "," + nt + "," + nr + "," + nb + " chrome=" + cx + "," + cy + " page=" + vx + "," + vy + "," + vw + "x" + vh + " r=" + vr + " reasserted=" + Reasserted;
   }
 
   /// <summary>Put the visible page at (x, y, w, hgt) and clip the window to a rounded rectangle over exactly that.</summary>
@@ -843,6 +905,7 @@ public class NovaHelper {
 
   public static void Place(IntPtr h, int x, int y, int w, int hgt, int radius) {
     generation++;
+    animating = false;
     Apply(h, x, y, w, hgt, radius, SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
   }
 
@@ -854,6 +917,7 @@ public class NovaHelper {
     int fromX = vx, fromY = vy, fromW = vw, fromH = vh, fromR = vr;
     if (fromW <= 0) { Place(h, x, y, w, hgt, radius); return; }
     int mine = ++generation;
+    animating = true;
     var worker = new Thread(delegate () {
       int steps = Math.Max(1, ms / 16);
       for (int i = 1; i <= steps; i++) {
@@ -866,7 +930,7 @@ public class NovaHelper {
           Math.Max(0, fromR + (int)((radius - fromR) * t)), SWP_NOACTIVATE | SWP_SHOWWINDOW);
         Thread.Sleep(16);
       }
-      if (generation == mine) Apply(h, x, y, w, hgt, radius, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+      if (generation == mine) { Apply(h, x, y, w, hgt, radius, SWP_NOACTIVATE | SWP_SHOWWINDOW); animating = false; }
     });
     worker.IsBackground = true;
     worker.Start();
@@ -1614,6 +1678,9 @@ while ($listener.IsListening) {
           @{ display = $_; kind = $p.kind; expected = $p.expected; desktop = [NovaDesk]::Describe([IntPtr]$p.handle) }
         })
         Send $ctx 200 @{ ok = $true; agent = $agentVersion; build = $os.BuildNumber; version = $os.Version; forward = [NovaClick]::Forward; corrections = [NovaDesk]::Corrections; input = [NovaClick]::State(); placed = $details }
+      }
+      '/v1/helper-debug' {
+        Send $ctx 200 @{ ok = $true; agent = $agentVersion; helper = $(if ($script:helper) { [NovaHelper]::Debug([IntPtr]$script:helper.handle) } else { 'not open' }) }
       }
       '/v1/displays' {
         $m = Get-ModeState

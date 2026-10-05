@@ -1,5 +1,8 @@
 /* The helper island: a floating, fully rounded glass-like pill in NOVA's navy and indigo with an orange accent
    (the Windows agent clips the window to the same radius). 340 x 100 compact, 420 x 360 open. */
+html:has(body.helper) {
+  background: #06070f;
+}
 body.helper {
   --ink: #f5f6f8;
   --dim: #9398a1;
@@ -32,24 +35,36 @@ body.helper input {
 .hp {
   position: fixed;
   inset: 0;
-  display: grid;
-  grid-template-rows: 100px minmax(0, 1fr);
-  transition:
-    grid-template-rows 0.3s cubic-bezier(0.3, 1.2, 0.4, 1),
-    border-radius 0.3s cubic-bezier(0.3, 1.2, 0.4, 1);
+  --bar: 100px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.4s;
+  /* Layered glass: a tint of the state at the orb, a faint sheen from the top, deep navy beneath. The page fills the
+     whole window edge to edge, so the Windows region is the only shape. */
   background:
     radial-gradient(
-      120% 90% at 0% 0%,
-      rgba(255, 122, 69, 0.14),
-      transparent 55%
+      90% 120% at 12% 50%,
+      color-mix(in srgb, var(--tint) 20%, transparent),
+      transparent 62%
     ),
-    linear-gradient(155deg, #1b1e48 0%, #0e1030 48%, #0a0b1e 100%);
-  border: 1px solid rgba(233, 230, 245, 0.14);
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.07),
+      rgba(255, 255, 255, 0) 38%
+    ),
+    linear-gradient(155deg, #1d2050 0%, #0f1233 50%, #090a1d 100%);
+  border: 1px solid
+    color-mix(in srgb, var(--tint) 30%, rgba(233, 230, 245, 0.16));
   border-radius: var(--island);
-  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 -18px 30px -24px color-mix(in srgb, var(--tint) 60%, transparent);
+  /* clip, not hidden: focusing the field must never scroll the card and push text under the header. */
+  overflow: clip;
 }
 .hp.open {
-  grid-template-rows: 56px minmax(0, 1fr);
+  --bar: 60px;
 }
 .hp.err {
   --tint: #ff4d4d;
@@ -59,8 +74,9 @@ body.helper input {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 100%;
-  padding: 0 16px 0 10px;
+  flex: none;
+  height: var(--bar);
+  padding: 0 16px 0 12px;
   gap: 10px;
 }
 .hp-core {
@@ -88,36 +104,60 @@ body.helper input {
 .hp-status {
   flex: 1;
   min-width: 0;
-  margin: 0;
+  display: grid;
+  gap: 3px;
+}
+.hp-label span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hp-label {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 15px;
+  gap: 9px;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.hp-sub {
+  font-size: 12.5px;
+  line-height: 1.2;
   color: var(--dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.hp.open .hp-label {
+  font-size: 15px;
+}
+.hp.open .hp-sub {
+  display: none;
+}
 .dot {
   flex: none;
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #4a4e56;
   transition: background 0.4s;
 }
 .dot.on {
   background: var(--tint);
+  box-shadow: 0 0 10px var(--tint);
 }
-.hp.err .hp-status {
-  color: #ff8a8a;
+.hp.err .hp-label {
+  color: #ffa0a0;
 }
 
 .hp-icon {
   flex: none;
-  width: 32px;
-  height: 32px;
-  padding: 8px;
+  width: 44px;
+  height: 44px;
+  padding: 12px;
   color: var(--ink);
   background: rgba(255, 255, 255, 0.08);
   border: 0;
@@ -148,9 +188,43 @@ body.helper input {
   color: #06070f;
 }
 .hp-mic-compact {
-  width: 40px;
-  height: 40px;
-  padding: 10px;
+  position: relative;
+  width: 50px;
+  height: 50px;
+  padding: 14px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.14),
+    rgba(255, 255, 255, 0.05)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.hp-mic-compact:active {
+  transform: scale(0.94);
+}
+.hp-icon.on {
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--tint) 65%, transparent),
+    inset 0 0 12px rgba(255, 255, 255, 0.35);
+}
+/* While listening a ring flows out of the button, so you see the microphone is open. */
+.hp-icon.on::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid var(--tint);
+  animation: hp-ring 1.4s ease-out infinite;
+}
+@keyframes hp-ring {
+  from {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.5);
+  }
 }
 .hp.open .hp-mic-compact {
   opacity: 0;
@@ -160,13 +234,14 @@ body.helper input {
 /* The dark card inside the island, with a soft glow in the colour of NOVA's state. */
 .hp-card {
   position: relative;
+  flex: 1;
   min-height: 0;
-  margin: 0 8px 8px;
-  padding: 14px 14px 12px;
+  margin: 0 10px 10px;
+  padding: 16px 16px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  overflow: hidden;
+  overflow: clip;
   border-radius: 22px;
   background: linear-gradient(
     180deg,
@@ -209,9 +284,12 @@ body.helper input {
   text-overflow: ellipsis;
 }
 .hp-answer {
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 0;
+  min-height: 48px;
+  padding: 2px 4px 2px 0;
   overflow-y: auto;
+  -webkit-mask-image: linear-gradient(transparent 0, #000 14px);
+  mask-image: linear-gradient(transparent 0, #000 14px);
   font-size: 14.5px;
   line-height: 1.5;
   scrollbar-width: thin;
@@ -248,28 +326,50 @@ body.helper input {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding-top: 2px;
 }
 .hp-field {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 4px 4px 14px;
-  background: rgba(6, 7, 15, 0.5);
+  gap: 8px;
+  height: 44px;
+  padding: 0 6px 0 18px;
+  background: rgba(6, 7, 15, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+/* Focus shows on the whole pill, following its radius, never as a square outline on the input. */
+.hp-field:focus-within {
+  border-color: var(--tint);
+  box-shadow:
+    0 0 0 1.5px var(--tint),
+    0 0 18px color-mix(in srgb, var(--tint) 35%, transparent);
 }
 .hp-field input {
   flex: 1;
   min-width: 0;
+  height: 100%;
+  padding: 0;
   font: inherit;
-  font-size: 14px;
+  font-size: 14.5px;
   color: var(--ink);
+  caret-color: var(--tint);
   background: transparent;
   border: 0;
-  outline: 0;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+}
+.hp-field input:focus,
+.hp-field input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 .hp-field input::placeholder {
   color: var(--dim);
@@ -279,17 +379,28 @@ body.helper input {
 }
 .hp-send {
   flex: none;
-  width: 30px;
-  height: 30px;
-  padding: 7px;
+  width: 34px;
+  height: 34px;
+  padding: 8px;
   color: #111;
   background: #fff;
   border: 0;
   border-radius: 50%;
   cursor: pointer;
+  opacity: 0.25;
+  transform: scale(0.82);
+  transition:
+    opacity 0.2s,
+    transform 0.3s cubic-bezier(0.3, 1.2, 0.4, 1),
+    background 0.2s;
+}
+.hp-send.ready {
+  opacity: 1;
+  transform: scale(1);
+  background: var(--tint);
+  color: #06070f;
 }
 .hp-send:disabled {
-  opacity: 0.35;
   cursor: default;
 }
 .hp-send svg {
@@ -303,8 +414,7 @@ body.helper input {
   stroke-linejoin: round;
 }
 
-button:focus-visible,
-input:focus-visible {
+button:focus-visible {
   outline: 2px solid var(--tint);
   outline-offset: 2px;
 }
@@ -313,6 +423,9 @@ input:focus-visible {
   .hp,
   .hp-card,
   .hp-glow,
+  .hp-icon.on::after {
+    animation: none;
+  }
   .dot,
   .hp-core {
     transition: none;

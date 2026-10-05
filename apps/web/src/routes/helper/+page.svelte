@@ -28,15 +28,39 @@
   // The answer stays readable until the helper collapses, also after the big stage would have cleared it.
   let lastYou = $state("");
   let lastAnswer = $state("");
+  let answerBox: HTMLElement | undefined = $state();
 
   const blocks = $derived(parseReply(lastAnswer));
   const waiting = $derived(cards.some((card) => !card.done));
   const problem = $derived(toasts.items.find((t) => t.severity !== "info"));
+  /** The big label, and a smaller line under it that says what you can do or what is happening. */
   const status = $derived(
     problem?.title ||
-      chat.hint ||
-      (shell.awaiting ? "Ik luister…" : MODE_LABELS[chat.uiState]),
+      (shell.awaiting && chat.uiState === "ready"
+        ? "Ik luister"
+        : MODE_LABELS[chat.uiState]),
   );
+  const sublabel = $derived(
+    problem?.detail ||
+      chat.hint ||
+      (waiting
+        ? "Wacht op je antwoord · Y of N"
+        : chat.uiState === "ready"
+          ? !shell.speechSupported
+            ? "Typ je vraag"
+            : shell.wakeActive
+              ? "Zeg “Hey NOVA”"
+              : "Tik op de bol om te praten"
+          : ""),
+  );
+
+  // The newest text stays in view while an answer grows.
+  $effect(() => {
+    void lastAnswer;
+    queueMicrotask(
+      () => answerBox && (answerBox.scrollTop = answerBox.scrollHeight),
+    );
+  });
 
   /** Something is going on that must not be hidden. */
   const busy = () =>
@@ -100,7 +124,8 @@
   let wasBusy = false;
   $effect(() => {
     const now = chat.busy;
-    if (wasBusy && !now && expanded) queueMicrotask(() => input?.focus());
+    if (wasBusy && !now && expanded)
+      queueMicrotask(() => input?.focus({ preventScroll: true }));
     wasBusy = now;
   });
 
@@ -137,7 +162,7 @@
   /** A click on the island opens it and puts the cursor in the field. */
   function press(): void {
     open();
-    void tick().then(() => input?.focus());
+    void tick().then(() => input?.focus({ preventScroll: true }));
   }
 
   onMount(() => {
@@ -175,9 +200,14 @@
       }}
       onpointerdown={(event) => event.stopPropagation()}><Orb /></button
     >
-    <p class="hp-status" role="status">
-      <i class="dot" class:on={chat.uiState !== "ready"}></i>{status}
-    </p>
+    <div class="hp-status" role="status">
+      <strong class="hp-label"
+        ><i class="dot" class:on={chat.uiState !== "ready"}></i><span
+          >{status}</span
+        ></strong
+      >
+      {#if sublabel}<span class="hp-sub">{sublabel}</span>{/if}
+    </div>
     <button
       type="button"
       class="hp-icon hp-mic-compact"
@@ -194,7 +224,7 @@
   <section class="hp-card" aria-label="NOVA" inert={!expanded}>
     <div class="hp-glow" aria-hidden="true"></div>
     {#if lastYou}<p class="hp-you">{lastYou}</p>{/if}
-    <div class="hp-answer" aria-live="polite">
+    <div class="hp-answer" aria-live="polite" bind:this={answerBox}>
       {#each blocks as block, b (b)}
         {#if block.type === "ul"}
           <ul>
@@ -239,6 +269,7 @@
         <button
           type="submit"
           class="hp-send"
+          class:ready={!!shell.draft.trim()}
           aria-label="Verstuur"
           disabled={chat.busy || !shell.draft.trim()}
         >

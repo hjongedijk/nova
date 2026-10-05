@@ -49,6 +49,13 @@ if (-not $failed) {
   $l = [NovaHelper]::Layout(100, 8, 340, 100, 1, 2, 3, 4, 10, 48)
   if (-not (& $same $l @(94, -42, 354, 154, 6, 50))) { $failed = $true; Write-Host "NovaHelper.Layout (frames and side chrome): $($l -join ',')" }
   else { Write-Host 'NovaHelper.Layout: chrome offsets ok' }
+  # Windows 10/11 add ~7-8 px of invisible border: window 92..448 against visible (extended) 100..440 gives 8 px left, right and bottom.
+  $ib = [NovaHelper]::InvisibleBorders(92, 0, 448, 148, 100, 0, 440, 140)
+  if (-not (& $same $ib @(8, 0, 8, 8))) { $failed = $true; Write-Host "NovaHelper.InvisibleBorders: $($ib -join ',')" }
+  # With those borders the page (visible rect 100,8 340x100, caption 32) must put its region exactly on the page.
+  $l = [NovaHelper]::Layout(100, 8, 340, 100, 8, 0, 8, 8, 0, 32)
+  if (-not (& $same $l @(92, -24, 356, 140, 8, 32))) { $failed = $true; Write-Host "NovaHelper.Layout (invisible borders): $($l -join ',')" }
+  else { Write-Host 'NovaHelper.InvisibleBorders: extended-frame offsets ok' }
   # The security flags and the chrome fallback are pure functions of the script: run them from its own source.
   $ast = [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)
   foreach ($fn in 'Get-EdgeSecurityArgs', 'Get-HelperChrome') {
@@ -68,7 +75,7 @@ if (-not $failed) {
   else { Write-Host "agent.example.json: mode '$($example.mode)'" }
   # Fully rounded corners: one region over the whole window (no flat top, no DWM rounding that varies by Windows version).
   if ($text -notmatch 'CreateRoundRectRgn\(l\[4\], l\[5\]') { $failed = $true; Write-Host 'NovaHelper: the window must be clipped to a rounded rectangle below the Edge caption' }
-  if ($text -match 'DwmSetWindowAttribute\(') { $failed = $true; Write-Host 'NovaHelper: DWM corner rounding is not used' }
+  if ($text -match 'int round = 2') { $failed = $true; Write-Host 'NovaHelper: DWM corner rounding would round the corners of the visible frame, not the pill' }
   foreach ($route in "'/v1/mode'", "'/v1/helper/size'", "'/v1/status'", "'/v1/displays'") {
     if (-not $text.Contains($route)) { $failed = $true; Write-Host "jarvis-agent.ps1: route $route is missing" }
   }
