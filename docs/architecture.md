@@ -1,67 +1,126 @@
 # Architecture
 
-## One image, separate services
+## Overview
 
-NOVA ships as one image: the NestJS API serves the built Svelte app as static files, so there is no separate web server. Speech (edge-tts) and NOVA's own tools (Proxmox, timers, lists, checks) become modules of the API, so they need no container of their own. The services NOVA talks to keep their own images: OmniRoute, Mosquitto, Qdrant, Home Assistant, and Node-RED, which is optional and only for your own flows.
+NOVA ships as **one Docker image**: a NestJS API that also serves the built SvelteKit web app as static files, so there is no separate web server. Speech (Microsoft neural voices through `msedge-tts`) and NOVA's own tools (Proxmox, timers, lists, checks) are modules of the API and need no container of their own. The services NOVA talks to keep their own images: OmniRoute, Mosquitto, Qdrant, Home Assistant and, optionally, Node-RED for your own flows.
 
-All runtime state lives outside the image, in `nova-data/` (production) or `dev-data/` (development): settings, memory, the action log, the MCP workspace, certificates and backups. Nothing in this repository changes at runtime, and no secret is ever committed.
+```mermaid
+flowchart LR
+  subgraph clients [Clients]
+    Browser["Browser / PWA<br/>(voice, chat, panels)"]
+    Helper["Windows PC<br/>wallpaper + helper pill"]
+  end
 
-## Rules that keep it clean
+  subgraph nova [nova container]
+    Web["Static web app<br/>(SvelteKit build)"]
+    API["NestJS API"]
+    Tools["Tool registry<br/>risk + confirmation + audit"]
+    Data[("/data<br/>settings, memory,<br/>action log, policy")]
+  end
+
+  Agent["Windows agent<br/>(PowerShell)"]
+  Omni["OmniRoute<br/>(free-model gateway)"]
+  Qdrant[("Qdrant")]
+  MQTT[("Mosquitto")]
+  HA["Home Assistant"]
+  PVE["Proxmox"]
+  Other["Termix, Pangolin,<br/>MCP servers, web APIs"]
+  LLM(["Free model providers"])
+
+  Browser <-->|HTTPS, SSE| API
+  Helper -->|/helper page| API
+  API --- Web
+  API --> Tools
+  API --- Data
+  API -->|"free route verified first"| Omni --> LLM
+  Tools --> HA
+  Tools --> PVE
+  Tools --> Other
+  Tools -->|bearer token| Agent
+  Agent -->|opens NOVA page| Helper
+  API --> Qdrant
+  API --> MQTT
+```
+
+All runtime state lives outside the image in the data folder (`nova-data/` in production, `dev-data/` in development): settings, memory, the action log, the routing policy, MCP configuration and certificates. Nothing in the repository changes at runtime and no secret is committed. See [Configuration](configuration.md#the-data-folder).
+
+## Repository layout
+
+| Path                 | What                                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| `apps/api`           | NestJS backend (ESM, TypeScript strict). One folder per domain. Serves the web app in production. |
+| `apps/web`           | SvelteKit app built with `adapter-static` (single-page, fallback `index.html`) and Svelte 5.      |
+| `packages/contracts` | Types shared by API and web, types only.                                                          |
+| `agents/windows`     | The PowerShell Windows agent. See [Windows agent](windows-agent.md).                              |
+| `deploy`             | Production `docker-compose.yml` and the default `mcp-servers.json`.                               |
+| `docs`               | This documentation.                                                                               |
+
+Rules that keep it clean:
 
 - A module in `apps/api` uses another module only through what that module exports (its service), never by importing its files.
 - `core/` holds what every module needs (config, security, audit, state, MQTT, HTTP helpers) and knows no domain.
+- Configuration is read once in `NovaConfig` (`core/config/nova-config.ts`); the rest of the code does not read `process.env` (two documented exceptions: the secret masking and `NODE_EXPORTER_URL`, plus MCP `${VAR}` references).
 - Components in `apps/web` never call `fetch` themselves; all calls go through `src/lib/api/`.
 - Types that cross the API boundary live in `packages/contracts` and are imported with `import type`.
+- Relative imports in the API use the `.js` extension (ESM, NodeNext).
 
 ## API modules
 
-One folder per domain under `apps/api/src/`. Everything is ported from the prototype and covered by tests.
+One folder per domain under `apps/api/src/`, wired together in `app.module.ts`. All routes live under `/api` except `/windows-agent/jarvis-agent.ps1` and `/nova-ca.crt`.
 
-| Module                          | Does                                                                                                                                                                                                      |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core`                          | config (`NovaConfig`), `sanitize`, net guard, safe requests, JSON client, audit log, component state, MQTT, error shape                                                                                   |
-| `health`                        | `/api/nova/health`                                                                                                                                                                                        |
-| `tools`                         | the registry and the one way to run a tool: clean the arguments, check them, decide the real risk, ask for confirmation, write the log. Sources of tools register themselves with `@ToolSourceProvider()` |
-| `confirmations`                 | pending confirmations (60 s, single use) and the words for asking and answering                                                                                                                           |
-| `chat`                          | `/api/chat`, `/api/chat-stream` (SSE), `/api/actions/confirm`; the orchestrator, prompt, context builder and the spoken summary of command output                                                         |
-| `memory`                        | conversations and session context (`memory.json`); long-term memory in Qdrant or OmniRoute; `/api/memories`, `/api/audit`                                                                                 |
-| `routing`                       | the free-model policy check against OmniRoute, OmniRoute's management API, `/api/providers`, `/api/gateway`                                                                                               |
-| `settings`                      | skills, persona, quick actions, sidebar, custom panels, backup, wallpaper pickers; `/api/settings/*`, `/api/widgets/*`                                                                                    |
-| `dashboard`                     | `/api/system`, `/api/overview`, `/api/alerts`, `/api/health`, `/api/integrations`                                                                                                                         |
-| `tts`                           | speech with Microsoft's neural voices, in Node                                                                                                                                                            |
-| `proxmox`, `planning`, `checks` | the tools that used to run in Node-RED: guests and storage, timers and lists, reachability and alerts                                                                                                     |
-| `home`                          | Home Assistant: catalog, tools, risk rules, verification, `/api/entities`                                                                                                                                 |
-| `integrations/*`                | `world`, `mcp`, `termix` (with direct SSH fallback), `windows` (programs, wallpaper, helper overlay) and `browser-agent` (the browser_* tools, served by the same Windows agent), `pangolin`, `youtube`   |
-| `downloads`                     | the Windows agent and the CA certificate, for devices that need them                                                                                                                                      |
-| `bridges`                       | the glue where one module needs something another owns by an agreed shape (language model, wallpaper, learned names, home location)                                                                       |
+| Module                          | Does                                                                                                                                                                                                                                            |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core`                          | `NovaConfig`, `sanitize`, net guard and safe requests, JSON client, audit log, component state, MQTT, error shape.                                                                                                                              |
+| `health`                        | `GET /api/nova/health`.                                                                                                                                                                                                                         |
+| `tools`                         | The registry and the one way to run a tool: clean and check arguments, decide the real risk, ask for confirmation, write the log. Tool sources register themselves with `@ToolSourceProvider()`. `GET /api/tools`, `POST /api/actions/execute`. |
+| `confirmations`                 | Pending confirmations (60 s, single use, one per session) and the words for asking and answering.                                                                                                                                               |
+| `chat`                          | `POST /api/chat`, `POST /api/chat-stream` (server-sent events), `POST /api/actions/confirm`. The orchestrator (tool loop), prompt, context builder, OmniRoute client and the spoken summary of command output.                                  |
+| `memory`                        | Conversations and session context (`memory.json`); long-term memory in Qdrant or OmniRoute; `/api/memories`, `/api/memory/:session`, `/api/audit`.                                                                                              |
+| `routing`                       | The free-model policy check, OmniRoute's management API, `/api/providers`, `/api/gateway`. See [OmniRoute](omniroute.md).                                                                                                                       |
+| `settings`                      | Skills, persona, quick actions, tool switches, sidebar, custom panels (widgets), back-up, wallpaper and helper pickers; `/api/settings/*`, `/api/widgets/*`.                                                                                    |
+| `dashboard`                     | `/api/system` (host metrics), `/api/overview`, `/api/alerts`, `/api/health` (integration status), `/api/integrations`.                                                                                                                          |
+| `tts`                           | `POST /api/tts`: speech with Microsoft's neural voices (`nl-NL-MaartenNeural`), in Node, with a small sentence cache.                                                                                                                           |
+| `proxmox`, `planning`, `checks` | Guests, storage and tasks; timers, lists and the daily briefing; reachability checks and the watchdog that raises alerts. They also provide `system_time`.                                                                                      |
+| `home`                          | Home Assistant: catalog of entities, tools, risk rules, verification of effects, `GET /api/entities`.                                                                                                                                           |
+| `integrations/*`                | `world` (weather, search, news, ...), `mcp` (MCP client hub), `termix` (with direct SSH fallback), `windows` (programs, wallpaper, helper), `browser-agent` (the `browser_*` tools, served by the same Windows agent), `pangolin`, `youtube`.   |
+| `downloads`                     | The Windows agent script and the CA certificate, for devices that need them.                                                                                                                                                                    |
+| `bridges`                       | The glue where one module needs something another owns, by an agreed shape.                                                                                                                                                                     |
 
-Node-RED is no longer part of NOVA. It stays available as an optional container for your own flows.
+### The bridges
 
-## Web
+`bridges/bridges.module.ts` keeps modules independent of each other. It provides:
+
+- `LLM_CLIENT`: the settings module asks the language model for help (skill drafting and improving) without knowing OmniRoute; it is the same `OmniRouteClient` the chat uses, so the free-route check applies to it too.
+- `WALLPAPER_PORT`: the settings screen sets the Windows wallpaper, mode and helper size without knowing the Windows agent.
+- `HOME_ALIAS_LOOKUP`: Home Assistant resolves names the user taught NOVA ("the big lamp") through long-term memory entries of type `LEARNED_ALIAS`.
+- A home source for the weather tools: "home" follows Home Assistant's `zone.home`.
+
+## A chat request
+
+1. The web app posts to `/api/chat-stream` and reads server-sent events (`connected`, `tools`, `token`, `tool_start`, `tool_result`, `confirmation`, `done`, `error`).
+2. The orchestrator first checks whether the message answers a pending confirmation ("ja", a confirm button).
+3. Otherwise it verifies the free route (it throws and nothing is sent if that fails), builds the context (persona, matching instruction skills, session memory, relevant long-term memories) and calls OmniRoute with the enabled tools.
+4. Tool calls the model makes (at most eight per reply, at most `JARVIS_MAX_TOOL_ITERATIONS` rounds) run through `ToolsService`. A call that needs confirmation ends the turn with a question and a confirmation card.
+5. The answer streams to the browser, which speaks it with `/api/tts`. Every event is sanitised on the way out.
+
+## Web app
 
 `apps/web/src/`:
 
-- `lib/api/`: one file per API module.
-- `lib/entity/`: the particle sphere (canvas).
-- `lib/voice/`: speaking, listening, "Hey NOVA", mobile audio unlock.
-- `lib/modes/`: wallpaper mode and device detection.
-- `routes/helper`: the compact helper page (see below).
-- `lib/stores/`: shared state.
-- `components/shell`, `components/hud`, `components/settings`, `components/admin`: one component per part of the screen.
+- `routes/+page.svelte`: the main view: the particle sphere, two columns of side panels, the stage with the conversation, the composer and the dialogs. `routes/helper/`: the compact helper page.
+- `lib/api/`: one file per API area.
+- `lib/chat/`: the chat stream (`ask`), SSE parsing, confirmation cards, alerts.
+- `lib/entity/`: the particle sphere and the helper's orb (canvas).
+- `lib/voice/`: speaking, listening (the browser's speech recognition), the "Hey NOVA" wake word, mobile audio unlock.
+- `lib/modes/`: wallpaper mode, device detection, PWA registration.
+- `lib/stores/`: shared state (Svelte 5 runes).
+- `components/shell`, `hud`, `settings`, `admin`, `helper`, `ui`: one component per part of the screen. The built-in side panels are Systeem, Virtuele machines, Opslag, Buiten, Lucht, Maan en dag, Huis, Markt, ISS (left) and Nu, Server, Stem, Planning, Nieuws, Activiteit (right); custom panels come from Settings.
+- `static/`: the web manifest, service worker and icons that make it an installable PWA. The microphone and installing need a secure origin: HTTPS (or `localhost`).
 
-### Helper overlay
-
-A third way to show NOVA on the Windows PC next to the wallpaper: a small always-on-top rounded island floating just below the top edge of the screen (glass-like gradients in NOVA's navy; the agent clips the window to a rounded rectangle with `SetWindowRgn`, the page matches it with CSS). The idea is a notch companion; the character is NOVA's own orb (the main entity renderer `lib/entity/entity.ts` in a compact mode for the 80 px pill (about 560 particles, no HUD or dust, the arc and rings kept inside the canvas), plus the character's own movement in `lib/entity/orb.ts`: blink, lean, hop and sparkles, shake, look at the pointer, squash), no third-party code or assets.
-
-- The route `/helper` reuses the chat stream (`ask`), voice (tap-to-talk, "Hey NOVA", speech) and the confirmation cards (`ConfirmationCard`, 60 s single use) of the main page, with only a compact layout of its own. It opens by itself for an answer or a question to confirm and collapses after 12 s of quiet or on Esc.
-- The Windows agent runs it as an Edge `--app` window with its own profile and a `mode` of `wallpaper`, `helper` or `both` (`POST /v1/mode`). The window is positioned, made topmost and hidden from the taskbar with Win32 calls in the agent's embedded C#.
-- The page cannot hold the agent's token, so a resize goes page, `POST /api/settings/helper/size` (open: it can only resize this window), `WindowsPcService.helperSize`, agent `POST /v1/helper/size`.
-- The choice (mode, display) is saved in `settings.json` (`helper`) and applied through `WALLPAPER_PORT`; it is kept even when the PC is off. Settings: Instellingen, Meer.
-
-The prototype is one 9,500-line `web/index.html`; it is split into these parts as they are ported.
+The interface text is Dutch and the speech voice is Dutch; the code, tool descriptions for the model and this documentation are English.
 
 ## Tests
 
-- `apps/api/test`: Vitest. The prototype's tests (`server/test/*.test.js`) are ported along with their module.
-- `agents/windows/test/check.ps1`: PowerShell syntax and the embedded C#, also in CI.
-- The interface is tested by hand and with the Playwright plugin; there is no e2e suite in the repository.
+- `apps/api/test`: Vitest, one folder per module, run with `npm test`.
+- `agents/windows/test/check.ps1`: PowerShell syntax and the embedded C#, also run in CI.
+- There is no end-to-end suite for the interface in the repository.

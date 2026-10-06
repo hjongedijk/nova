@@ -1,7 +1,7 @@
 <#
 Run once in an elevated PowerShell on the Windows PC:
-  powershell -ExecutionPolicy Bypass -File .\install.ps1 -JarvisHost 192.168.10.9
-Creates agent.json (with a random token), opens the firewall for the Jarvis host
+  powershell -ExecutionPolicy Bypass -File .\install.ps1 -JarvisHost <nova-host-ip>
+Creates agent.json (with a random token), opens the firewall for the NOVA host
 only, and registers a logon task so the agent runs in your desktop session.
 #>
 param(
@@ -34,6 +34,6 @@ Register-ScheduledTask -TaskName 'JarvisAgent' -Action $action -Trigger $trigger
 Start-ScheduledTask -TaskName 'JarvisAgent'
 $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like '192.168.*' } | Select-Object -First 1).IPAddress
 Write-Host ''
-Write-Host 'Agent installed. Add these two lines to /opt/jarvis/.env on the Jarvis host:' -ForegroundColor Green
+Write-Host 'Agent installed. Add these two lines to the .env of your NOVA install, then recreate the nova container:' -ForegroundColor Green
 Write-Host "WINDOWS_AGENT_URL=http://${ip}:$Port"
 Write-Host "WINDOWS_AGENT_TOKEN=$token"

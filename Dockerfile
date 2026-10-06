@@ -1,4 +1,4 @@
-# One NOVA image: NestJS API + the built Svelte app (+ TTS and tools once ported).
+# One NOVA image: the NestJS API (with speech and all tools) and the built Svelte app.
 # Build: docker build -t ghcr.io/hjongedijk/nova:dev .
 
 FROM node:24-alpine AS build

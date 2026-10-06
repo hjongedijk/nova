@@ -1,6 +1,6 @@
 name: Release
 
-# git tag v1.2.3 && git push --tags
+# git tag v0.1.6 && git push origin v0.1.6
 on:
   push:
     tags: ["v*"]
