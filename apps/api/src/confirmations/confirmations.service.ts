@@ -22,6 +22,7 @@ export class ConfirmationsService {
     tool: string,
     args: Record<string, unknown>,
     risk?: Risk,
+    schemaFingerprint?: string,
   ): PendingConfirmation {
     const now = this.now();
     for (const [id, action] of this.pending)
@@ -40,6 +41,7 @@ export class ConfirmationsService {
       tool,
       args: structuredClone(args),
       risk,
+      ...(schemaFingerprint ? { schemaFingerprint } : {}),
       createdAt: now,
       expiresAt: now + this.ttlMs,
     };

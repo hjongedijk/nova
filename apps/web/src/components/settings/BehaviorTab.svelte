@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { savePersona } from "#lib/api/settings.ts";
+  import { savePersona, revokeStandingApproval } from "#lib/api/settings.ts";
   import Badge from "#components/ui/Badge.svelte";
   import Button from "#components/ui/Button.svelte";
   import Field from "#components/ui/Field.svelte";
@@ -46,3 +46,30 @@
 </section>
 <h3>Snelle opdrachten op het beginscherm</h3>
 <QuickActionsEditor />
+
+<h3>Altijd goedgekeurde handelingen</h3>
+<section>
+  <p class="hint">
+    Elke toestemming geldt voor één tool met exact dezelfde parameters.
+    Risicovolle handelingen blijven bevestiging vragen.
+  </p>
+  {#each settings.data?.standingApprovals ?? [] as grant (grant.id)}
+    <div class="set-toolbar">
+      <span
+        >{grant.tool}
+        {grant.scope ?? ""} · {new Date(grant.createdAt).toLocaleString(
+          "nl-NL",
+        )}</span
+      ><Button
+        onclick={async () => {
+          try {
+            await revokeStandingApproval(grant.id);
+            await afterChange("Toestemming ingetrokken.");
+          } catch (error) {
+            fail(error);
+          }
+        }}>Intrekken</Button
+      >
+    </div>
+  {:else}<p class="hint">Geen blijvende toestemmingen.</p>{/each}
+</section>

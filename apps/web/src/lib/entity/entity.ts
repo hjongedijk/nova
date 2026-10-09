@@ -43,6 +43,60 @@ export interface Modulation {
   dim: number;
   /** Overrides on the state's look (waiting is orange, an error red). */
   look?: Partial<Look>;
+  /** Shape targets keep the same particles and interpolate their projected positions. */
+  shape?: ParticleShape;
+  shapeMix?: number;
+  spin?: number;
+}
+export type ParticleShape =
+  "heart" | "check" | "question" | "box" | "wave" | "ring" | "mist";
+
+/** Original normalized paths, sampled deterministically across the particle cloud. */
+export function particleShapePoint(
+  shape: ParticleShape,
+  progress: number,
+): [number, number] {
+  const u = Math.max(0, Math.min(1, progress));
+  const a = u * Math.PI * 2;
+  switch (shape) {
+    case "heart":
+      return [
+        Math.pow(Math.sin(a), 3),
+        -(
+          13 * Math.cos(a) -
+          5 * Math.cos(2 * a) -
+          2 * Math.cos(3 * a) -
+          Math.cos(4 * a)
+        ) / 16,
+      ];
+    case "check":
+      return u < 0.38
+        ? [-0.9 + (u / 0.38) * 0.6, 0.05 + (u / 0.38) * 0.65]
+        : [-0.3 + ((u - 0.38) / 0.62) * 1.15, 0.7 - ((u - 0.38) / 0.62) * 1.4];
+    case "question": {
+      if (u > 0.9) return [0, 0.9];
+      if (u > 0.7)
+        return [0.14 * (1 - (u - 0.7) / 0.2), 0.1 + ((u - 0.7) / 0.2) * 0.35];
+      const angle = Math.PI + (u / 0.7) * Math.PI * 1.7;
+      return [Math.cos(angle) * 0.6, -0.45 + Math.sin(angle) * 0.45];
+    }
+    case "box": {
+      const edge = u * 4;
+      return edge < 1
+        ? [-0.75 + edge * 1.5, -0.75]
+        : edge < 2
+          ? [0.75, -0.75 + (edge - 1) * 1.5]
+          : edge < 3
+            ? [0.75 - (edge - 2) * 1.5, 0.75]
+            : [-0.75, 0.75 - (edge - 3) * 1.5];
+    }
+    case "wave":
+      return [u * 2 - 1, Math.sin(u * Math.PI * 3) * 0.45];
+    case "ring":
+      return [Math.cos(a) * 0.88, Math.sin(a) * 0.88];
+    case "mist":
+      return [Math.cos(a) * (0.4 + 0.7 * u), Math.sin(a) * 0.65];
+  }
 }
 export interface Life {
   update(t: number, dt: number, level: number): Modulation;
@@ -279,7 +333,7 @@ export function startEntity(host: EntityHost): () => void {
     );
     halo.addColorStop(
       0,
-      `hsla(${hue},${cur.s}%,${cur.l}%,${0.1 + 0.22 * cur.glow * birth + audioLevel * 0.2})`,
+      `hsla(${hue},${cur.s}%,${cur.l}%,${(0.1 + 0.22 * cur.glow * birth + audioLevel * 0.2) * dim})`,
     );
     halo.addColorStop(1, `hsla(${hue},${cur.s}%,${cur.l}%,0)`);
     g.globalCompositeOperation = "lighter";
@@ -579,6 +633,21 @@ export function startEntity(host: EntityHost): () => void {
       sx[i] = cx + x1 * d * R * persp * squashX;
       sy[i] = cy + y1 * d * R * persp * squashY;
       sz[i] = z2;
+      if (mod?.shape) {
+        const mix = Math.max(0, Math.min(1, mod.shapeMix ?? 0));
+        const [targetX, targetY] = particleShapePoint(mod.shape, i / N);
+        const thickness = (sd - 0.5) * (mod.shape === "mist" ? 0.8 : 0.13);
+        const angle = mod.spin ?? 0;
+        const mx = targetX + thickness;
+        const my = targetY + thickness * Math.sin(i * 1.7);
+        const targetScreenX =
+          cx + (mx * Math.cos(angle) - my * Math.sin(angle)) * R;
+        const targetScreenY =
+          cy + (mx * Math.sin(angle) + my * Math.cos(angle)) * R;
+        sx[i] += (targetScreenX - sx[i]) * mix;
+        sy[i] += (targetScreenY - sy[i]) * mix;
+        sz[i] += (0.5 - sz[i]) * mix;
+      }
     }
 
     /* filaments */
@@ -623,9 +692,12 @@ export function startEntity(host: EntityHost): () => void {
     const nuc = g.createRadialGradient(nx, ny, 0, nx, ny, nr * 2.6);
     nuc.addColorStop(
       0,
-      `hsla(${hue},${Math.max(30, cur.s - 40)}%,96%,${0.85 * birth})`,
+      `hsla(${hue},${Math.max(30, cur.s - 40)}%,96%,${0.85 * birth * dim})`,
     );
-    nuc.addColorStop(0.25, `hsla(${hue},${cur.s}%,${cur.l}%,${0.45 * birth})`);
+    nuc.addColorStop(
+      0.25,
+      `hsla(${hue},${cur.s}%,${cur.l}%,${0.45 * birth * dim})`,
+    );
     nuc.addColorStop(1, `hsla(${hue},${cur.s}%,${cur.l}%,0)`);
     g.fillStyle = nuc;
     g.beginPath();

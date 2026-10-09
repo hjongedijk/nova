@@ -5,6 +5,7 @@ import { getSessionId } from "./session.ts";
 
 export interface Card {
   id: string;
+  risk?: PendingConfirmation["risk"];
   label: string;
   /** Buttons are locked (answered, or the time ran out). */
   locked: boolean;
@@ -43,7 +44,17 @@ export function confirmationLabel(action: PendingConfirmation): string {
   ]
     .filter(Boolean)
     .join("; ");
-  return `${args?.service || action.tool.replaceAll("_", " ")}: ${args?.entity_id || args?.entity_ids?.join(", ") || args?.vmid || args?.id || ""}${changes ? "; " + changes : ""}. Bevestiging verloopt na 60 seconden.`;
+  const services: Record<string, string> = {
+    turn_on: "Aanzetten",
+    turn_off: "Uitzetten",
+    restart: "Herstarten",
+    reboot: "Herstarten",
+    stop: "Stoppen",
+    start: "Starten",
+    set_temperature: "Temperatuur instellen",
+    volume_set: "Volume instellen",
+  };
+  return `${services[String(args?.service)] || action.tool.replaceAll("_", " ")}: ${args?.entity_id || args?.entity_ids?.join(", ") || args?.vmid || args?.id || ""}${changes ? "; " + changes : ""}. Bevestiging verloopt na 60 seconden.`;
 }
 
 /** Cards still waiting for an answer, oldest first. */
@@ -70,6 +81,7 @@ export function addCard(action: PendingConfirmation | null | undefined): void {
   const wait = Math.max(0, action.expiresAt - Date.now());
   cards.push({
     id,
+    risk: action.risk,
     label: confirmationLabel(action),
     locked: false,
     done: false,
@@ -89,15 +101,29 @@ export function addCard(action: PendingConfirmation | null | undefined): void {
 }
 
 /** The Bevestigen / Annuleren buttons. */
-export async function answerCard(id: string, approve: boolean): Promise<void> {
+export async function answerCard(
+  id: string,
+  approve: boolean,
+  always = false,
+): Promise<void> {
   const card = cards.find((item) => item.id === id);
   if (!card) return;
   card.locked = true;
   try {
-    const data = await confirmAction(getSessionId(), id, approve);
+    const data = await confirmAction(getSessionId(), id, approve, always);
     card.label = data.reply;
+    chat.toolResult = data.reply;
+    chat.history.push({ role: "assistant", text: data.reply });
+    window.dispatchEvent(
+      new CustomEvent("nova-helper-confirmed", { detail: approve }),
+    );
   } catch (error) {
     card.label = (error as Error).message;
+    chat.toolResult = card.label;
+    chat.history.push({
+      role: "assistant",
+      text: `Bevestiging mislukt: ${card.label}`,
+    });
   }
   settle(id);
 }

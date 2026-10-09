@@ -14,6 +14,8 @@ export interface ToolDefinition {
   risk: Risk;
   /** Upper limit for one call, at most 60 s. */
   timeoutMs?: number;
+  /** Private execution identity for standing approvals; never sent to the model. */
+  approvalRevision?: string;
   /** False when the tool exists but cannot work right now (missing configuration). */
   enabled?: boolean;
 }

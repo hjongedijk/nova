@@ -57,11 +57,13 @@ export const confirmAction = (
   sessionId: string,
   confirmationId: string,
   approve: boolean,
+  always = false,
 ) =>
   sendJson<ConfirmResult>("POST", "/actions/confirm", {
     sessionId,
     confirmationId,
     approve,
+    always,
   });
 
 /** DELETE /api/memory/:sessionId: forget this conversation on the server. */

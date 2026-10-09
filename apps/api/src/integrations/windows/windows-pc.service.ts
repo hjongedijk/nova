@@ -32,6 +32,9 @@ const ROUTES: Record<string, ["GET" | "POST", string]> = {
   windows_displays: ["GET", "/v1/displays"],
   windows_wallpaper: ["POST", "/v1/wallpaper"],
   windows_mode: ["POST", "/v1/mode"],
+  windows_helper_preferences_get: ["GET", "/v1/helper/preferences"],
+  windows_helper_preferences_set: ["POST", "/v1/helper/preferences"],
+  windows_helper_notify: ["POST", "/v1/helper/notify"],
   windows_helper_size: ["POST", "/v1/helper/size"],
 };
 
@@ -107,12 +110,40 @@ export class WindowsPcService {
     )) as AgentOutcome<DesktopState>;
   }
 
+  async helperPreferences(
+    hotkeys?: Record<string, string>,
+  ): Promise<AgentOutcome> {
+    return this.call(
+      hotkeys
+        ? "windows_helper_preferences_set"
+        : "windows_helper_preferences_get",
+      hotkeys ? { hotkeys } : {},
+    );
+  }
+  async notifyHelper(
+    event: import("@nova/contracts").FeedEvent,
+  ): Promise<AgentOutcome> {
+    return this.call("windows_helper_notify", { event });
+  }
+
   /** Grow or shrink the helper window (the helper page asks for it). */
   async helperSize(
     expanded: boolean,
+    options?: {
+      view:
+        | "compact"
+        | "overview"
+        | "chat"
+        | "weather"
+        | "lists"
+        | "notifications"
+        | "confirmation";
+      hidden: boolean;
+      reducedMotion: boolean;
+    },
     signal?: AbortSignal,
   ): Promise<AgentOutcome> {
-    return this.call("windows_helper_size", { expanded }, signal);
+    return this.call("windows_helper_size", { expanded, ...options }, signal);
   }
 
   /** Runs one of the agent's own tools (everything except search and YouTube, which build on it). */
@@ -125,6 +156,8 @@ export class WindowsPcService {
     if (!route) return { ok: false, error: "Unknown Windows tool" };
     // These open or close windows on the PC, which takes a few seconds.
     const wallpaper = name === "windows_wallpaper" || name === "windows_mode";
+    const openingHelper =
+      name === "windows_helper_notify" || name === "windows_helper_size";
     const origin = publicOrigin(this.config.publicUrl);
     const response = await requestJson<AgentBody>(this.url + route[1], {
       method: route[0],
@@ -135,13 +168,15 @@ export class WindowsPcService {
           ? args
           : undefined,
       // Opening the wallpaper window takes a few seconds.
-      signal: wallpaper
-        ? AbortSignal.any(
-            [signal, AbortSignal.timeout(45000)].filter(
-              (item): item is AbortSignal => Boolean(item),
-            ),
-          )
-        : signal,
+      timeoutMs: openingHelper ? 45000 : 15000,
+      signal:
+        wallpaper || openingHelper
+          ? AbortSignal.any(
+              [signal, AbortSignal.timeout(45000)].filter(
+                (item): item is AbortSignal => Boolean(item),
+              ),
+            )
+          : signal,
     });
     if (
       response.status === 404 &&

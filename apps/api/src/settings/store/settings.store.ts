@@ -1,3 +1,4 @@
+import type { HelperPreferences } from "@nova/contracts";
 import { Injectable } from "@nestjs/common";
 import fs from "node:fs";
 import path from "node:path";
@@ -20,7 +21,18 @@ export interface ToolOverride {
 }
 
 /** Everything the user can change on the settings screen. Shapes are checked by the settings module. */
+export interface StandingApproval {
+  id: string;
+  tool: string;
+  argsHash: string;
+  schemaHash: string;
+  createdAt: number;
+  scope?: string;
+}
+
 export interface NovaSettings {
+  standingApprovals: StandingApproval[];
+  helperPreferences: HelperPreferences;
   version: 1;
   persona: string;
   quickActions: QuickAction[] | null;
@@ -47,6 +59,18 @@ export const DEFAULT_QUICK_ACTIONS: QuickAction[] = [
 
 const blank = (): NovaSettings => ({
   version: 1,
+  standingApprovals: [],
+  helperPreferences: {
+    autohide: true,
+    contrast: false,
+    shape: "orb",
+    cues: {
+      enabled: true,
+      volume: 0.35,
+      theme: "soft",
+      quiet: { enabled: false, start: "22:00", end: "07:00" },
+    },
+  },
   persona: "",
   quickActions: null,
   toolOverrides: {},

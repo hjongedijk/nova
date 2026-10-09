@@ -35,6 +35,7 @@ export class ConfirmationHandler {
     sessionId: string,
     message: string,
     confirmationId?: string,
+    always = false,
   ): Promise<DirectReply | null> {
     const intent = confirmationIntent(message);
     if (!intent) return null;
@@ -61,18 +62,20 @@ export class ConfirmationHandler {
 
     const action = this.confirmations.take(sessionId, confirmationId);
     if (!action) return { reply: NOTHING_OPEN };
-    return this.run(sessionId, action);
+    return this.run(sessionId, action, always);
   }
 
   private async run(
     sessionId: string,
     action: PendingConfirmation,
+    always = false,
   ): Promise<DirectReply> {
     const result = await this.tools.execute(
       action.tool,
       action.args,
       sessionId,
       action,
+      always,
     );
     // Something to read came back (command output): say what it was, not just that it is done.
     if (result.ok && hasOutput(result))

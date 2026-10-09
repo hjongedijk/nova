@@ -105,6 +105,59 @@ describe("the settings API", () => {
     }
   });
 
+  it("keeps standing approval fingerprints private and only permits guarded revocation", async () => {
+    const grant = {
+      id: "approved-rule",
+      tool: "echo",
+      argsHash: "a".repeat(64),
+      schemaHash: "b".repeat(64),
+      scope: "living room",
+      createdAt: Date.now(),
+    };
+    nova.store.update((next) => {
+      next.standingApprovals = [grant];
+    });
+    const overview = await call("get", "/");
+    expect(overview.standingApprovals).toEqual([
+      {
+        id: grant.id,
+        tool: grant.tool,
+        scope: grant.scope,
+        createdAt: grant.createdAt,
+      },
+    ]);
+    expect(JSON.stringify(overview)).not.toContain(grant.argsHash);
+    expect(JSON.stringify(overview)).not.toContain(grant.schemaHash);
+    const backup = await call("get", "/export");
+    expect(backup).not.toHaveProperty("standingApprovals");
+    expect(JSON.stringify(backup)).not.toContain(grant.argsHash);
+    expect(
+      (await call("delete", "/standing-approvals/approved-rule", undefined, {}))
+        .status,
+    ).toBe(403);
+    expect(nova.store.get().standingApprovals).toEqual([grant]);
+    expect(
+      (await call("delete", "/standing-approvals/approved-rule")).status,
+    ).toBe(200);
+    expect(nova.store.get().standingApprovals).toEqual([]);
+    expect(
+      nova.audits.some(
+        (entry) =>
+          (entry.arguments as { what?: string }).what ===
+          "standing_approval_revoked",
+      ),
+    ).toBe(true);
+    expect(
+      (
+        await call("post", "/import", {
+          data: { ...backup, standingApprovals: [grant] },
+          mode: "replace",
+        })
+      ).status,
+    ).toBe(200);
+    expect(nova.store.get().standingApprovals).toEqual([]);
+  });
+
   it("creates, changes, switches off and deletes skills, and logs each change", async () => {
     const created = await call("post", "/skills", playbook());
     expect(created.status).toBe(201);
@@ -594,8 +647,8 @@ describe("the helper overlay choice", () => {
         ? { ok: false, error: failure.error }
         : { ok: true, displays: [], mode, helperDisplay: display };
     },
-    helperSize: async (expanded) => {
-      log.push({ expanded });
+    helperSize: async (expanded, options) => {
+      log.push({ expanded, ...(options ? { options } : {}) });
       return { ok: true };
     },
   });
@@ -657,6 +710,123 @@ describe("the helper overlay choice", () => {
           (row) => (row.arguments as { what?: string }).what === "helper",
         ),
       ).toBe(true);
+    } finally {
+      await app.app.close();
+    }
+  });
+
+  it("persists helper preferences after reload and rejects invalid settings without changing them", async () => {
+    const defaults = await call("get", "/helper/preferences", undefined, {});
+    expect(defaults).toMatchObject({
+      autohide: true,
+      contrast: false,
+      shape: "orb",
+      cues: {
+        enabled: true,
+        volume: 0.35,
+        theme: "soft",
+        quiet: { enabled: false, start: "22:00", end: "07:00" },
+      },
+    });
+    const preferences = {
+      autohide: false,
+      contrast: true,
+      shape: "ring",
+      cues: {
+        enabled: true,
+        volume: 0.7,
+        theme: "minimal",
+        cues: { done: false, file: true },
+        quiet: { enabled: true, start: "23:15", end: "06:30" },
+      },
+    };
+    const saved = await call("put", "/helper/preferences", preferences);
+    expect(saved).toMatchObject({ status: 200, ok: true, preferences });
+    nova.store.reset();
+    expect(await call("get", "/helper/preferences", undefined, {})).toEqual({
+      status: 200,
+      ...preferences,
+    });
+    const invalid = [
+      { ...preferences, shape: "unknown" },
+      { ...preferences, cues: { ...preferences.cues, volume: 1.1 } },
+      { ...preferences, cues: { ...preferences.cues, volume: -0.1 } },
+      { ...preferences, cues: { ...preferences.cues, volume: "0.7" } },
+      { ...preferences, cues: { ...preferences.cues, theme: "unknown" } },
+      {
+        ...preferences,
+        cues: {
+          ...preferences.cues,
+          quiet: { ...preferences.cues.quiet, start: "24:00" },
+        },
+      },
+      {
+        ...preferences,
+        cues: {
+          ...preferences.cues,
+          quiet: { ...preferences.cues.quiet, end: "07:99" },
+        },
+      },
+      {
+        ...preferences,
+        cues: { ...preferences.cues, cues: { unknown: true } },
+      },
+      { ...preferences, cues: { ...preferences.cues, cues: { done: "yes" } } },
+    ];
+    for (const body of invalid)
+      expect((await call("put", "/helper/preferences", body)).status).toBe(400);
+    expect(nova.store.get().helperPreferences).toEqual(preferences);
+  });
+
+  it("exposes preferences with a PIN configured but requires PIN and admin header to write", async () => {
+    const app = await createApp({ env: { NOVA_ADMIN_PIN: "1234" } });
+    try {
+      const got = await app.api.get("/api/settings/helper/preferences");
+      expect(got.status).toBe(200);
+      const write = (headers: Record<string, string>) =>
+        app.api
+          .put("/api/settings/helper/preferences")
+          .set(headers)
+          .send(got.body);
+      expect((await write({})).status).toBe(401);
+      expect((await write(ADMIN)).status).toBe(401);
+      expect((await write({ "x-nova-pin": "1234" })).status).toBe(403);
+      expect((await write({ ...ADMIN, "x-nova-pin": "1234" })).status).toBe(
+        200,
+      );
+      const revoke = (headers: Record<string, string>) =>
+        app.api.delete("/api/settings/standing-approvals/id").set(headers);
+      expect((await revoke(ADMIN)).status).toBe(401);
+      expect((await revoke({ "x-nova-pin": "1234" })).status).toBe(403);
+    } finally {
+      await app.app.close();
+    }
+  });
+
+  it("forwards named helper views and validates flags while retaining legacy sizing", async () => {
+    const log: unknown[] = [];
+    const app = await createApp({ wallpaper: port(log, { error: null }) });
+    try {
+      const size = (body: object) =>
+        app.api.post("/api/settings/helper/size").send(body);
+      for (const view of ["compact", "overview", "chat", "confirmation"]) {
+        expect(
+          (await size({ view, hidden: true, reducedMotion: true })).status,
+        ).toBe(200);
+        expect(log.at(-1)).toEqual({
+          expanded: view !== "compact",
+          options: { view, hidden: true, reducedMotion: true },
+        });
+      }
+      for (const body of [
+        { view: "unknown" },
+        { view: "chat", hidden: "yes" },
+        { view: "chat", reducedMotion: 1 },
+        { expanded: "yes" },
+      ])
+        expect((await size(body)).status).toBe(400);
+      expect((await size({ expanded: false })).status).toBe(200);
+      expect(log.at(-1)).toEqual({ expanded: false });
     } finally {
       await app.app.close();
     }

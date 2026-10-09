@@ -1000,3 +1000,15 @@ body[data-state="listening"] #micButton {
     animation: none;
   }
 }
+
+/* Shared sharp navy control language with the helper. */
+body.wallpaper .composer {
+  border-radius: 0;
+  background: #091321;
+  border: 1px solid #29415b;
+  border-bottom: 2px solid #8dd8ff;
+}
+body.wallpaper .composer .icon,
+body.wallpaper .composer .attachments button {
+  border-radius: 0;
+}

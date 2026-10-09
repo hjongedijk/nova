@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { schema, ToolSourceProvider } from "../../tools/tool.types.js";
 import type {
   ToolCall,
@@ -37,6 +38,9 @@ export class SkillsSource implements ToolSource {
       const tool = toolDefinition(skill);
       return {
         name: tool.name,
+        approvalRevision: createHash("sha256")
+          .update(JSON.stringify(skill))
+          .digest("hex"),
         description: tool.description,
         parameters: {
           ...schema(tool.properties, tool.required),

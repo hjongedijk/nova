@@ -1,5 +1,10 @@
 import type { UiState } from "#lib/stores/chat.svelte.ts";
-import { startEntity, type Life, type Modulation } from "./entity.ts";
+import {
+  startEntity,
+  type Life,
+  type Modulation,
+  type ParticleShape,
+} from "./entity.ts";
 import type { Look } from "./states.ts";
 
 /**
@@ -15,9 +20,25 @@ export interface OrbHost {
   state(): UiState;
   /** Open confirmations and warnings: the orb waits nervously in orange while this is above zero. */
   intensity(): number;
+  shape?(): "orb" | "ring" | "mist";
+  hue?(): number;
+  night?(): boolean;
+  reaction?(event: OrbEvent): void;
 }
 
-export type OrbEvent = "done" | "error" | "nudge";
+export type OrbEvent =
+  | "done"
+  | "error"
+  | "nudge"
+  | "heart"
+  | "check"
+  | "question"
+  | "box"
+  | "wave"
+  | "greet"
+  | "sleep"
+  | "wake"
+  | "dizzy";
 export interface OrbHandle {
   stop(): void;
   /** A one-off reaction: a happy hop with sparkles, a shake in red, or a nudge for attention. */
@@ -56,6 +77,16 @@ export function startOrb(host: OrbHost): OrbHandle {
   const lookX = new Spring(0);
   const lookY = new Spring(0);
   const grow = new Spring(1);
+  const brightness = new Spring(1);
+  const morph = new Spring(0);
+  let shape: ParticleShape | undefined;
+  let shapeUntil = 0;
+  let dizzyUntil = 0;
+  let lastActivity = performance.now();
+  let clickAt = 0;
+  let clicks = 0;
+  let hoverAt = 0;
+  let sleeping = false;
   let blinkAt = 0;
   let blinkStart = -1e9;
   let nudgeAt = 0;
@@ -66,6 +97,8 @@ export function startOrb(host: OrbHost): OrbHandle {
   const sparks: Spark[] = [];
 
   const onMove = (event: PointerEvent) => {
+    lastActivity = performance.now();
+    sleeping = false;
     const box = host.canvas.getBoundingClientRect();
     const far = Math.max(60, window.innerWidth / 2);
     pointer = {
@@ -78,10 +111,29 @@ export function startOrb(host: OrbHost): OrbHandle {
         Math.min(1, (event.clientY - (box.top + box.height / 2)) / far),
       ),
     };
+    const inside =
+      event.clientX >= box.left &&
+      event.clientX <= box.right &&
+      event.clientY >= box.top &&
+      event.clientY <= box.bottom;
+    if (inside && !hoverAt) hoverAt = lastActivity;
+    if (!inside) hoverAt = 0;
   };
-  const onLeave = () => (pointer = { x: 0, y: 0 });
+  const onLeave = () => {
+    pointer = { x: 0, y: 0 };
+    hoverAt = 0;
+  };
   const onDown = () => {
-    squash.v = 9; // squash flat, then spring back with a stretch
+    const now = performance.now();
+    lastActivity = now;
+    sleeping = false;
+    clicks = now - clickAt < 1400 ? clicks + 1 : 1;
+    clickAt = now;
+    squash.v = 9 * calm;
+    if (clicks >= 7) {
+      trigger("dizzy");
+      clicks = 0;
+    } else if (clicks >= 4) trigger("error");
   };
   window.addEventListener("pointermove", onMove);
   document.addEventListener("pointerleave", onLeave);
@@ -89,9 +141,30 @@ export function startOrb(host: OrbHost): OrbHandle {
 
   function trigger(event: OrbEvent): void {
     const now = performance.now();
+    host.reaction?.(event);
+    lastActivity = now;
+    sleeping = event === "sleep";
+    if (
+      ["heart", "check", "question", "box", "wave"].includes(event) ||
+      event === "done" ||
+      event === "greet"
+    ) {
+      shape =
+        event === "done"
+          ? "check"
+          : event === "greet"
+            ? "wave"
+            : (event as ParticleShape);
+      shapeUntil = now + 1800;
+    }
+    if (event === "dizzy") {
+      dizzyUntil = now + 2200;
+      shape = "ring";
+      shapeUntil = dizzyUntil;
+    }
     if (event === "done") {
-      hop.v = -7;
-      for (let i = 0; i < 14; i++) {
+      hop.v = -7 * calm;
+      for (let i = 0; i < 14 && sparks.length < 42; i++) {
         const a = (i / 14) * TAU + Math.random() * 0.4;
         const s = 0.7 + Math.random() * 0.9;
         sparks.push({ vx: Math.cos(a) * s, vy: Math.sin(a) * s - 0.4, age: 0 });
@@ -99,9 +172,9 @@ export function startOrb(host: OrbHost): OrbHandle {
     } else if (event === "error") {
       shakeUntil = now + 550;
       errorUntil = now + 1400;
-    } else {
-      hop.v = -3.5;
-      squash.v = -4;
+    } else if (event === "nudge" || event === "wake" || event === "greet") {
+      hop.v = -3.5 * calm;
+      squash.v = -4 * calm;
     }
   }
 
@@ -114,9 +187,23 @@ export function startOrb(host: OrbHost): OrbHandle {
       }
       const state = host.state();
       const waiting = host.intensity() > 0 && state === "ready";
+      if (state !== "ready" || waiting) {
+        lastActivity = now;
+        sleeping = false;
+      }
+      const asleep = sleeping || now - lastActivity > 60000;
+      const hovered = hoverAt > 0 && now - hoverAt > 700;
+      const wardrobe = host.shape?.() ?? "orb";
+      const wardrobeShape = wardrobe === "orb" ? undefined : wardrobe;
+      if (now >= shapeUntil && morph.x < 0.02) shape = wardrobeShape;
+      const morphTarget =
+        now < shapeUntil || (shape === wardrobeShape && !!wardrobeShape)
+          ? 0.92
+          : 0;
 
       // Breathing, plus what each state asks for.
-      let want = 1 + 0.03 * Math.sin(t * 1.6) * calm;
+      let want = 1 + 0.03 * Math.sin(t * (asleep ? 0.55 : 1.6)) * calm;
+      if (hovered) want += Math.sin(t * 3) * 0.035 * calm;
       if (state === "listening") want += 0.07 + 0.035 * Math.sin(t * 4) * calm; // leans in, attentive
       if (state === "thinking") want += 0.06 * Math.sin(t * 5) * calm; // contract and expand
       if (state === "speaking") want += level * 0.1 - 0.12; // its own displacement already swells the cloud
@@ -145,7 +232,7 @@ export function startOrb(host: OrbHost): OrbHandle {
 
       const shake =
         now < shakeUntil
-          ? Math.sin(now / 16) * 0.3 * ((shakeUntil - now) / 550)
+          ? Math.sin(now / 16) * 0.3 * ((shakeUntil - now) / 550) * calm
           : 0;
       const wobble = state === "thinking" ? Math.sin(t * 9) * 0.08 * calm : 0;
       const lean = state === "listening" ? -0.1 : 0; // up toward the user
@@ -156,8 +243,23 @@ export function startOrb(host: OrbHost): OrbHandle {
         sy: 1 - sq * 0.12,
         ox: Math.sin(t * 0.5) * 0.12 * calm + shake + wobble + lookX.x,
         oy: Math.cos(t * 0.37) * 0.09 * calm + lift * 0.4 + lean + lookY.x,
-        dim: 1 - 0.5 * blink,
-        look: now < errorUntil ? ERROR : waiting ? WAITING : undefined,
+        dim:
+          brightness.step(asleep || host.night?.() ? 0.32 : 1, dt, 30, 12) *
+          (1 - 0.5 * blink * calm),
+        look:
+          now < errorUntil
+            ? ERROR
+            : waiting
+              ? WAITING
+              : state === "ready" && host.hue
+                ? { h: host.hue() }
+                : undefined,
+        shape,
+        shapeMix: Math.max(0, Math.min(1, morph.step(morphTarget, dt, 45, 14))),
+        spin:
+          now < dizzyUntil
+            ? Math.sin(((dizzyUntil - now) / 2200) * Math.PI) * 4 * calm
+            : 0,
       };
     },
     overlay(g, cx, cy, R) {

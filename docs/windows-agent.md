@@ -4,7 +4,7 @@ The Windows agent (`agents/windows/jarvis-agent.ps1`, agent version `2026-10-06.
 
 - open (and, with confirmation, close) programs from an allow-list, open `http(s)` URLs and lock the screen,
 - show NOVA as a **living wallpaper** behind the desktop icons, per display,
-- show NOVA as a small always-on-top **helper pill** at the top of a display,
+- show NOVA as a small always-on-top **helper panel** at the top of a display,
 - drive a **browser of its own** (a separate Microsoft Edge window) for search, reading, clicking and typing.
 
 It is the only agent; there is no separate browser agent. The (Dutch) texts inside the agent and the NOVA interface are in Dutch.
@@ -79,23 +79,51 @@ Microsoft Edge shows the NOVA page in a window that is parented to the desktop, 
 | Mode        | What the PC shows                                                                                        |
 | ----------- | -------------------------------------------------------------------------------------------------------- |
 | `wallpaper` | The living wallpaper (default).                                                                          |
-| `helper`    | No wallpaper (the per-display choices stay remembered), only the helper pill.                            |
+| `helper`    | No wallpaper (the per-display choices stay remembered), only the rectangular helper panel.               |
 | `both`      | Quiet wallpaper windows (no input or voice) with the helper on top, which does the listening and typing. |
 
-Change it in NOVA under **Instellingen, Meer, "NOVA op je Windows-pc"**; no reinstall is needed. Endpoints: `POST /v1/mode` with `{ "mode": ..., "display": ... }`, `GET /v1/status` and `GET /v1/displays` (both report `mode` and `helperDisplay`), and `POST /v1/helper/size` with `{ "expanded": true|false }`.
+Change it in NOVA under **Instellingen, Meer, "NOVA op je Windows-pc"**; no reinstall is needed. Endpoints: `POST /v1/mode` with `{ "mode": ..., "display": ... }`, `GET /v1/status` and `GET /v1/displays` (both report `mode` and `helperDisplay`), and `POST /v1/helper/size` with `{ "view": "compact|overview|chat|notifications|weather|lists|confirmation" }` (legacy `expanded` remains supported).
 
-### The helper pill
+### The rectangular helper
 
-The helper is an Edge `--app` window that shows the page `<NOVA>/helper`, floating 8 px below the top edge of the chosen display as a rounded pill in NOVA's navy. Collapsed it shows the NOVA orb, a status dot with text and a microphone button (about 340 x 100). A click, or an incoming answer or confirmation question, expands it (about 420 x 360) with the last answer, a text field and the confirmation card (Bevestigen / Annuleren, or press Y / N). It collapses after 12 s of quiet or on Esc. "Hey NOVA" works there, and confirmations are the normal 60 s single-use ones.
+The helper uses a dedicated Edge fullscreen kiosk window at `<NOVA>/helper`. NOVA removes the native frame, preserves tool-window/topmost styles, and positions the visible rectangle against the chosen monitor's top edge. There is no `SetWindowRgn`, rounded clipping or region repair timer. Edge kiosk mode is InPrivate; NOVA persists appearance/sound preferences on the server and native view/display/hotkeys in `mode.json`.
 
-How it is built:
+| View                                    | Size in CSS pixels |
+| --------------------------------------- | ------------------ |
+| Compact                                 | 360 × 44           |
+| Overview, notifications, weather, lists | 640 × 180          |
+| Chat                                    | 640 × 340          |
+| Confirmation                            | 640 × 170          |
 
-- The window is positioned, made topmost and hidden from the taskbar with Win32 calls in the embedded C#, and clipped to a rounded rectangle with `SetWindowRgn` (an Edge window cannot be transparent, so the glass look is painted gradients).
-- Edge draws its own title bar in an app window. The agent measures it through DevTools (port 9340 on `127.0.0.1`, 32 px at 100% scale if that fails), makes the window taller by that amount and clips the caption away, so it is neither drawn nor clickable.
-- Windows adds an invisible border of about 7 to 8 px; the region is computed from the visible frame bounds. The agent checks twice a second that region and rectangle are as intended and restores them if Chromium or DWM reset them. `GET /v1/helper-debug` shows what Windows reports.
-- The helper has its own Edge profile (`helper-profile` next to the script), starts with microphone and sound allowed for NOVA's address and is restored whenever the agent starts. If you close it yourself, choose the mode again in NOVA.
-- The page cannot hold the agent's token, so a resize goes page, `POST /api/settings/helper/size` (open: it can only resize this window), the NOVA API, agent `POST /v1/helper/size`.
-- When NOVA's address is plain `http://`, Edge needs `--unsafely-treat-insecure-origin-as-secure` for the microphone and `--test-type` to hide the warning bar. With `https://` neither flag is passed. The same applies to the wallpaper windows.
+Geometry converts CSS pixels using the target monitor's DPI, centers on that monitor (including negative desktop coordinates), and compensates invisible native borders. Small displays clamp the panel to available dimensions. Size transitions take 200 ms without overshoot; reduced motion applies the target directly. `/v1/helper-debug` reports actual/native extended bounds, expected visible bounds, measured browser chrome, DPI, display, view and hidden state. Measurements expose caption problems rather than hiding them behind a clipping region.
+
+After 12 seconds without typing, files, speech, a pending confirmation or open settings, autohide resizes the window to a 3 CSS-pixel strip at the monitor's top. It never moves into a monitor above it. Entering the strip restores the compact panel; activity/notifications restore content. Disable autohide with the gear. Actual Windows kiosk resizing and minimum strip height still need manual verification.
+
+Overview shows real integration status, machines and timers. Chat includes recent messages, the model reported by OmniRoute, tool results, file selection/drop and the full-app link. The plus menu adds weather and lists using existing dashboard data. Calendar explicitly says it is not connected until the calendar phase is built. Notifications can be dismissed or snoozed for ten minutes. Confirmations open automatically, remain until answered/expired, and use Y/N outside editable fields. Their result appears in chat/ticker. “Altijd” is available only for `CONFIRM`, with exact argument/schema scope; revoke it under settings → behavior.
+
+The tray offers Open, Pause/Resume, Settings and Exit, with an original navy icon and active/paused dot. Pause stops the helper microphone/wake word and sounds, suppresses new native notifications, and blocks new helper requests; it cannot undo an action already running. Default global shortcuts:
+
+| Action       | Shortcut       |
+| ------------ | -------------- |
+| Open         | Ctrl+Alt+N     |
+| Speak        | Ctrl+Alt+Space |
+| Mute         | Ctrl+Alt+M     |
+| Show desktop | Ctrl+Alt+D     |
+
+Configure shortcuts in the helper. Empty bindings disable them; duplicate/invalid bindings are rejected, and Windows registration conflicts are shown. Native callbacks enqueue commands onto the agent's main thread. Closing the helper manually is recoverable through a shortcut or a server alert/timer notification in helper/both mode. Wallpaper-only and paused modes suppress notification opening. Recovery may take up to roughly 38 seconds; the server allows 45 seconds.
+
+Agent endpoints (bearer token/source-address checks apply):
+
+- `POST /v1/helper/size`: `{view, hidden, reducedMotion}`; legacy `{expanded}` remains supported.
+- `GET/POST /v1/helper/preferences`: read native preferences or replace the complete `{hotkeys:{open,speak,mute,desktop}}` set.
+- `POST /v1/helper/notify`: bounded `{event:{seq,severity,title,detail,at}}`; queues until the helper document loads.
+- `GET /v1/status`, `/v1/displays`: include helper view/display, paused state and shortcut warnings.
+
+The browser never receives the agent token. Appearance/sound settings use NOVA's guarded settings API; the helper has a masked PIN field. Output-device selection depends on browser sink support. Browser SpeechRecognition uses the system/default input device; choose its microphone in Windows, or test it in the helper. A speaking meter reports NOVA's audio level. Output device selection lasts for this session; voice volume remains device-local.
+
+The original particle renderer supplies temporary heart/check/question/box/wave forms, idle dimming, pointer lean, hover and bounded repeated-click reactions. Fifteen synthesized cues have independent volume, per-cue switches, quiet hours and soft/playful/minimal themes. Audio starts only after a browser gesture, never overlaps speech/listening, and thinking phrases stop after 30 seconds. Orb/ring/mist, color themes and optional seasonal/birthday accents are configurable; birthday accents require an explicitly entered date.
+
+Validation: run the PowerShell Docker check and [the browser helper check](helper-design.md). Real Windows acceptance remains: kiosk caption/bounds, stacked monitors at 100/150/200% DPI, actual 3 px strip, tray interaction, shortcut conflicts, microphone/output behavior and closed-window recovery. No real Windows or phone validation has been performed for this phase.
 
 ## Browser
 

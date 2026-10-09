@@ -124,3 +124,11 @@ Files are held in memory during the request, never saved to the server filesyste
 NOVA aims to be a calm, attentive personal assistant: understand the intention, act within the request, and explain the useful result. It can acknowledge a difficult day without launching unrelated tools, and suggest a relevant next step without appending an offer to every answer. Actions and claims of success still follow the backend's existing verification and confirmation rules.
 
 Typed chat allows useful lists, links, code and fuller explanations. Speech recognition and the wake word identify voice turns, which favour natural spoken sentences. Tool results preserve that turn's style rather than forcing every answer into four sentences. The model receives the last six conversation turns (twelve messages) for continuity, plus relevant older memory. The user's own persona settings remain in effect.
+
+## Scoped standing approvals
+
+“Altijd” on a fresh confirmation grants permission only for a `CONFIRM` tool with exactly the same normalized arguments. `DANGEROUS` never qualifies. The backend still validates arguments, prepares the call, determines its actual risk and checks action availability before considering a rule. Unknown fields cannot reuse a rule. The confirmation remains session-bound, single-use and valid for 60 seconds.
+
+Rules store argument and schema/execution fingerprints, a sanitized display scope and creation time. Changing parameters, risk, source identity or schema requires a new confirmation. Webhook skill execution settings contribute a private revision; changing its endpoint/body/credentials invalidates the rule. MCP connections receive a private generation revision, so reconnecting invalidates existing permissions. Private revision fields never reach the model or public tool metadata.
+
+Creation, automatic execution and revocation are audited; log failure prevents grant creation/execution. Every reused approval is marked in the live ticker. Revoke individual rules in Settings → Behavior. The settings API only lists/revokes rules; backup export/import cannot create them. Rules are limited to 100 and never store raw secrets. Permission applies across local conversation sessions until revoked, changed or invalidated.

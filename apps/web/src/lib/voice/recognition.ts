@@ -126,3 +126,9 @@ export function startListening(): void {
     }, 350);
   }
 }
+
+/** Stop the explicit recognizer when the native agent pauses. */
+export function stopListening(): void {
+  recognition?.abort();
+  if (chat.uiState === "listening") setState("ready");
+}

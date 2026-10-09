@@ -64,8 +64,21 @@ import {
             ? { ok: true, ...outcome.result }
             : { ok: false, error: outcome.error };
         },
-        async helperSize(expanded) {
-          const outcome = await windows.helperSize(expanded);
+        async helperPreferences(hotkeys) {
+          const outcome = await windows.helperPreferences(hotkeys);
+          return outcome.ok
+            ? {
+                ok: true,
+                preferences: outcome.result.preferences as {
+                  hotkeys: Record<string, string>;
+                  warnings: string[];
+                  paused: boolean;
+                },
+              }
+            : { ok: false, error: outcome.error };
+        },
+        async helperSize(expanded, options) {
+          const outcome = await windows.helperSize(expanded, options);
           return outcome.ok
             ? { ok: true }
             : { ok: false, error: outcome.error };

@@ -21,6 +21,15 @@
       onclick={() => answerCard(card.id, false)}
       >Annuleren <kbd aria-hidden="true">N</kbd></button
     >
+    {#if card.risk === "CONFIRM"}
+      <button
+        type="button"
+        class="hc-no"
+        disabled={card.locked}
+        title="Alleen deze tool met exact dezelfde parameters toestaan"
+        onclick={() => answerCard(card.id, true, true)}>Altijd</button
+      >
+    {/if}
   </div>
   {#if !card.done}
     <div class="hc-ttl" style:--ttl="{card.ttl}ms"></div>
@@ -33,7 +42,7 @@
     overflow: hidden;
     padding: 12px 14px 14px;
     border: 1px solid rgba(255, 138, 76, 0.45);
-    border-radius: 14px;
+    border-radius: 0;
     background: linear-gradient(
       180deg,
       rgba(255, 122, 69, 0.16),
@@ -61,7 +70,7 @@
     font: 600 13px/1 inherit;
     font-family: inherit;
     padding: 8px 8px 8px 14px;
-    border-radius: 999px;
+    border-radius: 0;
     border: 1px solid transparent;
     cursor: pointer;
   }
@@ -83,7 +92,7 @@
     font-family: inherit;
     min-width: 20px;
     padding: 4px 6px;
-    border-radius: 6px;
+    border-radius: 0;
     text-align: center;
   }
   .hc-yes kbd {

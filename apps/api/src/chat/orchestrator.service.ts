@@ -255,9 +255,26 @@ export class OrchestratorService {
         emit("tool_result", {
           name,
           ok: result.ok,
+          standingApproval: result.standingApproval === true,
+          accepted: result.accepted === true,
           verified: result.verified ?? null,
           status: (result.status as string | undefined) ?? null,
         });
+        if (result.ambiguous && Array.isArray(result.candidates)) {
+          const choices = result.candidates
+            .flatMap((candidate) => {
+              if (!candidate || typeof candidate !== "object") return [];
+              const item = candidate as Record<string, unknown>;
+              return typeof item.entity_id === "string" &&
+                /^[a-z][a-z0-9_]*\.[a-z0-9_]+$/i.test(item.entity_id) &&
+                item.entity_id.length <= 200 &&
+                typeof item.name === "string"
+                ? [{ entityId: item.entity_id, label: item.name }]
+                : [];
+            })
+            .slice(0, 10);
+          if (choices.length) emit("choices", { choices });
+        }
         if (result.requiresConfirmation && result.action) {
           const reply = confirmationQuestion(
             result.action,

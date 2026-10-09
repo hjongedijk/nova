@@ -19,3 +19,9 @@ export function getSessionId(): string {
   }
   return sessionId;
 }
+
+/** Start a fresh server conversation when the user explicitly clears chat. */
+export function resetSession(): void {
+  sessionId = createSessionId();
+  storage.set("jarvisSessionId", sessionId);
+}

@@ -1,16 +1,44 @@
 import { sendJson } from "./client.ts";
 
-/**
- * The helper window on the Windows PC grows for an answer or a question and shrinks back to its pill. The page
- * asks NOVA, NOVA asks the Windows agent (which holds the token). Without an agent, or in a normal browser tab,
- * this does nothing and the page simply lives in whatever window it has.
- */
-export async function requestHelperSize(expanded: boolean): Promise<void> {
+export type HelperView =
+  | "compact"
+  | "overview"
+  | "chat"
+  | "weather"
+  | "lists"
+  | "notifications"
+  | "confirmation";
+
+type Resize = { view: HelperView; hidden: boolean; reducedMotion: boolean };
+let pending: Resize | null = null;
+let running: Promise<void> | null = null;
+
+async function drain(): Promise<void> {
   try {
-    await sendJson<{ ok: boolean }>("POST", "/settings/helper/size", {
-      expanded,
-    });
-  } catch {
-    /* no agent: nothing to resize */
+    while (pending) {
+      const next = pending;
+      pending = null;
+      try {
+        await sendJson<{ ok: boolean }>("POST", "/settings/helper/size", next);
+      } catch {
+        /* A browser preview has no Windows agent. */
+      }
+    }
+  } finally {
+    running = null;
   }
+}
+
+/** Serialize native resizing; rapid tab changes retain only the latest queued size. */
+export function requestHelperSize(
+  view: HelperView,
+  hidden = false,
+): Promise<void> {
+  pending = {
+    view,
+    hidden,
+    reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+  };
+  running ??= Promise.resolve().then(drain);
+  return running;
 }

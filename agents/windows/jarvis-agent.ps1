@@ -9,7 +9,7 @@ It can also hang NOVA behind the desktop icons as a living wallpaper, per displa
 page in a window that is parented to the desktop. The real wallpaper setting is never
 changed. What is set is remembered in wallpaper.json and restored when the agent starts.
 
-A "mode" (wallpaper, helper or both) chooses what NOVA shows: the wallpaper, a small always-on-top helper pill docked
+A "mode" (wallpaper, helper or both) chooses what NOVA shows: the wallpaper, a small always-on-top helper panel docked
 top-centre on one display (an Edge app window, /helper), or both. agent.json sets the default; POST /v1/mode changes it
 at runtime and is remembered in mode.json.
 
@@ -262,7 +262,7 @@ public class NovaClick {
   [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
   [StructLayout(LayoutKind.Sequential)] struct MSLL { public POINT pt; public uint mouseData, flags, time; public IntPtr extra; }
   [StructLayout(LayoutKind.Sequential)] struct KBD { public uint vk, scan, flags, time; public IntPtr extra; }
-  [StructLayout(LayoutKind.Sequential)] struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam, lParam; public uint time; public POINT pt; }
+  [StructLayout(LayoutKind.Sequential)] struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam, lParam; public uint time; public POINT pt; public uint lPrivate; }
   [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
   [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECT rcMonitor, rcWork; public uint dwFlags; }
   [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowsHookEx(int id, LowLevelProc proc, IntPtr module, uint thread);
@@ -776,7 +776,7 @@ public class NovaClick {
     } catch (Exception) { }
   }
 }
-// The helper overlay: a small borderless Edge app window, always on top, without a taskbar button, docked top-centre.
+// Rectangular helper. Browser fullscreen content removes Edge's own title bar; Win32 controls the outer bounds.
 public class NovaHelper {
   [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
   [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int index, int value);
@@ -786,179 +786,236 @@ public class NovaHelper {
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(PT p, uint flags);
   [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
-  [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr h, IntPtr region, bool redraw);
-  [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int ellipseW, int ellipseH);
+  [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attribute, out RECT value, int size);
+  [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attribute, ref int value, int size);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   [StructLayout(LayoutKind.Sequential)] public struct PT { public int X, Y; }
   static readonly IntPtr TOPMOST = new IntPtr(-1);
-  const int GWL_STYLE = -16, GWL_EXSTYLE = -20;
-  const int WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000, WS_MINIMIZEBOX = 0x00020000, WS_MAXIMIZEBOX = 0x00010000, WS_SYSMENU = 0x00080000;
-  const int WS_EX_TOOLWINDOW = 0x00000080, WS_EX_APPWINDOW = 0x00040000;
-  const uint SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040;
-  static int generation = 0;
-
-  /// <summary>Scale of the display that contains this real-pixel point (1.0 = 96 dpi, 1.5 = 150%).</summary>
+  static int generation = 0, nl = 0, nt = 0, nr = 0, nb = 0, cx = 0, cy = 0;
+  static int vx = 0, vy = 0, vw = 0, vh = 0;
   public static double Scale(int x, int y) {
     try {
       uint dx, dy;
-      IntPtr monitor = MonitorFromPoint(new PT { X = x, Y = y }, 2);
-      if (GetDpiForMonitor(monitor, 0, out dx, out dy) == 0 && dx > 0) return dx / 96.0;
+      if (GetDpiForMonitor(MonitorFromPoint(new PT { X = x, Y = y }, 2), 0, out dx, out dy) == 0 && dx > 0) return dx / 96.0;
     } catch (Exception) { }
     return 1.0;
   }
-
-  /// <summary>No title bar or border, rounded corners where Windows 11 supports it, no taskbar button, always on top.</summary>
   public static void Setup(IntPtr h) {
-    int style = GetWindowLong(h, GWL_STYLE);
-    style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU);
-    SetWindowLong(h, GWL_STYLE, style);
-    // A window gets or loses its taskbar button when it is shown, so hide it while the style changes.
+    // Remove caption, sizing frame, controls and maximized state without leaving browser fullscreen mode.
+    int style = GetWindowLong(h, -16) & ~(0x00C00000 | 0x00040000 | 0x00020000 | 0x00010000 | 0x00080000 | 0x01000000);
+    SetWindowLong(h, -16, style);
     ShowWindow(h, 0);
-    int ex = GetWindowLong(h, GWL_EXSTYLE);
-    ex = (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW;
-    SetWindowLong(h, GWL_EXSTYLE, ex);
-    // No Windows-drawn frame colour, rounding or non-client rendering: the region is the only shape.
-    try { int none = unchecked((int)0xFFFFFFFE); DwmSetWindowAttribute(h, 34, ref none, 4); } catch (Exception) { }   // DWMWA_BORDER_COLOR = none
-    try { int square = 1; DwmSetWindowAttribute(h, 33, ref square, 4); } catch (Exception) { }                       // DWMWCP_DONOTROUND
-    try { int off = 1; DwmSetWindowAttribute(h, 2, ref off, 4); } catch (Exception) { }                              // DWMNCRP_DISABLED
-    ShowWindow(h, 4);   // SW_SHOWNOACTIVATE
+    SetWindowLong(h, -20, (GetWindowLong(h, -20) | 0x00000080) & ~0x00040000);
+    try { int square = 1; DwmSetWindowAttribute(h, 33, ref square, 4); } catch (Exception) { }
+    ShowWindow(h, 4);
   }
-
-  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out RECT r);
-  [DllImport("user32.dll")] static extern int GetWindowRgn(IntPtr h, IntPtr region);
-  [DllImport("gdi32.dll")] static extern IntPtr CreateRectRgn(int l, int t, int r, int b);
-  [DllImport("gdi32.dll")] static extern int GetRgnBox(IntPtr region, out RECT r);
-  [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
-  [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attribute, out RECT value, int size);
-  [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attribute, ref int value, int size);
-  [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr h, ref PT p);
-
-  // Edge draws its own title bar inside the window (and Windows adds a frame around it). The page must end up exactly
-  // the size we mean, and only a rounded rectangle over the page may be visible, so the window is made bigger by the
-  // chrome and the region starts below it. nl..nb: the Windows frame; cx, cy: Edge's own chrome (width, caption height).
-  static int nl = 0, nt = 0, nr = 0, nb = 0, cx = 0, cy = 0;
-  static int vx = 0, vy = 0, vw = 0, vh = 0, vr = 0;   // where the visible page is (real pixels)
-
-  /// <summary>Pure: for a visible page rectangle (x, y, w, h) and the chrome, returns { window x, y, width, height, region left, region top }.</summary>
-  public static int[] Layout(int x, int y, int w, int hgt, int frameL, int frameT, int frameR, int frameB, int chromeW, int chromeH) {
-    int left = chromeW / 2;
-    return new int[] { x - left - frameL, y - chromeH - frameT, w + chromeW + frameL + frameR, hgt + chromeH + frameT + frameB, frameL + left, frameT + chromeH };
+  // Pure: compensate only invisible Windows borders. Never enlarge or crop for browser chrome.
+  public static int[] Layout(int x, int y, int w, int hgt, int frameL, int frameT, int frameR, int frameB) {
+    return new int[] { x - frameL, y - frameT, w + frameL + frameR, hgt + frameT + frameB };
   }
-
-  /// <summary>Pure: the invisible border Windows adds around a window (about 7 to 8 px on Windows 10 and 11):
-  /// the window rectangle against the extended frame bounds. Returns { left, top, right, bottom }.</summary>
   public static int[] InvisibleBorders(int wl, int wt, int wr, int wb, int el, int et, int er, int eb) {
     return new int[] { Math.Max(0, el - wl), Math.Max(0, et - wt), Math.Max(0, wr - er), Math.Max(0, wb - eb) };
   }
-
-  /// <summary>Remember the invisible border Windows draws around the window and the chrome Edge draws (real pixels).
-  /// Call with the window shown. The page sits inside the extended frame bounds, below Edge's caption.</summary>
   public static void Configure(IntPtr h, int chromeW, int chromeH) {
-    RECT win, ext, client;
-    if (GetWindowRect(h, out win)) {
-      if (DwmGetWindowAttribute(h, 9, out ext, 16) == 0) {   // DWMWA_EXTENDED_FRAME_BOUNDS
-        int[] b = InvisibleBorders(win.Left, win.Top, win.Right, win.Bottom, ext.Left, ext.Top, ext.Right, ext.Bottom);
-        nl = b[0]; nt = b[1]; nr = b[2]; nb = b[3];
-      } else if (GetClientRect(h, out client)) {
-        PT origin = new PT { X = 0, Y = 0 };
-        ClientToScreen(h, ref origin);
-        nl = Math.Max(0, origin.X - win.Left); nt = Math.Max(0, origin.Y - win.Top);
-        nr = Math.Max(0, (win.Right - win.Left) - (client.Right - client.Left) - nl);
-        nb = Math.Max(0, (win.Bottom - win.Top) - (client.Bottom - client.Top) - nt);
-      }
+    RECT win, ext;
+    nl = nt = nr = nb = 0;
+    if (GetWindowRect(h, out win) && DwmGetWindowAttribute(h, 9, out ext, 16) == 0) {
+      int[] b = InvisibleBorders(win.Left, win.Top, win.Right, win.Bottom, ext.Left, ext.Top, ext.Right, ext.Bottom);
+      nl = b[0]; nt = b[1]; nr = b[2]; nb = b[3];
     }
     cx = Math.Max(0, chromeW); cy = Math.Max(0, chromeH);
-    keep = h;
-    if (keeper == null) {
-      keeper = new Thread(delegate () {
-        // Chromium or DWM may reset the region or the size now and then: check twice a second and put it back.
-        while (true) {
-          Thread.Sleep(500);
-          try { if (Alive(keep) && !animating && vw > 0) Reassert(keep); } catch (Exception) { }
-        }
-      });
-      keeper.IsBackground = true;
-      keeper.Start();
-    }
   }
-  static IntPtr keep = IntPtr.Zero;
-  static Thread keeper = null;
-  static volatile bool animating = false;
-  public static int Reasserted = 0;
-
-  static void Reassert(IntPtr h) {
-    int[] l = Layout(vx, vy, vw, vh, nl, nt, nr, nb, cx, cy);
-    RECT win, box;
-    IntPtr probe = CreateRectRgn(0, 0, 0, 0);
-    bool regionOk = false;
-    if (GetWindowRgn(h, probe) != 0 && GetRgnBox(probe, out box) != 0)
-      regionOk = box.Left == l[4] && box.Top == l[5] && box.Right == l[4] + vw + 1 && box.Bottom == l[5] + vh + 1;
-    DeleteObject(probe);
-    bool placed = GetWindowRect(h, out win) && win.Left == l[0] && win.Top == l[1] && win.Right - win.Left == l[2] && win.Bottom - win.Top == l[3];
-    if (!regionOk || !placed) { Reasserted++; Apply(h, vx, vy, vw, vh, vr, SWP_NOACTIVATE | SWP_SHOWWINDOW); }
-  }
-
-  /// <summary>What the window looks like to Windows, for the debug endpoint.</summary>
   public static string Debug(IntPtr h) {
     if (!Alive(h)) return "gone";
-    RECT win, ext, box;
+    RECT win, ext;
     GetWindowRect(h, out win);
-    string extText = DwmGetWindowAttribute(h, 9, out ext, 16) == 0 ? ext.Left + "," + ext.Top + "," + ext.Right + "," + ext.Bottom : "n/a";
-    IntPtr probe = CreateRectRgn(0, 0, 0, 0);
-    string rgn = GetWindowRgn(h, probe) != 0 && GetRgnBox(probe, out box) != 0 ? box.Left + "," + box.Top + "," + box.Right + "," + box.Bottom : "none";
-    DeleteObject(probe);
-    return "window=" + win.Left + "," + win.Top + "," + win.Right + "," + win.Bottom + " extended=" + extText + " region=" + rgn +
-      " frame=" + nl + "," + nt + "," + nr + "," + nb + " chrome=" + cx + "," + cy + " page=" + vx + "," + vy + "," + vw + "x" + vh + " r=" + vr + " reasserted=" + Reasserted;
+    string extended = DwmGetWindowAttribute(h, 9, out ext, 16) == 0 ? ext.Left + "," + ext.Top + "," + ext.Right + "," + ext.Bottom : "n/a";
+    return "window=" + win.Left + "," + win.Top + "," + win.Right + "," + win.Bottom + " extended=" + extended +
+      " shape=rectangle frame=" + nl + "," + nt + "," + nr + "," + nb + " chrome=" + cx + "," + cy +
+      " visible=" + vx + "," + vy + "," + vw + "x" + vh;
   }
-
-  /// <summary>Put the visible page at (x, y, w, hgt) and clip the window to a rounded rectangle over exactly that.</summary>
-  static void Apply(IntPtr h, int x, int y, int w, int hgt, int radius, uint flags) {
-    vx = x; vy = y; vw = w; vh = hgt; vr = radius;
-    int[] l = Layout(x, y, w, hgt, nl, nt, nr, nb, cx, cy);
+  static void Apply(IntPtr h, int x, int y, int w, int hgt, uint flags) {
+    vx = x; vy = y; vw = w; vh = hgt;
+    int[] l = Layout(x, y, w, hgt, nl, nt, nr, nb);
     SetWindowPos(h, TOPMOST, l[0], l[1], l[2], l[3], flags);
-    int r = Math.Max(0, Math.Min(radius, Math.Min(w, hgt) / 2));
-    // The region starts below Edge's caption: that part is neither drawn nor clickable, so it cannot be dragged either.
-    IntPtr region = CreateRoundRectRgn(l[4], l[5], l[4] + w + 1, l[5] + hgt + 1, r * 2, r * 2);
-    if (SetWindowRgn(h, region, true) == 0) { /* not applied: the caller keeps the rectangle */ }
   }
-
-  public static void Place(IntPtr h, int x, int y, int w, int hgt, int radius) {
-    generation++;
-    animating = false;
-    Apply(h, x, y, w, hgt, radius, SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+  public static void Place(IntPtr h, int x, int y, int w, int hgt) {
+    Interlocked.Increment(ref generation);
+    Apply(h, x, y, w, hgt, 0x0010 | 0x0020 | 0x0040);
   }
-
   public static bool Alive(IntPtr h) { return h != IntPtr.Zero && IsWindow(h); }
-
-  /// <summary>Move, resize and re-round the visible page smoothly on a background thread, easing out with a slight
-  /// overshoot (spring-like, ms is about 240); a newer call takes over.</summary>
-  public static void Animate(IntPtr h, int x, int y, int w, int hgt, int radius, int ms) {
-    int fromX = vx, fromY = vy, fromW = vw, fromH = vh, fromR = vr;
-    if (fromW <= 0) { Place(h, x, y, w, hgt, radius); return; }
-    int mine = ++generation;
-    animating = true;
+  public static void Animate(IntPtr h, int x, int y, int w, int hgt, int ms) {
+    int fromX = vx, fromY = vy, fromW = vw, fromH = vh;
+    if (fromW <= 0 || ms <= 0) { Place(h, x, y, w, hgt); return; }
+    int mine = Interlocked.Increment(ref generation);
     var worker = new Thread(delegate () {
       int steps = Math.Max(1, ms / 16);
       for (int i = 1; i <= steps; i++) {
-        if (generation != mine) return;
-        double t = (double)i / steps;
-        double c = 1.70158, u = t - 1;
-        t = 1 + (c + 1) * u * u * u + c * u * u;   // ease out back: overshoots a little, settles at 1
+        if (generation != mine || !Alive(h)) return;
+        double u = 1 - (double)i / steps, t = 1 - u * u * u;
         Apply(h, fromX + (int)((x - fromX) * t), fromY + (int)((y - fromY) * t),
-          Math.Max(40, fromW + (int)((w - fromW) * t)), Math.Max(24, fromH + (int)((hgt - fromH) * t)),
-          Math.Max(0, fromR + (int)((radius - fromR) * t)), SWP_NOACTIVATE | SWP_SHOWWINDOW);
+          Math.Max(1, fromW + (int)((w - fromW) * t)), Math.Max(1, fromH + (int)((hgt - fromH) * t)), 0x0010 | 0x0040);
         Thread.Sleep(16);
       }
-      if (generation == mine) { Apply(h, x, y, w, hgt, radius, SWP_NOACTIVATE | SWP_SHOWWINDOW); animating = false; }
+      if (generation == mine) Apply(h, x, y, w, hgt, 0x0010 | 0x0040);
     });
     worker.IsBackground = true;
     worker.Start();
   }
+}
 
-  public static string Describe(IntPtr h) {
-    RECT r;
-    if (!Alive(h) || !GetWindowRect(h, out r)) return "gone";
-    return r.Left + "," + r.Top + "," + (r.Right - r.Left) + "x" + (r.Bottom - r.Top) + " exstyle=0x" + GetWindowLong(h, GWL_EXSTYLE).ToString("x");
+// UI callbacks only enqueue actions. PowerShell consumes them on its own thread.
+public class NovaControls {
+  [StructLayout(LayoutKind.Sequential)] struct MSG { public IntPtr Hwnd; public uint Message; public UIntPtr WParam; public IntPtr LParam; public uint Time; public int X, Y; public uint Private; }
+  [DllImport("user32.dll", SetLastError = true)] static extern bool RegisterHotKey(IntPtr h, int id, uint modifiers, uint key);
+  [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr h, int id);
+  [DllImport("user32.dll")] static extern int GetMessage(out MSG msg, IntPtr h, uint min, uint max);
+  [DllImport("user32.dll")] static extern bool TranslateMessage(ref MSG msg);
+  [DllImport("user32.dll")] static extern IntPtr DispatchMessage(ref MSG msg);
+  [DllImport("user32.dll")] static extern bool PostThreadMessage(uint id, uint msg, UIntPtr w, IntPtr l);
+  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  static readonly string[] names = { "open", "speak", "mute", "desktop" };
+  static readonly System.Collections.Concurrent.ConcurrentQueue<string> actions = new System.Collections.Concurrent.ConcurrentQueue<string>();
+  static readonly object gate = new object();
+  static string[] chords = { "Ctrl+Alt+N", "Ctrl+Alt+Space", "Ctrl+Alt+M", "Ctrl+Alt+D" };
+  static string[] warnings = new string[0];
+  static Thread thread;
+  static readonly ManualResetEvent bindingsReady = new ManualResetEvent(false);
+  static uint threadId;
+  static bool paused;
+  static object tray;
+  public static string Take() { string value; return actions.TryDequeue(out value) ? value : null; }
+  public static string[] Warnings() { lock (gate) return (string[])warnings.Clone(); }
+  // Pure: only explicit modifiers plus a single letter, digit, Space or F1-F24. Empty disables a binding.
+  public static uint[] ParseChord(string chord) {
+    if (String.IsNullOrWhiteSpace(chord)) return new uint[] { 0, 0 };
+    string[] parts = chord.Split('+');
+    uint modifiers = 0, key = 0;
+    foreach (string item in parts) {
+      string token = item.Trim().ToUpperInvariant(); uint bit = 0;
+      if (token == "CTRL") bit = 2; else if (token == "ALT") bit = 1; else if (token == "SHIFT") bit = 4; else if (token == "WIN") bit = 8;
+      if (bit != 0) { if ((modifiers & bit) != 0) throw new ArgumentException("Duplicate shortcut modifier"); modifiers |= bit; continue; }
+      if (key != 0) throw new ArgumentException("Shortcut must contain one key");
+      if (token == "SPACE") key = 32;
+      else if (token.Length == 1 && ((token[0] >= 'A' && token[0] <= 'Z') || (token[0] >= '0' && token[0] <= '9'))) key = token[0];
+      else {
+        int number;
+        if (!token.StartsWith("F") || !Int32.TryParse(token.Substring(1), out number) || number < 1 || number > 24) throw new ArgumentException("Unsupported shortcut key");
+        key = (uint)(111 + number);
+      }
+    }
+    if (key == 0 || modifiers == 0) throw new ArgumentException("Shortcut requires a modifier and a key");
+    return new uint[] { modifiers, key };
+  }
+  public static void Configure(string open, string speak, string mute, string desktop) {
+    string[] next = { open, speak, mute, desktop };
+    var seen = new HashSet<string>();
+    foreach (string chord in next) { uint[] parsed = ParseChord(chord); if (parsed[1] != 0 && !seen.Add(parsed[0] + ":" + parsed[1])) throw new ArgumentException("Duplicate shortcuts"); }
+    lock (gate) chords = next;
+    if (threadId != 0) {
+      bindingsReady.Reset();
+      if (!PostThreadMessage(threadId, 0x8001, UIntPtr.Zero, IntPtr.Zero) || !bindingsReady.WaitOne(1500)) {
+        lock (gate) warnings = new string[] { "Shortcut registration did not complete" };
+      }
+    }
+  }
+  static void Bind() {
+    var failed = new List<string>();
+    string[] selected; lock (gate) selected = (string[])chords.Clone();
+    for (int i = 0; i < names.Length; i++) {
+      UnregisterHotKey(IntPtr.Zero, i + 1);
+      uint[] parsed = ParseChord(selected[i]);
+      if (parsed[1] != 0 && !RegisterHotKey(IntPtr.Zero, i + 1, parsed[0] | 0x4000, parsed[1])) failed.Add(names[i] + ": " + selected[i] + " (Windows error " + Marshal.GetLastWin32Error() + ")");
+    }
+    lock (gate) warnings = failed.ToArray();
+    bindingsReady.Set();
+  }
+  [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr icon);
+  static object statusIcon;
+  static Type DrawingType(string name) {
+    Type type = Type.GetType("System.Drawing." + name + ", System.Drawing");
+    if (type == null) type = Type.GetType("System.Drawing." + name + ", System.Drawing.Common", true);
+    return type;
+  }
+  static void TrayState() {
+    if (tray == null) return;
+    tray.GetType().GetProperty("Text").SetValue(tray, paused ? "NOVA — gepauzeerd" : "NOVA — actief", null);
+    Type bitmapType = DrawingType("Bitmap"), colorType = DrawingType("Color"), iconType = DrawingType("Icon");
+    object bitmap = Activator.CreateInstance(bitmapType, new object[] { 16, 16 });
+    IntPtr handle = IntPtr.Zero;
+    try {
+      var rgb = colorType.GetMethod("FromArgb", new Type[] { typeof(int), typeof(int), typeof(int) });
+      object navy = rgb.Invoke(null, new object[] { 12, 24, 43 });
+      object accent = rgb.Invoke(null, paused ? new object[] { 245, 180, 73 } : new object[] { 80, 225, 206 });
+      var pixel = bitmapType.GetMethod("SetPixel", new Type[] { typeof(int), typeof(int), colorType });
+      // Original geometric artwork: navy tile, accent ring and one status dot.
+      for (int y = 0; y < 16; y++) for (int x = 0; x < 16; x++) {
+        int ring = (x - 6) * (x - 6) + (y - 6) * (y - 6);
+        bool lit = (ring >= 12 && ring <= 25) || ((x - 12) * (x - 12) + (y - 12) * (y - 12) <= 5);
+        pixel.Invoke(bitmap, new object[] { x, y, lit ? accent : navy });
+      }
+      handle = (IntPtr)bitmapType.GetMethod("GetHicon").Invoke(bitmap, null);
+      object borrowed = iconType.GetMethod("FromHandle").Invoke(null, new object[] { handle });
+      object next = iconType.GetMethod("Clone").Invoke(borrowed, null);
+      tray.GetType().GetProperty("Icon").SetValue(tray, next, null);
+      if (statusIcon != null) ((IDisposable)statusIcon).Dispose();
+      statusIcon = next;
+    } finally {
+      if (handle != IntPtr.Zero) DestroyIcon(handle);
+      ((IDisposable)bitmap).Dispose();
+    }
+  }
+  static void MakeTray() {
+    // Reflection keeps WinForms dependencies out of the cross-platform C# compile check.
+    Type notifyType = Type.GetType("System.Windows.Forms.NotifyIcon, System.Windows.Forms", true);
+    Type menuType = Type.GetType("System.Windows.Forms.ContextMenuStrip, System.Windows.Forms", true);
+    tray = Activator.CreateInstance(notifyType);
+    object menu = Activator.CreateInstance(menuType);
+    object items = menuType.GetProperty("Items").GetValue(menu, null);
+    string[] labels = { "Openen", "Pauzeren / hervatten", "Instellingen", "Afsluiten" };
+    string[] commands = { "open", "pause", "settings", "exit" };
+    for (int i = 0; i < labels.Length; i++) {
+      string command = commands[i];
+      object item = items.GetType().GetMethod("Add", new Type[] { typeof(string) }).Invoke(items, new object[] { labels[i] });
+      item.GetType().GetEvent("Click").AddEventHandler(item, new EventHandler(delegate { actions.Enqueue(command); }));
+    }
+    notifyType.GetProperty("ContextMenuStrip").SetValue(tray, menu, null);
+    notifyType.GetEvent("DoubleClick").AddEventHandler(tray, new EventHandler(delegate { actions.Enqueue("open"); }));
+    TrayState();
+    notifyType.GetProperty("Visible").SetValue(tray, true, null);
+  }
+  public static void SetPaused(bool value) { paused = value; if (threadId != 0) PostThreadMessage(threadId, 0x8002, UIntPtr.Zero, IntPtr.Zero); }
+  public static void Stop() { if (threadId != 0) PostThreadMessage(threadId, 0x0012, UIntPtr.Zero, IntPtr.Zero); }
+  public static void Start() {
+    if (thread != null) return;
+    thread = new Thread(delegate () {
+      threadId = GetCurrentThreadId();
+      try {
+        Bind();
+        try { MakeTray(); } catch (Exception e) {
+          lock (gate) { var failures = new List<string>(warnings); failures.Add("Tray: " + e.Message); warnings = failures.ToArray(); }
+        }
+        MSG message;
+        while (GetMessage(out message, IntPtr.Zero, 0, 0) > 0) {
+          if (message.Message == 0x0312) { int id = (int)message.WParam.ToUInt64(); if (id >= 1 && id <= names.Length) actions.Enqueue(names[id - 1]); }
+          else if (message.Message == 0x8001) Bind();
+          else if (message.Message == 0x8002) {
+            try { TrayState(); } catch (Exception e) {
+              lock (gate) { var failures = new List<string>(warnings); failures.Add("Tray status: " + e.Message); warnings = failures.ToArray(); }
+            }
+          }
+          TranslateMessage(ref message); DispatchMessage(ref message);
+        }
+      } catch (Exception e) { lock (gate) warnings = new string[] { "Agent controls: " + e.Message }; }
+      finally {
+        for (int i = 1; i <= names.Length; i++) UnregisterHotKey(IntPtr.Zero, i);
+        if (tray != null) ((IDisposable)tray).Dispose();
+        if (statusIcon != null) ((IDisposable)statusIcon).Dispose();
+        threadId = 0;
+      }
+    });
+    thread.SetApartmentState(ApartmentState.STA); thread.IsBackground = true; thread.Start();
+    bindingsReady.WaitOne(1500);
   }
 }
 
@@ -1122,14 +1179,13 @@ function Restore-Wallpapers {
 
 # ---------- mode: wallpaper, helper overlay, or both ----------
 # The mode comes from agent.json ("mode") until NOVA sets it at runtime (POST /v1/mode); the runtime choice is kept
-# in mode.json and survives a restart. The helper is a small Edge app window floating just below the top edge of one display.
+# in mode.json and survives a restart. The rectangular helper touches the top edge of the selected display.
 $modeStore = Join-Path $PSScriptRoot 'mode.json'
-$helperCollapsed = @(340, 100, 50)    # CSS pixels (width, height, bottom corner radius), scaled to the display
-$helperExpanded = @(420, 360, 30)
+$helperSizes = @{ compact = @(360, 44); overview = @(640, 180); notifications = @(640, 180); weather = @(640, 180); lists = @(640, 180); chat = @(640, 340); confirmation = @(640, 170) }
 $helperPort = 9340    # DevTools port of the helper window, 127.0.0.1 only
 $script:helper = $null
 function Get-ModeState {
-  $state = @{ mode = 'wallpaper'; display = 0; url = '' }
+  $state = @{ mode = 'wallpaper'; display = 0; url = ''; view = 'compact'; hotkeys = @{ open = 'Ctrl+Alt+N'; speak = 'Ctrl+Alt+Space'; mute = 'Ctrl+Alt+M'; desktop = 'Ctrl+Alt+D' } }
   if (@('wallpaper', 'helper', 'both') -contains [string]$config.mode) { $state.mode = [string]$config.mode }
   if ($config.helperDisplay) { $state.display = [int]$config.helperDisplay }
   if ($config.novaUrl -match '^https?://[^\s/]+$') { $state.url = [string]$config.novaUrl }
@@ -1138,10 +1194,100 @@ function Get-ModeState {
       $saved = Get-Content -Raw $modeStore | ConvertFrom-Json
       if (@('wallpaper', 'helper', 'both') -contains [string]$saved.mode) { $state.mode = [string]$saved.mode }
       $state.display = [int]$saved.display
+      if (@('compact', 'overview', 'chat', 'notifications', 'weather', 'lists') -contains [string]$saved.view) { $state.view = [string]$saved.view }
+      if ($saved.hotkeys) { $state.hotkeys = ConvertTo-HelperHotkeys $saved.hotkeys }
       if ([string]$saved.url -match '^https?://[^\s/]+$') { $state.url = [string]$saved.url }
     } catch { }
   }
   return $state
+}
+# Validate a complete set before persisting or registering any binding.
+function ConvertTo-HelperHotkeys($value) {
+  $result = @{}; $seen = @{}
+  foreach ($name in @('open', 'speak', 'mute', 'desktop')) {
+    if ($null -eq $value.$name) { throw "Missing shortcut: $name" }
+    $chord = [string]$value.$name
+    $parsed = [NovaControls]::ParseChord($chord)
+    if ($parsed[1] -ne 0) {
+      $identity = "$($parsed[0]):$($parsed[1])"
+      if ($seen.ContainsKey($identity)) { throw 'Duplicate shortcuts' }
+      $seen[$identity] = $true
+    }
+    $result[$name] = $chord
+  }
+  return $result
+}
+function Get-HelperPreferences {
+  $state = Get-ModeState
+  return @{ hotkeys = $state.hotkeys; warnings = @([NovaControls]::Warnings()); paused = [bool]$script:agentPaused; view = $state.view; display = $state.display }
+}
+function Set-HelperPreferences($body) {
+  $state = Get-ModeState
+  if ($body.hotkeys) {
+    $validated = ConvertTo-HelperHotkeys $body.hotkeys
+    [NovaControls]::Configure($validated.open, $validated.speak, $validated.mute, $validated.desktop)
+    $state.hotkeys = $validated
+    Save-ModeState $state
+  }
+}
+# Notification content remains data. Only validated fields enter a JSON-encoded CustomEvent.
+function ConvertTo-HelperNotification($value) {
+  if ($null -eq $value -or -not ($value.seq -is [int] -or $value.seq -is [long] -or $value.seq -is [double] -or $value.seq -is [decimal])) { throw 'Notification sequence must be a number' }
+  $sequence = [double]$value.seq
+  if ([double]::IsNaN($sequence) -or [double]::IsInfinity($sequence) -or $sequence -le 0 -or $sequence -gt 9007199254740991 -or [Math]::Floor($sequence) -ne $sequence) { throw 'Invalid notification sequence' }
+  if (@('info', 'warning', 'critical') -notcontains [string]$value.severity) { throw 'Invalid notification severity' }
+  if ($value.title -isnot [string] -or [string]::IsNullOrWhiteSpace($value.title) -or $value.title.Length -gt 120) { throw 'Invalid notification title' }
+  if ($null -ne $value.detail -and ($value.detail -isnot [string] -or $value.detail.Length -gt 240)) { throw 'Invalid notification detail' }
+  if ($value.at -isnot [string] -or $value.at.Length -gt 40 -or $value.at -notmatch '^\d{4}-\d{2}-\d{2}T') { throw 'Invalid notification timestamp' }
+  $timestamp = [DateTimeOffset]::MinValue
+  if (-not [DateTimeOffset]::TryParse($value.at, [ref]$timestamp)) { throw 'Invalid notification timestamp' }
+  return @{ seq = [long]$sequence; severity = [string]$value.severity; title = [string]$value.title; detail = [string]$value.detail; at = [string]$value.at }
+}
+function Send-HelperNotification($value) {
+  $event = ConvertTo-HelperNotification $value
+  if ($script:agentPaused) { return @{ delivered = $false; reason = 'paused' } }
+  $state = Get-ModeState
+  if (@('helper', 'both') -notcontains $state.mode) { return @{ delivered = $false; reason = 'helper-disabled' } }
+  if (-not $state.url) { throw 'The NOVA address is not known' }
+  if (-not $script:helper -or -not [NovaHelper]::Alive([IntPtr]$script:helper.handle)) { Open-Helper $state.url ([int]$state.display) }
+  $notificationView = if ($script:helper.view -eq 'confirmation') { 'confirmation' } else { 'overview' }
+  Set-HelperSize $true $notificationView $false $false
+  $json = $event | ConvertTo-Json -Compress
+  # Buffer first, then dispatch. The page consumes this bounded queue after mounting, including on a fresh launch.
+  $expression = "(() => { if (document.readyState !== 'complete' || location.pathname !== '/helper') return false; const event = $json; window.__novaHelperNotifications = [...(window.__novaHelperNotifications || []).filter(item => item.seq !== event.seq), event].slice(-20); window.dispatchEvent(new CustomEvent('nova-helper-notification',{detail:event})); return true; })()"
+  $payload = @{ expression = $expression; returnByValue = $true } | ConvertTo-Json -Compress
+  for ($attempt = 0; $attempt -lt 5; $attempt++) {
+    try {
+      $targets = @(Invoke-RestMethod -Uri "http://127.0.0.1:$helperPort/json/list" -TimeoutSec 1)
+      $page = $targets | Where-Object { $_.type -eq 'page' -and $_.webSocketDebuggerUrl } | Select-Object -First 1
+      if (-not $page) { throw 'The helper page is not ready' }
+      $reply = ConvertFrom-Json ([NovaCdp]::Call([string]$page.webSocketDebuggerUrl, 'Runtime.evaluate', $payload, 1500))
+      if ($reply.result.exceptionDetails -or $reply.result.result.value -ne $true) { throw 'Notification dispatch failed' }
+      return @{ delivered = $true; seq = $event.seq }
+    } catch { if ($attempt -eq 4) { throw }; Start-Sleep -Milliseconds 100 }
+  }
+}
+# Actions come only from native controls or authenticated requests. Never evaluate arbitrary user-provided script.
+function Invoke-HelperControl([string]$action) {
+  if ($action -eq 'exit') { $listener.Stop(); [NovaControls]::Stop(); return }
+  if ($action -eq 'desktop') {
+    $shell = New-Object -ComObject Shell.Application
+    $shell.ToggleDesktop()
+    return
+  }
+  if ($action -eq 'pause') { $script:agentPaused = -not $script:agentPaused; [NovaControls]::SetPaused($script:agentPaused) }
+  $state = Get-ModeState
+  if (-not $state.url) { throw 'Set the NOVA address before opening the helper' }
+  if (-not $script:helper -or -not [NovaHelper]::Alive([IntPtr]$script:helper.handle)) { Open-Helper $state.url ([int]$state.display) }
+  Set-HelperSize $false 'compact' $false $false
+  if ($action -eq 'open') { return }
+  $targets = @(Invoke-RestMethod -Uri "http://127.0.0.1:$helperPort/json/list" -TimeoutSec 2)
+  $page = $targets | Where-Object { $_.type -eq 'page' -and $_.webSocketDebuggerUrl } | Select-Object -First 1
+  if (-not $page) { throw 'The helper page is not ready' }
+  $detail = @{ action = $action; paused = [bool]$script:agentPaused } | ConvertTo-Json -Compress
+  $expression = "window.dispatchEvent(new CustomEvent('nova-helper-action',{detail:$detail}))"
+  $payload = @{ expression = $expression; returnByValue = $true } | ConvertTo-Json -Compress
+  [void][NovaCdp]::Call([string]$page.webSocketDebuggerUrl, 'Runtime.evaluate', $payload, 3000)
 }
 function Save-ModeState($state) { $state | ConvertTo-Json -Depth 3 | Set-Content -Path $modeStore -Encoding UTF8 }
 function Test-WallpaperWanted { return @('wallpaper', 'both') -contains (Get-ModeState).mode }
@@ -1150,23 +1296,29 @@ function Get-HelperScreen([int]$display) {
   if ($display -ge 1 -and $display -le $screens.Count) { return $screens[$display - 1] }
   return [System.Windows.Forms.Screen]::PrimaryScreen
 }
-# Window rectangle in real pixels: floating 8 CSS pixels below the top edge of the display (not the work area), centred,
-# sized per display scale. r is the corner radius (all four corners).
-function Get-HelperRect($screen, [bool]$expanded) {
+# Pure geometry in real pixels. A hidden panel retains a 3 CSS-pixel strip at the display's top edge.
+function Get-HelperGeometry($bounds, [double]$scale, [string]$view = 'compact', [bool]$hidden = $false) {
+  if (-not $helperSizes.ContainsKey($view)) { throw 'Unknown helper view' }
+  if ($scale -le 0 -or [double]::IsNaN($scale) -or [double]::IsInfinity($scale)) { throw 'Invalid display scale' }
+  $size = $helperSizes[$view]
+  $w = [Math]::Min([int][Math]::Round($size[0] * $scale), $bounds.Width)
+  $h = [Math]::Min([int][Math]::Round($size[1] * $scale), $bounds.Height)
+  $y = $bounds.Y
+  if ($hidden) { $h = [Math]::Min($h, [Math]::Max(1, [int][Math]::Round(3 * $scale))) }
+  return @{ x = [int][Math]::Round($bounds.X + ($bounds.Width - $w) / 2); y = [int]$y; w = $w; h = $h; scale = $scale }
+}
+function Get-HelperRect($screen, [string]$view = 'compact', [bool]$hidden = $false) {
   $b = $screen.Bounds
-  $scale = [NovaHelper]::Scale([int]($b.X + $b.Width / 2), [int]($b.Y + 8))
-  $size = if ($expanded) { $helperExpanded } else { $helperCollapsed }
-  $w = [Math]::Min([int]($size[0] * $scale), $b.Width)
-  $h = [Math]::Min([int]($size[1] * $scale), $b.Height)
-  return @{ x = [int]($b.X + ($b.Width - $w) / 2); y = [int]($b.Y + 8 * $scale); w = $w; h = $h; r = [int]($size[2] * $scale); scale = $scale }
+  $scale = [NovaHelper]::Scale([int]($b.X + $b.Width / 2), [int]$b.Y)
+  return Get-HelperGeometry $b $scale $view $hidden
 }
 # Edge's own chrome around the page, in real pixels. measured is { w, h } in CSS pixels from the page
-# (outerWidth - innerWidth, outerHeight - innerHeight) or $null; without it a title bar of 32 px at 100% is assumed.
+# (outerWidth - innerWidth, outerHeight - innerHeight). Fullscreen browser content should report no chrome.
 function Get-HelperChrome($measured, [double]$scale) {
   if ($measured -and $measured.h -ge 0 -and $measured.h -le 120 -and $measured.w -ge 0 -and $measured.w -le 60) {
     return @{ cx = [int][Math]::Round($measured.w * $scale); cy = [int][Math]::Round($measured.h * $scale) }
   }
-  return @{ cx = 0; cy = [int][Math]::Round(32 * $scale) }
+  return @{ cx = 0; cy = 0 }
 }
 # Asks the helper page how much room Edge's caption takes (CSS pixels). $null when the page does not answer.
 function Measure-HelperChrome([double]$scale) {
@@ -1199,13 +1351,16 @@ function Open-Helper([string]$baseUrl, [int]$display) {
   if (-not $edgeExe) { throw 'Microsoft Edge is not installed on this PC' }
   if ($baseUrl -notmatch '^https?://[^\s/]+$') { throw 'Invalid NOVA address' }
   $screen = Get-HelperScreen $display
-  $rect = Get-HelperRect $screen $false
+  $view = (Get-ModeState).view
+  $rect = Get-HelperRect $screen $view
   $profileDir = Join-Path $PSScriptRoot 'helper-profile\nova-helper'
   New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
   # Its own profile; the page may use the microphone and play speech without a click (it answers "Hey NOVA").
-  # The DevTools port (this PC only) is used to measure Edge's own caption, which Windows styles cannot remove.
+  # Fullscreen kiosk content has no browser caption. The native window is then sized as a rectangular panel.
+  # See https://learn.microsoft.com/en-us/deployedge/microsoft-edge-configure-kiosk-mode.
+  # Native resizing in this mode needs verification on Windows; CDP reports any unexpected remaining chrome.
   Start-Process -FilePath $edgeExe -ArgumentList (@(
-    "--app=$baseUrl/helper", "--user-data-dir=`"$profileDir`"",
+    '--kiosk', "$baseUrl/helper?view=$view", '--edge-kiosk-type=fullscreen', "--user-data-dir=`"$profileDir`"",
     "--window-position=$($rect.x),$($rect.y)", "--window-size=$($rect.w),$($rect.h)",
     '--no-first-run', '--no-default-browser-check', '--disable-extensions',
     '--disable-session-crashed-bubble', '--hide-crash-restore-bubble',
@@ -1228,27 +1383,42 @@ function Open-Helper([string]$baseUrl, [int]$display) {
   # First with the default chrome, so something sensible shows at once; then measure the real one once the page is up.
   $default = Get-HelperChrome $null $rect.scale
   [NovaHelper]::Configure($handle, $default.cx, $default.cy)
-  [NovaHelper]::Place($handle, $rect.x, $rect.y, $rect.w, $rect.h, $rect.r)
-  $script:helper = @{ handle = $handle; device = $screen.DeviceName; display = $display; expanded = $false }
+  [NovaHelper]::Place($handle, $rect.x, $rect.y, $rect.w, $rect.h)
+  $script:helper = @{ handle = $handle; device = $screen.DeviceName; display = $display; expanded = ($view -ne 'compact'); view = $view; hidden = $false }
   $measured = $null
   for ($i = 0; $i -lt 16 -and -not $measured; $i++) { $measured = Measure-HelperChrome $rect.scale; if (-not $measured) { Start-Sleep -Milliseconds 500 } }
   $chrome = Get-HelperChrome $measured $rect.scale
   [NovaHelper]::Configure($handle, $chrome.cx, $chrome.cy)
-  [NovaHelper]::Place($handle, $rect.x, $rect.y, $rect.w, $rect.h, $rect.r)
+  [NovaHelper]::Place($handle, $rect.x, $rect.y, $rect.w, $rect.h)
 }
-# Grow the helper window for an answer or a question, or shrink it back to the pill (the page asks for it).
-function Set-HelperSize([bool]$expanded) {
-  if (-not $script:helper -or -not [NovaHelper]::Alive([IntPtr]$script:helper.handle)) { throw 'The helper is not open' }
-  $screen = Get-HelperScreen ([int]$script:helper.display)
-  $rect = Get-HelperRect $screen $expanded
-  # Measure again: the chrome can change (a different display scale, a window state).
-  $measured = Measure-HelperChrome $rect.scale
-  if ($measured) {
-    $chrome = Get-HelperChrome $measured $rect.scale
-    [NovaHelper]::Configure([IntPtr]$script:helper.handle, $chrome.cx, $chrome.cy)
+# Pure: transient compact/confirmation/hidden states never replace the user's last meaningful view.
+function Get-PersistedHelperView([string]$current, [string]$requested, [bool]$hidden) {
+  if (-not $helperSizes.ContainsKey($requested)) { throw 'Unknown helper view' }
+  if (-not $hidden -and @('compact', 'confirmation') -notcontains $requested) { return $requested }
+  return $current
+}
+# Named views; the legacy expanded boolean still maps to chat/compact.
+function Set-HelperSize([bool]$expanded, [string]$view = '', [bool]$hidden = $false, [bool]$reducedMotion = $false) {
+  if (-not $view) { $view = if ($expanded) { 'chat' } else { 'compact' } }
+  if (-not $helperSizes.ContainsKey($view)) { throw 'Unknown helper view' }
+  if (-not $script:helper -or -not [NovaHelper]::Alive([IntPtr]$script:helper.handle)) {
+    $state = Get-ModeState
+    if (@('helper', 'both') -notcontains $state.mode) { throw 'The helper is disabled' }
+    Open-Helper $state.url ([int]$state.display)
   }
-  [NovaHelper]::Animate([IntPtr]$script:helper.handle, $rect.x, $rect.y, $rect.w, $rect.h, $rect.r, 240)
-  $script:helper.expanded = $expanded
+  $screen = Get-HelperScreen ([int]$script:helper.display)
+  $rect = Get-HelperRect $screen $view $hidden
+  $duration = if ($reducedMotion) { 0 } else { 200 }
+  [NovaHelper]::Animate([IntPtr]$script:helper.handle, $rect.x, $rect.y, $rect.w, $rect.h, $duration)
+  $script:helper.expanded = $view -ne 'compact'
+  $script:helper.view = $view
+  $script:helper.hidden = $hidden
+  $state = Get-ModeState
+  $persistedView = Get-PersistedHelperView $state.view $view $hidden
+  if ($persistedView -ne $state.view) {
+    $state.view = $persistedView
+    Save-ModeState $state
+  }
 }
 # Make the running windows match the mode: wallpaper windows from wallpaper.json, and the helper.
 function Apply-Mode {
@@ -1271,7 +1441,9 @@ function Set-AgentMode([string]$mode, $display, [string]$baseUrl) {
   if ($baseUrl -notmatch '^https?://[^\s/]+$') { throw 'Invalid NOVA address' }
   $n = if ($null -ne $display -and "$display" -ne '') { [int]$display } else { 0 }
   if ($n -lt 0 -or $n -gt [System.Windows.Forms.Screen]::AllScreens.Count) { throw "There is no display $n (this PC has $([System.Windows.Forms.Screen]::AllScreens.Count))" }
-  Save-ModeState @{ mode = $mode; display = $n; url = $baseUrl }
+  $state = Get-ModeState
+  $state.mode = $mode; $state.display = $n; $state.url = $baseUrl
+  Save-ModeState $state
   Apply-Mode
 }
 
@@ -1654,8 +1826,21 @@ $listener.Start()
 Write-Host "Jarvis agent listening on port $Port"
 try { if (-not [NovaClick]::Start()) { Write-Host 'Click hook not available' } } catch { Write-Host "Click hook: $($_.Exception.Message)" }
 try { Apply-Mode } catch { Write-Host "Mode: $($_.Exception.Message)" }
+$script:agentPaused = $false
+try {
+  $keys = (Get-ModeState).hotkeys
+  [NovaControls]::Configure($keys.open, $keys.speak, $keys.mute, $keys.desktop)
+  [NovaControls]::Start()
+} catch { Write-Host "Agent controls: $($_.Exception.Message)" }
+$pendingRequest = $listener.GetContextAsync()
 while ($listener.IsListening) {
-  $ctx = $listener.GetContext()
+  while ($null -ne ($action = [NovaControls]::Take())) {
+    try { Invoke-HelperControl $action } catch { Write-Host "Helper control: $($_.Exception.Message)" }
+  }
+  if (-not $listener.IsListening) { break }
+  if (-not $pendingRequest.IsCompleted) { Start-Sleep -Milliseconds 100; continue }
+  $ctx = $pendingRequest.GetAwaiter().GetResult()
+  $pendingRequest = $listener.GetContextAsync()
   try {
     $remote = $ctx.Request.RemoteEndPoint.Address.ToString()
     if ($allowedIps.Count -gt 0 -and $allowedIps -notcontains $remote) { Send $ctx 403 @{ ok = $false; error = 'Source not allowed' }; continue }
@@ -1665,7 +1850,7 @@ while ($listener.IsListening) {
       '/v1/status' {
         $running = @($apps.Keys | Where-Object { $p = $apps[$_].process; $p -and (Get-Process -Name $p -ErrorAction SilentlyContinue) })
         $os = Get-CimInstance Win32_OperatingSystem
-        Send $ctx 200 @{ ok = $true; hostname = $env:COMPUTERNAME; user = $env:USERNAME; uptimeHours = [Math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1); features = @('wallpaper', 'browser', 'helper'); mode = (Get-ModeState).mode; helperDisplay = (Get-ModeState).display; helperOpen = [bool]($script:helper -and [NovaHelper]::Alive([IntPtr]$script:helper.handle)); agent = $agentVersion; apps = @($apps.Keys | Sort-Object); running = $running }
+        Send $ctx 200 @{ ok = $true; hostname = $env:COMPUTERNAME; user = $env:USERNAME; uptimeHours = [Math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1); features = @('wallpaper', 'browser', 'helper'); mode = (Get-ModeState).mode; helperDisplay = (Get-ModeState).display; helperView = (Get-ModeState).view; helperWarnings = @([NovaControls]::Warnings()); agentPaused = [bool]$script:agentPaused; helperOpen = [bool]($script:helper -and [NovaHelper]::Alive([IntPtr]$script:helper.handle)); agent = $agentVersion; apps = @($apps.Keys | Sort-Object); running = $running }
       }
       '/v1/open-app' {
         $app = Get-App (Read-Body $ctx).app
@@ -1699,23 +1884,34 @@ while ($listener.IsListening) {
         Send $ctx 200 @{ ok = $true; agent = $agentVersion; build = $os.BuildNumber; version = $os.Version; forward = [NovaClick]::Forward; corrections = [NovaDesk]::Corrections; input = [NovaClick]::State(); placed = $details }
       }
       '/v1/helper-debug' {
-        Send $ctx 200 @{ ok = $true; agent = $agentVersion; helper = $(if ($script:helper) { [NovaHelper]::Debug([IntPtr]$script:helper.handle) } else { 'not open' }) }
+        Send $ctx 200 @{ ok = $true; agent = $agentVersion; helper = $(if ($script:helper) { [NovaHelper]::Debug([IntPtr]$script:helper.handle) } else { 'not open' }); view = $(if ($script:helper) { $script:helper.view } else { $null }); display = (Get-ModeState).display }
       }
       '/v1/displays' {
         $m = Get-ModeState
-        Send $ctx 200 @{ ok = $true; displays = @(Get-Displays); mode = $m.mode; helperDisplay = $m.display }
+        Send $ctx 200 @{ ok = $true; displays = @(Get-Displays); mode = $m.mode; helperDisplay = $m.display; helperView = $m.view }
       }
       '/v1/mode' {
         $body = Read-Body $ctx
         $base = if ($body.url) { [string]$body.url } else { "http://${remote}:$novaPort" }
         Set-AgentMode ([string]$body.mode) $body.display $base
         $m = Get-ModeState
-        Send $ctx 200 @{ ok = $true; displays = @(Get-Displays); mode = $m.mode; helperDisplay = $m.display }
+        Send $ctx 200 @{ ok = $true; displays = @(Get-Displays); mode = $m.mode; helperDisplay = $m.display; helperView = $m.view }
+      }
+      '/v1/helper/notify' {
+        if ($ctx.Request.HttpMethod -ne 'POST') { Send $ctx 405 @{ ok = $false; error = 'Use POST' }; continue }
+        $outcome = Send-HelperNotification (Read-Body $ctx).event
+        $outcome.ok = $true
+        Send $ctx 200 $outcome
+      }
+      '/v1/helper/preferences' {
+        if ($ctx.Request.HttpMethod -eq 'POST') { Set-HelperPreferences (Read-Body $ctx) }
+        elseif ($ctx.Request.HttpMethod -ne 'GET') { Send $ctx 405 @{ ok = $false; error = 'Use GET or POST' }; continue }
+        Send $ctx 200 @{ ok = $true; preferences = (Get-HelperPreferences) }
       }
       '/v1/helper/size' {
         $body = Read-Body $ctx
-        Set-HelperSize ([bool]$body.expanded)
-        Send $ctx 200 @{ ok = $true; expanded = [bool]$script:helper.expanded }
+        Set-HelperSize ([bool]$body.expanded) ([string]$body.view) ([bool]$body.hidden) ([bool]$body.reducedMotion)
+        Send $ctx 200 @{ ok = $true; expanded = [bool]$script:helper.expanded; view = $script:helper.view; hidden = $script:helper.hidden }
       }
       '/v1/wallpaper' {
         $body = Read-Body $ctx
@@ -1740,3 +1936,5 @@ while ($listener.IsListening) {
     try { Send $ctx 400 @{ ok = $false; error = $_.Exception.Message } } catch { }
   }
 }
+
+[NovaControls]::Stop()

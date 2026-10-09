@@ -283,6 +283,12 @@ export interface ToolOverride {
 
 /** GET /settings */
 export interface SettingsOverview {
+  standingApprovals?: {
+    id: string;
+    tool: string;
+    scope?: string;
+    createdAt: number;
+  }[];
   persona: string;
   quickActions: QuickAction[];
   quickActionsAreDefault: boolean;
@@ -368,4 +374,23 @@ export interface HelperState {
   /** False when the choice was saved but the agent could not apply it (PC off, agent too old). */
   applied?: boolean;
   error?: string;
+}
+
+/** Non-secret helper appearance and sound preferences, persisted by NOVA. */
+export interface HelperPreferences {
+  wardrobe?: {
+    theme: "nova" | "violet" | "gold";
+    seasonal: boolean;
+    birthday: string;
+  };
+  autohide: boolean;
+  contrast: boolean;
+  shape: "orb" | "ring" | "mist";
+  cues: {
+    enabled: boolean;
+    volume: number;
+    theme: "soft" | "playful" | "minimal";
+    cues?: Record<string, boolean>;
+    quiet: { enabled: boolean; start: string; end: string };
+  };
 }

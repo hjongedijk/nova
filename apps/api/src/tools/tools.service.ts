@@ -2,6 +2,7 @@ import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
 import { DiscoveryService } from "@nestjs/core";
 import type { PendingConfirmation, Risk, ToolInfo } from "@nova/contracts";
 import { Ajv, type ValidateFunction } from "ajv";
+import crypto from "node:crypto";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { MqttService } from "../core/mqtt/mqtt.service.js";
@@ -18,6 +19,46 @@ import {
   type ToolResult,
   type ToolSource,
 } from "./tool.types.js";
+
+/** Stable fingerprints contain no tool arguments or secrets. */
+export function approvalHash(value: unknown): string {
+  const canonical = (item: unknown): unknown => {
+    if (Array.isArray(item)) return item.map(canonical);
+    if (item && typeof item === "object")
+      return Object.fromEntries(
+        Object.entries(item)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, entry]) => [key, canonical(entry)]),
+      );
+    return item;
+  };
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(canonical(value)))
+    .digest("hex");
+}
+
+/** Even fields the coercer discards must never silently match a standing approval. */
+function hasUnknownArguments(parameters: unknown, value: unknown): boolean {
+  if (
+    !parameters ||
+    typeof parameters !== "object" ||
+    !value ||
+    typeof value !== "object"
+  )
+    return false;
+  const rule = parameters as {
+    properties?: Record<string, unknown>;
+    items?: unknown;
+  };
+  if (Array.isArray(value))
+    return value.some((item) => hasUnknownArguments(rule.items, item));
+  return Object.entries(value).some(
+    ([key, item]) =>
+      !Object.hasOwn(rule.properties ?? {}, key) ||
+      hasUnknownArguments(rule.properties?.[key], item),
+  );
+}
 
 interface Registered {
   definition: ToolDefinition & { enabled: boolean; timeoutMs: number };
@@ -180,6 +221,7 @@ export class ToolsService implements OnModuleInit {
     rawArgs: unknown,
     sessionId: string,
     approved: PendingConfirmation | null = null,
+    always = false,
   ): Promise<ToolResult> {
     const started = Date.now();
     let args: Record<string, unknown> = (rawArgs ?? {}) as Record<
@@ -188,9 +230,12 @@ export class ToolsService implements OnModuleInit {
     >;
     let risk: Risk = "READ_ONLY";
     let confirmation = "not_required";
+    let standingApproval = false;
     let entity: ToolPlan["entity"] = null;
     const finish = (result: ToolResult): ToolResult => {
-      const clean = sanitize(result);
+      const clean = sanitize(
+        standingApproval ? { ...result, standingApproval: true } : result,
+      );
       this.audit.record({
         sessionId,
         tool: name,
@@ -226,10 +271,23 @@ export class ToolsService implements OnModuleInit {
           : "Deze tool bestaat niet of staat uit. Gebruik alleen tools uit je lijst.",
       });
     risk = tool.definition.risk;
-    const cleaned = coerceArguments(
+    const transportArgs = dropTransportReason(
       tool.definition.parameters,
-      dropTransportReason(tool.definition.parameters, rawArgs),
+      rawArgs,
     );
+    const unknownArguments = hasUnknownArguments(
+      tool.definition.parameters,
+      transportArgs,
+    );
+    const schemaFingerprint = approvalHash({
+      source: tool.source.source,
+      revision: tool.definition.approvalRevision ?? null,
+      name,
+      parameters: tool.definition.parameters,
+      description: tool.definition.description,
+      risk: tool.definition.risk,
+    });
+    const cleaned = coerceArguments(tool.definition.parameters, transportArgs);
     if (
       !cleaned ||
       typeof cleaned !== "object" ||
@@ -280,14 +338,70 @@ export class ToolsService implements OnModuleInit {
           approved &&
           approved.tool === name &&
           approved.sessionId === sessionId &&
+          approved.expiresAt > Date.now() &&
           JSON.stringify(approved.args) === JSON.stringify(args) &&
-          (!approved.risk || approved.risk === risk);
-        if (!matches) {
+          (!approved.risk || approved.risk === risk) &&
+          (!approved.schemaFingerprint ||
+            approved.schemaFingerprint === schemaFingerprint);
+        const argsHash = approvalHash(args);
+        const grants = this.settings.get().standingApprovals ?? [];
+        const standing =
+          risk === "CONFIRM" &&
+          !unknownArguments &&
+          grants.some(
+            (grant) =>
+              grant.tool === name &&
+              grant.argsHash === argsHash &&
+              grant.schemaHash === schemaFingerprint,
+          );
+        if (!matches && !standing) {
           confirmation = "pending";
-          const action = this.confirmations.create(sessionId, name, args, risk);
+          const action = this.confirmations.create(
+            sessionId,
+            name,
+            args,
+            risk,
+            schemaFingerprint,
+          );
           return finish({ ok: false, requiresConfirmation: true, action });
         }
-        confirmation = "confirmed";
+        confirmation = standing && !matches ? "standing_approval" : "confirmed";
+        standingApproval = confirmation === "standing_approval";
+        if (
+          always &&
+          matches &&
+          risk === "CONFIRM" &&
+          !unknownArguments &&
+          approved.schemaFingerprint === schemaFingerprint &&
+          !standing
+        ) {
+          if (grants.length >= 100)
+            return finish({
+              ok: false,
+              error:
+                "Standing approval limit reached; revoke a rule in settings first",
+            });
+          const grant = {
+            id: crypto.randomUUID(),
+            tool: name,
+            argsHash,
+            schemaHash: schemaFingerprint,
+            scope: JSON.stringify(sanitize(args)).slice(0, 500),
+            createdAt: Date.now(),
+          };
+          this.audit.record({
+            sessionId,
+            tool: name,
+            risk,
+            confirmation: "standing_approval_created",
+            grantId: grant.id,
+            argsHash,
+            schemaHash: schemaFingerprint,
+          });
+          this.settings.update((next) => {
+            next.standingApprovals.push(grant);
+          });
+        }
       }
       // Prove the log is writable before anything changes.
       if (risk !== "READ_ONLY")

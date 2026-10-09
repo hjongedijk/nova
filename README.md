@@ -15,12 +15,12 @@ NOVA is a self-hosted personal AI assistant for your home and your servers. It i
 - **Memory.** Short-term conversation context, and long-term memory in Qdrant (with free embeddings) or in OmniRoute's native memory. NOVA only remembers what you explicitly ask it to, and never credentials.
 - **Your own skills and panels.** In the settings you can write instruction skills (a routine NOVA follows with its existing tools) and webhook skills (an HTTP call that becomes a tool), with an AI assistant to help draft them, and custom sidebar panels.
 - **Integrations.** Proxmox VE, Home Assistant (lights, climate, scenes, Sonos and media), MQTT, Termix (SSH hosts, confirmed commands), Pangolin, any MCP server, weather, news, web search and more. Node-RED is optional, for your own flows.
-- **Windows agent.** A small PowerShell agent that lets NOVA open allow-listed programs, show NOVA as living wallpaper behind your icons (per display), show a small always-on-top **helper** pill, and use a browser of its own (search, read, click, type) with safety limits.
+- **Windows agent.** A small PowerShell agent that lets NOVA open allow-listed programs, show NOVA as living wallpaper behind your icons (per display), show a small always-on-top **helper** panel, and use a browser of its own (search, read, click, type) with safety limits.
 - **PWA.** Installable on a phone or PC from the browser, with its own icon.
 
-| Settings dialog                                                                                                 | Helper pill on the Windows PC                                                     |
-| --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| ![The settings dialog with the abilities tab: tool groups with switches and risk badges](docs/img/settings.png) | ![The helper overlay, collapsed and expanded with an answer](docs/img/helper.png) |
+| Settings dialog                                                                                                 | Rectangular helper panel on the Windows PC                                                           |
+| --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| ![The settings dialog with the abilities tab: tool groups with switches and risk badges](docs/img/settings.png) | ![The rectangular helper with chat, model information and tool results](docs/img/helper-chat-1x.png) |
 
 The screenshots show mocked data. Settings texts are Dutch ("Instellingen" = settings, "Wat NOVA kan" = what NOVA can do).
 
@@ -82,7 +82,7 @@ Details: [docs/tools-and-safety.md](docs/tools-and-safety.md).
 
 ## Windows agent
 
-`agents/windows` contains a PowerShell agent for a Windows PC. It runs in your desktop session, authenticates with a bearer token, only accepts calls from the NOVA host and only starts programs you list in `agent.json`. It can show NOVA as living wallpaper per display, as a small helper overlay, or both, and gives NOVA a visible Edge window to browse in. It is verified in CI only for syntax and compilation, not on real Windows machines. Install and details: [docs/windows-agent.md](docs/windows-agent.md).
+`agents/windows` contains a PowerShell agent for a Windows PC. It runs in your desktop session, authenticates with a bearer token, only accepts calls from the NOVA host and only starts programs you list in `agent.json`. It can show NOVA as living wallpaper per display, as a small helper overlay, or both, and gives NOVA a visible Edge window to browse in. It is verified in CI only for syntax and compilation, not on real Windows machines. Install and details: [docs/windows-agent.md](docs/windows-agent.md). The helper has overview/chat/notifications tabs, optional weather/lists, file drops, scoped approvals, configurable shortcuts and a tray. Design/screenshots: [docs/helper-design.md](docs/helper-design.md). Kiosk bounds, DPI and device behavior still need a real Windows test.
 
 ## Development
 

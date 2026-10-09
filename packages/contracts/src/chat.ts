@@ -5,6 +5,10 @@ export type ChatEvent =
   | { event: "token"; data: { text: string } }
   | { event: "tool_start"; data: { name: string } }
   | { event: "tool_result"; data: { name: string; ok: boolean } }
+  | {
+      event: "choices";
+      data: { choices: { entityId: string; label: string }[] };
+    }
   | { event: "confirmation"; data: PendingConfirmation }
   | { event: "attachment_notice"; data: { message: string } }
   | { event: "error"; data: { message: string } }
@@ -36,4 +40,5 @@ export interface PendingConfirmation {
   risk?: Risk;
   createdAt: number;
   expiresAt: number;
+  schemaFingerprint?: string;
 }

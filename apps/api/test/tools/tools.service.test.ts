@@ -1,6 +1,14 @@
 import { Module } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { AuditService } from "../../src/core/audit/audit.service.js";
 import { CoreModule } from "../../src/core/core.module.js";
 import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
@@ -12,11 +20,15 @@ import {
   schema,
   text,
   type ToolDefinition,
+  type ToolPlan,
   ToolSourceProvider,
   type ToolResult,
   type ToolSource,
 } from "../../src/tools/tool.types.js";
 
+let effectiveRisk: "CONFIRM" | "DANGEROUS" = "CONFIRM";
+let changedSchema = false;
+let approvalRevision = "initial-execution";
 const ran: { name: string; args: Record<string, unknown> }[] = [];
 
 @ToolSourceProvider()
@@ -32,8 +44,16 @@ class FakeSource implements ToolSource {
       },
       {
         name: "fake_restart",
+        approvalRevision,
         description: "Restarts",
-        parameters: schema({ vmid: integer(100, 999), note: text() }, ["vmid"]),
+        parameters: schema(
+          {
+            vmid: integer(100, 999),
+            note: text(),
+            ...(changedSchema ? { extra: text() } : {}),
+          },
+          ["vmid"],
+        ),
         risk: "CONFIRM",
       },
       {
@@ -50,6 +70,15 @@ class FakeSource implements ToolSource {
         enabled: false,
       },
     ];
+  }
+  async prepare(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<ToolPlan> {
+    return {
+      args,
+      risk: name === "fake_restart" ? effectiveRisk : "READ_ONLY",
+    };
   }
   async execute(
     name: string,
@@ -83,7 +112,15 @@ describe("ToolsService", () => {
     settings = moduleRef.get(SettingsStore);
   });
   afterAll(() => delete process.env.JARVIS_ENABLE_ACTIONS);
-  beforeEach(() => (ran.length = 0));
+  beforeEach(() => {
+    ran.length = 0;
+    effectiveRisk = "CONFIRM";
+    changedSchema = false;
+    approvalRevision = "initial-execution";
+    settings.update((next) => {
+      next.standingApprovals = [];
+    });
+  });
 
   it("finds the source by itself and lists its tools, also the unavailable one", () => {
     // The memory and OmniRoute sources come with the modules ToolsModule imports; only ours are checked here.
@@ -146,6 +183,272 @@ describe("ToolsService", () => {
     const log = audit.read(10, "s2");
     expect(log.map((entry) => entry.confirmation)).toContain("confirmed");
     expect(log.map((entry) => entry.phase)).toContain("execution_started");
+  });
+
+  async function grant(sessionId = "grant", args = { vmid: 104 }) {
+    const pending = await tools.execute("fake_restart", args, sessionId);
+    const approval = confirmations.take(
+      sessionId,
+      pending.action!.confirmationId,
+    )!;
+    const result = await tools.execute(
+      "fake_restart",
+      approval.args,
+      sessionId,
+      approval,
+      true,
+    );
+    expect(result.ok).toBe(true);
+    return approval;
+  }
+
+  it("creates a scoped grant, reuses normalized arguments, audits and revokes it", async () => {
+    await grant();
+    const rule = settings.get().standingApprovals[0]!;
+    expect(rule).toMatchObject({ tool: "fake_restart", scope: '{"vmid":104}' });
+    expect(rule.argsHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(rule.schemaHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(
+      await tools.execute("fake_restart", { vmid: "104" }, "reuse"),
+    ).toMatchObject({ ok: true, standingApproval: true });
+    expect(audit.read(5, "reuse").map((entry) => entry.confirmation)).toContain(
+      "standing_approval",
+    );
+    settings.update((next) => {
+      next.standingApprovals = [];
+    });
+    expect(
+      (await tools.execute("fake_restart", { vmid: 104 }, "revoke"))
+        .requiresConfirmation,
+    ).toBe(true);
+  });
+
+  it("invalidates grants and pending approvals when execution revision changes with the same schema", async () => {
+    await grant();
+    const before = tools
+      .forModel()
+      .find((tool) => tool.function.name === "fake_restart");
+    const pending = await tools.execute(
+      "fake_restart",
+      { vmid: 105 },
+      "revision-pending",
+    );
+    const approval = confirmations.take(
+      "revision-pending",
+      pending.action!.confirmationId,
+    )!;
+    approvalRevision = "changed-endpoint-and-body";
+    expect(
+      tools.forModel().find((tool) => tool.function.name === "fake_restart"),
+    ).toEqual(before);
+    expect(
+      (await tools.execute("fake_restart", { vmid: 104 }, "revision-reuse"))
+        .requiresConfirmation,
+    ).toBe(true);
+    expect(
+      (
+        await tools.execute(
+          "fake_restart",
+          approval.args,
+          "revision-pending",
+          approval,
+          true,
+        )
+      ).requiresConfirmation,
+    ).toBe(true);
+    expect(settings.get().standingApprovals).toHaveLength(1);
+    expect(ran).toHaveLength(1);
+  });
+
+  it("stores only hashes and a sanitized scope, without revision or argument secrets", async () => {
+    approvalRevision = "execution-secret-do-not-persist";
+    const pending = await tools.execute(
+      "fake_restart",
+      { vmid: 104, note: "password=argument-secret-do-not-persist" },
+      "secret-grant",
+    );
+    const approval = confirmations.take(
+      "secret-grant",
+      pending.action!.confirmationId,
+    )!;
+    expect(
+      (
+        await tools.execute(
+          "fake_restart",
+          approval.args,
+          "secret-grant",
+          approval,
+          true,
+        )
+      ).ok,
+    ).toBe(true);
+    const saved = JSON.stringify(settings.get().standingApprovals);
+    expect(saved).not.toContain("execution-secret-do-not-persist");
+    expect(saved).not.toContain("argument-secret-do-not-persist");
+    expect(saved).toContain("[redacted]");
+    expect(settings.get().standingApprovals[0]).not.toHaveProperty("args");
+  });
+
+  it("never broadens grants to different values, new fields, or changed schemas", async () => {
+    await grant();
+    for (const args of [
+      { vmid: 105 },
+      { vmid: 104, note: "new scope" },
+      { vmid: 104, unexpected: "discarded by coercion" },
+    ])
+      expect(
+        (await tools.execute("fake_restart", args, "different"))
+          .requiresConfirmation,
+      ).toBe(true);
+    changedSchema = true;
+    expect(
+      (await tools.execute("fake_restart", { vmid: 104 }, "schema"))
+        .requiresConfirmation,
+    ).toBe(true);
+    expect(ran).toHaveLength(1);
+  });
+
+  it("re-evaluates dangerous risk and cannot grant dangerous actions", async () => {
+    await grant();
+    effectiveRisk = "DANGEROUS";
+    const pending = await tools.execute(
+      "fake_restart",
+      { vmid: 104 },
+      "danger",
+    );
+    expect(pending.requiresConfirmation).toBe(true);
+    expect(pending.action?.risk).toBe("DANGEROUS");
+    settings.update((next) => {
+      next.standingApprovals = [];
+    });
+    const approval = confirmations.take(
+      "danger",
+      pending.action!.confirmationId,
+    )!;
+    expect(
+      (
+        await tools.execute(
+          "fake_restart",
+          approval.args,
+          "danger",
+          approval,
+          true,
+        )
+      ).ok,
+    ).toBe(true);
+    expect(settings.get().standingApprovals).toEqual([]);
+  });
+
+  it("rejects stale, mismatched and changed-schema approvals without granting", async () => {
+    const pending = await tools.execute("fake_restart", { vmid: 104 }, "stale");
+    const approval = confirmations.take(
+      "stale",
+      pending.action!.confirmationId,
+    )!;
+    expect(
+      (
+        await tools.execute(
+          "fake_restart",
+          { vmid: 105 },
+          "stale",
+          approval,
+          true,
+        )
+      ).requiresConfirmation,
+    ).toBe(true);
+    expect(
+      (
+        await tools.execute(
+          "fake_restart",
+          approval.args,
+          "other",
+          approval,
+          true,
+        )
+      ).requiresConfirmation,
+    ).toBe(true);
+    expect(
+      (
+        await tools.execute(
+          "fake_restart",
+          approval.args,
+          "stale",
+          { ...approval, expiresAt: Date.now() - 1 },
+          true,
+        )
+      ).requiresConfirmation,
+    ).toBe(true);
+    changedSchema = true;
+    expect(
+      (
+        await tools.execute(
+          "fake_restart",
+          approval.args,
+          "stale",
+          approval,
+          true,
+        )
+      ).requiresConfirmation,
+    ).toBe(true);
+    expect(settings.get().standingApprovals).toEqual([]);
+    expect(ran).toHaveLength(0);
+  });
+
+  it("does not persist or execute a grant when its audit write fails", async () => {
+    const pending = await tools.execute(
+      "fake_restart",
+      { vmid: 104 },
+      "audit-fail",
+    );
+    const approval = confirmations.take(
+      "audit-fail",
+      pending.action!.confirmationId,
+    )!;
+    const record = audit.record.bind(audit);
+    const spy = vi.spyOn(audit, "record").mockImplementation((entry) => {
+      if (entry.confirmation === "standing_approval_created")
+        throw new Error("Audit unavailable");
+      return record(entry);
+    });
+    try {
+      expect(
+        (
+          await tools.execute(
+            "fake_restart",
+            approval.args,
+            "audit-fail",
+            approval,
+            true,
+          )
+        ).ok,
+      ).toBe(false);
+      expect(settings.get().standingApprovals).toEqual([]);
+      expect(ran).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("expiry and wrong IDs cannot consume an approval", async () => {
+    const pending = await tools.execute(
+      "fake_restart",
+      { vmid: 104 },
+      "expiry",
+    );
+    expect(confirmations.take("expiry", "wrong-id")).toBeNull();
+    const previousNow = confirmations.now;
+    confirmations.now = () => pending.action!.expiresAt;
+    try {
+      expect(
+        confirmations.take("expiry", pending.action!.confirmationId),
+      ).toBeNull();
+      expect(
+        confirmations.take("expiry", pending.action!.confirmationId),
+      ).toBeNull();
+    } finally {
+      confirmations.now = previousNow;
+    }
+    expect(ran).toHaveLength(0);
   });
 
   it("a tool the user switched off cannot run, and an edited description reaches the model", async () => {

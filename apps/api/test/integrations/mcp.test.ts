@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Test } from "@nestjs/testing";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { ToolsModule } from "../../src/tools/tools.module.js";
+import { ToolsService } from "../../src/tools/tools.service.js";
 import { CoreModule } from "../../src/core/core.module.js";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import {
@@ -77,6 +79,46 @@ describe("MCP hub", () => {
     });
   });
 
+  it("retains revisions within a connection and invalidates them on an identical reconnect", async () => {
+    const hub = await start(
+      configFile(
+        {
+          echo: {
+            command: process.execPath,
+            args: [fixture],
+            risk: "CONFIRM",
+            env: { SECRET_TOKEN: "private-execution-secret" },
+          },
+        },
+        "revision.json",
+      ),
+    );
+    const before = hub.definitions();
+    const revision = before[0]!.approvalRevision;
+    expect(revision).toMatch(/^[a-f0-9-]{36}$/);
+    expect(before.every((tool) => tool.approvalRevision === revision)).toBe(
+      true,
+    );
+    await hub.sync();
+    expect(hub.definitions()).toEqual(before);
+    await hub.stop();
+    await hub.start();
+    const after = hub.definitions();
+    expect(after[0]!.approvalRevision).not.toBe(revision);
+    const exposed = (tools: typeof before) =>
+      tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+        risk: tool.risk,
+      }));
+    expect(exposed(after)).toEqual(exposed(before));
+    expect(JSON.stringify(after)).not.toContain("private-execution-secret");
+    expect(JSON.stringify(hub.health())).not.toContain(
+      after[0]!.approvalRevision,
+    );
+  });
+
   it("the default risk is CONFIRM and a declared risk applies to tools without a hint", async () => {
     const hub = await start(
       configFile(
@@ -142,7 +184,7 @@ describe("MCP hub", () => {
       echo: { command: process.execPath, args: [fixture] },
     });
     const moduleRef = await Test.createTestingModule({
-      imports: [CoreModule, McpModule],
+      imports: [CoreModule, McpModule, ToolsModule],
     })
       .overrideProvider(McpHub)
       .useValue(hubFor(file))
@@ -165,6 +207,20 @@ describe("MCP hub", () => {
         result: "yo",
       },
     );
+    const tools = moduleRef.get(ToolsService);
+    const revision = source.definitions()[0]!.approvalRevision!;
+    const modelTools = tools
+      .forModel()
+      .filter((tool) => tool.function.name.startsWith("mcp_echo_"));
+    const publicTools = tools
+      .list()
+      .filter((tool) => tool.name.startsWith("mcp_echo_"));
+    expect(modelTools).toHaveLength(2);
+    expect(publicTools).toHaveLength(2);
+    expect(JSON.stringify(modelTools)).not.toContain(revision);
+    expect(JSON.stringify(publicTools)).not.toContain(revision);
+    expect(JSON.stringify(modelTools)).not.toContain("approvalRevision");
+    expect(JSON.stringify(publicTools)).not.toContain("approvalRevision");
     await moduleRef.close();
     expect(hub.health().servers).toEqual([]);
   });

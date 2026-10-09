@@ -14,6 +14,7 @@ import {
 } from "@nestjs/common";
 import type {
   PublicConfig,
+  HelperPreferences,
   SettingsBackup,
   SettingsOverview,
   Skill,
@@ -113,6 +114,9 @@ export class SettingsController {
     const tools = this.tools.list();
     return {
       persona: settings.persona,
+      standingApprovals: settings.standingApprovals.map(
+        ({ id, tool, scope, createdAt }) => ({ id, tool, scope, createdAt }),
+      ),
       quickActions: this.settings.quickActions(),
       quickActionsAreDefault: settings.quickActions === null,
       skills: skillsOf(settings).map(publicSkill),
@@ -524,11 +528,180 @@ export class SettingsController {
   @PublicRoute()
   @HttpCode(200)
   async helperSize(@Body() body: Body_): Promise<{ ok: boolean }> {
-    if (typeof body?.expanded !== "boolean")
-      throw new ValidationError(["expanded moet true of false zijn."]);
+    const views = [
+      "compact",
+      "overview",
+      "chat",
+      "notifications",
+      "weather",
+      "lists",
+      "confirmation",
+    ] as const;
+    const view = views.find((value) => value === body?.view);
+    if (
+      (body?.view !== undefined && !view) ||
+      (!view && typeof body?.expanded !== "boolean")
+    )
+      throw new ValidationError([
+        "Kies compact, overview, chat of confirmation.",
+      ]);
+    for (const key of ["hidden", "reducedMotion"])
+      if (body?.[key] !== undefined && typeof body[key] !== "boolean")
+        throw new ValidationError([`${key} moet true of false zijn.`]);
     if (!this.wallpaper?.configured) return { ok: false };
-    const outcome = await this.wallpaper.helperSize(body.expanded);
+    const outcome = await this.wallpaper.helperSize(
+      view ? view !== "compact" : (body?.expanded as boolean),
+      view
+        ? {
+            view,
+            hidden: body?.hidden === true,
+            reducedMotion: body?.reducedMotion === true,
+          }
+        : undefined,
+    );
     return { ok: outcome.ok };
+  }
+
+  @Get("helper/preferences")
+  @PublicRoute()
+  getHelperPreferences(): HelperPreferences {
+    return this.settings.get().helperPreferences;
+  }
+
+  @Put("helper/preferences")
+  saveHelperPreferences(@Body() body: Body_): {
+    ok: true;
+    preferences: HelperPreferences;
+  } {
+    const shape = body?.shape;
+    const cues = body?.cues as Record<string, unknown> | undefined;
+    const quiet = cues?.quiet as Record<string, unknown> | undefined;
+    if (
+      typeof body?.autohide !== "boolean" ||
+      typeof body.contrast !== "boolean" ||
+      !["orb", "ring", "mist"].includes(String(shape)) ||
+      !cues ||
+      typeof cues.enabled !== "boolean" ||
+      typeof cues.volume !== "number" ||
+      !Number.isFinite(cues.volume) ||
+      cues.volume < 0 ||
+      cues.volume > 1 ||
+      !["soft", "playful", "minimal"].includes(String(cues.theme)) ||
+      !quiet ||
+      typeof quiet.enabled !== "boolean" ||
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(quiet.start)) ||
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(quiet.end))
+    )
+      throw new ValidationError(["Ongeldige helperinstellingen."]);
+    const names = [
+      "listening-start",
+      "listening-end",
+      "thinking",
+      "done",
+      "notice",
+      "error",
+      "approved",
+      "declined",
+      "greet",
+      "goodnight",
+      "file",
+      "touch",
+      "dizzy",
+      "heart",
+      "wake",
+    ];
+    const perCue: Record<string, boolean> = {};
+    if (cues.cues !== undefined) {
+      if (
+        !cues.cues ||
+        typeof cues.cues !== "object" ||
+        Array.isArray(cues.cues)
+      )
+        throw new ValidationError(["Ongeldige geluiden."]);
+      for (const [key, value] of Object.entries(cues.cues)) {
+        if (!names.includes(key) || typeof value !== "boolean")
+          throw new ValidationError(["Onbekend geluid."]);
+        perCue[key] = value;
+      }
+    }
+    const wardrobe = body.wardrobe as Record<string, unknown> | undefined;
+    if (
+      wardrobe &&
+      (!["nova", "violet", "gold"].includes(String(wardrobe.theme)) ||
+        typeof wardrobe.seasonal !== "boolean" ||
+        typeof wardrobe.birthday !== "string" ||
+        (wardrobe.birthday !== "" &&
+          !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(wardrobe.birthday)))
+    )
+      throw new ValidationError(["Ongeldige orbkleuren of verjaardag."]);
+    const preferences: HelperPreferences = {
+      ...(wardrobe
+        ? {
+            wardrobe: wardrobe as unknown as NonNullable<
+              HelperPreferences["wardrobe"]
+            >,
+          }
+        : {}),
+      autohide: body.autohide,
+      contrast: body.contrast,
+      shape: shape as HelperPreferences["shape"],
+      cues: {
+        enabled: cues.enabled,
+        volume: cues.volume,
+        theme: cues.theme as HelperPreferences["cues"]["theme"],
+        cues: perCue,
+        quiet: {
+          enabled: quiet.enabled,
+          start: String(quiet.start),
+          end: String(quiet.end),
+        },
+      },
+    };
+    this.log(
+      "helper_preferences",
+      preferences as unknown as Record<string, unknown>,
+    );
+    this.settings.update((next) => {
+      next.helperPreferences = preferences;
+    });
+    return { ok: true, preferences };
+  }
+
+  @Get("helper/hotkeys")
+  @PublicRoute()
+  async helperHotkeys() {
+    return this.wallpaper?.helperPreferences
+      ? this.wallpaper.helperPreferences()
+      : { ok: false, error: "Geen Windows-agent." };
+  }
+  @Put("helper/hotkeys")
+  async saveHelperHotkeys(@Body() body: Body_) {
+    const input = body?.hotkeys;
+    if (!input || typeof input !== "object" || Array.isArray(input))
+      throw new ValidationError(["Sneltoetsen ontbreken."]);
+    const hotkeys: Record<string, string> = {};
+    for (const key of ["open", "speak", "mute", "desktop"]) {
+      const value = (input as Record<string, unknown>)[key];
+      if (typeof value !== "string" || value.length > 80)
+        throw new ValidationError(["Ongeldige sneltoets."]);
+      hotkeys[key] = value;
+    }
+    this.log("helper_hotkeys", { hotkeys });
+    return this.wallpaper?.helperPreferences
+      ? this.wallpaper.helperPreferences(hotkeys)
+      : { ok: false, error: "Geen Windows-agent." };
+  }
+
+  /** Grants can only be created by a fresh confirmation; this endpoint only revokes. */
+  @Delete("standing-approvals/:id")
+  revokeStandingApproval(@Param("id") id: string): { ok: true } {
+    this.log("standing_approval_revoked", { id });
+    this.settings.update((next) => {
+      next.standingApprovals = next.standingApprovals.filter(
+        (grant) => grant.id !== id,
+      );
+    });
+    return { ok: true };
   }
 
   /* ---------- backup ---------- */

@@ -199,6 +199,7 @@ export class ChatController {
       sessionId?: unknown;
       confirmationId?: unknown;
       approve?: unknown;
+      always?: unknown;
     },
   ) {
     if (typeof body?.confirmationId !== "string")
@@ -214,6 +215,7 @@ export class ChatController {
         sessionId,
         body.approve === true ? "yes" : "cancel",
         body.confirmationId,
+        body.approve === true && body.always === true,
       );
       return sanitize(
         reply ?? {

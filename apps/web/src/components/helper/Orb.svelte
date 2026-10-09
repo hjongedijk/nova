@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { startOrb, type OrbHandle } from "#lib/entity/orb.ts";
+  import { helper, helperHue } from "#lib/stores/helper.svelte.ts";
+  import { cueQuiet } from "#lib/voice/helper-cues.ts";
   import { chat } from "#lib/stores/chat.svelte.ts";
   import { attentionCount } from "#lib/stores/toasts.svelte.ts";
 
@@ -11,9 +13,22 @@
     orb = startOrb({
       canvas,
       state: () => chat.uiState,
+      shape: () => helper.shape,
+      hue: helperHue,
+      night: () => cueQuiet(helper.cues),
+      reaction: (event) =>
+        window.dispatchEvent(
+          new CustomEvent("nova-helper-cue", { detail: event }),
+        ),
       intensity: () => chat.confirmations.length + attentionCount(),
     });
+    orb.trigger("greet");
     return () => orb?.stop();
+  });
+
+  $effect(() => {
+    void helper.eventId;
+    orb?.trigger(helper.event);
   });
 
   // A finished turn: a happy hop, or a shake when it went wrong. A new warning also shakes it.

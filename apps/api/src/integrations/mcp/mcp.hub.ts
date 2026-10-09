@@ -8,6 +8,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { ArgumentSchema, Risk } from "@nova/contracts";
 import { Ajv } from "ajv";
+import { randomUUID } from "node:crypto";
 import { NovaConfig } from "../../core/config/nova-config.js";
 import type { ToolDefinition, ToolResult } from "../../tools/tool.types.js";
 import {
@@ -25,6 +26,8 @@ const CALL_TIMEOUT_MS = 30000;
 const RESYNC_MS = 60000;
 
 interface McpTool {
+  /** Private connection generation: reconnecting invalidates standing approvals. */
+  approvalRevision: string;
   server: string;
   remote: string;
   description: string;
@@ -150,6 +153,7 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
     spec: McpServerSpec,
     tools: Awaited<ReturnType<Client["listTools"]>>["tools"],
   ): void {
+    const approvalRevision = randomUUID();
     const fallback = RISKS.find((risk) => risk === spec.risk) ?? "CONFIRM";
     for (const tool of tools.slice(0, MAX_TOOLS_PER_SERVER)) {
       const name = toolName(id, tool.name);
@@ -167,6 +171,7 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
         continue;
       }
       this.tools.set(name, {
+        approvalRevision,
         server: id,
         remote: tool.name,
         description: `[${id}] ${tool.description || tool.name}`.slice(0, 1000),
@@ -187,6 +192,7 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
   definitions(): ToolDefinition[] {
     return [...this.tools].map(([name, tool]) => ({
       name,
+      approvalRevision: tool.approvalRevision,
       description: tool.description,
       parameters: tool.parameters,
       risk: tool.risk,

@@ -19,6 +19,10 @@ export const chat = $state({
   streaming: false,
   /** A few words about what NOVA is doing ("Proxmox controleren…"); empty shows the idle hint. */
   hint: "",
+  model: "",
+  choices: [] as { entityId: string; label: string }[],
+  toolResult: "",
+  activeTool: "",
   /** Confirmation cards waiting for a yes or no (settled cards leave this list). */
   confirmations: [] as PendingConfirmation[],
   history: [] as HistoryMessage[],

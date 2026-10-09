@@ -20,6 +20,15 @@ export type WallpaperOutcome =
  * there is no agent.
  */
 export interface WallpaperPort {
+  helperPreferences?(hotkeys?: Record<string, string>): Promise<{
+    ok: boolean;
+    preferences?: {
+      hotkeys: Record<string, string>;
+      warnings: string[];
+      paused: boolean;
+    };
+    error?: string;
+  }>;
   /** False when no Windows agent is set up. */
   readonly configured: boolean;
   displays(): Promise<WallpaperOutcome>;
@@ -30,6 +39,18 @@ export interface WallpaperPort {
   /** The helper window grows (an answer, a question) or shrinks back to its pill. */
   helperSize(
     expanded: boolean,
+    options?: {
+      view:
+        | "compact"
+        | "overview"
+        | "chat"
+        | "weather"
+        | "lists"
+        | "notifications"
+        | "confirmation";
+      hidden: boolean;
+      reducedMotion: boolean;
+    },
   ): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 

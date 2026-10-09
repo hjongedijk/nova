@@ -52,6 +52,10 @@ export async function ask(
   if (!text || chat.busy) return false;
 
   stopSpeaking();
+  chat.model = "";
+  chat.choices = [];
+  chat.toolResult = "";
+  chat.activeTool = "";
   chat.busy = true;
 
   addMessage(
@@ -100,16 +104,32 @@ export async function ask(
         const user = chat.history[assistant - 1];
         if (user) user.text += `\n${data.message}`;
       }
+      if (event === "choices" && Array.isArray(data?.choices))
+        chat.choices = data.choices
+          .filter(
+            (item): item is { entityId: string; label: string } =>
+              !!item &&
+              typeof item.entityId === "string" &&
+              /^[a-z][a-z0-9_]*\.[a-z0-9_]+$/i.test(item.entityId) &&
+              item.entityId.length <= 200 &&
+              typeof item.label === "string",
+          )
+          .slice(0, 10);
       if (event === "confirmation")
         addCard(data as unknown as Parameters<typeof addCard>[0]);
       if (event === "tool_start") {
         setState("executing");
         chat.hint = toolHint(data?.name);
+        chat.activeTool = String(data?.name ?? "");
       }
       if (event === "tool_result") {
         setState("thinking");
         chat.hint = "";
+        chat.activeTool = "";
+        chat.toolResult = `${toolHint(data?.name).replace(/…$/, "")}: ${data?.ok === true ? (data?.verified === true ? "gecontroleerd" : data?.accepted === true ? "aangenomen · nog niet gecontroleerd" : "afgerond · niet gecontroleerd") : "niet gelukt"}${data?.standingApproval === true ? " · altijd toegestaan" : ""}`;
       }
+      if (event === "done" && typeof data?.model === "string")
+        chat.model = data.model;
       if (event === "token" && typeof data?.text === "string" && data.text) {
         if (!gotFirst) {
           gotFirst = true;

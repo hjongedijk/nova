@@ -1,5 +1,6 @@
 import type {
   ImportResult,
+  HelperPreferences,
   Skill,
   SkillDraftResult,
   SkillInput,
@@ -117,3 +118,24 @@ export const setHelper = (mode: HelperMode, display: number) =>
 export const exportSettings = () => read<SettingsBackup>("/export");
 export const importSettings = (data: unknown, mode: "merge" | "replace") =>
   write<ImportResult>("POST", "/import", { data, mode });
+
+export const revokeStandingApproval = (id: string) =>
+  write<{ ok: true }>("DELETE", `/standing-approvals/${enc(id)}`);
+
+export interface HelperHotkeys {
+  ok: boolean;
+  error?: string;
+  preferences?: {
+    hotkeys: Record<string, string>;
+    warnings: string[];
+    paused: boolean;
+  };
+}
+export const getHelperHotkeys = () => read<HelperHotkeys>("/helper/hotkeys");
+export const saveHelperHotkeys = (hotkeys: Record<string, string>) =>
+  write<HelperHotkeys>("PUT", "/helper/hotkeys", { hotkeys });
+
+export const getHelperPreferences = () =>
+  read<HelperPreferences>("/helper/preferences");
+export const persistHelperPreferences = (preferences: HelperPreferences) =>
+  write<{ ok: true }>("PUT", "/helper/preferences", preferences);

@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Optional,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
@@ -9,6 +10,7 @@ import type {
   InfrastructureEvent,
 } from "@nova/contracts";
 import { sanitize } from "../core/security/sanitize.js";
+import { WindowsPcService } from "../integrations/windows/windows-pc.service.js";
 import { PlanningService } from "../planning/planning.service.js";
 
 const SEVERITIES = new Set(["info", "warning", "critical"]);
@@ -66,7 +68,10 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   private sequence = 0;
   private stop?: () => void;
 
-  constructor(private readonly planning: PlanningService) {}
+  constructor(
+    private readonly planning: PlanningService,
+    @Optional() private readonly windows?: WindowsPcService,
+  ) {}
 
   onModuleInit(): void {
     this.stop = this.planning.onEvent((event) => this.record(event));
@@ -82,6 +87,8 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     const stored: FeedEvent = { seq: ++this.sequence, ...entry };
     this.feed.push(stored);
     if (this.feed.length > MAX_EVENTS) this.feed.shift();
+    if (this.windows?.configured)
+      void this.windows.notifyHelper(stored).catch(() => undefined);
     return stored;
   }
 
