@@ -1,4 +1,4 @@
-import type { PendingConfirmation } from "@nova/contracts";
+import type { ChatAttachment, PendingConfirmation } from "@nova/contracts";
 
 /** What the entity is doing; the sphere's colour and motion follow it. */
 export type UiState =
@@ -33,7 +33,12 @@ export function setState(state: UiState): void {
 }
 
 /** Set by the chat layer: send something to NOVA as if it was typed. */
-export let ask: (text: string) => Promise<void> = async () => {};
-export function provideAsk(fn: (text: string) => Promise<void>): void {
+export let ask: (
+  text: string,
+  attachments?: ChatAttachment[],
+) => Promise<void> = async () => {};
+export function provideAsk(
+  fn: (text: string, attachments?: ChatAttachment[]) => Promise<void>,
+): void {
   ask = fn;
 }

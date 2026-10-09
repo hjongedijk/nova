@@ -108,3 +108,9 @@ Language-model requests only go out when the free route is verified. This fails 
 - **There is no user login.** The chat, tools, memory, audit and dashboard API endpoints are open to anyone who can reach NOVA; only the settings API can be protected with `NOVA_ADMIN_PIN` (plus an `x-nova-admin` header on writes so a cross-site form cannot change settings). Run NOVA on a trusted network, or put a reverse proxy with authentication or a VPN in front of it. Do not expose the ports directly to the internet.
 - The other containers in the compose file (OmniRoute dashboard on 20128, MQTT on 1883, Node-RED on 1880) are published on the host too and run as root; restrict them with your firewall. The compose file ships no Mosquitto configuration, so authentication on MQTT is up to you.
 - Confirmation protects against the model acting alone; it is not a substitute for network access control.
+
+## Chat file attachments
+
+Use the paperclip beside the chat input to attach up to three UTF-8 text files, each at most 16 KiB. Text, source code, CSV, JSON, Markdown and logs are supported. Remove a selected file by clicking its name. You can send files with a question or on their own.
+
+File contents are sent to OmniRoute as reference data for the current turn. Files are not written to the server filesystem and their contents are not saved in conversation history; the browser history shows their names. PDF, images and binary Office documents are not supported.

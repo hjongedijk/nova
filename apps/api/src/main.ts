@@ -1,7 +1,10 @@
 import "reflect-metadata";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
-import { ExpressAdapter } from "@nestjs/platform-express";
+import {
+  type NestExpressApplication,
+  ExpressAdapter,
+} from "@nestjs/platform-express";
 import express from "express";
 import fs from "node:fs";
 import http from "node:http";
@@ -12,10 +15,14 @@ import { NovaConfig } from "./core/config/nova-config.js";
 
 async function bootstrap() {
   const server = express();
-  const app = await NestFactory.create(AppModule, new ExpressAdapter(server));
+  const app = await NestFactory.create<NestExpressApplication>(
+    AppModule,
+    new ExpressAdapter(server),
+  );
   app.setGlobalPrefix("api", {
     exclude: ["windows-agent/{*path}", "nova-ca.crt"],
   });
+  app.useBodyParser("json", { limit: "512kb" });
   app.enableShutdownHooks();
   await app.init();
 

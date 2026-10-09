@@ -1,3 +1,5 @@
+import type { ChatAttachment } from "@nova/contracts";
+import { checkAttachments } from "./attachments.js";
 import { Body, ConflictException, Controller, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { ValidationError } from "../core/errors/validation.error.js";
@@ -28,6 +30,7 @@ const FORBIDDEN_OVERRIDES = ["model", "provider", "route", "fallback"];
 function check(body: ChatBody): {
   sessionId: string;
   message: string;
+  attachments: ChatAttachment[];
   confirmationId?: string;
 } {
   if (FORBIDDEN_OVERRIDES.some((key) => body?.[key] !== undefined))
@@ -54,6 +57,7 @@ function check(body: ChatBody): {
     ]);
   return {
     sessionId,
+    attachments: checkAttachments(body.attachments),
     message: body.message.trim(),
     confirmationId: body.confirmationId as string | undefined,
   };
@@ -86,7 +90,7 @@ export class ChatController {
   /** POST /api/chat: one question, one complete answer. */
   @Post("chat")
   async chat(@Body() body: ChatBody): Promise<Record<string, unknown>> {
-    const { sessionId, message, confirmationId } = check(body);
+    const { sessionId, message, confirmationId, attachments } = check(body);
     if (!this.client.configured)
       throw new ConflictException("OmniRoute is not configured");
     if (active.has(sessionId))
@@ -99,6 +103,7 @@ export class ChatController {
       const result = await this.orchestrator.run({
         sessionId,
         message,
+        attachments,
         confirmationId,
       });
       this.remember(sessionId, message, result, started);
@@ -118,7 +123,7 @@ export class ChatController {
     @Body() body: ChatBody,
     @Res() response: Response,
   ): Promise<void> {
-    const { sessionId, message, confirmationId } = check(body);
+    const { sessionId, message, confirmationId, attachments } = check(body);
     if (!this.client.configured) {
       response.status(503).json({ error: "OmniRoute is not configured" });
       return;
@@ -155,6 +160,7 @@ export class ChatController {
       const result = await this.orchestrator.run({
         sessionId,
         message,
+        attachments,
         confirmationId,
         stream: true,
         emit,

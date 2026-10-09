@@ -1,5 +1,6 @@
+import { attachmentContext } from "./attachments.js";
 import { Injectable } from "@nestjs/common";
-import type { PendingConfirmation } from "@nova/contracts";
+import type { ChatAttachment, PendingConfirmation } from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { confirmationQuestion } from "../confirmations/confirmation-words.js";
@@ -42,6 +43,7 @@ export type Emit = (event: string, data: Record<string, unknown>) => void;
 export interface OrchestrateInput {
   sessionId: string;
   message: string;
+  attachments?: ChatAttachment[];
   /** The confirmation the user is answering, when the interface knows it. */
   confirmationId?: string;
   stream?: boolean;
@@ -154,6 +156,11 @@ export class OrchestratorService {
       names: tools.map((tool) => tool.name),
     });
     const messages = await this.context.build(sessionId, message);
+    if (input.attachments?.length)
+      messages.push({
+        role: "user",
+        content: attachmentContext(input.attachments),
+      });
     const notes = capabilityNotes(tools.map((tool) => tool.name));
     if (notes) messages.splice(1, 0, { role: "system", content: notes });
 

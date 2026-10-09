@@ -1,3 +1,4 @@
+import type { ChatAttachment } from "@nova/contracts";
 import { openChatStream } from "#lib/api/chat.ts";
 import { chat, provideAsk, setState } from "#lib/stores/chat.svelte.ts";
 import { playback } from "#lib/voice/audio.ts";
@@ -39,14 +40,25 @@ export function addMessage(role: "user" | "assistant", text = ""): number {
  * Send something to NOVA as if it was typed: stream the answer onto the stage, speak it sentence by
  * sentence while it is still being written, and close confirmation cards that a "ja"/"nee" answers.
  */
-export async function ask(raw: string): Promise<void> {
-  const text = raw.trim();
+export async function ask(
+  raw: string,
+  attachments: ChatAttachment[] = [],
+): Promise<void> {
+  const text =
+    raw.trim() ||
+    (attachments.length ? "Bekijk de bijgevoegde bestanden." : "");
   if (!text || chat.busy) return;
 
   stopSpeaking();
   chat.busy = true;
 
-  addMessage("user", text);
+  addMessage(
+    "user",
+    text +
+      (attachments.length
+        ? `\n📎 ${attachments.map((file) => file.name).join(", ")}`
+        : ""),
+  );
   const assistant = addMessage("assistant", "");
   const setAssistant = (value: string) => {
     const line = chat.history[assistant];
@@ -69,6 +81,7 @@ export async function ask(raw: string): Promise<void> {
   try {
     const body = await openChatStream({
       message: text,
+      attachments,
       sessionId: getSessionId(),
       ...(answering ? { confirmationId: answering } : {}),
     });
