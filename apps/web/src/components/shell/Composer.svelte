@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ChatAttachment } from "@nova/contracts";
+  import { encodeAttachments } from "#lib/chat/attachments.ts";
   import { onMount } from "svelte";
   import { cards } from "#lib/chat/cards.svelte.ts";
   import { installReveal } from "#lib/modes/reveal.ts";
@@ -15,65 +15,46 @@
 
   let input: HTMLInputElement;
   let picker: HTMLInputElement;
-  let attachments: ChatAttachment[] = $state([]);
+  let attachments: File[] = $state([]);
   let fileError = $state("");
   let reading = $state(false);
 
-  async function selectFiles(event: Event) {
+  function selectFiles(event: Event) {
     const target = event.currentTarget as HTMLInputElement;
-    const files = Array.from(target.files ?? []);
+    const files = [...attachments, ...Array.from(target.files ?? [])];
     target.value = "";
-    reading = true;
     fileError = "";
-    try {
-      if (attachments.length + files.length > 3)
-        throw new Error("Voeg maximaal drie bestanden toe.");
-      const added: ChatAttachment[] = [];
-      for (const file of files) {
-        if (file.size > 16 * 1024)
-          throw new Error(`${file.name}: maximaal 16 KiB per bestand.`);
-        if (
-          !file.name ||
-          file.name.length > 200 ||
-          Array.from(file.name).some((char) => char.charCodeAt(0) < 32) ||
-          /[/\\]/.test(file.name)
-        )
-          throw new Error("Ongeldige bestandsnaam.");
-        if (
-          /\.(pdf|png|jpe?g|gif|webp|zip|docx?|xlsx?|pptx?)$/i.test(file.name)
-        )
-          throw new Error(
-            "Kies tekstbestanden; PDF en afbeeldingen worden nog niet ondersteund.",
-          );
-        const content = new TextDecoder("utf-8", { fatal: true }).decode(
-          await file.arrayBuffer(),
-        );
-        if (content.includes("\0"))
-          throw new Error(`${file.name}: kies een tekstbestand.`);
-        added.push({ name: file.name, content });
-      }
-      attachments = [...attachments, ...added];
-    } catch (error) {
-      fileError =
-        error instanceof TypeError
-          ? "Kies UTF-8 tekstbestanden; PDF en afbeeldingen worden nog niet ondersteund."
-          : (error as Error).message;
-    } finally {
-      reading = false;
-      showChrome();
-    }
+    if (files.length > 5) fileError = "Voeg maximaal vijf bestanden toe.";
+    else if (files.some((file) => file.size > 10 * 1024 * 1024))
+      fileError = "Maximaal 10 MiB per bestand.";
+    else if (files.reduce((sum, file) => sum + file.size, 0) > 20 * 1024 * 1024)
+      fileError = "Maximaal 20 MiB aan bijlagen per bericht.";
+    else attachments = files;
+    showChrome();
   }
 
-  function submit(event: SubmitEvent) {
+  async function submit(event: SubmitEvent) {
     event.preventDefault();
     if (chat.busy || reading || (!shell.draft.trim() && !attachments.length))
       return;
-    const text = shell.draft;
-    const files = attachments;
-    attachments = [];
+    reading = true;
     fileError = "";
-    shell.draft = "";
-    void ask(text, files);
+    try {
+      const files = await encodeAttachments(attachments);
+      if (chat.busy) return;
+      const text = shell.draft;
+      // Preserve the draft and files when a request fails, so it can be retried.
+      reading = false;
+      const sent = await ask(text, files);
+      if (sent) {
+        attachments = [];
+        shell.draft = "";
+      }
+    } catch (error) {
+      fileError = (error as Error).message;
+    } finally {
+      reading = false;
+    }
   }
 
   // After an answer the cursor is back in the field, as in the prototype.
@@ -108,13 +89,13 @@
     hidden
     bind:this={picker}
     onchange={selectFiles}
-    accept="text/*,.txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.js,.ts,.py,.sh,.ps1,.html,.css"
+    accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,text/*,.txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.js,.ts,.py,.sh,.ps1,.html,.css"
   />
   <button
     class="icon"
     type="button"
     aria-label="Bestanden bijvoegen"
-    title="Tekstbestanden bijvoegen (max. 3 × 16 KiB)"
+    title="PDF, Word, afbeeldingen en tekst (max. 5 bestanden, 10 MiB per bestand)"
     disabled={chat.busy || reading}
     onclick={() => picker.click()}
   >
@@ -167,7 +148,7 @@
           onclick={() =>
             (attachments = attachments.filter((_, index) => index !== i))}
         >
-          📎 {file.name} ×
+          📎 {file.name} ({(file.size / 1024).toFixed(0)} KiB) ×
         </button>
       {/each}
       {#if reading}<span>Bestanden lezen…</span>{/if}

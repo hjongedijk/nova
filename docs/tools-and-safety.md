@@ -111,6 +111,16 @@ Language-model requests only go out when the free route is verified. This fails 
 
 ## Chat file attachments
 
-Use the paperclip beside the chat input to attach up to three UTF-8 text files, each at most 16 KiB. Text, source code, CSV, JSON, Markdown and logs are supported. Remove a selected file by clicking its name. You can send files with a question or on their own.
+Use the paperclip beside the chat input for PDF, Word (.docx), PNG/JPEG/WebP/GIF images, text, source code, CSV, JSON, Markdown and logs. Attach up to five files, at most 10 MiB each and 20 MiB in total. Click a selected file to remove it. Files can accompany a question or be sent on their own. A failed request keeps the draft and files so you can retry.
 
-File contents are sent to OmniRoute as reference data for the current turn. Files are not written to the server filesystem and their contents are not saved in conversation history; the browser history shows their names. PDF, images and binary Office documents are not supported.
+PDF and DOCX body text are extracted locally in an isolated, time-limited worker. Images are sent as vision input through the existing OmniRoute free route; the chosen model must support images. NOVA does not switch to a paid provider to read them. Legacy .doc, Excel/PowerPoint files, archives and audio/video are unsupported; export documents as PDF and spreadsheets as CSV.
+
+NOVA sees at most the first 24,000 characters of each text document and at most 100 PDF pages. If a file is excerpted, chat displays a notice and the model is told it has an excerpt. Scanned PDFs without text need an image of the relevant page; there is no OCR step. Document layouts, drawings and embedded DOCX images are not preserved.
+
+Files are held in memory during the request, never saved to the server filesystem or as file contents in conversation history. The browser history shows file names. To ask another question about a file in a later turn, attach it again.
+
+## Conversation style
+
+NOVA aims to be a calm, attentive personal assistant: understand the intention, act within the request, and explain the useful result. It can acknowledge a difficult day without launching unrelated tools, and suggest a relevant next step without appending an offer to every answer. Actions and claims of success still follow the backend's existing verification and confirmation rules.
+
+Typed chat allows useful lists, links, code and fuller explanations. Speech recognition and the wake word identify voice turns, which favour natural spoken sentences. Tool results preserve that turn's style rather than forcing every answer into four sentences. The model receives the last six conversation turns (twelve messages) for continuity, plus relevant older memory. The user's own persona settings remain in effect.

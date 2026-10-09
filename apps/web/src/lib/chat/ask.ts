@@ -1,3 +1,4 @@
+import { showToast } from "#lib/stores/toasts.svelte.ts";
 import type { ChatAttachment } from "@nova/contracts";
 import { openChatStream } from "#lib/api/chat.ts";
 import { chat, provideAsk, setState } from "#lib/stores/chat.svelte.ts";
@@ -43,11 +44,12 @@ export function addMessage(role: "user" | "assistant", text = ""): number {
 export async function ask(
   raw: string,
   attachments: ChatAttachment[] = [],
-): Promise<void> {
+  inputMode: "text" | "voice" = "text",
+): Promise<boolean> {
   const text =
     raw.trim() ||
     (attachments.length ? "Bekijk de bijgevoegde bestanden." : "");
-  if (!text || chat.busy) return;
+  if (!text || chat.busy) return false;
 
   stopSpeaking();
   chat.busy = true;
@@ -68,6 +70,7 @@ export async function ask(
   setState("thinking");
 
   let fullReply = "";
+  let sent = false;
   // "ja"/"nee" while a card is open answers that card; anything else makes the server drop it.
   const cardsBefore = openCardIds();
   const answering =
@@ -82,11 +85,21 @@ export async function ask(
     const body = await openChatStream({
       message: text,
       attachments,
+      inputMode,
       sessionId: getSessionId(),
       ...(answering ? { confirmationId: answering } : {}),
     });
 
     await readEvents(body, ({ event, data }) => {
+      if (event === "attachment_notice" && typeof data?.message === "string") {
+        showToast({
+          severity: "info",
+          title: "Bijlage ingekort",
+          detail: data.message,
+        });
+        const user = chat.history[assistant - 1];
+        if (user) user.text += `\n${data.message}`;
+      }
       if (event === "confirmation")
         addCard(data as unknown as Parameters<typeof addCard>[0]);
       if (event === "tool_start") {
@@ -132,6 +145,7 @@ export async function ask(
     noteSpoken(fullReply);
     speaker.finish();
     await speaker.done;
+    sent = true;
   } catch (error) {
     speaker.cancel();
     const message = (error as Error).message;
@@ -144,6 +158,7 @@ export async function ask(
     chatEvents.emit("turnDone");
     if (!playback.current) setState("ready");
   }
+  return sent;
 }
 
 provideAsk(ask);

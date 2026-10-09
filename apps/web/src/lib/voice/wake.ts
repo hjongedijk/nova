@@ -105,7 +105,7 @@ function sendCommand(command: string, index: number): void {
   clearTimeout(settleTimer);
   finishAwait();
   shell.draft = "";
-  void ask(command);
+  void ask(command, [], "voice");
 }
 function sendWhenSettled(command: string, index: number): void {
   clearTimeout(settleTimer);

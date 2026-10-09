@@ -52,7 +52,7 @@ export class ContextBuilder {
         content: `Recent cached component summary (use live tools for live questions): ${JSON.stringify(this.state.all())}`,
       });
 
-    messages.push(...this.session.recent(sessionId, 4));
+    messages.push(...this.session.recent(sessionId, 12));
     messages.push({ role: "user", content: message });
 
     if (this.config.extensionsEnabled)

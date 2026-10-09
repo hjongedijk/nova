@@ -22,7 +22,7 @@ async function bootstrap() {
   app.setGlobalPrefix("api", {
     exclude: ["windows-agent/{*path}", "nova-ca.crt"],
   });
-  app.useBodyParser("json", { limit: "512kb" });
+  app.useBodyParser("json", { limit: "42mb" });
   app.enableShutdownHooks();
   await app.init();
 

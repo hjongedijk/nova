@@ -6,18 +6,23 @@ export type ChatEvent =
   | { event: "tool_start"; data: { name: string } }
   | { event: "tool_result"; data: { name: string; ok: boolean } }
   | { event: "confirmation"; data: PendingConfirmation }
+  | { event: "attachment_notice"; data: { message: string } }
   | { event: "error"; data: { message: string } }
   | { event: "done"; data: { reply: string } };
 
 export interface ChatAttachment {
   name: string;
   content: string;
+  /** Binary documents and images use base64; omitted for UTF-8 text. */
+  encoding?: "base64";
+  mimeType?: string;
 }
 
 export interface ChatRequest {
-  /** UTF-8 text files, at most three of 16 KiB each. */
+  /** Up to five files: 10 MiB each, 20 MiB total. */
   attachments?: ChatAttachment[];
   message: string;
+  inputMode?: "text" | "voice";
   sessionId: string;
   /** Answers this pending confirmation ("ja"/"nee") instead of starting a new request. */
   confirmationId?: string;

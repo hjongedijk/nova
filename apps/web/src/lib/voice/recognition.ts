@@ -75,7 +75,7 @@ export function initRecognition(): boolean {
     }
     clearTimeout(micTimer);
     if (!text) return;
-    void ask(text);
+    void ask(text, [], "voice");
   };
 
   rec.onend = () => {

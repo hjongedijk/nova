@@ -17,6 +17,17 @@ export interface ModelMessage {
   name?: string;
 }
 
+export type ModelContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail: "auto" } };
+
+export type ModelInputMessage =
+  | ModelMessage
+  | {
+      role: "user";
+      content: ModelContentPart[];
+    };
+
 export interface GatewayMetadata {
   compression: string | null;
   cache: string | null;
@@ -43,6 +54,7 @@ export interface CallOptions {
   toolChoice?: "auto" | "required";
   /** A pure text answer is wanted: no tools are offered. */
   tools?: ModelTool[];
+  maxTokens?: number;
 }
 
 /**
@@ -76,7 +88,7 @@ export class OmniRouteClient {
   }
 
   async call(
-    messages: ModelMessage[],
+    messages: ModelInputMessage[],
     options: CallOptions = {},
   ): Promise<ModelAnswer> {
     const {
@@ -92,7 +104,7 @@ export class OmniRouteClient {
       model: this.config.omniModel,
       messages,
       temperature: 0.7,
-      max_tokens: 900,
+      max_tokens: options.maxTokens ?? 1800,
       reasoning_effort: "none",
       stream,
     };
@@ -119,6 +131,14 @@ export class OmniRouteClient {
         ? AbortSignal.any([signal, AbortSignal.timeout(60_000)])
         : AbortSignal.timeout(60_000),
     });
+    if (
+      !response.ok &&
+      [400, 415, 422].includes(response.status) &&
+      messages.some((message) => Array.isArray(message.content))
+    )
+      throw new Error(
+        "OmniRoute weigert deze afbeelding. Kies in OmniRoute een gratis model dat afbeeldingen kan lezen, of stuur een PDF of tekstdocument.",
+      );
     if (!response.ok)
       throw new Error(
         `OmniRoute request failed (${response.status}); no alternate gateway or paid fallback was attempted`,

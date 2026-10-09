@@ -1,4 +1,4 @@
-import { attachmentContext } from "./attachments.js";
+import { attachmentMessage } from "./attachments.js";
 import { Injectable } from "@nestjs/common";
 import type { ChatAttachment, PendingConfirmation } from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
@@ -12,6 +12,7 @@ import {
   type GatewayMetadata,
   type ModelAnswer,
   type ModelMessage,
+  type ModelInputMessage,
 } from "./omniroute-client.service.js";
 import { capabilityNotes } from "./prompt.js";
 import { ContextBuilder } from "./context-builder.service.js";
@@ -25,12 +26,32 @@ import { ConfirmationHandler } from "./confirmation-handler.service.js";
 const LIVE_DATA =
   /\b(?:weer|temperatuur|regent?|regen|zonnig|wind|buiten|weather|forecast|hoe laat|welke dag|welke datum|datum|nieuws|headlines?|timer|herinner\w*|wekker|lijst\w*|boodschappen|taken|lampen?|licht|verlichting|verwarming|thermostaat|iemand thuis|hoe warm|hoe koud|graden|in huis|woonkamer|slaapkamer|keuken|proxmox|vm|vm['’]?s|virtuele|servers?|status|bereikbaar|storing|meldingen?|watchdog|opslag|cpu|belasting|koers|bitcoin|dollar|euro|valuta|luchtkwaliteit|pollen|maan|iss|ruimtestation|zoek\w*|google|wikipedia|internet|inwoners|bereken\w*|open|sluit|herstart|restart|vergrendel\w*|speel|pauzeer|volume|browser|chrome|website|surf|navigeer|scroll|klik|tabblad|ga naar|youtube|amazon|marktplaats)\b/i;
 
-export const requiresLiveData = (message: string) =>
-  LIVE_DATA.test(String(message || ""));
+// Sharing a mood is conversation, even if it mentions the weather or the house.
+const PERSONAL_CHAT =
+  /\b(?:ik ben (?:moe|verdrietig|blij|gestrest|eenzaam)|ik voel me|wat een dag|i(?:'m| am) (?:tired|sad|happy|stressed|lonely)|i feel)\b/i;
+const EXPLICIT_REQUEST =
+  /\b(?:kun je|kan je|wil je|hoe|wat is|wat zijn|welke|zoek|check|controleer|zet|doe|open|sluit|speel|help|can you|could you|please|what|when|where|check|turn|play)\b/i;
+const LIVE_WITH_FILES =
+  /\b(?:nu|momenteel|actueel|live|current|currently|today|vandaag|check|controleer|zet|schakel|herstart|restart|reboot|turn|open|sluit|speel|play)\b/i;
+export const requiresLiveData = (
+  message: string,
+  hasAttachments = false,
+): boolean => {
+  if (PERSONAL_CHAT.test(message) && !EXPLICIT_REQUEST.test(message))
+    return false;
+  if (hasAttachments && !LIVE_WITH_FILES.test(message)) return false;
+  return LIVE_DATA.test(message);
+};
 
-// Travels inside the tool result, where it is read last and every provider accepts it.
-const SPOKEN_STYLE =
-  "Beantwoord alleen de laatste vraag van de gebruiker en vertel dit zoals je het hardop zou zeggen: gewone zinnen, geen lijst, geen nummers, geen opmaak, hooguit vier zinnen, en alleen wat gevraagd is.";
+export function responseStyle(inputMode: "text" | "voice" = "text"): string {
+  const manner =
+    "Answer the user's actual request in their language. Be calm, warm and capable, like a trusted personal assistant. Give the useful result, not a tool report. Keep simple answers brief; give enough detail for complex requests. Do not force a joke, an opening catchphrase or a follow-up question.";
+  return inputMode === "voice"
+    ? manner +
+        " This is a spoken conversation: use natural sentences and no markdown. Start with the key point; expand when asked."
+    : manner +
+        " This is typed chat: use readable paragraphs, lists, links, tables or code when they help, especially for documents and technical help. Do not arbitrarily stop after four sentences.";
+}
 
 const REMINDER: ModelMessage = {
   role: "user",
@@ -44,6 +65,7 @@ export interface OrchestrateInput {
   sessionId: string;
   message: string;
   attachments?: ChatAttachment[];
+  inputMode?: "text" | "voice";
   /** The confirmation the user is answering, when the interface knows it. */
   confirmationId?: string;
   stream?: boolean;
@@ -83,7 +105,7 @@ export class OrchestratorService {
    * says in a failed attempt is held back, not shown.
    */
   private async firstRoundWithTool(
-    messages: ModelMessage[],
+    messages: ModelInputMessage[],
     options: {
       stream: boolean;
       emit: Emit;
@@ -155,17 +177,26 @@ export class OrchestratorService {
       count: tools.length,
       names: tools.map((tool) => tool.name),
     });
-    const messages = await this.context.build(sessionId, message);
-    if (input.attachments?.length)
-      messages.push({
-        role: "user",
-        content: attachmentContext(input.attachments),
-      });
+    const messages: ModelInputMessage[] = await this.context.build(
+      sessionId,
+      message,
+    );
+    const style = responseStyle(input.inputMode);
+    messages.splice(1, 0, { role: "system", content: style });
+    if (input.attachments?.length) {
+      const prepared = await attachmentMessage(input.attachments, message);
+      for (const notice of prepared.notices)
+        emit("attachment_notice", { message: notice });
+      // Keep the user's question last, alongside its files, instead of two competing user messages.
+      messages[messages.length - 1] = prepared.message;
+    }
     const notes = capabilityNotes(tools.map((tool) => tool.name));
     if (notes) messages.splice(1, 0, { role: "system", content: notes });
 
     const modelTools = this.tools.forModel();
-    const mustUseTool = modelTools.length > 0 && requiresLiveData(message);
+    const mustUseTool =
+      modelTools.length > 0 &&
+      requiresLiveData(message, !!input.attachments?.length);
     const rounds = this.config.maxToolRounds;
     let emptyRetried = false;
 
@@ -185,6 +216,7 @@ export class OrchestratorService {
               signal,
               sessionId,
               tools: modelTools,
+              maxTokens: input.inputMode === "voice" ? 1000 : 2400,
             });
       const assistant = last.assistant;
       // A model that asks for more than eight calls at once gets its first eight run.
@@ -244,7 +276,7 @@ export class OrchestratorService {
           name,
           content: JSON.stringify(
             result && typeof result === "object"
-              ? { ...result, spoken_style: SPOKEN_STYLE }
+              ? { ...result, response_style: style }
               : result,
           ),
         });

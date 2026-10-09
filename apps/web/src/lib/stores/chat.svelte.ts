@@ -36,9 +36,14 @@ export function setState(state: UiState): void {
 export let ask: (
   text: string,
   attachments?: ChatAttachment[],
-) => Promise<void> = async () => {};
+  inputMode?: "text" | "voice",
+) => Promise<boolean> = async () => false;
 export function provideAsk(
-  fn: (text: string, attachments?: ChatAttachment[]) => Promise<void>,
+  fn: (
+    text: string,
+    attachments?: ChatAttachment[],
+    inputMode?: "text" | "voice",
+  ) => Promise<boolean>,
 ): void {
   ask = fn;
 }

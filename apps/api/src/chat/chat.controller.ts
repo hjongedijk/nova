@@ -31,6 +31,7 @@ function check(body: ChatBody): {
   sessionId: string;
   message: string;
   attachments: ChatAttachment[];
+  inputMode: "text" | "voice";
   confirmationId?: string;
 } {
   if (FORBIDDEN_OVERRIDES.some((key) => body?.[key] !== undefined))
@@ -44,6 +45,12 @@ function check(body: ChatBody): {
     body.message.length > 10_000
   )
     throw new ValidationError(["Invalid message"]);
+  if (
+    body.inputMode !== undefined &&
+    body.inputMode !== "text" &&
+    body.inputMode !== "voice"
+  )
+    throw new ValidationError(["Invalid input mode"]);
   const sessionId = normalizeSessionId(body.sessionId);
   if (
     body.confirmationId !== undefined &&
@@ -58,6 +65,7 @@ function check(body: ChatBody): {
   return {
     sessionId,
     attachments: checkAttachments(body.attachments),
+    inputMode: body.inputMode === "voice" ? "voice" : "text",
     message: body.message.trim(),
     confirmationId: body.confirmationId as string | undefined,
   };
@@ -90,7 +98,8 @@ export class ChatController {
   /** POST /api/chat: one question, one complete answer. */
   @Post("chat")
   async chat(@Body() body: ChatBody): Promise<Record<string, unknown>> {
-    const { sessionId, message, confirmationId, attachments } = check(body);
+    const { sessionId, message, confirmationId, attachments, inputMode } =
+      check(body);
     if (!this.client.configured)
       throw new ConflictException("OmniRoute is not configured");
     if (active.has(sessionId))
@@ -104,6 +113,7 @@ export class ChatController {
         sessionId,
         message,
         attachments,
+        inputMode,
         confirmationId,
       });
       this.remember(sessionId, message, result, started);
@@ -123,7 +133,8 @@ export class ChatController {
     @Body() body: ChatBody,
     @Res() response: Response,
   ): Promise<void> {
-    const { sessionId, message, confirmationId, attachments } = check(body);
+    const { sessionId, message, confirmationId, attachments, inputMode } =
+      check(body);
     if (!this.client.configured) {
       response.status(503).json({ error: "OmniRoute is not configured" });
       return;
@@ -161,6 +172,7 @@ export class ChatController {
         sessionId,
         message,
         attachments,
+        inputMode,
         confirmationId,
         stream: true,
         emit,
