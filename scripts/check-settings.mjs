@@ -215,6 +215,8 @@ try {
     let usageReads = 0;
     let skillVersionReads = 0;
     let helperAgentWrites = 0;
+    let helperPreferenceHistoryReads = 0;
+    let helperPreferenceHistoryWrites = 0;
     let restartRequests = 0;
     const backup = {
       format: "nova-settings",
@@ -657,7 +659,48 @@ try {
             },
           ],
         };
-      else if (endpoint === "/settings/services/restart") {
+      else if (endpoint === "/settings/helper/preferences/history") {
+        helperPreferenceHistoryReads++;
+        data = {
+          truncated: false,
+          revisions: [
+            {
+              id: "55555555-5555-4555-8555-555555555555",
+              at: "2026-10-10T10:00:00Z",
+              before: {
+                autohide: true,
+                contrast: false,
+                shape: "orb",
+                wardrobe: { theme: "nova", seasonal: false, birthday: "" },
+                cues: { enabled: true, volume: 0.35, theme: "soft" },
+              },
+              after: {
+                autohide: false,
+                contrast: true,
+                shape: "ring",
+                wardrobe: { theme: "violet", seasonal: false, birthday: "" },
+                cues: { enabled: true, volume: 0.35, theme: "soft" },
+              },
+            },
+          ],
+        };
+      } else if (
+        endpoint.startsWith("/settings/helper/preferences/history/") &&
+        endpoint.endsWith("/rollback")
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        helperPreferenceHistoryWrites++;
+        data = {
+          ok: true,
+          preferences: {
+            autohide: true,
+            contrast: false,
+            shape: "orb",
+            wardrobe: { theme: "nova", seasonal: false, birthday: "" },
+            cues: { enabled: true, volume: 0.35, theme: "soft" },
+          },
+        };
+      } else if (endpoint === "/settings/services/restart") {
         if (request.method() === "POST") {
           assert.equal(request.headers()["x-nova-admin"], "1");
           restartRequests++;
@@ -1958,6 +2001,37 @@ try {
         `settings-personality-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
+    await page
+      .locator('.settings-sidebar a[href="/settings?section=system"]')
+      .click();
+    const helperHistory = page.getByRole("region", {
+      name: "Helper wijzigingsgeschiedenis",
+    });
+    assert.equal(
+      helperPreferenceHistoryReads,
+      0,
+      "Helper history loads only on request",
+    );
+    await helperHistory
+      .getByRole("button", { name: "Helpergeschiedenis laden" })
+      .click();
+    await helperHistory.getByText(/orb, hoog contrast uit/).waitFor();
+    await helperHistory.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-helper-history-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+    await helperHistory
+      .getByRole("button", { name: "Deze wijziging terugdraaien" })
+      .click();
+    await helperHistory
+      .getByText("Helperinstellingen teruggedraaid.", { exact: true })
+      .waitFor();
+    assert.equal(helperPreferenceHistoryReads, 2);
+    assert.equal(helperPreferenceHistoryWrites, 1);
+    await page.goto(`${base}/settings?section=personality`);
+    await page.locator("#behaviorText").waitFor();
     pinned = true;
     await page.reload();
     await page.locator("#pinInput").waitFor();

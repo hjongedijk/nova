@@ -30,6 +30,8 @@ import type {
   ServiceConnectionWrite,
   ServiceRestartStatus,
   ServiceRestartResult,
+  HelperPreferenceHistory,
+  HelperPreferenceRollbackResult,
   HelperPreferences,
   Skill,
   SkillDraftResult,
@@ -227,7 +229,19 @@ export const saveHelperHotkeys = (hotkeys: Record<string, string>) =>
 export const getHelperPreferences = () =>
   read<HelperPreferences>("/helper/preferences");
 export const persistHelperPreferences = (preferences: HelperPreferences) =>
-  write<{ ok: true }>("PUT", "/helper/preferences", preferences);
+  write<{
+    ok: true;
+    preferences: HelperPreferences;
+    auditWarning?: string;
+  }>("PUT", "/helper/preferences", preferences);
+export const getHelperPreferenceHistory = () =>
+  read<HelperPreferenceHistory>("/helper/preferences/history");
+export const rollbackHelperPreferenceRevision = (id: string) =>
+  write<HelperPreferenceRollbackResult>(
+    "POST",
+    `/helper/preferences/history/${enc(id)}/rollback`,
+    {},
+  );
 
 /* ---------- service connections (credentials never returned) ---------- */
 export const getServiceConnections = () =>

@@ -516,6 +516,22 @@ export interface ServiceRestartResult {
   error?: string;
   scheduled?: boolean;
 }
+export interface HelperPreferenceRevision {
+  id: string;
+  at: string;
+  before: HelperPreferences;
+  after: HelperPreferences;
+  revertedFrom?: string;
+}
+export interface HelperPreferenceHistory {
+  revisions: HelperPreferenceRevision[];
+  truncated: boolean;
+}
+export interface HelperPreferenceRollbackResult {
+  ok: true;
+  preferences: HelperPreferences;
+  auditWarning?: string;
+}
 
 /** Private projections of the bounded audit tail, with no arguments or session identifiers. */
 export interface ToolUsageReport {

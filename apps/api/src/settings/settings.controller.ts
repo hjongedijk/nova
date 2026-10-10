@@ -1,4 +1,5 @@
 import { SettingsBackupService } from "./settings-backup.service.js";
+import { HelperPreferencesHistory } from "./helper-preferences-history.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
@@ -89,6 +90,7 @@ export class SettingsController {
     private readonly playbooks: PlaybooksService,
     private readonly mutations: SettingsMutationsService,
     private readonly backups: SettingsBackupService,
+    private readonly helperHistory: HelperPreferencesHistory,
     @Optional()
     @Inject(WALLPAPER_PORT)
     private readonly wallpaper?: WallpaperPort,
@@ -602,8 +604,15 @@ export class SettingsController {
   saveHelperPreferences(@Body() body: Body_): {
     ok: true;
     preferences: HelperPreferences;
+    auditWarning?: string;
   } {
     const preferences = normalizeHelperPreferences(body);
+    const before = normalizeHelperPreferences(
+      this.settings.get().helperPreferences as unknown as Record<
+        string,
+        unknown
+      >,
+    );
     this.log(
       "helper_preferences",
       preferences as unknown as Record<string, unknown>,
@@ -611,7 +620,27 @@ export class SettingsController {
     this.settings.update((next) => {
       next.helperPreferences = preferences;
     });
-    return { ok: true, preferences };
+    this.helperHistory.record(before, preferences);
+    return {
+      ok: true,
+      preferences,
+      ...(this.helperHistory.lastWarning
+        ? { auditWarning: this.helperHistory.lastWarning }
+        : {}),
+    };
+  }
+
+  @Get("helper/preferences/history")
+  helperPreferencesHistory() {
+    return this.helperHistory.list();
+  }
+
+  @Post("helper/preferences/history/:id/rollback")
+  @HttpCode(200)
+  rollbackHelperPreferences(@Param("id") id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige wijziging."]);
+    return this.helperHistory.rollback(id);
   }
 
   @Get("helper/hotkeys")

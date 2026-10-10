@@ -23,6 +23,7 @@ import { ServiceConnectionsStore } from "./services/service-connections.store.js
 import { ServiceConnectionsAdapter } from "./services/service-connections.adapter.js";
 import { ServiceRestartController } from "./services/service-restart.controller.js";
 import { ServiceRestart } from "./services/service-restart.service.js";
+import { HelperPreferencesHistory } from "./helper-preferences-history.service.js";
 import { SkillAssistantService } from "./ai/skill-assistant.service.js";
 import { PlaybooksService } from "./playbooks.service.js";
 import { PublicConfigService } from "./public-config.service.js";
@@ -72,6 +73,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     ServiceConnectionsStore,
     ServiceConnectionsAdapter,
     ServiceRestart,
+    HelperPreferencesHistory,
     SkillsSource,
     PlaybooksService,
     PublicConfigService,

@@ -1,0 +1,102 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { HelperPreferences } from "@nova/contracts";
+import { SettingsStore } from "../../src/settings/store/settings.store.js";
+import { HelperPreferencesHistory } from "../../src/settings/helper-preferences-history.service.js";
+import { normalizeHelperPreferences } from "../../src/settings/settings-validation.js";
+import type { AuditService } from "../../src/core/audit/audit.service.js";
+import type { NovaConfig } from "../../src/core/config/nova-config.js";
+
+const normalize = (value: HelperPreferences) =>
+  normalizeHelperPreferences(value as unknown as Record<string, unknown>);
+
+const cleanups: (() => void)[] = [];
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup();
+});
+
+function fixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-helper-history-"));
+  cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const config = { dataFile: (name: string) => path.join(dir, name) };
+  const settings = new SettingsStore(config as NovaConfig);
+  const record = vi.fn();
+  const history = new HelperPreferencesHistory(config as NovaConfig, settings, {
+    record,
+  } as unknown as AuditService);
+  return { dir, settings, record, history };
+}
+
+describe("helper preference history", () => {
+  it("stores secret-free bounded revisions with private file permissions", () => {
+    const f = fixture();
+    const before = normalize(f.settings.get().helperPreferences);
+    const after = { ...before, contrast: !before.contrast };
+    f.history.record(before, after);
+    const listed = f.history.list();
+    expect(listed.revisions).toHaveLength(1);
+    expect(listed.revisions[0]).toMatchObject({ before, after });
+    expect(
+      fs.statSync(path.join(f.dir, "helper-preferences-history.json")).mode &
+        0o777,
+    ).toBe(0o600);
+    expect(JSON.stringify(listed)).not.toMatch(
+      /secret|token|password|headers/i,
+    );
+  });
+
+  it("rolls back only while the current values still match and records the inverse", () => {
+    const f = fixture();
+    const before = normalize(f.settings.get().helperPreferences);
+    const after = { ...before, contrast: !before.contrast };
+    f.settings.update((next) => {
+      next.helperPreferences = after;
+    });
+    f.history.record(before, after);
+    const revision = f.history.list().revisions[0]!;
+    expect(f.history.rollback(revision.id).preferences).toEqual(before);
+    expect(f.settings.get().helperPreferences).toEqual(before);
+    expect(f.history.list().revisions[0]?.revertedFrom).toBe(revision.id);
+    expect(f.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        arguments: {
+          what: "helper_preferences_rollback",
+          revision: revision.id,
+        },
+      }),
+    );
+  });
+
+  it("rejects a stale rollback after newer settings have been saved", () => {
+    const f = fixture();
+    const before = normalize(f.settings.get().helperPreferences);
+    const after = { ...before, contrast: !before.contrast };
+    f.settings.update((next) => {
+      next.helperPreferences = after;
+    });
+    f.history.record(before, after);
+    const revision = f.history.list().revisions[0]!;
+    f.settings.update((next) => {
+      next.helperPreferences = { ...after, autohide: !after.autohide };
+    });
+    expect(() => f.history.rollback(revision.id)).toThrow(
+      "De instellingen zijn daarna gewijzigd.",
+    );
+  });
+
+  it("retains at most one hundred revisions", () => {
+    const f = fixture();
+    for (let index = 0; index < 105; index++) {
+      const before = normalize(f.settings.get().helperPreferences);
+      const after = { ...before, contrast: !before.contrast };
+      f.history.record(before, after);
+      f.settings.update((next) => {
+        next.helperPreferences = after;
+      });
+    }
+    expect(f.history.list().revisions).toHaveLength(50);
+    expect(f.history.list().truncated).toBe(true);
+  });
+});

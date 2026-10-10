@@ -117,6 +117,35 @@ describe("the settings API", () => {
       expect((await send("get", "/skills/ochtend/versions", {})).status).toBe(
         401,
       );
+      expect(
+        (await send("get", "/helper/preferences/history", {})).status,
+      ).toBe(401);
+      expect(
+        (
+          await pinned.api
+            .post(
+              "/api/settings/helper/preferences/history/00000000-0000-0000-0000-000000000000/rollback",
+            )
+            .send({})
+        ).status,
+      ).toBe(401);
+      expect(
+        (
+          await pinned.api
+            .get("/api/settings/helper/preferences/history")
+            .set("x-nova-pin", "4321")
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await pinned.api
+            .post(
+              "/api/settings/helper/preferences/history/00000000-0000-0000-0000-000000000000/rollback",
+            )
+            .set("x-nova-pin", "4321")
+            .send({})
+        ).status,
+      ).toBe(403);
       expect((await send("get", "/", { "x-nova-pin": "0000" })).status).toBe(
         401,
       );

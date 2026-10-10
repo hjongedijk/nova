@@ -686,14 +686,15 @@
             class="hp-button hp-primary"
             onclick={async () => {
               try {
-                await persistHelperPreferences({
+                const result = await persistHelperPreferences({
                   autohide,
                   contrast,
                   shape: helper.shape,
                   wardrobe: helper.wardrobe,
                   cues: { ...helper.cues, quiet: helper.cues.quiet! },
                 });
-                preferencesNote = "Helperinstellingen opgeslagen.";
+                preferencesNote =
+                  result.auditWarning ?? "Helperinstellingen opgeslagen.";
               } catch (error) {
                 preferencesNote = (error as Error).message;
               }
