@@ -1,6 +1,9 @@
 import { Module } from "@nestjs/common";
 import { SettingsSource } from "./settings.source.js";
+import { ConfirmationsModule } from "../confirmations/confirmations.module.js";
 import { NativeGatewayController } from "./native-gateway.controller.js";
+import { NativeSkillModesController } from "./native-skill-modes.controller.js";
+import { NativeSkillModesService } from "./native-skill-modes.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import { UpdatesController } from "./updates.controller.js";
 import { UpdatesService } from "./updates.service.js";
@@ -29,7 +32,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
  * PublicConfigService for the chat and the dashboard.
  */
 @Module({
-  imports: [SettingsStoreModule, RoutingModule],
+  imports: [SettingsStoreModule, RoutingModule, ConfirmationsModule],
   controllers: [
     SettingsController,
     WidgetsController,
@@ -37,11 +40,13 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     ModelMetricsController,
     UpdatesController,
     NativeGatewayController,
+    NativeSkillModesController,
   ],
   providers: [
     SettingsGuard,
     SettingsMutationsService,
     SettingsSource,
+    NativeSkillModesService,
     UpdatesService,
     ServiceConnectionsStore,
     ServiceConnectionsAdapter,

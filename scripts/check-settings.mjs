@@ -144,6 +144,9 @@ try {
     let tested = false;
     let persona = overview.persona;
     let updateChecks = 0;
+    let nativeMode = "off";
+    let nativePreparedMode = "off";
+    let nativeWrites = 0;
     let hotkeys = {
       open: "Ctrl+Alt+N",
       speak: "Ctrl+Alt+Space",
@@ -198,6 +201,14 @@ try {
           truncated: false,
           skills: [
             {
+              id: "fixture-owned",
+              name: "NOVA voorbeeldskill",
+              version: "1.0.0",
+              scope: "nova",
+              enabled: nativeMode !== "off",
+              mode: nativeMode,
+            },
+            {
               id: "fixture-native",
               name: "Gedeelde voorbeeldskill",
               version: "1.0.0",
@@ -225,7 +236,45 @@ try {
           documentation:
             "<script>globalThis.nativeDocumentRan = true</script>\nDocumentatie is tekst.",
         };
-      else if (endpoint === "/settings/models/metrics")
+      else if (
+        endpoint === "/settings/omniroute/native/skills/fixture-owned/prepare"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        nativePreparedMode = request.postDataJSON().mode;
+        const now = await page.evaluate(() => Date.now());
+        data = {
+          ok: true,
+          name: "NOVA voorbeeldskill",
+          action: {
+            confirmationId: "11111111-1111-4111-8111-111111111111",
+            sessionId: "settings-native:22222222-2222-4222-8222-222222222222",
+            tool: "native_skill_mode",
+            args: {
+              id: "fixture-owned",
+              mode: nativePreparedMode,
+              revision: "fixture-revision",
+            },
+            risk: nativePreparedMode === "off" ? "CONFIRM" : "DANGEROUS",
+            allowAlways: false,
+            createdAt: now,
+            expiresAt: now + 60000,
+          },
+        };
+      } else if (
+        endpoint === "/settings/omniroute/native/skills/fixture-owned/confirm"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        if (request.postDataJSON().approve) {
+          nativeWrites++;
+          nativeMode = nativePreparedMode;
+          data = {
+            ok: true,
+            verified: true,
+            mode: nativeMode,
+            enabled: nativeMode !== "off",
+          };
+        } else data = { ok: true };
+      } else if (endpoint === "/settings/models/metrics")
         data = {
           updatedAt: "2026-10-10T09:00:00Z",
           available: true,
@@ -361,6 +410,71 @@ try {
       .getByRole("button", { name: "OmniRoute-overzicht laden", exact: true })
       .click();
     await page.getByText("Gedeelde voorbeeldskill", { exact: true }).waitFor();
+    assert.equal(
+      await page
+        .getByRole("button", {
+          name: "Aan Gedeelde voorbeeldskill",
+          exact: true,
+        })
+        .count(),
+      0,
+    );
+    await page
+      .getByRole("button", { name: "Aan NOVA voorbeeldskill", exact: true })
+      .click();
+    await page
+      .getByRole("group", { name: "Native skillwijziging bevestigen" })
+      .waitFor();
+    assert.equal(nativeWrites, 0);
+    await page
+      .getByRole("group", { name: "Native skillwijziging bevestigen" })
+      .screenshot({
+        path: path.join(
+          screenshots,
+          `settings-native-confirm-${width === 390 ? "mobile" : `${scale}x`}.png`,
+        ),
+      });
+    await page
+      .getByRole("button", { name: "Annuleer skillmodus", exact: true })
+      .click();
+    await page
+      .getByRole("group", { name: "Native skillwijziging bevestigen" })
+      .waitFor({ state: "detached" });
+    assert.equal(nativeWrites, 0);
+    await page
+      .getByRole("button", {
+        name: "Automatisch NOVA voorbeeldskill",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("group", { name: "Native skillwijziging bevestigen" })
+      .waitFor();
+    await page.clock.fastForward(60001);
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Bevestig skillmodus", exact: true })
+        .isDisabled(),
+      true,
+    );
+    await page
+      .getByRole("button", { name: "Annuleer skillmodus", exact: true })
+      .click();
+    await page
+      .getByRole("group", { name: "Native skillwijziging bevestigen" })
+      .waitFor({ state: "detached" });
+    await page
+      .getByRole("button", { name: "Aan NOVA voorbeeldskill", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Bevestig skillmodus", exact: true })
+      .click();
+    await page
+      .getByText("Modus opgeslagen en gecontroleerd.", { exact: false })
+      .waitFor();
+    assert.equal(nativeWrites, 1);
+    assert.equal(nativeMode, "on");
+
     await page
       .getByRole("button", { name: "Lees Gateway-documentatie", exact: true })
       .click();
@@ -536,7 +650,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts and native gateway documentation.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes.",
   );
 } finally {
   await browser.close();

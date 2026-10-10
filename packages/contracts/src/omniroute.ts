@@ -25,3 +25,20 @@ export interface NativeSkillDocument {
   name?: string;
   documentation?: string;
 }
+import type { PendingConfirmation } from "./chat.js";
+
+export type NativeSkillMode = "on" | "off" | "auto";
+export interface NativeSkillModePrepared {
+  ok: boolean;
+  error?: string;
+  name?: string;
+  action?: PendingConfirmation;
+}
+export interface NativeSkillModeResult {
+  ok: boolean;
+  error?: string;
+  verified?: boolean | null;
+  mode?: NativeSkillMode;
+  enabled?: boolean;
+  auditWarning?: string;
+}

@@ -35,11 +35,11 @@ Run Node checks with Node 24 (host Node 22 is below the repository engine requir
 Use `scripts/check-helper.mjs`; its fixtures contain test data only.
 PowerShell syntax/geometry checks do not prove Windows kiosk/tray/audio/display behavior.
 
-Phase J latest block: 452 tests in 39 files; format/lint/typecheck/build passed in Node 24 Docker.
+Phase J latest block: 498 tests in 40 files; format/lint/typecheck/build passed in Node 24 Docker.
 Production settings browser checks passed for all sections, search/keyboard/deep links, mobile, save, PIN expiry/lock, model measurements and explicit release checks.
 Production helper regression checks passed at 1x/2x. Screenshots use fixtures; no real phone proof.
 
-Next: J3 native skill mode/prompt editing and account/policy management using `docs/omniroute-admin-api.md`; onboarding follows its policy wizard. Mode updates must verify persisted SQLite values, not the upstream echo or cached registry. J7 personal changes are implemented; night mode and model changes await their owning features.
+Next: J3 native global prompt editing and account/policy management using `docs/omniroute-admin-api.md`; onboarding follows its policy wizard. Mode updates must verify persisted SQLite values, not the upstream echo or cached registry. J7 personal changes are implemented; night mode and model changes await their owning features.
 J2.3 restart button, complete history/backup and service-specific management remain unfinished. J4 waits for C.
 Service config: `core/config/service-connections.ts`; store/adapter/controller: `settings/services/`.
 Saved gateway URL changes are blocked until provenance is verified; connection tests never establish free billing.
@@ -67,3 +67,7 @@ Latest block: J7 persona replacement, instruction creation/toggle and credential
 Latest J3 visibility block: `settings/native-gateway.controller.ts`, `NativeGateway.svelte`, shared `contracts/omniroute.ts`. Explicit fixed management reads expose NOVA/global skill metadata, separate documentation and global prompt enabled/size only. Other owners, handlers, schemas and prompt contents stay private. 31 boundary/API tests added; gateway origin/CSRF and native cache behavior researched against v3.8.51. Native mutations remain pending.
 
 The first 452-test runs hit chat/SQLite setup time-outs. SQLite fixture setup inserted each row in its own transaction; batching setup into one atomic transaction preserved real read-only database checks. Standard test run then passed all 452 without increasing time-outs or reducing worker settings. Gates and build passed; final production native-overview browser checks passed at 1x/2x/mobile, including escaped documentation. Screenshots reviewed. Only new native screenshots should be committed, not regenerated unrelated fixtures.
+
+Native NOVA-owned skill modes are implemented in `settings/native-skill-modes.service.ts` and its guarded controller. Prepare is read-only; confirmation sessions are server-created, 60 seconds and single-use. On/auto are DANGEROUS, off is CONFIRM; no standing approval or chat setter. Global/foreign owners are blocked. Private revisions bind handler/schema/name/owner/mode/update time; per-skill in-flight guards prevent overlapping writes. Read-only SQLite verifies persistence, with honest unknown results and post-audit warnings.
+
+This block added 46 focused tests. All 498 tests in 40 files and Node24 format/lint/typecheck/build passed. Production settings checks passed at 1x/2x/mobile for preparation, cancellation, expiry and confirmed persistence; mobile overview/confirmation screenshots reviewed. No live gateway writes or PowerShell changes. J3.4 stays partial pending prompt editing and further native management. Local commit follows; J push/release remains unauthorized.

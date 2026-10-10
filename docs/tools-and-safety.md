@@ -140,3 +140,9 @@ NOVA can replace personal conversation rules, create an instruction skill and en
 The read-only skill list exposes identifiers, names, types, enabled state and versions, without credentials or HTTP bindings. Chat cannot create or enable webhook bindings, edit service credentials, change access controls or add executable code through these settings tools. Manage those bindings on the settings page. Webhook skills and custom panels reject `x-nova-admin` and `x-nova-pin` headers, including legacy stored headers at request time.
 
 Night mode and model selection through chat are still pending their corresponding features. Instruction skills describe a workflow using existing tools; they do not grant new permissions.
+
+## Native gateway skill modes
+
+The Models settings page can change the mode of an existing NOVA-owned native OmniRoute skill. Native skills may execute handler code inside the gateway; enabling or automatic mode is DANGEROUS, disabling is CONFIRM. Preparation performs no write. The PIN-guarded settings API uses a separate server-created confirmation session, a 60-second single-use approval and no standing permission. Shared/global and other-owner skills cannot be changed through this endpoint. There is no chat tool for it.
+
+A private revision binds the approval to ownership, name, handler, schema, mode and update time. The server checks the revision again before writing and refuses overlapping changes to the same skill. The upstream PUT echo is insufficient: NOVA checks actual mode/enabled and execution binding through the read-only database. A failure leaves persistence unknown; audit completion failure after verified persistence is reported as a warning. The upstream runtime cache may take a minute to reflect a saved change. External gateway administrators are not covered by NOVA's local in-flight guard; changed execution bindings fail post-write verification.

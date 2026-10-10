@@ -1,6 +1,9 @@
 import type {
   NativeGatewayReport,
   NativeSkillDocument,
+  NativeSkillMode,
+  NativeSkillModePrepared,
+  NativeSkillModeResult,
   WindowsAgentStatus,
   UpdateReport,
   ModelMetricsReport,
@@ -52,6 +55,23 @@ const enc = encodeURIComponent;
 export const getSettings = () => read<SettingsOverview>("");
 export const getNativeGateway = () =>
   read<NativeGatewayReport>("/omniroute/native");
+export const prepareNativeSkillMode = (id: string, mode: NativeSkillMode) =>
+  write<NativeSkillModePrepared>(
+    "POST",
+    `/omniroute/native/skills/${enc(id)}/prepare`,
+    { mode },
+  );
+export const confirmNativeSkillMode = (
+  id: string,
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<NativeSkillModeResult>(
+    "POST",
+    `/omniroute/native/skills/${enc(id)}/confirm`,
+    { sessionId, confirmationId, approve },
+  );
 export const getNativeSkillDocument = (id: string) =>
   read<NativeSkillDocument>(`/omniroute/native/documentation/${enc(id)}`);
 export const getModelMetrics = () =>
