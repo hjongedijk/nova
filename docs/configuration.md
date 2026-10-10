@@ -11,6 +11,7 @@ Notes on the tables below:
 - "Secret" marks values that must never be committed or shared. NOVA masks the value of every variable whose name contains `KEY`, `SECRET`, `TOKEN` or `PASSWORD` in logs, the action log, tool results and what the model sees (see [Tools and safety](tools-and-safety.md#secret-sanitising)).
 - The `JARVIS_*` names are historical and kept so an old `.env` keeps working.
 - In production `deploy/docker-compose.yml` fixes the internal wiring (`PORT`, `HTTPS_PORT`, `NOVA_DATA_DIR`, `OMNIROUTE_URL`, `OMNIROUTE_DATABASE`, `MQTT_URL`, `QDRANT_URL`, `NODE_RED_URL`) in its `environment:` block, which wins over `.env`.
+- The tables document every variable in [`.env.example`](../.env.example); values owned only by Compose are called out in the relevant rows and the Settings ownership section below.
 
 ## Release and runtime
 
