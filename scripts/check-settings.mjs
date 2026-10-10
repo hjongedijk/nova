@@ -147,6 +147,13 @@ try {
     let nativeMode = "off";
     let nativePreparedMode = "off";
     let nativeWrites = 0;
+    let promptWrites = 0;
+    let gatewayPrompt = {
+      enabled: false,
+      prefixPrompt: "private-existing-prefix",
+      suffixPrompt: "private-existing-suffix",
+    };
+    let promptDraft;
     let hotkeys = {
       open: "Ctrl+Alt+N",
       speak: "Ctrl+Alt+Space",
@@ -224,7 +231,11 @@ try {
               description: "Vaste API-documentatie",
             },
           ],
-          prompt: { enabled: false, prefixCharacters: 0, suffixCharacters: 0 },
+          prompt: {
+            enabled: gatewayPrompt.enabled,
+            prefixCharacters: gatewayPrompt.prefixPrompt.length,
+            suffixCharacters: gatewayPrompt.suffixPrompt.length,
+          },
         };
       else if (
         endpoint === "/settings/omniroute/native/documentation/fixture-doc"
@@ -273,6 +284,39 @@ try {
             mode: nativeMode,
             enabled: nativeMode !== "off",
           };
+        } else data = { ok: true };
+      } else if (endpoint === "/settings/omniroute/native/prompt/prepare") {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        promptDraft = request.postDataJSON();
+        assert.equal(promptDraft.acknowledgeGlobal, true);
+        const now = await page.evaluate(() => Date.now());
+        data = {
+          ok: true,
+          action: {
+            confirmationId: "33333333-3333-4333-8333-333333333333",
+            sessionId: "settings-prompt:44444444-4444-4444-8444-444444444444",
+            tool: "native_prompt_replace",
+            args: {
+              enabled: promptDraft.enabled,
+              prefixCharacters: promptDraft.prefixPrompt.length,
+              suffixCharacters: promptDraft.suffixPrompt.length,
+            },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: now,
+            expiresAt: now + 60000,
+          },
+        };
+      } else if (endpoint === "/settings/omniroute/native/prompt/confirm") {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        if (request.postDataJSON().approve) {
+          promptWrites++;
+          gatewayPrompt = {
+            enabled: promptDraft.enabled,
+            prefixPrompt: promptDraft.prefixPrompt,
+            suffixPrompt: promptDraft.suffixPrompt,
+          };
+          data = { ok: true, verified: true };
         } else data = { ok: true };
       } else if (endpoint === "/settings/models/metrics")
         data = {
@@ -474,6 +518,130 @@ try {
       .waitFor();
     assert.equal(nativeWrites, 1);
     assert.equal(nativeMode, "on");
+    await page
+      .getByRole("button", { name: "Gateway-prompt vervangen", exact: true })
+      .click();
+    assert.equal(
+      await page
+        .getByRole("textbox", {
+          name: "Nieuw gateway-voorvoegsel",
+          exact: true,
+        })
+        .inputValue(),
+      "",
+    );
+    assert.equal(
+      await page
+        .getByRole("button", {
+          name: "Promptvervanging voorbereiden",
+          exact: true,
+        })
+        .isDisabled(),
+      true,
+    );
+    await page
+      .getByRole("textbox", { name: "Nieuw gateway-voorvoegsel", exact: true })
+      .fill("Spreek helder.");
+    await page
+      .getByRole("checkbox", {
+        name: "Extra gateway-prompt inschakelen",
+        exact: true,
+      })
+      .check();
+    await page
+      .getByRole("checkbox", {
+        name: "Ik vervang beide velden voor alle gateway-clients.",
+        exact: true,
+      })
+      .check();
+    await page
+      .getByRole("button", {
+        name: "Promptvervanging voorbereiden",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("group", { name: "Gateway-prompt vervangen bevestigen" })
+      .waitFor();
+    assert.equal(promptWrites, 0);
+    assert.equal(
+      await page
+        .getByRole("textbox", {
+          name: "Nieuw gateway-voorvoegsel",
+          exact: true,
+        })
+        .isDisabled(),
+      true,
+    );
+    await page.locator(".prompt-editor").screenshot({
+      path: path.join(
+        screenshots,
+        `settings-prompt-confirm-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+    await page
+      .getByRole("button", { name: "Annuleer gateway-prompt", exact: true })
+      .click();
+    await page
+      .getByRole("group", { name: "Gateway-prompt vervangen bevestigen" })
+      .waitFor({ state: "detached" });
+    assert.equal(promptWrites, 0);
+    await page
+      .getByRole("checkbox", {
+        name: "Ik vervang beide velden voor alle gateway-clients.",
+        exact: true,
+      })
+      .check();
+    await page
+      .getByRole("button", {
+        name: "Promptvervanging voorbereiden",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("group", { name: "Gateway-prompt vervangen bevestigen" })
+      .waitFor();
+    await page.clock.fastForward(60001);
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Bevestig gateway-prompt", exact: true })
+        .isDisabled(),
+      true,
+    );
+    await page
+      .getByRole("button", { name: "Annuleer gateway-prompt", exact: true })
+      .click();
+    await page
+      .getByRole("group", { name: "Gateway-prompt vervangen bevestigen" })
+      .waitFor({ state: "detached" });
+    await page
+      .getByRole("checkbox", {
+        name: "Ik vervang beide velden voor alle gateway-clients.",
+        exact: true,
+      })
+      .check();
+    await page
+      .getByRole("button", {
+        name: "Promptvervanging voorbereiden",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("button", { name: "Bevestig gateway-prompt", exact: true })
+      .click();
+    await page
+      .getByText("Gateway-prompt opgeslagen en gecontroleerd.", { exact: true })
+      .waitFor();
+    assert.equal(promptWrites, 1);
+    assert.deepEqual(gatewayPrompt, {
+      enabled: true,
+      prefixPrompt: "Spreek helder.",
+      suffixPrompt: "",
+    });
+    assert.doesNotMatch(
+      await page.locator("body").innerText(),
+      /private-existing/,
+    );
 
     await page
       .getByRole("button", { name: "Lees Gateway-documentatie", exact: true })
@@ -650,7 +818,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement.",
   );
 } finally {
   await browser.close();

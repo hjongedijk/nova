@@ -31,10 +31,10 @@ function fixture() {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });
   });
-  db.exec(`CREATE TABLE skills (
+  db.exec(`BEGIN; CREATE TABLE skills (
     id TEXT PRIMARY KEY, api_key_id TEXT, name TEXT, handler TEXT,
     schema TEXT, mode TEXT, enabled INTEGER, updated_at TEXT
-  ); BEGIN;`);
+  );`);
   const insert = db.prepare("INSERT INTO skills VALUES (?,?,?,?,?,?,?,?)");
   for (const owner of [
     "nova-owner",

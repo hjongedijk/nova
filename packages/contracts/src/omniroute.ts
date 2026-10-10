@@ -42,3 +42,21 @@ export interface NativeSkillModeResult {
   enabled?: boolean;
   auditWarning?: string;
 }
+
+export interface NativePromptReplacement {
+  enabled: boolean;
+  prefixPrompt: string;
+  suffixPrompt: string;
+  acknowledgeGlobal: true;
+}
+export interface NativePromptPrepared {
+  ok: boolean;
+  error?: string;
+  action?: PendingConfirmation;
+}
+export interface NativePromptResult {
+  ok: boolean;
+  error?: string;
+  verified?: boolean | null;
+  auditWarning?: string;
+}

@@ -4,6 +4,8 @@ import { ConfirmationsModule } from "../confirmations/confirmations.module.js";
 import { NativeGatewayController } from "./native-gateway.controller.js";
 import { NativeSkillModesController } from "./native-skill-modes.controller.js";
 import { NativeSkillModesService } from "./native-skill-modes.service.js";
+import { NativePromptController } from "./native-prompt.controller.js";
+import { NativePromptService } from "./native-prompt.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import { UpdatesController } from "./updates.controller.js";
 import { UpdatesService } from "./updates.service.js";
@@ -41,12 +43,14 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     UpdatesController,
     NativeGatewayController,
     NativeSkillModesController,
+    NativePromptController,
   ],
   providers: [
     SettingsGuard,
     SettingsMutationsService,
     SettingsSource,
     NativeSkillModesService,
+    NativePromptService,
     UpdatesService,
     ServiceConnectionsStore,
     ServiceConnectionsAdapter,

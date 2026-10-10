@@ -106,6 +106,9 @@ export class RoutingService {
         const connections = key
           ? (JSON.parse(key.allowed_connections || "[]") as string[])
           : undefined;
+        const connectionById = db.prepare(
+          "SELECT id,provider,is_active FROM provider_connections WHERE id=?",
+        );
         const candidateOf = (id: string) =>
           policy.catalog?.find(
             (item) => `${item.provider}/${item.modelId}` === id,
@@ -140,11 +143,22 @@ export class RoutingService {
           allowed?.length === 1 &&
           allowed[0] === "auto" &&
           (connections?.length ?? 0) > 0 &&
-          connections!.every((id) =>
-            (policy.verifiedConnectionIds || policy.verifiedProviders).includes(
-              id,
-            ),
-          ) &&
+          connections!.every((id) => {
+            if (
+              typeof id !== "string" ||
+              id.length === 0 ||
+              !(
+                policy.verifiedConnectionIds || policy.verifiedProviders
+              ).includes(id)
+            )
+              return false;
+            const connection = connectionById.get(id) as
+              { id: string; provider: string; is_active: number } | undefined;
+            return (
+              connection?.is_active === 1 &&
+              policy.verifiedProviders.includes(connection.provider)
+            );
+          }) &&
           policy.blockedProviders.every((id) =>
             settings.blockedProviders?.includes(id),
           );

@@ -140,6 +140,12 @@ describe("RoutingService verified SQLite policy", () => {
         model_access_mode TEXT, allowed_models TEXT,
         allowed_connections TEXT, allow_auto_combos INTEGER
       );
+      CREATE TABLE provider_connections (
+        id TEXT PRIMARY KEY, provider TEXT, is_active INTEGER
+      );
+      INSERT INTO provider_connections VALUES (
+        'fixture-connection', 'fixture-provider', 1
+      );
     `);
     const settings = {
       freeAccessPolicy: "strict",
@@ -210,6 +216,18 @@ describe("RoutingService verified SQLite policy", () => {
       "UPDATE api_keys SET allowed_connections='[\"unverified-connection\"]'",
     ],
     ["key revocation", "UPDATE api_keys SET revoked_at='2026-10-10T12:00:00Z'"],
+    [
+      "deleted verified connection",
+      "DELETE FROM provider_connections WHERE id='fixture-connection'",
+    ],
+    [
+      "reassigned verified connection",
+      "UPDATE provider_connections SET provider='paid-provider' WHERE id='fixture-connection'",
+    ],
+    [
+      "inactive verified connection",
+      "UPDATE provider_connections SET is_active=0 WHERE id='fixture-connection'",
+    ],
   ])(
     "blocks inference after %s drift, without a restart",
     (_name, mutation) => {
@@ -223,6 +241,32 @@ describe("RoutingService verified SQLite policy", () => {
       expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
     },
   );
+
+  it("requires every allowed connection to exist, even if its ID remains locally verified", () => {
+    const changed = policy();
+    changed.verifiedConnectionIds.push("missing-connection");
+    writePolicy(changed);
+    db.prepare("UPDATE api_keys SET allowed_connections=?").run(
+      JSON.stringify(changed.verifiedConnectionIds),
+    );
+    expect(routing.status()).toMatchObject({
+      ready: false,
+      policyVerified: false,
+      status: "POLICY_DRIFT_BLOCKED",
+    });
+    expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
+  });
+
+  it("fails closed when the native connection inventory is unavailable", () => {
+    expect(routing.assertFree().ready).toBe(true);
+    db.exec("DROP TABLE provider_connections");
+    expect(routing.status()).toMatchObject({
+      ready: false,
+      policyVerified: false,
+      status: "POLICY_UNAVAILABLE",
+    });
+    expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
+  });
 
   it.each(["paid", "ineligible", "exhausted"])(
     "blocks inference when the verified model becomes %s",

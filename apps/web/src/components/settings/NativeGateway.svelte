@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
+  import NativePromptEditor from "./NativePromptEditor.svelte";
   import type {
     NativeGatewayReport,
     NativeSkillDocument,
@@ -199,6 +200,13 @@
           "onbekend"} tekens.
       </p>
       <p>NOVA-instructies beheer je bij Skills; eigen geheugen bij Geheugen.</p>
+      <NativePromptEditor
+        initialEnabled={report.prompt.enabled}
+        saved={(enabled, prefixCharacters, suffixCharacters) => {
+          if (report)
+            report.prompt = { enabled, prefixCharacters, suffixCharacters };
+        }}
+      />
       <h3>Documentatie</h3>
       <ul>
         {#each report.documentation as skill (skill.id)}<li>
