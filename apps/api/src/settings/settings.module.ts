@@ -21,6 +21,8 @@ import { ModelMetricsController } from "./model-metrics.controller.js";
 import { ServiceConnectionsController } from "./services/service-connections.controller.js";
 import { ServiceConnectionsStore } from "./services/service-connections.store.js";
 import { ServiceConnectionsAdapter } from "./services/service-connections.adapter.js";
+import { ServiceRestartController } from "./services/service-restart.controller.js";
+import { ServiceRestart } from "./services/service-restart.service.js";
 import { SkillAssistantService } from "./ai/skill-assistant.service.js";
 import { PlaybooksService } from "./playbooks.service.js";
 import { PublicConfigService } from "./public-config.service.js";
@@ -47,6 +49,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     ToolUsageController,
     WidgetsController,
     ServiceConnectionsController,
+    ServiceRestartController,
     ModelMetricsController,
     UpdatesController,
     NativeGatewayController,
@@ -68,6 +71,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     UpdatesService,
     ServiceConnectionsStore,
     ServiceConnectionsAdapter,
+    ServiceRestart,
     SkillsSource,
     PlaybooksService,
     PublicConfigService,

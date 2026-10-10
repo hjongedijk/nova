@@ -28,6 +28,8 @@ import type {
   ServiceConnectionRevision,
   ServiceConnectionTest,
   ServiceConnectionWrite,
+  ServiceRestartStatus,
+  ServiceRestartResult,
   HelperPreferences,
   Skill,
   SkillDraftResult,
@@ -230,6 +232,10 @@ export const persistHelperPreferences = (preferences: HelperPreferences) =>
 /* ---------- service connections (credentials never returned) ---------- */
 export const getServiceConnections = () =>
   read<{ services: ServiceConnection[] }>("/services");
+export const getServiceRestartStatus = () =>
+  read<ServiceRestartStatus>("/services/restart");
+export const requestServiceRestart = () =>
+  write<ServiceRestartResult>("POST", "/services/restart", {});
 export const getMqttOverview = () =>
   read<MqttOverview>("/services/mqtt/overview");
 export const getQdrantOverview = () =>

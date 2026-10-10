@@ -74,6 +74,12 @@ describe("service connection management", () => {
         (await pinned.api.get("/api/settings/services/history")).status,
       ).toBe(401);
       expect(
+        (await pinned.api.get("/api/settings/services/restart")).status,
+      ).toBe(401);
+      expect(
+        (await pinned.api.post("/api/settings/services/restart")).status,
+      ).toBe(401);
+      expect(
         (await pinned.api.get("/api/settings/services/mqtt/overview")).status,
       ).toBe(401);
       expect(
@@ -87,6 +93,20 @@ describe("service connection management", () => {
             .set("x-nova-pin", "fixture-pin")
         ).status,
       ).toBe(200);
+      expect(
+        (
+          await pinned.api
+            .get("/api/settings/services/restart")
+            .set("x-nova-pin", "fixture-pin")
+        ).body,
+      ).toMatchObject({ available: false, pendingChanges: false });
+      expect(
+        (
+          await pinned.api
+            .post("/api/settings/services/restart")
+            .set("x-nova-pin", "fixture-pin")
+        ).status,
+      ).toBe(403);
       const mqttOverview = await pinned.api
         .get("/api/settings/services/mqtt/overview")
         .set("x-nova-pin", "fixture-pin");

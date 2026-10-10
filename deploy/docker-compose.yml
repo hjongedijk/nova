@@ -17,6 +17,8 @@ services:
       PORT: 8080
       HTTPS_PORT: 8443
       NOVA_DATA_DIR: /data
+      # This service has restart: unless-stopped, so NOVA may safely request a graceful restart.
+      NOVA_RESTART_ENABLED: "true"
       OMNIROUTE_URL: http://omniroute:20128/v1
       OMNIROUTE_DATABASE: /omniroute/storage.sqlite
       MQTT_URL: mqtt://mqtt:1883

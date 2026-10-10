@@ -192,6 +192,7 @@ try {
       deviceScaleFactor: scale,
     });
     const page = await context.newPage();
+    page.on("dialog", (dialog) => dialog.accept());
     await page.clock.install();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -214,6 +215,7 @@ try {
     let usageReads = 0;
     let skillVersionReads = 0;
     let helperAgentWrites = 0;
+    let restartRequests = 0;
     const backup = {
       format: "nova-settings",
       version: 1,
@@ -655,7 +657,19 @@ try {
             },
           ],
         };
-      else if (endpoint === "/settings/services") data = { services };
+      else if (endpoint === "/settings/services/restart") {
+        if (request.method() === "POST") {
+          assert.equal(request.headers()["x-nova-admin"], "1");
+          restartRequests++;
+          data = { ok: true, scheduled: true };
+        } else {
+          data = {
+            available: true,
+            pendingChanges: services.some((service) => service.restartRequired),
+            restartPending: restartRequests > 0,
+          };
+        }
+      } else if (endpoint === "/settings/services") data = { services };
       else if (endpoint === "/settings/services/mqtt/overview") {
         mqttReads++;
         data = {
@@ -1915,6 +1929,13 @@ try {
         "Herstart nodig. De draaiende service gebruikt nog de vorige verbinding.",
       )
       .waitFor();
+    await page
+      .getByRole("button", { name: "Herstart NOVA", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Herstart aangevraagd", exact: true })
+      .waitFor();
+    assert.equal(restartRequests, 1);
     assert.equal(await page.locator("#home-assistant-token").inputValue(), "");
     assert.equal(
       (await page.locator("body").innerText()).includes("secret-test-fixture"),

@@ -3,6 +3,7 @@
   import type {
     MqttOverview,
     QdrantOverview,
+    ServiceRestartStatus,
     ServiceConnection,
     ServiceConnectionTest,
   } from "@nova/contracts";
@@ -12,8 +13,11 @@
     getQdrantOverview,
     saveServiceConnection,
     testServiceConnection,
+    getServiceRestartStatus,
+    requestServiceRestart,
   } from "#lib/api/settings.ts";
   import { fail, say } from "./state.svelte.ts";
+  import Button from "#components/ui/Button.svelte";
   let { ids }: { ids?: string[] } = $props();
   let services = $state<ServiceConnection[]>([]);
   let drafts = $state<Record<string, Record<string, string | boolean>>>({});
@@ -25,6 +29,7 @@
   let mqttError = $state("");
   let qdrantOverview = $state<QdrantOverview | null>(null);
   let qdrantError = $state("");
+  let restartStatus = $state<ServiceRestartStatus | null>(null);
   const shown = $derived(
     services.filter((item) => !ids || ids.includes(item.id)),
   );
@@ -39,7 +44,12 @@
   }
   async function load() {
     try {
-      services = (await getServiceConnections()).services;
+      const [connections, restart] = await Promise.all([
+        getServiceConnections(),
+        getServiceRestartStatus(),
+      ]);
+      services = connections.services;
+      restartStatus = restart;
       services.forEach(reset);
       error = "";
     } catch (e) {
@@ -47,6 +57,30 @@
         e instanceof Error
           ? e.message
           : "De koppelingen zijn niet beschikbaar.";
+    }
+  }
+  async function restart() {
+    if (
+      !window.confirm(
+        "NOVA is kort niet bereikbaar. Herstart nu om de opgeslagen koppelingen toe te passen?",
+      )
+    )
+      return;
+    busy = "restart";
+    try {
+      const result = await requestServiceRestart();
+      if (!result.ok)
+        throw new Error(result.error ?? "Herstart kon niet worden ingepland.");
+      restartStatus = {
+        available: true,
+        pendingChanges: true,
+        restartPending: true,
+      };
+      say("Herstart aangevraagd. NOVA kan kort niet bereikbaar zijn.", "ok");
+    } catch (e) {
+      fail(e);
+    } finally {
+      busy = null;
     }
   }
   onMount(() => {
@@ -85,6 +119,7 @@
           cleared(service.id),
         );
         services = result.services;
+        restartStatus = await getServiceRestartStatus();
         const saved = services.find((item) => item.id === service.id)!;
         reset(saved);
         delete tests[service.id];
@@ -136,6 +171,18 @@
   </p>
   {#if error}<p role="status">{error}</p>
     <button type="button" onclick={load}>Opnieuw proberen</button>{/if}
+  {#if restartStatus?.available && shown.some((service) => service.restartRequired)}
+    <div class="connection-pending" role="status">
+      <p>Opgeslagen wijzigingen wachten op een herstart van NOVA.</p>
+      <Button
+        disabled={busy !== null || restartStatus.restartPending}
+        onclick={restart}
+        >{restartStatus.restartPending
+          ? "Herstart aangevraagd"
+          : "Herstart NOVA"}</Button
+      >
+    </div>
+  {/if}
   {#each shown as service (service.id)}
     <details class="connection-editor">
       <summary

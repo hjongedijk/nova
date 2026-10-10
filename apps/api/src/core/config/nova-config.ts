@@ -50,6 +50,8 @@ export class NovaConfig {
   );
   readonly publicUrl = text("NOVA_PUBLIC_URL");
   readonly adminPin = text("NOVA_ADMIN_PIN");
+  /** Permit a graceful process restart only when an external supervisor restarts this process. */
+  readonly restartEnabled = flag("NOVA_RESTART_ENABLED", false);
   readonly defaultLanguage = text("JARVIS_DEFAULT_LANGUAGE", "nl-NL");
   readonly timezone = text("TZ", "Europe/Amsterdam");
 

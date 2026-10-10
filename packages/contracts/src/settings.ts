@@ -505,6 +505,17 @@ export interface ServiceConnectionWrite {
   services: ServiceConnection[];
   auditWarning?: string;
 }
+export interface ServiceRestartStatus {
+  available: boolean;
+  pendingChanges: boolean;
+  restartPending: boolean;
+  reason?: string;
+}
+export interface ServiceRestartResult {
+  ok: boolean;
+  error?: string;
+  scheduled?: boolean;
+}
 
 /** Private projections of the bounded audit tail, with no arguments or session identifiers. */
 export interface ToolUsageReport {
