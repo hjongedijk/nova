@@ -547,6 +547,22 @@ export interface ToolSwitchRollbackResult {
   ok: true;
   auditWarning?: string;
 }
+export interface SidebarRevision {
+  id: string;
+  at: string;
+  before: SidebarItem[];
+  after: SidebarItem[];
+  revertedFrom?: string;
+}
+export interface SidebarHistory {
+  revisions: SidebarRevision[];
+  truncated: boolean;
+}
+export interface SidebarRollbackResult {
+  ok: true;
+  sidebar: SidebarItem[];
+  auditWarning?: string;
+}
 
 /** Private projections of the bounded audit tail, with no arguments or session identifiers. */
 export interface ToolUsageReport {

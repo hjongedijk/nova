@@ -121,6 +121,7 @@ describe("the settings API", () => {
         (await send("get", "/helper/preferences/history", {})).status,
       ).toBe(401);
       expect((await send("get", "/tools/history", {})).status).toBe(401);
+      expect((await send("get", "/sidebar/history", {})).status).toBe(401);
       expect(
         (
           await pinned.api
@@ -813,6 +814,27 @@ describe("the settings API", () => {
     expect(missing.status).toBe(404);
     expect(missing.error).toBe("Dat onderdeel bestaat niet.");
     expect((await call("put", "/abilities/systeem", {})).status).toBe(400);
+  });
+
+  it("records and conflict-checks sidebar layout rollback", async () => {
+    const before = (await call("get", "/")).sidebar;
+    const after = before.map((item: { shown: boolean }, index: number) =>
+      index === 0 ? { ...item, shown: !item.shown } : item,
+    );
+    expect((await call("put", "/sidebar", { items: after })).status).toBe(200);
+    const history = await call("get", "/sidebar/history");
+    expect(history.revisions[0].before).toEqual(before);
+    expect(history.revisions[0].after).toEqual(after);
+    const restored = await call(
+      "post",
+      `/sidebar/history/${history.revisions[0].id}/rollback`,
+      {},
+    );
+    expect(restored.status).toBe(200);
+    expect(restored.sidebar).toEqual(before);
+    expect(
+      (await call("get", "/sidebar/history")).revisions[0].revertedFrom,
+    ).toBe(history.revisions[0].id);
   });
 
   it("shows the public address with only its origin", async () => {

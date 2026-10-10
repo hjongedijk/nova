@@ -1,6 +1,7 @@
 import { SettingsBackupService } from "./settings-backup.service.js";
 import { HelperPreferencesHistory } from "./helper-preferences-history.service.js";
 import { ToolSwitchHistory } from "./tool-switch-history.service.js";
+import { SidebarHistory } from "./sidebar-history.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
@@ -93,6 +94,7 @@ export class SettingsController {
     private readonly backups: SettingsBackupService,
     private readonly helperHistory: HelperPreferencesHistory,
     private readonly toolHistory: ToolSwitchHistory,
+    private readonly sidebarHistory: SidebarHistory,
     @Optional()
     @Inject(WALLPAPER_PORT)
     private readonly wallpaper?: WallpaperPort,
@@ -236,6 +238,19 @@ export class SettingsController {
     if (!/^[0-9a-f-]{36}$/i.test(id))
       throw new ValidationError(["Ongeldige wijziging."]);
     return this.toolHistory.rollback(id);
+  }
+
+  @Get("sidebar/history")
+  sidebarHistoryList() {
+    return this.sidebarHistory.list();
+  }
+
+  @Post("sidebar/history/:id/rollback")
+  @HttpCode(200)
+  rollbackSidebar(@Param("id") id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige wijziging."]);
+    return this.sidebarHistory.rollback(id);
   }
 
   /* ---------- skills ---------- */
@@ -479,6 +494,7 @@ export class SettingsController {
 
   @Put("sidebar")
   setSidebar(@Body() body: Body_) {
+    const before = resolveSidebar(this.settings.get());
     this.settings.update((settings) => {
       settings.sidebar =
         body?.reset === true
@@ -487,8 +503,14 @@ export class SettingsController {
               items: normalizeSidebar(body?.items, settings) as never[],
             };
     });
+    this.sidebarHistory.record(before, resolveSidebar(this.settings.get()));
     this.log("sidebar_changed", { reset: body?.reset === true });
-    return { sidebar: resolveSidebar(this.settings.get()) };
+    return {
+      sidebar: resolveSidebar(this.settings.get()),
+      ...(this.sidebarHistory.lastWarning
+        ? { auditWarning: this.sidebarHistory.lastWarning }
+        : {}),
+    };
   }
 
   /* ---------- wallpaper on the Windows PC, through the Windows agent ---------- */

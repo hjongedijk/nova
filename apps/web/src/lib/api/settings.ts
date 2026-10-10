@@ -34,6 +34,8 @@ import type {
   HelperPreferenceRollbackResult,
   ToolSwitchHistory,
   ToolSwitchRollbackResult,
+  SidebarHistory,
+  SidebarRollbackResult,
   HelperPreferences,
   Skill,
   SkillDraftResult,
@@ -252,6 +254,13 @@ export const rollbackToolSwitchRevision = (id: string) =>
   write<ToolSwitchRollbackResult>(
     "POST",
     `/tools/history/${enc(id)}/rollback`,
+    {},
+  );
+export const getSidebarHistory = () => read<SidebarHistory>("/sidebar/history");
+export const rollbackSidebarRevision = (id: string) =>
+  write<SidebarRollbackResult>(
+    "POST",
+    `/sidebar/history/${enc(id)}/rollback`,
     {},
   );
 

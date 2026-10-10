@@ -219,6 +219,8 @@ try {
     let helperPreferenceHistoryWrites = 0;
     let toolSwitchHistoryReads = 0;
     let toolSwitchHistoryWrites = 0;
+    let sidebarHistoryReads = 0;
+    let sidebarHistoryWrites = 0;
     let restartRequests = 0;
     const backup = {
       format: "nova-settings",
@@ -722,6 +724,29 @@ try {
         assert.equal(request.headers()["x-nova-admin"], "1");
         toolSwitchHistoryWrites++;
         data = { ok: true };
+      } else if (endpoint === "/settings/sidebar/history") {
+        sidebarHistoryReads++;
+        data = {
+          truncated: false,
+          revisions: [
+            {
+              id: "77777777-7777-4777-8777-777777777777",
+              at: "2026-10-10T12:00:00Z",
+              before: [{ id: "chat", column: "left", page: 1, shown: true }],
+              after: [{ id: "chat", column: "left", page: 1, shown: false }],
+            },
+          ],
+        };
+      } else if (
+        endpoint.startsWith("/settings/sidebar/history/") &&
+        endpoint.endsWith("/rollback")
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        sidebarHistoryWrites++;
+        data = {
+          ok: true,
+          sidebar: [{ id: "chat", column: "left", page: 1, shown: true }],
+        };
       } else if (endpoint === "/settings/services/restart") {
         if (request.method() === "POST") {
           assert.equal(request.headers()["x-nova-admin"], "1");
@@ -2078,6 +2103,34 @@ try {
       .waitFor();
     assert.equal(toolSwitchHistoryReads, 2);
     assert.equal(toolSwitchHistoryWrites, 1);
+    const sidebarHistory = page.getByRole("region", {
+      name: "Zijbalk wijzigingsgeschiedenis",
+    });
+    assert.equal(
+      sidebarHistoryReads,
+      0,
+      "Sidebar history loads only on request",
+    );
+    await sidebarHistory
+      .getByRole("button", { name: "Indelingsgeschiedenis laden" })
+      .click();
+    await sidebarHistory
+      .getByText("1 panelen · 1 zichtbaar → 1 panelen · 0 zichtbaar")
+      .waitFor();
+    await sidebarHistory.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-sidebar-history-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+    await sidebarHistory
+      .getByRole("button", { name: "Deze wijziging terugdraaien" })
+      .click();
+    await sidebarHistory
+      .getByText("Zijbalkindeling teruggedraaid.", { exact: true })
+      .waitFor();
+    assert.equal(sidebarHistoryReads, 2);
+    assert.equal(sidebarHistoryWrites, 1);
     await page.goto(`${base}/settings?section=personality`);
     await page.locator("#behaviorText").waitFor();
     pinned = true;
@@ -2104,7 +2157,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory and confirmed deletion, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports, explicit helper/tool settings history and rollback, bounded tool usage history, source/name filters and unused tools.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory and confirmed deletion, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports, explicit helper/tool/sidebar settings history and rollback, bounded tool usage history, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();
