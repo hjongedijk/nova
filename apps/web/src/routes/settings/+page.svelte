@@ -1,4 +1,5 @@
 <script lang="ts">
+  import OmniRouteAccounts from "#components/settings/OmniRouteAccounts.svelte";
   import { onMount, untrack } from "svelte";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
@@ -171,6 +172,7 @@
           {:else if section === "models"}
             <ConnectionsSection ids={["omniroute"]} />
             <ModelMetrics />
+            <OmniRouteAccounts />
             <NativeGateway />
             <AdminDialog embedded initialView="providers" />
             <h2>OmniRoute</h2>

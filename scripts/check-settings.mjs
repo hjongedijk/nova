@@ -144,6 +144,7 @@ try {
     let tested = false;
     let persona = overview.persona;
     let updateChecks = 0;
+    let accountsReads = 0;
     let nativeMode = "off";
     let nativePreparedMode = "off";
     let nativeWrites = 0;
@@ -201,6 +202,32 @@ try {
             notes:
               "Fixture changes <script>window.fixtureInjected = true</script>",
           },
+        };
+      } else if (endpoint === "/settings/omniroute/accounts") {
+        accountsReads++;
+        data = {
+          available: true,
+          truncated: false,
+          billingVerified: false,
+          connections: [
+            {
+              id: "fixture-account",
+              provider: "fixture",
+              name: "Voorbeeldaccount",
+              active: true,
+              credentialPresent: true,
+            },
+          ],
+          models: [
+            {
+              provider: "fixture",
+              modelId: "example:free",
+              name: "<script>globalThis.accountCatalogRan = true</script>",
+              freeType: "trial",
+              monthlyTokens: 10000,
+              creditTokens: null,
+            },
+          ],
         };
       } else if (endpoint === "/settings/omniroute/native")
         data = {
@@ -450,6 +477,41 @@ try {
     assert.equal(await page.locator(".settings-sidebar nav a").count(), 1);
     await page.locator("#settingsSearch").press("Enter");
     await page.waitForURL("**/settings?section=models");
+    assert.equal(
+      accountsReads,
+      0,
+      "Opening models must not fetch account metadata",
+    );
+    await page
+      .getByRole("button", { name: "Accounts en catalogus laden", exact: true })
+      .click();
+    const accounts = page.getByRole("region", {
+      name: "OmniRoute-accounts en modelcatalogus",
+    });
+    await accounts.getByText("Voorbeeldaccount", { exact: true }).waitFor();
+    assert.equal(accountsReads, 1);
+    assert.match(
+      await accounts.innerText(),
+      /Facturering en harde gratis limieten zijn niet gecontroleerd/,
+    );
+    await accounts.locator("summary").click();
+    await accounts
+      .getByText("<script>globalThis.accountCatalogRan = true</script>", {
+        exact: true,
+      })
+      .waitFor();
+    assert.equal(
+      await page.evaluate(() => globalThis.accountCatalogRan),
+      undefined,
+    );
+    await accounts.locator("summary").click();
+    await accounts.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-accounts-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+
     await page
       .getByRole("button", { name: "OmniRoute-overzicht laden", exact: true })
       .click();
@@ -818,7 +880,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory.",
   );
 } finally {
   await browser.close();

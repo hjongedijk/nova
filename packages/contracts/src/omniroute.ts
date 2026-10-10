@@ -60,3 +60,25 @@ export interface NativePromptResult {
   verified?: boolean | null;
   auditWarning?: string;
 }
+
+export interface OmniRouteAccountsReport {
+  available: boolean;
+  error?: string;
+  truncated: boolean;
+  connections: {
+    id: string;
+    provider: string;
+    name: string;
+    active: boolean | null;
+    credentialPresent: boolean;
+  }[];
+  models: {
+    provider: string;
+    modelId: string;
+    name: string;
+    freeType: string;
+    monthlyTokens: number | null;
+    creditTokens: number | null;
+  }[];
+  billingVerified: false;
+}

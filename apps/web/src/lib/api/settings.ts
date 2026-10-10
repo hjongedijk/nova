@@ -1,3 +1,4 @@
+import type { OmniRouteAccountsReport } from "@nova/contracts";
 import type {
   NativeGatewayReport,
   NativeSkillDocument,
@@ -222,3 +223,6 @@ export const rollbackConnection = (id: string) =>
     "POST",
     `/services/history/${enc(id)}/rollback`,
   );
+
+export const getOmniRouteAccounts = () =>
+  read<OmniRouteAccountsReport>("/omniroute/accounts");

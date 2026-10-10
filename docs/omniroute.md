@@ -15,7 +15,7 @@ The route is "ready" only when all of these hold:
 
 - OmniRoute's setting `freeAccessPolicy` matches the policy (`nativeFreeAccessPolicy`, default `strict`), `hidePaidModels` and `excludeTosAvoid` are `true`, and, if the policy lists a `nativeModelAllowlist`, OmniRoute's `modelVisibilityAllowlist` is exactly that list.
 - `OMNIROUTE_MODEL` is `auto` and equals the policy's `route`.
-- The API key in `OMNIROUTE_API_KEY` is active, in `restricted` mode, may use only the model `auto`, and is limited to a non-empty set of connections that are all listed as verified in the policy (`verifiedConnectionIds`, or `verifiedProviders` when that is absent).
+- The API key in `OMNIROUTE_API_KEY` is active, in `restricted` mode, may use only the model `auto`, and is limited to a non-empty set of connections that are all listed as verified in the policy (`verifiedConnectionIds`, or `verifiedProviders` when that is absent). Each must still exist, be active and belong to a verified provider in the native database.
 - Every provider in the policy's `blockedProviders` is also blocked in OmniRoute.
 - The policy has at least one enabled model, and every enabled model is a catalog entry that is `nativeAutoEligible` and passes the free-access classification below.
 
@@ -82,7 +82,7 @@ A catalog entry in the policy is allowed only when `classifyFreeAccess` (in `rou
 
 - **Request headers.** Chat requests carry the NOVA session id (`x-omniroute-session-id`, `x-session-id`), opt out of OmniRoute's own automatic memory injection (`x-omniroute-no-memory`), choose compression with `x-omniroute-compression` (`lite` only when `JARVIS_OMNIROUTE_COMPRESSION=lite`) and, when tools are offered, disable the response cache (`x-omniroute-no-cache`) so that device actions and live readings are never replayed from cache.
 - **Native memory backend.** With `JARVIS_MEMORY_BACKEND=omniroute`, long-term memory is stored in OmniRoute's native memory, scoped to NOVA's API key and entries tagged `application=jarvis`; search is keyword based, so no embedding model is needed. NOVA writes durable facts explicitly and injects retrieved memories as untrusted context.
-- **Management reads.** With `OMNIROUTE_ADMIN_PASSWORD` NOVA logs in to the OmniRoute management API (fixed `/api/...` endpoints only, read-only use) for the gateway status shown in the interface and the read-only tools `omniroute_status` (memory, skill catalog, compression, cache) and `omniroute_agent_skills` (documentation of Agent Skills; it installs and executes nothing). The model has no generic management proxy and no tool that changes OmniRoute settings.
+- **Management reads.** With `OMNIROUTE_ADMIN_PASSWORD` NOVA logs in to the OmniRoute management API (fixed `/api/...` endpoints only) for the gateway status shown in the interface and the read-only tools `omniroute_status` (memory, skill catalog, compression, cache) and `omniroute_agent_skills` (documentation of Agent Skills; it installs and executes nothing). The model has no generic management proxy and no tool that changes OmniRoute settings. Private settings also offer account/catalog metadata on explicit request and fresh confirmations for NOVA-owned native skill modes and full global prompt replacement; writes verify native persistence.
 - **Embeddings** for the Qdrant memory backend, through OmniRoute's `/embeddings`, only when `EMBEDDING_FREE_VERIFIED=true` and a model and dimensions are set. See [Configuration](configuration.md#memory).
 
 ## Disabling or reverting

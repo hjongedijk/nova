@@ -1,3 +1,4 @@
+import { OmniRouteAccountsController } from "./omniroute-accounts.controller.js";
 import { Module } from "@nestjs/common";
 import { SettingsSource } from "./settings.source.js";
 import { ConfirmationsModule } from "../confirmations/confirmations.module.js";
@@ -44,6 +45,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     NativeGatewayController,
     NativeSkillModesController,
     NativePromptController,
+    OmniRouteAccountsController,
   ],
   providers: [
     SettingsGuard,
