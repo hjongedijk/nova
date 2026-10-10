@@ -171,11 +171,12 @@ A different saved endpoint blocks inference, including test bypasses, and a conn
 to send credentials to that unverified target. Updating the gateway requires a matching trusted
 deployment and a new free-route check; changing a URL alone cannot establish that trust.
 
-The System section lists the latest hundred connection changes. Nonsecret fields can be restored
-when those fields have not subsequently changed. Unrelated later edits are preserved. Secret changes
-require entering the desired value again. An audit failure before persistence prevents the change;
-if the final audit message fails after persistence, the response clearly reports that the values
-were saved and the local history remains available.
+The System section loads connection, helper preference, tool switch and sidebar layout histories on
+request. Each history stores at most 100 private revisions and shows at most 50. Rollback checks
+that the values being restored still match the recorded change; unrelated edits stay untouched.
+Connection credentials remain outside the visible history and require entering the desired value
+again. Tool history contains only tool names and enabled states. Sidebar history contains only panel
+placement and visibility, never panel content, prompts or source addresses.
 
 Version-one settings backups include persona, quick actions, tool overrides, skills, widgets, sidebar layout, helper appearance and helper sound preferences. Helper mode and display are included as saved choices only; import never commands the Windows agent to apply them. Import first validates a detached candidate (maximum 1,000,000 bytes) and shows changed categories, additions, replacements, removals and missing secret header names. It requires a fresh DANGEROUS confirmation valid for 60 seconds and one use; changing settings in the meantime invalidates the import. Preparation never writes settings. Unknown versions, invalid modes, duplicate IDs, over-capacity merges and broken widget/sidebar references are rejected rather than silently truncated.
 
@@ -183,8 +184,11 @@ Secret header values are never exported or restored from a file. A merge retains
 
 The guarded API uses POST `/api/settings/import/prepare` with `{data, mode, acknowledgeEffects: true}`. POST `/api/settings/import` now accepts only `{sessionId, confirmationId, approve}` from that preparation; old direct-import bodies are rejected. The settings screen performs both steps and supports cancellation and expiry.
 
-These connection settings and Node-RED flows are not yet included in the existing version-one
-settings download; complete-system export/import remains phase J work.
+The version-one download includes local quick-action and widget lists, as well as the other fields
+above. It excludes connection settings, provider/model accounts, Node-RED flows, secret values,
+standing permissions, native hotkeys, memories and conversation history. Connection and flow owners
+are external to this file; complete-system export/import remains unfinished. Node-RED flow backup
+depends on its management API and repository ownership work in phases C and J4.
 
 ## Tool usage and standing permissions
 
