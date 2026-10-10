@@ -4,6 +4,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
+import { connectionFingerprint } from "../../src/routing/connection-binding.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
 import {
   FreeRoutingBlockedError,
@@ -93,6 +94,12 @@ describe("RoutingService verified SQLite policy", () => {
   let routing: RoutingService;
   let previous: Record<string, string | undefined>;
   const model = "fixture-provider/free-model";
+  const connection = {
+    id: "fixture-connection",
+    provider: "fixture-provider",
+    auth_type: "apikey",
+    api_key: "fixture-account-secret",
+  };
   const candidate = {
     provider: "fixture-provider",
     modelId: "free-model",
@@ -118,6 +125,16 @@ describe("RoutingService verified SQLite policy", () => {
       path.join(directory, "free-routing-policy.json"),
       JSON.stringify(value),
     );
+  const boundPolicy = () => ({
+    ...policy(),
+    verifiedConnections: [
+      {
+        id: connection.id,
+        provider: connection.provider,
+        fingerprint: connectionFingerprint(connection),
+      },
+    ],
+  });
 
   beforeEach(() => {
     directory = fs.mkdtempSync(path.join(os.tmpdir(), "nova-policy-proof-"));
@@ -145,10 +162,12 @@ describe("RoutingService verified SQLite policy", () => {
         allowed_connections TEXT, allow_auto_combos INTEGER
       );
       CREATE TABLE provider_connections (
-        id TEXT PRIMARY KEY, provider TEXT, is_active INTEGER
+        id TEXT PRIMARY KEY, provider TEXT, is_active INTEGER,
+        auth_type TEXT, api_key TEXT
       );
       INSERT INTO provider_connections VALUES (
-        'fixture-connection', 'fixture-provider', 1
+        'fixture-connection', 'fixture-provider', 1,
+        'apikey', 'fixture-account-secret'
       );
     `);
     const settings = {
@@ -196,6 +215,101 @@ describe("RoutingService verified SQLite policy", () => {
     expect(JSON.stringify(routing.status())).not.toContain(
       "fixture-private-key",
     );
+  });
+
+  it("verifies a bound account without projecting credential material or fingerprints", () => {
+    const changed = boundPolicy();
+    writePolicy(changed);
+    expect(routing.assertFree().ready).toBe(true);
+    const projected = JSON.stringify([
+      routing.status(),
+      routing.verifyForManagement(),
+      routing.providerInventory(),
+    ]);
+    expect(projected).not.toContain(connection.api_key);
+    expect(projected).not.toContain(
+      changed.verifiedConnections[0]!.fingerprint,
+    );
+  });
+
+  it.each([
+    [
+      "credential rotation",
+      "UPDATE provider_connections SET api_key='rotated-secret'",
+    ],
+    [
+      "same-provider account replacement",
+      "DELETE FROM provider_connections; INSERT INTO provider_connections VALUES ('fixture-connection', 'fixture-provider', 1, 'apikey', 'other-account-secret')",
+    ],
+    [
+      "authentication type",
+      "UPDATE provider_connections SET auth_type='oauth'",
+    ],
+    [
+      "provider reassignment",
+      "UPDATE provider_connections SET provider='other-provider'",
+    ],
+  ])("blocks a bound account after %s drift", (_name, mutation) => {
+    const changed = boundPolicy();
+    // Reassignment must also fail when the new provider is independently verified.
+    changed.verifiedProviders.push("other-provider");
+    writePolicy(changed);
+    expect(routing.assertFree().ready).toBe(true);
+    db.exec(mutation);
+    expect(routing.status()).toMatchObject({
+      ready: false,
+      policyVerified: false,
+      status: "POLICY_DRIFT_BLOCKED",
+    });
+    expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
+  });
+
+  it.each([
+    "missing",
+    "duplicate",
+    "invalid fingerprint",
+    "wrong fingerprint",
+    "wrong provider",
+    "extra connection",
+    "non-array",
+    "null binding",
+  ])("fails closed with a %s binding proof", (change) => {
+    const changed = boundPolicy();
+    const binding = changed.verifiedConnections[0]!;
+    if (change === "missing") changed.verifiedConnections = [];
+    if (change === "duplicate")
+      changed.verifiedConnections.push({ ...binding });
+    if (change === "invalid fingerprint") binding.fingerprint = "invalid";
+    if (change === "wrong fingerprint") binding.fingerprint = "0".repeat(64);
+    if (change === "wrong provider") binding.provider = "other-provider";
+    if (change === "extra connection")
+      changed.verifiedConnections.push({ ...binding, id: "extra-connection" });
+    if (change === "non-array")
+      Object.assign(changed, { verifiedConnections: {} });
+    if (change === "null binding")
+      Object.assign(changed, { verifiedConnections: [null] });
+    writePolicy(changed);
+    expect(routing.status()).toMatchObject({
+      ready: false,
+      policyVerified: false,
+      status: "POLICY_DRIFT_BLOCKED",
+    });
+    expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
+  });
+
+  it("keeps legacy policies usable without credential columns", () => {
+    db.exec(`
+      BEGIN;
+      ALTER TABLE provider_connections DROP COLUMN auth_type;
+      ALTER TABLE provider_connections DROP COLUMN api_key;
+      COMMIT;
+    `);
+    expect(routing.assertFree().ready).toBe(true);
+    writePolicy(boundPolicy());
+    expect(routing.status()).toMatchObject({
+      ready: false,
+      status: "POLICY_UNAVAILABLE",
+    });
   });
 
   it("keeps a pending management change blocked across service instances", () => {

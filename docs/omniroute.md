@@ -15,7 +15,7 @@ The route is "ready" only when all of these hold:
 
 - OmniRoute's setting `freeAccessPolicy` matches the policy (`nativeFreeAccessPolicy`, default `strict`), `hidePaidModels` and `excludeTosAvoid` are `true`, and, if the policy lists a `nativeModelAllowlist`, OmniRoute's `modelVisibilityAllowlist` is exactly that list.
 - `OMNIROUTE_MODEL` is `auto` and equals the policy's `route`.
-- The API key in `OMNIROUTE_API_KEY` is active, in `restricted` mode, may use only the model `auto`, and is limited to a non-empty set of connections that are all listed as verified in the policy (`verifiedConnectionIds`, or `verifiedProviders` when that is absent). Each must still exist, be active and belong to a verified provider in the native database.
+- The API key in `OMNIROUTE_API_KEY` is active, in `restricted` mode, may use only the model `auto`, and is limited to a non-empty set of connections that are all listed as verified in the policy (`verifiedConnectionIds`, or `verifiedProviders` when that is absent). Each must still exist, be active and belong to a verified provider in the native database. Wizard-generated policies also bind each account to its provider, authentication type and credential fingerprint. Any observed credential change blocks the route; credentials and fingerprints stay outside public status and audit output.
 - Every provider in the policy's `blockedProviders` is also blocked in OmniRoute.
 - The policy has at least one enabled model, and every enabled model is a catalog entry that is `nativeAutoEligible` and passes the free-access classification below.
 
@@ -48,7 +48,7 @@ A catalog entry in the policy is allowed only when `classifyFreeAccess` (in `rou
 
 1. Start the stack and open the OmniRoute dashboard (port 20128, published by the compose file; restrict access to it on your network). Add your provider accounts there, and make sure each is on a genuinely free tier or has billing disabled. A "free" badge or signup credit does not prove recurring, zero-cost access.
 2. In OmniRoute, create an API key for NOVA that is restricted to the model `auto` and to your verified connections. Put it in `OMNIROUTE_API_KEY` and set `OMNIROUTE_MODEL=auto` and `OMNIROUTE_ADMIN_PASSWORD` in `.env`.
-3. Provide `free-routing-policy.json` in the data folder with the structure the code reads:
+3. Open **Instellingen → Modellen → Gratis beleid maken** to generate the policy. Load choices explicitly, select active API-key accounts and recurring free models, provide official source URLs, and confirm the account facts. The wizard requires billing and automatic top-ups to be disabled, a guaranteed hard free limit, permission under the terms, acknowledgement of changes affecting other clients, and permission to refresh candidate metadata. One account per provider and at most 20 models are supported. Alternatively, provide `free-routing-policy.json` in the data folder with the structure the code reads:
 
    ```json
    {
@@ -78,7 +78,11 @@ A catalog entry in the policy is allowed only when `classifyFreeAccess` (in `rou
 
    `providers` is an inventory that is only displayed. `nativeModelAllowlist` is optional.
 
-> The repository does not contain a generator for this file. The original operator produced it with helper scripts that are not part of this repository, from the free catalog of the installed OmniRoute version. If you have no policy file, NOVA starts and the interface works, but chat is blocked with `POLICY_UNAVAILABLE` until you provide one that matches your OmniRoute configuration. Verify every entry against your own accounts; the operator's confirmation, never a provider label, is what makes an account count as free.
+The wizard uses **operator-account evidence** for economic safety, following the existing operator-confirmed classification. Your attestations establish billing disabled, guaranteed hard stop and entitlement to recurring free access; NOVA does not independently verify the supplied source URL or account billing. Native candidate metadata is checked only for the selected account/model's reported structural availability. Cached quota verdicts do not prove billing or current credentials, and the result explicitly reports `nativeQuotaVerified: false`. A ready route does not promise remaining quota or a successful model response; native strict enforcement stays enabled.
+
+Loaded choices carry a private, signed inventory binding valid for ten minutes. Any account, credential, key restriction or settings change requires loading again and renewing the attestations. Changing selections also clears the attestations. Preparation is read-only and expires after 60 seconds. Fresh, single-use DANGEROUS approval precedes a persistent inference stop, native settings CAS, restriction of NOVA's key to the selected accounts and independent SQLite verification. Only then is the credential-bound policy replaced atomically with mode 0600; the prior policy receives a private backup once. Any partial or unknown outcome retains the stop, including after restart. The model has no wizard or account-management tool.
+
+Revisions detect external changes between preparation and confirmation, and credential binding is checked before dispatch. Native settings, key restrictions and the local file have no shared transaction; external administrators can still race between checks or between verification and dispatch. NOVA does not claim an atomic lock over independent upstream administrators.
 
 ## What else NOVA uses OmniRoute for
 

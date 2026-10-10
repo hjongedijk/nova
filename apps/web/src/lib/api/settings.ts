@@ -1,4 +1,8 @@
 import type {
+  FreePolicyOptions,
+  FreePolicySelection,
+  FreePolicyPrepared,
+  FreePolicyResult,
   OmniRouteAccountsReport,
   OmniRouteAccountRemovalPrepared,
   OmniRouteAccountRemovalResult,
@@ -248,3 +252,18 @@ export const confirmOmniRouteAccountRemoval = (
     `/omniroute/accounts/${enc(id)}/removal/confirm`,
     { sessionId, confirmationId, approve },
   );
+
+export const getFreePolicyOptions = () =>
+  read<FreePolicyOptions>("/omniroute/policy");
+export const prepareFreePolicy = (value: FreePolicySelection) =>
+  write<FreePolicyPrepared>("POST", "/omniroute/policy/prepare", value);
+export const confirmFreePolicy = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<FreePolicyResult>("POST", "/omniroute/policy/confirm", {
+    sessionId,
+    confirmationId,
+    approve,
+  });

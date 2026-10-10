@@ -1,3 +1,5 @@
+import { FreePolicyWizardController } from "./free-policy-wizard.controller.js";
+import { FreePolicyWizard } from "./free-policy-wizard.service.js";
 import { OmniRouteAccountRemovalController } from "./omniroute-account-removal.controller.js";
 import { OmniRouteAccountRemoval } from "./omniroute-account-removal.service.js";
 import { OmniRouteAccountsController } from "./omniroute-accounts.controller.js";
@@ -49,6 +51,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     NativePromptController,
     OmniRouteAccountsController,
     OmniRouteAccountRemovalController,
+    FreePolicyWizardController,
   ],
   providers: [
     SettingsGuard,
@@ -57,6 +60,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     NativeSkillModesService,
     NativePromptService,
     OmniRouteAccountRemoval,
+    FreePolicyWizard,
     UpdatesService,
     ServiceConnectionsStore,
     ServiceConnectionsAdapter,

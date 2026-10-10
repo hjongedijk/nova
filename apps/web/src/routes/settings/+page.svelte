@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FreePolicyWizard from "#components/settings/FreePolicyWizard.svelte";
   import OmniRouteAccounts from "#components/settings/OmniRouteAccounts.svelte";
   import { onMount, untrack } from "svelte";
   import { page } from "$app/state";
@@ -173,6 +174,7 @@
             <ConnectionsSection ids={["omniroute"]} />
             <ModelMetrics />
             <OmniRouteAccounts />
+            <FreePolicyWizard />
             <NativeGateway />
             <AdminDialog embedded initialView="providers" />
             <h2>OmniRoute</h2>

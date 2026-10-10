@@ -96,3 +96,45 @@ export interface OmniRouteAccountRemovalResult {
   routeReady?: boolean;
   auditWarning?: string;
 }
+
+export interface FreePolicyOptions {
+  inventoryToken?: string;
+  available: boolean;
+  error?: string;
+  accounts: { id: string; provider: string; name: string }[];
+  models: {
+    provider: string;
+    modelId: string;
+    name: string;
+    freeType: string;
+    tos: string;
+  }[];
+  verified: false;
+}
+export interface FreePolicySelection {
+  inventoryToken: string;
+  selection: {
+    connectionId: string;
+    modelId: string;
+    officialSource: string;
+  }[];
+  acknowledgeBillingDisabled: true;
+  acknowledgeHardStop: true;
+  acknowledgeTerms: true;
+  acknowledgeAllClients: true;
+  acknowledgeQuotaRefresh: true;
+}
+export interface FreePolicyPrepared {
+  ok: boolean;
+  error?: string;
+  action?: PendingConfirmation;
+}
+export interface FreePolicyResult {
+  ok: boolean;
+  evidenceSource?: "operator-account";
+  nativeQuotaVerified?: false;
+  error?: string;
+  verified?: boolean | null;
+  routeReady?: boolean;
+  auditWarning?: string;
+}

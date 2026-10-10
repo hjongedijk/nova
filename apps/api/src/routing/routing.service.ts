@@ -2,6 +2,10 @@ import { Injectable } from "@nestjs/common";
 import fs from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { NovaConfig } from "../core/config/nova-config.js";
+import {
+  connectionFingerprint,
+  type CredentialConnection,
+} from "./connection-binding.js";
 import { classifyFreeAccess, type FreeCandidate } from "./free-access.js";
 
 interface Policy {
@@ -10,6 +14,7 @@ interface Policy {
   enabledModels: string[];
   verifiedProviders: string[];
   verifiedConnectionIds?: string[];
+  verifiedConnections?: { id: string; provider: string; fingerprint: string }[];
   blockedProviders: string[];
   nativeModelAllowlist?: string[];
   catalog?: (FreeCandidate & { provider: string; modelId: string })[];
@@ -164,6 +169,33 @@ export class RoutingService {
         const connectionById = db.prepare(
           "SELECT id,provider,is_active FROM provider_connections WHERE id=?",
         );
+        const bound = policy.verifiedConnections !== undefined;
+        const bindings = policy.verifiedConnections;
+        const validBindings =
+          !bound ||
+          (Array.isArray(bindings) &&
+            bindings.length > 0 &&
+            bindings.every(
+              (item) =>
+                item !== null &&
+                typeof item === "object" &&
+                typeof item.id === "string" &&
+                item.id.length > 0 &&
+                typeof item.provider === "string" &&
+                typeof item.fingerprint === "string" &&
+                /^[0-9a-f]{64}$/.test(item.fingerprint),
+            ) &&
+            new Set(bindings.map((item) => item.id)).size === bindings.length &&
+            Array.isArray(connections) &&
+            new Set(connections).size === connections.length &&
+            bindings.length === connections.length &&
+            bindings.every((item) => connections.includes(item.id)));
+        const credentialsById =
+          bound && validBindings
+            ? db.prepare(
+                "SELECT id,provider,auth_type,api_key FROM provider_connections WHERE id=?",
+              )
+            : undefined;
         const candidateOf = (id: string) =>
           policy.catalog?.find(
             (item) => `${item.provider}/${item.modelId}` === id,
@@ -197,6 +229,7 @@ export class RoutingService {
           key?.model_access_mode === "restricted" &&
           allowed?.length === 1 &&
           allowed[0] === "auto" &&
+          validBindings &&
           (connections?.length ?? 0) > 0 &&
           connections!.every((id) => {
             if (
@@ -209,9 +242,19 @@ export class RoutingService {
               return false;
             const connection = connectionById.get(id) as
               { id: string; provider: string; is_active: number } | undefined;
+            if (
+              connection?.is_active !== 1 ||
+              !policy.verifiedProviders.includes(connection.provider)
+            )
+              return false;
+            if (!bound) return true;
+            const binding = bindings!.find((item) => item.id === id);
+            const credentials = credentialsById!.get(id) as
+              CredentialConnection | undefined;
             return (
-              connection?.is_active === 1 &&
-              policy.verifiedProviders.includes(connection.provider)
+              binding?.provider === connection.provider &&
+              credentials?.provider === connection.provider &&
+              binding.fingerprint === connectionFingerprint(credentials)
             );
           }) &&
           policy.blockedProviders.every((id) =>

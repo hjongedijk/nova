@@ -149,6 +149,9 @@ try {
     let releaseAccountInventory;
     let accountWrites = 0;
     let accountRemoved = false;
+    let policyReads = 0;
+    let policyWrites = 0;
+    const policyAccountId = "77777777-7777-4777-8777-777777777777";
     let nativeMode = "off";
     let nativePreparedMode = "off";
     let nativeWrites = 0;
@@ -269,6 +272,81 @@ try {
           accountWrites++;
           accountRemoved = true;
           data = { ok: true, verified: true, routeReady: false };
+        } else data = { ok: true };
+      } else if (endpoint === "/settings/omniroute/policy") {
+        policyReads++;
+        data = {
+          available: true,
+          verified: false,
+          inventoryToken: "fixture-policy-inventory-token",
+          accounts: [
+            {
+              id: policyAccountId,
+              provider: "groq",
+              name: "Gratis Groq-account",
+            },
+          ],
+          models: [
+            {
+              provider: "groq",
+              modelId: "fixture-free-model",
+              name: "<script>globalThis.freePolicyLabelRan = true</script>",
+              freeType: "recurring-daily",
+              tos: "ok",
+            },
+          ],
+        };
+      } else if (endpoint === "/settings/omniroute/policy/prepare") {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        assert.deepEqual(request.postDataJSON(), {
+          inventoryToken: "fixture-policy-inventory-token",
+          selection: [
+            {
+              connectionId: policyAccountId,
+              modelId: "fixture-free-model",
+              officialSource: "https://groq.example/free-account-terms",
+            },
+          ],
+          acknowledgeBillingDisabled: true,
+          acknowledgeHardStop: true,
+          acknowledgeTerms: true,
+          acknowledgeAllClients: true,
+          acknowledgeQuotaRefresh: true,
+        });
+        const now = await page.evaluate(() => Date.now());
+        data = {
+          ok: true,
+          action: {
+            confirmationId: "88888888-8888-4888-8888-888888888888",
+            sessionId: "settings-policy:99999999-9999-4999-8999-999999999999",
+            tool: "free_policy_replace",
+            args: { accountCount: 1, modelCount: 1 },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: now,
+            expiresAt: now + 60000,
+          },
+        };
+      } else if (endpoint === "/settings/omniroute/policy/confirm") {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        const confirmation = request.postDataJSON();
+        assert.equal(
+          confirmation.sessionId,
+          "settings-policy:99999999-9999-4999-8999-999999999999",
+        );
+        assert.equal(
+          confirmation.confirmationId,
+          "88888888-8888-4888-8888-888888888888",
+        );
+        if (confirmation.approve) {
+          policyWrites++;
+          data = {
+            ok: true,
+            verified: true,
+            evidenceSource: "operator-account",
+            nativeQuotaVerified: false,
+            routeReady: true,
+          };
         } else data = { ok: true };
       } else if (endpoint === "/settings/omniroute/native")
         data = {
@@ -523,6 +601,8 @@ try {
       0,
       "Opening models must not fetch account metadata",
     );
+    assert.equal(policyReads, 0, "Opening models must not load policy options");
+    assert.equal(policyWrites, 0);
     await page
       .getByRole("button", { name: "Accounts en catalogus laden", exact: true })
       .click();
@@ -672,6 +752,172 @@ try {
       .waitFor();
     assert.equal(accountWrites, 1);
     assert.match(await accounts.innerText(), /AI blijft geblokkeerd/);
+
+    const policy = page.getByRole("region", { name: "Gratis beleid maken" });
+    assert.equal(policyReads, 0);
+    await policy
+      .getByRole("button", {
+        name: "Keuzes voor gratis beleid laden",
+        exact: true,
+      })
+      .click();
+    await policy
+      .getByRole("combobox", { name: "Account", exact: true })
+      .waitFor();
+    assert.equal(policyReads, 1);
+    await policy
+      .getByRole("combobox", { name: "Account", exact: true })
+      .selectOption(policyAccountId);
+    const policyModel = policy.getByRole("combobox", {
+      name: "Model",
+      exact: true,
+    });
+    await policyModel.selectOption("fixture-free-model");
+    assert.equal(
+      await policyModel
+        .locator('option[value="fixture-free-model"]')
+        .textContent(),
+      "<script>globalThis.freePolicyLabelRan = true</script> (fixture-free-model)",
+    );
+    assert.equal(
+      await page.evaluate(() => globalThis.freePolicyLabelRan),
+      undefined,
+    );
+    await policy
+      .getByRole("textbox", {
+        name: "Officiële bron voor gratis account en harde limiet",
+        exact: true,
+      })
+      .fill("https://groq.example/free-account-terms");
+    const selectionAcknowledgements = policy.getByRole("checkbox");
+    assert.equal(await selectionAcknowledgements.count(), 5);
+    for (let index = 0; index < 5; index++)
+      await selectionAcknowledgements.nth(index).check();
+    await policy
+      .getByRole("button", { name: "Model toevoegen aan beleid", exact: true })
+      .click();
+    await policy
+      .getByRole("button", { name: "Verwijder keuze 1", exact: true })
+      .waitFor();
+    for (let index = 0; index < 5; index++) {
+      assert.equal(
+        await selectionAcknowledgements.nth(index).isChecked(),
+        false,
+        "Adding a model must reset every account attestation",
+      );
+      await selectionAcknowledgements.nth(index).check();
+    }
+    await policy
+      .getByRole("button", { name: "Verwijder keuze 1", exact: true })
+      .click();
+    await policy
+      .getByRole("button", { name: "Verwijder keuze 1", exact: true })
+      .waitFor({ state: "detached" });
+    for (let index = 0; index < 5; index++)
+      assert.equal(
+        await selectionAcknowledgements.nth(index).isChecked(),
+        false,
+        "Removing a model must reset every account attestation",
+      );
+    await policy
+      .getByRole("button", { name: "Model toevoegen aan beleid", exact: true })
+      .click();
+    await policy
+      .getByRole("button", { name: "Verwijder keuze 1", exact: true })
+      .waitFor();
+    const preparePolicy = policy.getByRole("button", {
+      name: "Gratis beleid voorbereiden",
+      exact: true,
+    });
+    const prepareChosenPolicy = async () => {
+      assert.equal(await preparePolicy.isDisabled(), true);
+      const acknowledgements = policy.getByRole("checkbox");
+      assert.equal(await acknowledgements.count(), 5);
+      for (let index = 0; index < 5; index++) {
+        assert.equal(await preparePolicy.isDisabled(), true);
+        await acknowledgements.nth(index).check();
+      }
+      assert.equal(await preparePolicy.isDisabled(), false);
+      await preparePolicy.click();
+      await policy
+        .getByRole("heading", {
+          name: "Beleidswijziging bevestigen",
+          exact: true,
+        })
+        .waitFor();
+      assert.equal(
+        policyWrites,
+        0,
+        "Preparing policy must not persist changes",
+      );
+      assert.equal(
+        await policy
+          .getByRole("combobox", { name: "Account", exact: true })
+          .isDisabled(),
+        true,
+      );
+      assert.equal(
+        await policy
+          .getByRole("button", {
+            name: "Keuzes voor gratis beleid laden",
+            exact: true,
+          })
+          .isDisabled(),
+        true,
+      );
+    };
+    await prepareChosenPolicy();
+    await policy.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-free-policy-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+    const cancelPolicy = policy.getByRole("button", {
+      name: "Annuleer gratis beleid",
+      exact: true,
+    });
+    await cancelPolicy.click();
+    await policy
+      .getByRole("status")
+      .filter({ hasText: "Beleidswijziging geannuleerd." })
+      .waitFor();
+    assert.equal(policyWrites, 0);
+    await prepareChosenPolicy();
+    await page.clock.fastForward(60001);
+    const confirmPolicy = policy.getByRole("button", {
+      name: "Bevestig gratis beleid",
+      exact: true,
+    });
+    assert.equal(await confirmPolicy.isDisabled(), true);
+    await policy
+      .getByText("Toestemming verlopen. Annuleer en bereid opnieuw voor.", {
+        exact: true,
+      })
+      .waitFor();
+    assert.equal(policyWrites, 0);
+    await cancelPolicy.click();
+    await policy
+      .getByRole("heading", {
+        name: "Beleidswijziging bevestigen",
+        exact: true,
+      })
+      .waitFor({ state: "detached" });
+    await prepareChosenPolicy();
+    await confirmPolicy.click();
+    await policy
+      .getByRole("status")
+      .filter({ hasText: "native quota is niet geverifieerd." })
+      .waitFor();
+    assert.equal(policyWrites, 1);
+    assert.match(
+      await policy.innerText(),
+      /Facturering en harde limiet zijn door jou bevestigd/,
+    );
+    assert.doesNotMatch(
+      await policy.innerText(),
+      /De gratis route blijft geblokkeerd/,
+    );
 
     await page
       .getByRole("button", { name: "OmniRoute-overzicht laden", exact: true })
@@ -1041,7 +1287,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory and confirmed deletion.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory and confirmed deletion, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence.",
   );
 } finally {
   await browser.close();
