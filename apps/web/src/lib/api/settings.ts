@@ -1,4 +1,5 @@
 import type {
+  ToolUsageReport,
   FreePolicyOptions,
   FreePolicySelection,
   FreePolicyPrepared,
@@ -285,3 +286,5 @@ export const confirmFreePolicy = (
     confirmationId,
     approve,
   });
+
+export const getToolUsage = () => read<ToolUsageReport>("/tools/usage");

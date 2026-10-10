@@ -467,3 +467,30 @@ export interface ServiceConnectionWrite {
   services: ServiceConnection[];
   auditWarning?: string;
 }
+
+/** Private projections of the bounded audit tail, with no arguments or session identifiers. */
+export interface ToolUsageReport {
+  scannedEntries: number;
+  entryLimit: 500;
+  logByteLimit: 2000000;
+  oldestAt: string | null;
+  latestAt: string | null;
+  toolsTruncated: boolean;
+  tools: {
+    name: string;
+    source: string;
+    risk: Risk;
+    enabled: boolean;
+    attempts: number;
+    okResults: number;
+    failedResults: number;
+    lastAt: string | null;
+    averageDurationMs: number | null;
+    contexts: {
+      chat: number;
+      settings: number;
+      background: number;
+      unknown: number;
+    };
+  }[];
+}

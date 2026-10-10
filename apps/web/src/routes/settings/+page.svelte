@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ToolUsage from "#components/settings/ToolUsage.svelte";
   import FreePolicyWizard from "#components/settings/FreePolicyWizard.svelte";
   import OmniRouteAccounts from "#components/settings/OmniRouteAccounts.svelte";
   import { onMount, untrack } from "svelte";
@@ -166,6 +167,8 @@
                 void goto("/");
               }}
             />
+            <ToolUsage />
+            <BehaviorTab part="approvals" />
             <details>
               <summary>Alle gereedschappen en hun risico</summary><ToolsList />
             </details>

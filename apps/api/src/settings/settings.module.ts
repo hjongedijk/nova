@@ -1,3 +1,4 @@
+import { ToolUsageController } from "./tool-usage.controller.js";
 import { SettingsBackupService } from "./settings-backup.service.js";
 import { FreePolicyWizardController } from "./free-policy-wizard.controller.js";
 import { FreePolicyWizard } from "./free-policy-wizard.service.js";
@@ -43,6 +44,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
   imports: [SettingsStoreModule, RoutingModule, ConfirmationsModule],
   controllers: [
     SettingsController,
+    ToolUsageController,
     WidgetsController,
     ServiceConnectionsController,
     ModelMetricsController,

@@ -186,6 +186,12 @@ The guarded API uses POST `/api/settings/import/prepare` with `{data, mode, ackn
 These connection settings and Node-RED flows are not yet included in the existing version-one
 settings download; complete-system export/import remains phase J work.
 
+## Tool usage and standing permissions
+
+**Vaardigheden** includes the existing tool list with source, risk, enable switch and description editor, the current “Altijd” permission list with revocation, and an explicit **Gebruiksstatistieken laden** button. The PIN-guarded GET `/api/settings/tools/usage` projects metadata and counts from at most 500 entries in the last 2 MB of the existing audit log. Only tools in the current registry appear. Loading does not execute tools or contact their services.
+
+A recorded terminal attempt requires a valid timestamp, bounded duration and boolean result. Preparation, confirmation requests, execution-start records, cancellation and grant-creation records do not count. OK-result counts describe the reported result and do not prove a physical device effect. The report gives attempts, OK/error totals, average duration, last recorded attempt and fixed chat/settings/background/unknown context buckets. It returns no arguments, responses, errors, approval hashes or session identifiers. Quiet dashboard calls intentionally produce no audit entries and are absent; this bounded tail is not a lifetime usage total. Unused current tools are optional in the display.
+
 ## Model observations and release checks
 
 **Modellen** shows rolling gateway measurements for the past 24 hours: requests, failures, average latency,

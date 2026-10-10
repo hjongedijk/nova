@@ -153,6 +153,7 @@ try {
     let policyWrites = 0;
     let importPrepares = 0;
     let importWrites = 0;
+    let usageReads = 0;
     const backup = {
       format: "nova-settings",
       version: 1,
@@ -205,7 +206,57 @@ try {
           mode: "helper",
           display: 0,
         };
-      else if (endpoint === "/settings/helper/hotkeys") {
+      else if (endpoint === "/settings/tools/usage") {
+        usageReads++;
+        data = {
+          scannedEntries: 20,
+          entryLimit: 500,
+          logByteLimit: 2000000,
+          oldestAt: "2026-10-10T08:00:00Z",
+          latestAt: "2026-10-10T09:00:00Z",
+          toolsTruncated: false,
+          tools: [
+            {
+              name: "echo",
+              source: "builtin",
+              risk: "SAFE",
+              enabled: true,
+              attempts: 3,
+              okResults: 2,
+              failedResults: 1,
+              lastAt: "2026-10-10T09:00:00Z",
+              averageDurationMs: 100,
+              contexts: { chat: 2, settings: 1, background: 0, unknown: 0 },
+              args: { private: "private-usage-argument" },
+              sessionId: "private-usage-session",
+            },
+            {
+              name: "settings_persona_set",
+              source: "<script>globalThis.toolUsageSourceRan = true</script>",
+              risk: "CONFIRM",
+              enabled: false,
+              attempts: 1,
+              okResults: 1,
+              failedResults: 0,
+              lastAt: "2026-10-10T08:30:00Z",
+              averageDurationMs: 50,
+              contexts: { chat: 0, settings: 1, background: 0, unknown: 0 },
+            },
+            {
+              name: "never_called",
+              source: "extension",
+              risk: "READ_ONLY",
+              enabled: true,
+              attempts: 0,
+              okResults: 0,
+              failedResults: 0,
+              lastAt: null,
+              averageDurationMs: null,
+              contexts: { chat: 0, settings: 0, background: 0, unknown: 0 },
+            },
+          ],
+        };
+      } else if (endpoint === "/settings/helper/hotkeys") {
         if (request.method() === "PUT")
           hotkeys = request.postDataJSON().hotkeys;
         data = {
@@ -1252,6 +1303,144 @@ try {
       );
     }
     assert.equal(updateChecks, 0, "Opening settings must not contact GitHub");
+    assert.equal(
+      usageReads,
+      0,
+      "Opening abilities must not fetch tool audit history",
+    );
+    await page
+      .locator('.settings-sidebar a[href="/settings?section=abilities"]')
+      .click();
+    const usage = page.getByRole("region", {
+      name: "Gebruik van gereedschappen",
+      exact: true,
+    });
+    await usage
+      .getByRole("heading", { name: "Gebruik van gereedschappen", exact: true })
+      .waitFor();
+    assert.equal(usageReads, 0);
+    await page
+      .getByRole("heading", {
+        name: "Altijd goedgekeurde handelingen",
+        exact: true,
+      })
+      .waitFor();
+    await page
+      .getByText("Geen blijvende toestemmingen.", { exact: true })
+      .waitFor();
+    assert.match(
+      await page.locator(".settings-content").innerText(),
+      /Risicovolle handelingen blijven bevestiging vragen/,
+    );
+    await usage
+      .getByRole("button", { name: "Gebruiksstatistieken laden", exact: true })
+      .click();
+    await usage.getByRole("heading", { name: "echo", exact: true }).waitFor();
+    assert.equal(usageReads, 1);
+    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 2);
+    assert.equal(
+      await usage
+        .getByRole("heading", { name: "never_called", exact: true })
+        .count(),
+      0,
+    );
+    const echoUsage = usage.locator("li").filter({
+      has: page.getByRole("heading", { name: "echo", exact: true }),
+    });
+    assert.match(
+      await usage.innerText(),
+      /maximaal 500 recente auditregels, binnen de laatste 2 MB/,
+    );
+    assert.match(await usage.innerText(), /20 auditregels bekeken/);
+    assert.match(
+      await usage.innerText(),
+      /Het bewijst geen wijziging op een apparaat/,
+    );
+    assert.match(
+      await echoUsage.innerText(),
+      /builtin · direct uitvoeren · aan/,
+    );
+    assert.match(
+      await echoUsage.innerText(),
+      /3 afgeronde pogingen · 2 OK-resultaten · 1 foutresultaten/,
+    );
+    assert.match(
+      await echoUsage.innerText(),
+      /Aanroepcontext: gesprek 2, instellingen 1, achtergrond 0, onbekend 0/,
+    );
+    assert.match(await echoUsage.innerText(), /Gemiddelde duur: 100 ms/);
+    const settingsUsage = usage.locator("li").filter({
+      has: page.getByRole("heading", {
+        name: "settings_persona_set",
+        exact: true,
+      }),
+    });
+    assert.match(
+      await settingsUsage.innerText(),
+      /<script>globalThis.toolUsageSourceRan = true<\/script> · vraagt bevestiging · uit/,
+    );
+    assert.equal(
+      await page.evaluate(() => globalThis.toolUsageSourceRan),
+      undefined,
+    );
+    assert.doesNotMatch(
+      await usage.innerText(),
+      /private-usage-argument|private-usage-session/,
+    );
+    const usageSearch = usage.getByRole("searchbox", {
+      name: "Zoek in gebruik",
+      exact: true,
+    });
+    await usageSearch.fill("builtin");
+    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 1);
+    await usage.getByRole("heading", { name: "echo", exact: true }).waitFor();
+    await usageSearch.fill("settings_persona_set");
+    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 1);
+    await usage
+      .getByRole("heading", { name: "settings_persona_set", exact: true })
+      .waitFor();
+    await usageSearch.fill("");
+    const unusedUsage = usage.getByRole("checkbox", {
+      name: "Toon ook zonder geregistreerd gebruik",
+      exact: true,
+    });
+    await unusedUsage.check();
+    await usage
+      .getByRole("heading", { name: "never_called", exact: true })
+      .waitFor();
+    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 3);
+    await usageSearch.fill("extension");
+    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 1);
+    assert.match(
+      await usage.innerText(),
+      /Laatste: geen geregistreerde aanroep. Gemiddelde duur: onbekend/,
+    );
+    await usageSearch.fill("");
+    await unusedUsage.uncheck();
+    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 2);
+    const usageLoadBounds = await usage
+      .getByRole("button", { name: "Gebruiksstatistieken laden", exact: true })
+      .boundingBox();
+    const usageSearchBounds = await usageSearch.boundingBox();
+    assert(usageLoadBounds?.height >= 44);
+    assert(usageSearchBounds?.height >= 44);
+    assert(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      ),
+      `Tool usage overflow at ${width}`,
+    );
+    await usage.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-tool-usage-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+    await page
+      .locator('.settings-sidebar a[href="/settings?section=system"]')
+      .click();
     await page
       .getByRole("button", { name: "Controleer op nieuwe release" })
       .click();
@@ -1546,7 +1735,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory and confirmed deletion, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory and confirmed deletion, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports, explicit bounded tool history, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();
