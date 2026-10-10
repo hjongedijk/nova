@@ -100,6 +100,13 @@ export interface SkillRun {
   arguments: Record<string, unknown>;
 }
 
+export interface SkillVersionHistory {
+  currentVersion: number;
+  scannedEntries: number;
+  truncated: boolean;
+  versions: { version: number; at: string; action: "created" | "updated" }[];
+}
+
 /** POST /settings/skills/test */
 export type SkillTestResult =
   | { ok: true; type: "instruction"; matched: boolean; phrase: string }

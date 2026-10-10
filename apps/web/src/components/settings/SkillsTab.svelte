@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { Skill } from "@nova/contracts";
-  import { draftSkill, updateSkill } from "#lib/api/settings.ts";
+  import type { Skill, SkillVersionHistory } from "@nova/contracts";
+  import { draftSkill, skillVersions, updateSkill } from "#lib/api/settings.ts";
   import Badge from "#components/ui/Badge.svelte";
   import Button from "#components/ui/Button.svelte";
   import Details from "#components/ui/Details.svelte";
@@ -24,6 +24,8 @@
   const skills = $derived(settings.data?.skills ?? []);
   let wish = $state("");
   let making = $state(false);
+  let histories = $state<Record<string, SkillVersionHistory>>({});
+  let historyBusy = $state<string | null>(null);
 
   async function make(): Promise<void> {
     making = true;
@@ -47,9 +49,30 @@
       await afterChange(
         on ? `“${skill.name}” staat aan.` : `“${skill.name}” staat uit.`,
       );
+      delete histories[skill.id];
     } catch (error) {
       box.checked = !on;
       fail(error);
+    }
+  }
+
+  async function showVersions(skill: Skill) {
+    const requestedVersion = skill.version;
+    historyBusy = skill.id;
+    try {
+      const history = await skillVersions(skill.id);
+      const current = settings.data?.skills.find(
+        (item) => item.id === skill.id,
+      );
+      if (
+        current?.version === requestedVersion &&
+        history.currentVersion === requestedVersion
+      )
+        histories[skill.id] = history;
+    } catch (error) {
+      fail(error);
+    } finally {
+      historyBusy = null;
     }
   }
 </script>
@@ -124,7 +147,39 @@
             <Button onclick={() => startEditing(skill.type, skill)}
               >Bewerken</Button
             >
+            <Button
+              disabled={historyBusy === skill.id}
+              onclick={() => showVersions(skill)}
+              >{historyBusy === skill.id ? "Laden…" : "Versies"}</Button
+            >
           </div>
+          {#if histories[skill.id]?.currentVersion === skill.version}
+            <div class="skill-versions" aria-label="Versiegeschiedenis">
+              <strong
+                >Huidige versie {histories[skill.id]!.currentVersion}</strong
+              >
+              <p class="hint">
+                Versiegegevens uit de laatste {histories[skill.id]!
+                  .scannedEntries} auditregels. De inhoud en geheime headers staan
+                hier niet.
+              </p>
+              {#if histories[skill.id]!.versions.length}
+                <ol>
+                  {#each histories[skill.id]!.versions as version (`${version.version}-${version.at}`)}
+                    <li>
+                      v{version.version} · {version.action === "created"
+                        ? "gemaakt"
+                        : "bijgewerkt"} ·
+                      <time datetime={version.at}>{version.at}</time>
+                    </li>
+                  {/each}
+                </ol>
+              {:else}<p>Geen versiegegevens in de recente auditregels.</p>{/if}
+              {#if histories[skill.id]!.truncated}<p class="hint">
+                  De lijst is begrensd; oudere versies ontbreken mogelijk.
+                </p>{/if}
+            </div>
+          {/if}
         </li>
       {/each}
     </ul>

@@ -284,6 +284,53 @@ export class SettingsController {
     return { runs };
   }
 
+  @Get("skills/:id/versions")
+  skillVersions(@Param("id") id: string): {
+    currentVersion: number;
+    scannedEntries: number;
+    truncated: boolean;
+    versions: { version: number; at: string; action: "created" | "updated" }[];
+  } {
+    const skill = skillsOf(this.settings.get()).find((item) => item.id === id);
+    if (!skill) throw new NotFoundException("Die vaardigheid bestaat niet.");
+    const entries = this.audit.read(500);
+    const versions = entries.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry))
+        return [];
+      const args = entry.arguments;
+      if (!args || typeof args !== "object" || Array.isArray(args)) return [];
+      const row = args as Record<string, unknown>;
+      const action: "created" | "updated" | null =
+        row.what === "skill-created"
+          ? "created"
+          : row.what === "skill-updated"
+            ? "updated"
+            : null;
+      const version = row.version ?? (action === "created" ? 1 : undefined);
+      const timestamp =
+        typeof entry.timestamp === "string" ? new Date(entry.timestamp) : null;
+      if (
+        entry.tool !== "settings_change" ||
+        row.skill !== id ||
+        !action ||
+        typeof version !== "number" ||
+        !Number.isSafeInteger(version) ||
+        version < 1 ||
+        !timestamp ||
+        !Number.isFinite(timestamp.getTime()) ||
+        timestamp.toISOString() !== entry.timestamp
+      )
+        return [];
+      return [{ version, at: timestamp.toISOString(), action }];
+    });
+    return {
+      currentVersion: Number.isSafeInteger(skill.version) ? skill.version : 1,
+      scannedEntries: entries.length,
+      truncated: entries.length === 500 || versions.length > 20,
+      versions: versions.slice(0, 20).reverse(),
+    };
+  }
+
   /** NOVA proposes a better version of a skill. Nothing is saved: the screen shows the proposal. */
   @Post("skills/improve")
   @HttpCode(200)

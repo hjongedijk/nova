@@ -63,7 +63,11 @@ export class SettingsMutationsService {
     this.settings.update(
       (settings) => void settings.skills.push(skill as never),
     );
-    this.log("skill-created", { skill: skill.id, type: skill.type }, origin);
+    this.log(
+      "skill-created",
+      { skill: skill.id, type: skill.type, version: skill.version },
+      origin,
+    );
     return { ok: true, skill: publicSkill(skill) };
   }
 

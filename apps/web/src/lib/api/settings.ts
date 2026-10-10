@@ -33,6 +33,7 @@ import type {
   SkillDraftResult,
   SkillInput,
   SkillRun,
+  SkillVersionHistory,
   SkillSuggestion,
   SkillTestResult,
   SettingsBackup,
@@ -151,6 +152,8 @@ export const testSkill = (
 ) => write<SkillTestResult>("POST", "/skills/test", { skill, ...extra });
 export const skillRuns = (id: string) =>
   read<{ runs: SkillRun[] }>(`/skills/${enc(id)}/runs`);
+export const skillVersions = (id: string) =>
+  read<SkillVersionHistory>(`/skills/${enc(id)}/versions`);
 export const improveSkill = (skill: SkillInput, goal: string) =>
   write<SkillSuggestion>("POST", "/skills/improve", { skill, goal });
 

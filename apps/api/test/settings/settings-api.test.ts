@@ -114,6 +114,9 @@ describe("the settings API", () => {
       const denied = await send("get", "/", {});
       expect(denied.status).toBe(401);
       expect(denied.body).toEqual({ error: "PIN vereist", pinRequired: true });
+      expect((await send("get", "/skills/ochtend/versions", {})).status).toBe(
+        401,
+      );
       expect((await send("get", "/", { "x-nova-pin": "0000" })).status).toBe(
         401,
       );
@@ -207,6 +210,27 @@ describe("the settings API", () => {
     expect(changed.status).toBe(200);
     expect(changed.skill.version).toBe(2);
     expect(changed.skill.enabled).toBe(false);
+    nova.audits.push(null as never);
+    nova.audits.push({
+      tool: "settings_change",
+      timestamp: "2026-10-10 (private-token)",
+      arguments: {
+        what: "skill-updated",
+        skill: "filmavond",
+        version: 99,
+      },
+    } as never);
+    const history = await call("get", "/skills/filmavond/versions");
+    expect(history).toMatchObject({
+      status: 200,
+      currentVersion: 2,
+      versions: [
+        { version: 1, action: "created" },
+        { version: 2, action: "updated" },
+      ],
+    });
+    expect(JSON.stringify(history)).not.toContain("Nieuwe stappen.");
+    nova.audits.splice(-2);
     const overview = await call("get", "/");
     expect(
       overview.skills.find((item: { id: string }) => item.id === "filmavond")

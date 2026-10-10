@@ -35,7 +35,7 @@ const overview = {
       enabled: true,
       createdAt: "2026-10-09",
       updatedAt: "2026-10-09",
-      version: 1,
+      version: 2,
     },
   ],
   widgets: [
@@ -212,6 +212,7 @@ try {
     let importPrepares = 0;
     let importWrites = 0;
     let usageReads = 0;
+    let skillVersionReads = 0;
     let helperAgentWrites = 0;
     const backup = {
       format: "nova-settings",
@@ -678,6 +679,17 @@ try {
               segments: 2,
               status: "green",
             },
+          ],
+        };
+      } else if (endpoint === "/settings/skills/ochtend/versions") {
+        skillVersionReads++;
+        data = {
+          currentVersion: 2,
+          scannedEntries: 2,
+          truncated: false,
+          versions: [
+            { version: 1, at: "2026-10-09T10:00:00Z", action: "created" },
+            { version: 2, at: "2026-10-10T10:00:00Z", action: "updated" },
           ],
         };
       } else if (endpoint === "/settings/services/history")
@@ -1426,6 +1438,23 @@ try {
       0,
       "Opening abilities must not fetch tool audit history",
     );
+    await page
+      .locator('.settings-sidebar a[href="/settings?section=skills"]')
+      .click();
+    const skillRow = page.locator(".set-row").filter({ hasText: "Ochtend" });
+    assert.equal(skillVersionReads, 0, "Skill versions load only on request");
+    await skillRow
+      .getByRole("button", { name: "Versies", exact: true })
+      .click();
+    await skillRow.getByText("Huidige versie 2", { exact: true }).waitFor();
+    assert.equal(skillVersionReads, 1);
+    assert.doesNotMatch(await skillRow.innerText(), /Bekijk het weer\./);
+    await skillRow.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-skill-versions-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
     await page
       .locator('.settings-sidebar a[href="/settings?section=abilities"]')
       .click();
