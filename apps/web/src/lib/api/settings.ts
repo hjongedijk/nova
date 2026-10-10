@@ -7,6 +7,7 @@ import type {
   OmniRouteAccountsReport,
   OmniRouteAccountRemovalPrepared,
   OmniRouteAccountRemovalResult,
+  MqttOverview,
 } from "@nova/contracts";
 import type {
   NativeGatewayReport,
@@ -225,6 +226,8 @@ export const persistHelperPreferences = (preferences: HelperPreferences) =>
 /* ---------- service connections (credentials never returned) ---------- */
 export const getServiceConnections = () =>
   read<{ services: ServiceConnection[] }>("/services");
+export const getMqttOverview = () =>
+  read<MqttOverview>("/services/mqtt/overview");
 export const saveServiceConnection = (
   id: string,
   values: Record<string, string | boolean>,

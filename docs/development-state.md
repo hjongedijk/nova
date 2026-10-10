@@ -11,7 +11,7 @@ Do not record credentials, personal messages or actual deployment configuration 
 - User approved push/release of A, then immediate work on J. Future phase releases still require their phase approval.
 - Phase A tags v0.1.9/v0.1.10 published agent assets, but Docker Hub throttling/timeouts prevented image publishing.
 - Commit `3534257` configures Docker's registry mirror for QEMU, BuildKit and base-image pulls; v0.1.11 succeeded: CI/release green, amd64/arm64 image and both release assets verified.
-- Phase J in progress: 49/259 tasks overall; settings block `81ceebe` verified; private model metrics and explicit release checks also built and tested.
+- Phase J in progress: 50/259 tasks overall; settings block `81ceebe` verified; private model metrics and explicit release checks also built and tested.
 - This file must be updated with test outcomes and the next unfinished step before a usage-limit pause.
 - Resume automatically when the host allows execution; this file cannot restart an ended session or increase quota.
 
@@ -46,6 +46,8 @@ Saved gateway URL changes are blocked until provenance is verified; connection t
 Do not push/release J until its phase approval. No Windows code changed in this block.
 
 Helper preferences and saved mode/display are now included in version-one settings backups. Legacy files preserve omitted helper fields in both merge and replace. Strict nested validation and secret projection cover cues and known wardrobe fields; unrecognized legacy wardrobe extras are omitted from public reads and exports. Import reports helper changes and never commands the Windows agent. Node24 format/lint/typecheck/test/build passed: 1,012 tests in 49 files. Production browser checks and screenshot review remain pending. Local changes are uncommitted; next J6 candidate is bounded read-only MQTT visibility. J phase push/release still needs separate approval.
+
+J6.2 MQTT overview now lists fixed publisher topics, connection state and at most 50 process-local send summaries behind SettingsGuard. Timer, alert and conversation content stays hidden; delivery callbacks report client acceptance, not broker receipt. No inbound subscription was added. Full Node24 gates passed: 1,015 tests in 50 files, format, lint, typecheck and build. Production browser checks passed at 1x/2x/mobile, including duplicate timestamps; connection and MQTT screenshots reviewed. Continue J; no J push/release approval.
 
 ## Memory tooling decision
 

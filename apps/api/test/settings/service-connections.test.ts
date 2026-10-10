@@ -74,6 +74,9 @@ describe("service connection management", () => {
         (await pinned.api.get("/api/settings/services/history")).status,
       ).toBe(401);
       expect(
+        (await pinned.api.get("/api/settings/services/mqtt/overview")).status,
+      ).toBe(401);
+      expect(
         (await pinned.api.get("/api/settings/services/home-assistant/status"))
           .status,
       ).toBe(401);
@@ -84,6 +87,12 @@ describe("service connection management", () => {
             .set("x-nova-pin", "fixture-pin")
         ).status,
       ).toBe(200);
+      const mqttOverview = await pinned.api
+        .get("/api/settings/services/mqtt/overview")
+        .set("x-nova-pin", "fixture-pin");
+      expect(mqttOverview.status).toBe(200);
+      expect(mqttOverview.body.topics).toContain("jarvis/events/timer");
+      expect(mqttOverview.body.recent).toEqual([]);
       expect(
         (
           await pinned.api

@@ -12,12 +12,33 @@ import { StateService } from "../state/state.service.js";
 const ALLOWED_TOPIC =
   /^jarvis\/(events\/(tool|proxmox|system|conversation|web|timer)|status\/(api|node-red|proxmox)|alerts)$/;
 
+const TOPICS = [
+  "jarvis/events/tool",
+  "jarvis/events/proxmox",
+  "jarvis/events/system",
+  "jarvis/events/conversation",
+  "jarvis/events/web",
+  "jarvis/events/timer",
+  "jarvis/status/api",
+  "jarvis/status/node-red",
+  "jarvis/status/proxmox",
+  "jarvis/alerts",
+] as const;
+
+export interface MqttRecentMessage {
+  topic: (typeof TOPICS)[number];
+  at: string;
+  summary: string;
+  delivery: "pending" | "accepted" | "failed";
+}
+
 /** Publishes NOVA's events on the message bus, for Node-RED flows and other listeners. */
 @Injectable()
 export class MqttService implements OnModuleInit, OnModuleDestroy {
   private client?: MqttClient;
   private watchdog?: NodeJS.Timeout;
   private readonly log = new Logger("MQTT");
+  private readonly recent: MqttRecentMessage[] = [];
 
   constructor(
     private readonly config: NovaConfig,
@@ -75,6 +96,39 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     return this.client?.connected === true;
   }
 
+  overview() {
+    return {
+      connected: this.connected,
+      topics: TOPICS,
+      recent: this.recent.map((message) => ({ ...message })),
+    };
+  }
+
+  private messageSummary(topic: string, data: Record<string, unknown>): string {
+    if (topic === "jarvis/events/tool") {
+      const result =
+        typeof data.ok === "boolean"
+          ? data.ok
+            ? "geslaagd"
+            : "mislukt"
+          : "resultaat onbekend";
+      const duration =
+        typeof data.durationMs === "number" && Number.isFinite(data.durationMs)
+          ? ` · ${Math.max(0, Math.min(3_600_000, Math.round(data.durationMs)))} ms`
+          : "";
+      return `Tool ${result}${duration}`;
+    }
+    if (topic === "jarvis/events/conversation")
+      return "Gesprek afgerond · inhoud verborgen";
+    if (topic === "jarvis/events/timer")
+      return "Timergebeurtenis · label verborgen";
+    if (topic === "jarvis/alerts") return "Melding · details verborgen";
+    if (topic.startsWith("jarvis/status/")) return "Status bijgewerkt";
+    if (topic === "jarvis/events/proxmox") return "Proxmox-gebeurtenis";
+    if (topic === "jarvis/events/system") return "Systeemgebeurtenis";
+    return "Gebeurtenis gepubliceerd";
+  }
+
   envelope(type: string, data: unknown, severity = "info") {
     return {
       type,
@@ -88,8 +142,21 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
   publish(topic: string, data: Record<string, unknown>, retain = false): void {
     if (!ALLOWED_TOPIC.test(topic) || !this.client?.connected) return;
     const type = typeof data.type === "string" ? data.type : "update";
-    this.client.publish(topic, JSON.stringify(this.envelope(type, data)), {
-      retain,
-    });
+    const entry: MqttRecentMessage = {
+      topic: topic as MqttRecentMessage["topic"],
+      at: new Date().toISOString(),
+      summary: this.messageSummary(topic, data),
+      delivery: "pending",
+    };
+    this.recent.unshift(entry);
+    this.recent.length = Math.min(this.recent.length, 50);
+    this.client.publish(
+      topic,
+      JSON.stringify(this.envelope(type, data)),
+      { retain },
+      (error) => {
+        entry.delivery = error ? "failed" : "accepted";
+      },
+    );
   }
 }

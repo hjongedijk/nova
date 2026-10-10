@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import { ValidationError } from "../../core/errors/validation.error.js";
 import { SettingsGuard } from "../settings.guard.js";
+import { MqttService } from "../../core/mqtt/mqtt.service.js";
 import { ServiceConnectionsStore } from "./service-connections.store.js";
 import { ServiceConnectionsAdapter } from "./service-connections.adapter.js";
 
@@ -20,6 +21,7 @@ export class ServiceConnectionsController {
   constructor(
     private readonly store: ServiceConnectionsStore,
     private readonly adapters: ServiceConnectionsAdapter,
+    private readonly mqtt: MqttService,
   ) {}
 
   @Get() list() {
@@ -27,6 +29,9 @@ export class ServiceConnectionsController {
   }
   @Get("history") history() {
     return { revisions: this.store.history() };
+  }
+  @Get("mqtt/overview") mqttOverview() {
+    return this.mqtt.overview();
   }
   @Get(":id/status") status(@Param("id") id: string) {
     return { test: this.adapters.status(id) };

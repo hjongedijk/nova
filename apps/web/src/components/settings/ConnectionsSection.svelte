@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type {
+    MqttOverview,
     ServiceConnection,
     ServiceConnectionTest,
   } from "@nova/contracts";
   import {
     getServiceConnections,
+    getMqttOverview,
     saveServiceConnection,
     testServiceConnection,
   } from "#lib/api/settings.ts";
@@ -17,6 +19,8 @@
   let tests = $state<Record<string, ServiceConnectionTest>>({});
   let busy = $state<string | null>(null);
   let error = $state("");
+  let mqttOverview = $state<MqttOverview | null>(null);
+  let mqttError = $state("");
   const shown = $derived(
     services.filter((item) => !ids || ids.includes(item.id)),
   );
@@ -90,6 +94,18 @@
       }
     } catch (e) {
       fail(e);
+    } finally {
+      busy = null;
+    }
+  }
+  async function loadMqttOverview() {
+    busy = "mqtt-overview";
+    try {
+      mqttOverview = await getMqttOverview();
+      mqttError = "";
+    } catch (e) {
+      mqttError =
+        e instanceof Error ? e.message : "MQTT-overzicht niet beschikbaar.";
     } finally {
       busy = null;
     }
@@ -197,6 +213,54 @@
           </div>
         </fieldset>
       </form>
+      {#if service.id === "mqtt"}
+        <section aria-label="MQTT-berichten" class="mqtt-overview">
+          <h3>MQTT-status en berichten</h3>
+          <p class="hint">
+            Alleen berichten die NOVA sinds de start heeft verzonden. Inhoud en
+            privégegevens blijven verborgen.
+          </p>
+          <button
+            type="button"
+            disabled={busy !== null}
+            onclick={loadMqttOverview}>Berichten laden</button
+          >
+          {#if mqttError}<p role="status" class="connection-failed">
+              {mqttError}
+            </p>{/if}
+          {#if mqttOverview}
+            <p role="status">
+              {mqttOverview.connected ? "Verbonden" : "Niet verbonden"}
+            </p>
+            <h4>Topics die NOVA gebruikt</h4>
+            <ul>
+              {#each mqttOverview.topics as topic (topic)}<li>
+                  <code>{topic}</code>
+                </li>{/each}
+            </ul>
+            <h4>Recente berichten</h4>
+            {#if mqttOverview.recent.length}
+              <ul>
+                {#each mqttOverview.recent as message, index (index)}<li
+                  >
+                    <code>{message.topic}</code> · {message.summary} · {message.delivery ===
+                    "accepted"
+                      ? "aangenomen"
+                      : message.delivery === "failed"
+                        ? "mislukt"
+                        : "in wachtrij"} ·
+                    <time datetime={message.at}>{message.at}</time>
+                  </li>{/each}
+              </ul>
+            {:else}<p>Nog geen berichten sinds deze start.</p>{/if}
+            <p class="hint">
+              Dit is alleen de lokale verzendgeschiedenis. ‘Aangenomen’ betekent
+              dat de MQTT-client de verzending aannam; NOVA bevestigt geen
+              ontvangst. Berichten van andere apparaten worden niet gelezen.
+            </p>
+          {/if}
+        </section>
+      {/if}
       {#if service.restartRequired}<p class="connection-pending">
           Herstart nodig. De draaiende service gebruikt nog de vorige
           verbinding.

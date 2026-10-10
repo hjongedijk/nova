@@ -467,6 +467,19 @@ export interface ServiceConnectionTest {
   status?: number;
 }
 
+export interface MqttRecentMessage {
+  topic: string;
+  at: string;
+  summary: string;
+  delivery: "pending" | "accepted" | "failed";
+}
+
+export interface MqttOverview {
+  connected: boolean;
+  topics: string[];
+  recent: MqttRecentMessage[];
+}
+
 export interface ServiceConnectionWrite {
   ok: true;
   services: ServiceConnection[];

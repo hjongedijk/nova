@@ -119,6 +119,34 @@ const initialServices = [
     ],
     restartRequired: false,
   },
+  {
+    id: "mqtt",
+    label: "MQTT",
+    fields: [
+      {
+        key: "url",
+        label: "Broker-adres",
+        kind: "url",
+        source: "environment",
+        value: "mqtt://mqtt:1883",
+      },
+      {
+        key: "username",
+        label: "Gebruikersnaam",
+        kind: "text",
+        source: "environment",
+        value: "nova",
+      },
+      {
+        key: "password",
+        label: "Wachtwoord",
+        kind: "secret",
+        source: "environment",
+        set: true,
+      },
+    ],
+    restartRequired: false,
+  },
 ];
 const browser = await chromium.launch({
   headless: true,
@@ -142,6 +170,7 @@ try {
     let pinned = false;
     const services = structuredClone(initialServices);
     let tested = false;
+    let mqttReads = 0;
     let persona = overview.persona;
     let updateChecks = 0;
     let accountsReads = 0;
@@ -586,7 +615,27 @@ try {
           ],
         };
       else if (endpoint === "/settings/services") data = { services };
-      else if (endpoint === "/settings/services/history")
+      else if (endpoint === "/settings/services/mqtt/overview") {
+        mqttReads++;
+        data = {
+          connected: true,
+          topics: ["jarvis/events/tool", "jarvis/events/timer"],
+          recent: [
+            {
+              topic: "jarvis/events/timer",
+              at: "2026-10-10T10:00:00Z",
+              summary: "Timergebeurtenis · label verborgen",
+              delivery: "accepted",
+            },
+            {
+              topic: "jarvis/events/timer",
+              at: "2026-10-10T10:00:00Z",
+              summary: "Timergebeurtenis · label verborgen",
+              delivery: "accepted",
+            },
+          ],
+        };
+      } else if (endpoint === "/settings/services/history")
         data = { revisions: [] };
       else if (
         endpoint.endsWith("/test") &&
@@ -1714,6 +1763,24 @@ try {
       ),
     });
     await page.goto(`${base}/settings?section=connections`);
+    const mqtt = page
+      .locator(".connection-editor")
+      .filter({ has: page.locator("summary", { hasText: "MQTT" }) });
+    await mqtt.locator("summary").click();
+    assert.equal(mqttReads, 0, "MQTT history loads only on request");
+    await mqtt.getByRole("button", { name: "Berichten laden" }).click();
+    await mqtt
+      .getByText("Timergebeurtenis · label verborgen")
+      .first()
+      .waitFor();
+    assert.equal(mqttReads, 1);
+    await mqtt.scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-mqtt-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
     const connection = page
       .locator(".connection-editor")
       .filter({ has: page.locator("summary", { hasText: "Home Assistant" }) });
