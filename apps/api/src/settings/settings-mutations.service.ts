@@ -3,6 +3,7 @@ import type { Skill } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { normalizePersona } from "./settings-validation.js";
+import { PersonaHistoryService } from "./persona-history.service.js";
 import {
   normalizeSkill,
   publicSkill,
@@ -23,6 +24,7 @@ export class SettingsMutationsService {
   constructor(
     private readonly settings: SettingsStore,
     private readonly audit: AuditService,
+    private readonly personaHistory: PersonaHistoryService,
   ) {}
 
   private log(
@@ -43,11 +45,19 @@ export class SettingsMutationsService {
   setPersona(
     value: unknown,
     origin?: SettingsMutationOrigin,
-  ): { ok: true; persona: string } {
+  ): { ok: true; persona: string; historyWarning?: string } {
     const persona = normalizePersona(value);
+    const previous = this.settings.get().persona;
     this.settings.update((settings) => void (settings.persona = persona));
+    this.personaHistory.record(previous, persona);
     this.log("persona", { length: persona.length }, origin);
-    return { ok: true, persona };
+    return {
+      ok: true,
+      persona,
+      ...(this.personaHistory.lastWarning
+        ? { historyWarning: this.personaHistory.lastWarning }
+        : {}),
+    };
   }
 
   createSkill(

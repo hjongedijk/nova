@@ -54,6 +54,8 @@ The Connections section has expandable service editors, secret-presence flags, a
 test button and a saved-versus-running restart message. The System section provides selective
 nonsecret rollback. Screenshots use fixture credentials, never actual connections.
 
+Personality offers an explicitly loaded, PIN-protected history of user-authored behavior rules with conflict-checked rollback. The history stays in a private mode-0600 file, redacts credential-shaped strings, and does not enter audit contents.
+
 ![](img/settings-connections-1x.png)
 ![](img/settings-connections-2x.png)
 ![](img/settings-connections-mobile.png)

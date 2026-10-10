@@ -134,6 +134,8 @@ J8.3 configuration documentation now covers every variable in `.env.example`, di
 
 J8.1 service-adapter API coverage is complete: 35 focused tests exercise all nine configured adapters, including fake-service probes, MQTT cleanup without publish/subscribe, restart-time migration, secret masking in responses/history/audit, redirects, and transport/auth failures. No external service was contacted.
 
-J8.2 browser coverage uses Playwright against the production build for all twelve sections, search, keyboard navigation, deep links, saves, PIN expiry, and confirmed backup flows at desktop 1x/2x and 390 px mobile. No physical phone was tested.
+J8.2 browser coverage uses Playwright against the production build for all twelve sections, search, keyboard navigation, deep links, saves, PIN expiry, confirmed backup flows and explicit persona-history loading at desktop 1x/2x and 390 px mobile. No physical phone was tested.
 
-Latest Node 24 verification: 1,044 API tests pass across 54 files with one worker. Format, lint and typecheck pass; the production build passed immediately before the test-only Node-RED coverage addition. Production-browser checks pass on the current built UI.
+J2.4 now also records user-authored behavior-rule changes in `persona-history.json`: 100 private revisions maximum, 50 shown after an explicit PIN-protected load, credential-shaped text sanitized, and rollback guarded by a current-value conflict check. Both settings-screen and confirmed-chat persona changes enter history. History API, secret redaction, PIN/admin boundaries, stale rollback and chat mutation have tests; mobile history screenshot reviewed.
+
+Latest Node 24 verification: 1,048 API tests pass across 55 files with one worker. Format, lint, typecheck and build pass. Production-browser checks pass on the current built UI.

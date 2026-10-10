@@ -36,6 +36,8 @@ import type {
   ToolSwitchRollbackResult,
   SidebarHistory,
   SidebarRollbackResult,
+  PersonaHistory,
+  PersonaRollbackResult,
   HelperPreferences,
   Skill,
   SkillDraftResult,
@@ -121,7 +123,18 @@ export const getUpdates = () => read<UpdateReport>("/updates");
 export const checkUpdates = () => write<UpdateReport>("POST", "/updates/check");
 
 export const savePersona = (text: string) =>
-  write<{ ok: true; persona: string }>("PUT", "/persona", { text });
+  write<{ ok: true; persona: string; historyWarning?: string }>(
+    "PUT",
+    "/persona",
+    { text },
+  );
+export const getPersonaHistory = () => read<PersonaHistory>("/persona/history");
+export const rollbackPersonaRevision = (id: string) =>
+  write<PersonaRollbackResult>(
+    "POST",
+    `/persona/history/${enc(id)}/rollback`,
+    {},
+  );
 
 export const saveQuickActions = (items: QuickAction[]) =>
   write<{ ok: true; quickActions: QuickAction[] }>("PUT", "/quick-actions", {

@@ -27,6 +27,7 @@ import { ServiceRestart } from "./services/service-restart.service.js";
 import { HelperPreferencesHistory } from "./helper-preferences-history.service.js";
 import { ToolSwitchHistory } from "./tool-switch-history.service.js";
 import { SidebarHistory } from "./sidebar-history.service.js";
+import { PersonaHistoryService } from "./persona-history.service.js";
 import { SkillAssistantService } from "./ai/skill-assistant.service.js";
 import { PlaybooksService } from "./playbooks.service.js";
 import { PublicConfigService } from "./public-config.service.js";
@@ -84,6 +85,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     HelperPreferencesHistory,
     ToolSwitchHistory,
     SidebarHistory,
+    PersonaHistoryService,
     SkillsSource,
     PlaybooksService,
     PublicConfigService,

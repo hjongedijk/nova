@@ -4,6 +4,7 @@
   import Button from "#components/ui/Button.svelte";
   import Field from "#components/ui/Field.svelte";
   import QuickActionsEditor from "./QuickActionsEditor.svelte";
+  import PersonaHistory from "./PersonaHistory.svelte";
   import SoundSection from "./SoundSection.svelte";
   import { afterChange, fail, settings } from "./state.svelte.ts";
 
@@ -13,8 +14,10 @@
 
   async function save(): Promise<void> {
     try {
-      await savePersona(persona);
-      await afterChange("De eigen regels zijn opgeslagen.");
+      const result = await savePersona(persona);
+      await afterChange(
+        result.historyWarning ?? "De eigen regels zijn opgeslagen.",
+      );
     } catch (error) {
       fail(error);
     }
@@ -49,6 +52,7 @@
       <Badge text="{persona.length} / 2000" />
     </div>
   </section>
+  <PersonaHistory />
 {/if}
 {#if part === "all"}
   <h3>Snelle opdrachten op het beginscherm</h3>

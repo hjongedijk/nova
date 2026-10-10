@@ -3,6 +3,7 @@ import { MAX_BACKUP_BYTES } from "./backup-plan.js";
 import { HelperPreferencesHistory } from "./helper-preferences-history.service.js";
 import { ToolSwitchHistory } from "./tool-switch-history.service.js";
 import { SidebarHistory } from "./sidebar-history.service.js";
+import { PersonaHistoryService } from "./persona-history.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
@@ -96,6 +97,7 @@ export class SettingsController {
     private readonly helperHistory: HelperPreferencesHistory,
     private readonly toolHistory: ToolSwitchHistory,
     private readonly sidebarHistory: SidebarHistory,
+    private readonly personaHistory: PersonaHistoryService,
     @Optional()
     @Inject(WALLPAPER_PORT)
     private readonly wallpaper?: WallpaperPort,
@@ -143,8 +145,21 @@ export class SettingsController {
   }
 
   @Put("persona")
-  setPersona(@Body() body: Body_): { ok: true; persona: string } {
+  setPersona(@Body() body: Body_) {
     return this.mutations.setPersona(body?.text);
+  }
+
+  @Get("persona/history")
+  personaHistoryList() {
+    return this.personaHistory.list();
+  }
+
+  @Post("persona/history/:id/rollback")
+  @HttpCode(200)
+  rollbackPersona(@Param("id") id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige wijziging."]);
+    return this.personaHistory.rollback(id);
   }
 
   @Put("quick-actions")

@@ -545,6 +545,22 @@ export interface HelperPreferenceRollbackResult {
   preferences: HelperPreferences;
   auditWarning?: string;
 }
+export interface PersonaRevision {
+  id: string;
+  at: string;
+  before: string;
+  after: string;
+  revertedFrom?: string;
+}
+export interface PersonaHistory {
+  revisions: PersonaRevision[];
+  truncated: boolean;
+}
+export interface PersonaRollbackResult {
+  ok: true;
+  persona: string;
+  auditWarning?: string;
+}
 export interface ToolSwitchRevision {
   id: string;
   at: string;

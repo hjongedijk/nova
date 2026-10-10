@@ -120,6 +120,7 @@ Everything NOVA writes lives in the data folder (`nova-data/` in production, `de
 | `settings.json`                                                                       | NOVA-owned preferences: persona, quick actions, tool switches, skills, panels, sidebar, helper choice and preferences, plus scoped standing approvals. May contain skill secret headers; mode 0600. |
 | `services.json`                                                                       | Service connection values and bounded connection history. Secret fields are private; mode 0600.                                                                                                     |
 | `helper-preferences-history.json`, `tool-switch-history.json`, `sidebar-history.json` | Bounded private change histories for helper appearance, tool enabled states and sidebar layout. Each is written with mode 0600.                                                                     |
+| `persona-history.json`                                                                | Private history of up to 100 changes to the user's behavior rules; full text is shown only after the PIN-protected history is loaded. Mode 0600.                                                    |
 | `memory.json`                                                                         | Short-term conversation history and session context.                                                                                                                                                |
 | `actions.jsonl`                                                                       | The action log, one JSON line per event, append-only (mode 0600).                                                                                                                                   |
 | `jarvis-state.json`                                                                   | Timers, named user lists, alerts and component state. Only named lists are included in settings backups; active timers and alerts remain local.                                                     |
@@ -204,8 +205,10 @@ A different saved endpoint blocks inference, including test bypasses, and a conn
 to send credentials to that unverified target. Updating the gateway requires a matching trusted
 deployment and a new free-route check; changing a URL alone cannot establish that trust.
 
-The System section loads connection, helper preference, tool switch and sidebar layout histories on
-request. Each history stores at most 100 private revisions and shows at most 50. Rollback checks
+The Personality section loads the private behavior-rule history on request. Recognizable bearer tokens,
+API keys and password assignments are redacted before history is stored or restored. The System section loads
+connection, helper preference, tool switch and sidebar layout histories on request. Each history stores
+at most 100 private revisions and shows at most 50. Rollback checks
 that the values being restored still match the recorded change; unrelated edits stay untouched.
 Connection credentials remain outside the visible history and require entering the desired value
 again. Tool history contains only tool names and enabled states. Sidebar history contains only panel

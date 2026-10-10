@@ -216,6 +216,7 @@ try {
     let skillVersionReads = 0;
     let helperAgentWrites = 0;
     let helperPreferenceHistoryReads = 0;
+    let personaHistoryReads = 0;
     let helperPreferenceHistoryWrites = 0;
     let toolSwitchHistoryReads = 0;
     let toolSwitchHistoryWrites = 0;
@@ -858,6 +859,19 @@ try {
       } else if (endpoint === "/settings/persona") {
         persona = request.postDataJSON().text;
         data = { ok: true, persona };
+      } else if (endpoint === "/settings/persona/history") {
+        personaHistoryReads++;
+        data = {
+          revisions: [
+            {
+              id: "11111111-1111-4111-8111-111111111111",
+              at: "2026-10-10T10:00:00.000Z",
+              before: "Wees helder.",
+              after: "Wees warm en duidelijk.",
+            },
+          ],
+          truncated: false,
+        };
       } else if (endpoint === "/providers")
         data = {
           ready: true,
@@ -2073,6 +2087,18 @@ try {
     await page.getByRole("button", { name: "Opslaan", exact: true }).click();
     await page.getByText("De eigen regels zijn opgeslagen.").waitFor();
     assert.equal(persona, "Wees warm en duidelijk.");
+    const personaHistory = page.getByRole("region", {
+      name: "Eigen-regelsgeschiedenis",
+    });
+    await personaHistory
+      .getByRole("button", { name: "Geschiedenis laden" })
+      .click();
+    await personaHistory.getByText("Voor en na bekijken").click();
+    await personaHistory.getByText("Wees helder.", { exact: true }).waitFor();
+    assert.equal(personaHistoryReads, 1);
+    await personaHistory
+      .getByText("Wees helder.", { exact: true })
+      .scrollIntoViewIfNeeded();
     await page.screenshot({
       path: path.join(
         screenshots,
