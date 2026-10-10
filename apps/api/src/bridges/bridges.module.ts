@@ -43,6 +43,7 @@ import {
       provide: WALLPAPER_PORT,
       inject: [WindowsPcService],
       useFactory: (windows: WindowsPcService): WallpaperPort => ({
+        agentStatus: () => windows.settingsStatus(),
         get configured() {
           return windows.configured;
         },

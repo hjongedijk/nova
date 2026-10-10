@@ -3,6 +3,7 @@ import type {
   HelperMode,
   WallpaperDisplay,
   WallpaperMode,
+  WindowsAgentStatus,
 } from "@nova/contracts";
 import { NovaConfig } from "../../core/config/nova-config.js";
 import { requestJson } from "../../core/http/http-json.js";
@@ -73,6 +74,65 @@ export class WindowsPcService {
       configured: this.configured,
       url: this.configured ? this.url : null,
     };
+  }
+
+  /** Small private settings status, with no host/user/process or upstream error details. */
+  async settingsStatus(): Promise<WindowsAgentStatus> {
+    const unavailable: WindowsAgentStatus = {
+      available: false,
+      version: null,
+      helperOpen: null,
+      paused: null,
+      mode: null,
+      display: null,
+    };
+    if (!this.configured)
+      return { ...unavailable, error: "Er is geen Windows-agent ingesteld." };
+    try {
+      const outcome = await this.call(
+        "windows_status",
+        {},
+        AbortSignal.timeout(6000),
+      );
+      if (!outcome.ok)
+        return {
+          ...unavailable,
+          error:
+            "De Windows-agent is niet bereikbaar of weigert de verbinding.",
+        };
+      const result = outcome.result;
+      return {
+        available: true,
+        version:
+          typeof result.agent === "string" &&
+          /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(result.agent)
+            ? result.agent
+            : null,
+        helperOpen:
+          typeof result.helperOpen === "boolean" ? result.helperOpen : null,
+        paused:
+          typeof result.agentPaused === "boolean" ? result.agentPaused : null,
+        mode:
+          result.mode === "helper" ||
+          result.mode === "wallpaper" ||
+          result.mode === "both"
+            ? result.mode
+            : null,
+        display:
+          typeof result.helperDisplay === "number" &&
+          Number.isInteger(result.helperDisplay) &&
+          result.helperDisplay >= 0 &&
+          result.helperDisplay <= 8
+            ? result.helperDisplay
+            : null,
+      };
+    } catch {
+      return {
+        ...unavailable,
+        error:
+          "De Windows-agent antwoordt nu niet. Controleer of de pc aanstaat.",
+      };
+    }
   }
 
   /** The displays with their wallpaper mode. */

@@ -11,7 +11,7 @@ Do not record credentials, personal messages or actual deployment configuration 
 - User approved push/release of A, then immediate work on J. Future phase releases still require their phase approval.
 - Phase A tags v0.1.9/v0.1.10 published agent assets, but Docker Hub throttling/timeouts prevented image publishing.
 - Commit `3534257` configures Docker's registry mirror for QEMU, BuildKit and base-image pulls; v0.1.11 succeeded: CI/release green, amd64/arm64 image and both release assets verified.
-- Phase J in progress: 46/259 tasks overall; settings block `81ceebe` verified; private model metrics and explicit release checks also built and tested.
+- Phase J in progress: 47/259 tasks overall; settings block `81ceebe` verified; private model metrics and explicit release checks also built and tested.
 - This file must be updated with test outcomes and the next unfinished step before a usage-limit pause.
 - Resume automatically when the host allows execution; this file cannot restart an ended session or increase quota.
 
@@ -35,11 +35,11 @@ Run Node checks with Node 24 (host Node 22 is below the repository engine requir
 Use `scripts/check-helper.mjs`; its fixtures contain test data only.
 PowerShell syntax/geometry checks do not prove Windows kiosk/tray/audio/display behavior.
 
-Phase J latest block: 373 tests in 34 files; format/lint/typecheck/build passed in Node 24 Docker.
+Phase J latest block: 381 tests in 35 files; format/lint/typecheck/build passed in Node 24 Docker.
 Production settings browser checks passed for all sections, search/keyboard/deep links, mobile, save, PIN expiry/lock, model measurements and explicit release checks.
 Production helper regression checks passed at 1x/2x. Screenshots use fixtures; no real phone proof.
 
-Next: finish Windows/helper management J6.5, then continue J3 OmniRoute account/policy management using `docs/omniroute-admin-api.md`; onboarding follows its policy wizard.
+Next: shared settings mutation boundary and fresh-confirmation chat controls (J7), then continue J3 OmniRoute account/policy management using `docs/omniroute-admin-api.md`; onboarding follows its policy wizard.
 J2.3 restart button, complete history/backup and service-specific management remain unfinished. J4 waits for C.
 Service config: `core/config/service-connections.ts`; store/adapter/controller: `settings/services/`.
 Saved gateway URL changes are blocked until provenance is verified; connection tests never establish free billing.
@@ -57,3 +57,7 @@ Release metadata: `settings/updates.service.ts` and controller; no automatic net
 Management responses capped at 2 MB, raw documentation at 16,000 characters; session resets on reconfiguration.
 SQLite fixtures prove verified routing and drift rejection. Test workers use 50% CPU: full default-concurrency run
 had five unrelated five-second timeouts; four-worker and updated standard runs passed all 373 tests.
+
+Latest checked block: private Windows status and shortcut management in Apparaten. 381 Node24 tests/gates green;
+production settings and helper browser tests pass at 1x/2x/mobile. New device screenshots use fixture data only.
+No PowerShell/agent source changed; native PC behavior remains unverified.

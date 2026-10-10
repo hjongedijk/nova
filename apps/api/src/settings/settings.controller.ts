@@ -14,6 +14,7 @@ import {
 } from "@nestjs/common";
 import type {
   PublicConfig,
+  WindowsAgentStatus,
   HelperPreferences,
   SettingsBackup,
   SettingsOverview,
@@ -674,6 +675,20 @@ export class SettingsController {
     return this.wallpaper?.helperPreferences
       ? this.wallpaper.helperPreferences()
       : { ok: false, error: "Geen Windows-agent." };
+  }
+  @Get("windows/status")
+  agentStatus(): Promise<WindowsAgentStatus> | WindowsAgentStatus {
+    return this.wallpaper?.agentStatus
+      ? this.wallpaper.agentStatus()
+      : {
+          available: false,
+          version: null,
+          helperOpen: null,
+          paused: null,
+          mode: null,
+          display: null,
+          error: "Er is geen Windows-agent ingesteld.",
+        };
   }
   @Put("helper/hotkeys")
   async saveHelperHotkeys(@Body() body: Body_) {

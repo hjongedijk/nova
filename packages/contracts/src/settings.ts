@@ -376,6 +376,17 @@ export interface HelperState {
   error?: string;
 }
 
+/** Private settings projection of /v1/status; excludes user, host and process details. */
+export interface WindowsAgentStatus {
+  available: boolean;
+  version: string | null;
+  helperOpen: boolean | null;
+  paused: boolean | null;
+  mode: HelperMode | null;
+  display: number | null;
+  error?: string;
+}
+
 /** Non-secret helper appearance and sound preferences, persisted by NOVA. */
 export interface HelperPreferences {
   wardrobe?: {

@@ -56,7 +56,7 @@
     [
       "helper",
       "Helper",
-      "Geen achtergrond: een klein, altijd zichtbaar balkje bovenaan je scherm.",
+      "Een klein helpervenster met gesprek, meldingen en overzicht.",
     ],
     ["both", "Beide", "De achtergrond én het balkje er bovenop."],
   ];

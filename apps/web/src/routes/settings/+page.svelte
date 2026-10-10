@@ -6,6 +6,7 @@
   import ConnectionHistory from "#components/settings/ConnectionHistory.svelte";
   import ModelMetrics from "#components/settings/ModelMetrics.svelte";
   import UpdatesSection from "#components/settings/UpdatesSection.svelte";
+  import WindowsAgentPanel from "#components/settings/WindowsAgentPanel.svelte";
   import AbilitiesTab from "#components/settings/AbilitiesTab.svelte";
   import SkillsTab from "#components/settings/SkillsTab.svelte";
   import SidebarTab from "#components/settings/SidebarTab.svelte";
@@ -188,6 +189,7 @@
           {:else if section === "devices"}<ConnectionsSection
               ids={["windows"]}
             />
+            <WindowsAgentPanel />
             <DevicesSection />
           {:else if section === "memory"}<AdminDialog
               embedded

@@ -36,6 +36,7 @@ snapshot protection/permissions and PIN throttling.
 | ----------- | ------------------------------------ | ------------------------------------ | ---------------------------------------- |
 | General     | ![](img/settings-general-1x.png)     | ![](img/settings-general-2x.png)     | ![](img/settings-general-mobile.png)     |
 | Models      | ![](img/settings-models-1x.png)      | ![](img/settings-models-2x.png)      | ![](img/settings-models-mobile.png)      |
+| Devices     | ![](img/settings-devices-1x.png)     | ![](img/settings-devices-2x.png)     | ![](img/settings-devices-mobile.png)     |
 | System      | ![](img/settings-system-1x.png)      | ![](img/settings-system-2x.png)      | ![](img/settings-system-mobile.png)      |
 | Personality | ![](img/settings-personality-1x.png) | ![](img/settings-personality-2x.png) | ![](img/settings-personality-mobile.png) |
 

@@ -1,4 +1,5 @@
 import type {
+  WindowsAgentStatus,
   UpdateReport,
   ModelMetricsReport,
   ImportResult,
@@ -118,6 +119,8 @@ export const setWallpaper = (display: number, mode: WallpaperMode) =>
   write<WallpaperState>("POST", "/wallpaper", { display, mode });
 
 export const getHelper = () => read<HelperState>("/helper");
+export const getWindowsAgentStatus = () =>
+  read<WindowsAgentStatus>("/windows/status");
 export const setHelper = (mode: HelperMode, display: number) =>
   write<HelperState>("POST", "/helper", { mode, display });
 

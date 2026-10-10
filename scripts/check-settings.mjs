@@ -144,12 +144,34 @@ try {
     let tested = false;
     let persona = overview.persona;
     let updateChecks = 0;
+    let hotkeys = {
+      open: "Ctrl+Alt+N",
+      speak: "Ctrl+Alt+Space",
+      mute: "Ctrl+Alt+M",
+      desktop: "Ctrl+Alt+D",
+    };
     await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
       const request = route.request();
       const url = new URL(request.url());
       const endpoint = url.pathname.slice(4);
       let data = {};
-      if (endpoint === "/settings/updates")
+      if (endpoint === "/settings/windows/status")
+        data = {
+          available: true,
+          version: "2026-10-10.fixture",
+          helperOpen: true,
+          paused: false,
+          mode: "helper",
+          display: 0,
+        };
+      else if (endpoint === "/settings/helper/hotkeys") {
+        if (request.method() === "PUT")
+          hotkeys = request.postDataJSON().hotkeys;
+        data = {
+          ok: true,
+          preferences: { hotkeys, warnings: [], paused: false },
+        };
+      } else if (endpoint === "/settings/updates")
         data = {
           running: "v0.1.10",
           checkedAt: null,
@@ -360,6 +382,27 @@ try {
         `settings-system-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
+    await page.goto(`${base}/settings?section=devices`);
+    await page.getByText("2026-10-10.fixture", { exact: true }).waitFor();
+    await page
+      .getByText("Sneltoetsen op de Windows-pc", { exact: true })
+      .click();
+    await page
+      .getByLabel("Sneltoets Openen", { exact: true })
+      .fill("Ctrl+Alt+J");
+    await page
+      .getByRole("button", { name: "Sneltoetsen opslaan", exact: true })
+      .click();
+    await page
+      .getByText("Sneltoetsen opgeslagen op de Windows-pc.", { exact: true })
+      .waitFor();
+    assert.equal(hotkeys.open, "Ctrl+Alt+J");
+    await page.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-devices-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
     await page.goto(`${base}/settings?section=connections`);
     const connection = page
       .locator(".connection-editor")
@@ -429,7 +472,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks and Windows shortcuts.",
   );
 } finally {
   await browser.close();

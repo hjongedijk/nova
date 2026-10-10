@@ -197,3 +197,14 @@ rendered as plain text, bounded to 12,000 characters. Redirects, excessive respo
 network failures and rate limits produce generic Dutch errors. The check does not install or restart anything.
 Development builds cannot be compared with release numbers. A failed refresh retains the last fetched release,
 with an explicit error and check timestamp.
+
+## Windows status and shortcuts
+
+**Apparaten** combines the running Windows-agent version, helper open/paused state, actual mode and helper display,
+shortcut editing, existing mode/display controls and the bundled agent download. The status endpoint is PIN-protected
+and projects only those fields; it excludes hostname, username, app/process inventories and raw upstream errors.
+Older agents may omit fields, which appear as unknown. Shortcut controls remain disabled until the agent returns
+all four current shortcuts. Saving writes only those shortcut names, needs settings authorization and uses the
+existing audit path. Agent warnings and failed acknowledgements remain visible. A download is the agent bundled
+with this NOVA build; checking the latest NOVA release is a separate explicit action in **Systeem**.
+No status test opens the helper, changes a display or starts a process.

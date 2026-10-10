@@ -165,6 +165,99 @@ describe("Windows tools", () => {
   });
 });
 
+describe("WindowsPcService private settings status", () => {
+  it("reads the fixed authenticated route and projects only helper status", async () => {
+    const { fake, pc } = await agent("agent-token", (_seen, send) =>
+      send(200, {
+        ok: true,
+        agent: "0.1.11",
+        helperOpen: true,
+        agentPaused: false,
+        mode: "both",
+        helperDisplay: 2,
+        username: "private-user",
+        hostname: "private-host",
+        processes: ["private-process"],
+        token: "private-secret",
+        error: "private-error",
+      }),
+    );
+    expect(await pc.settingsStatus()).toEqual({
+      available: true,
+      version: "0.1.11",
+      helperOpen: true,
+      paused: false,
+      mode: "both",
+      display: 2,
+    });
+    expect(fake.requests).toHaveLength(1);
+    expect(fake.requests[0]).toMatchObject({
+      method: "GET",
+      url: "/v1/status",
+      body: "",
+      headers: { authorization: "Bearer agent-token" },
+    });
+  });
+
+  it.each([
+    {},
+    {
+      agent: "private host/user",
+      helperOpen: "true",
+      agentPaused: 1,
+      mode: "unexpected",
+      helperDisplay: 9,
+    },
+    {
+      agent: "x".repeat(81),
+      helperOpen: null,
+      agentPaused: {},
+      mode: false,
+      helperDisplay: 1.5,
+    },
+  ])("keeps unsupported or malformed fields unknown: %j", async (fields) => {
+    const { pc } = await agent("agent-token", (_seen, send) =>
+      send(200, { ok: true, ...fields }),
+    );
+    expect(await pc.settingsStatus()).toEqual({
+      available: true,
+      version: null,
+      helperOpen: null,
+      paused: null,
+      mode: null,
+      display: null,
+    });
+  });
+
+  it("returns generic unavailable status for refusal, offline and missing configuration", async () => {
+    const { pc } = await agent("agent-token", (_seen, send) =>
+      send(403, { ok: false, error: "private upstream error and token" }),
+    );
+    const refused = await pc.settingsStatus();
+    expect(refused).toMatchObject({ available: false, version: null });
+    expect(refused.error).toBe(
+      "De Windows-agent is niet bereikbaar of weigert de verbinding.",
+    );
+    const fake = await listen((_seen, send) => send(200, {}));
+    fake.close();
+    const offline = new WindowsPcService(
+      fakeConfig({ windowsAgent: { url: fake.url, token: "private-token" } }),
+    );
+    expect(await offline.settingsStatus()).toMatchObject({
+      available: false,
+      error:
+        "De Windows-agent antwoordt nu niet. Controleer of de pc aanstaat.",
+    });
+    const missing = new WindowsPcService(
+      fakeConfig({ windowsAgent: { url: "", token: "" } }),
+    );
+    expect(await missing.settingsStatus()).toMatchObject({
+      available: false,
+      error: "Er is geen Windows-agent ingesteld.",
+    });
+  });
+});
+
 describe("WindowsPcService displays and wallpaper", () => {
   const displays = [
     {
