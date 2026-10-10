@@ -393,6 +393,17 @@ try {
               creditTokens: null,
             },
           ],
+          combos: [
+            {
+              id: "fixture-combo",
+              name: "example-route",
+              displayName: "Voorbeeldroute",
+              active: true,
+              strategy: "priority",
+              models: ["fixture/example:free"],
+              systemMessage: "private combo text",
+            },
+          ],
         };
       } else if (
         endpoint ===
@@ -872,21 +883,31 @@ try {
       await accounts.innerText(),
       /Facturering en harde gratis limieten zijn niet gecontroleerd/,
     );
-    await accounts.locator("summary").click();
+    await accounts.locator("summary").nth(0).click();
     await accounts
       .getByText("<script>globalThis.accountCatalogRan = true</script>", {
         exact: true,
       })
       .waitFor();
+    await accounts.locator("summary").nth(1).click();
+    await accounts.getByText("Voorbeeldroute", { exact: true }).waitFor();
+    assert.doesNotMatch(await accounts.innerText(), /private combo text/);
     assert.equal(
       await page.evaluate(() => globalThis.accountCatalogRan),
       undefined,
     );
-    await accounts.locator("summary").click();
+    await accounts.locator("summary").nth(1).click();
     await accounts.screenshot({
       path: path.join(
         screenshots,
         `settings-accounts-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+    await accounts.locator("summary").nth(1).click();
+    await accounts.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-combos-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
     accountInventoryGate = new Promise((resolve) => {

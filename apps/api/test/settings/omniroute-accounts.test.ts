@@ -26,15 +26,29 @@ const model = {
   tos: "private-tos",
   poolKey: "private-pool",
 };
+const combo = {
+  id: "balanced",
+  name: "balanced-route",
+  displayName: "Balanced route",
+  isActive: true,
+  strategy: "priority",
+  models: [
+    "provider-1/vendor/model:free",
+    { provider: "provider-2", modelId: "second/model" },
+  ],
+  system_message: "private-prompt",
+  apiKey: "private-combo-secret",
+};
 
 function fixture({ verified = true, configured = true } = {}) {
   const management = {
     configured,
-    request: vi.fn(async (endpoint: string): Promise<unknown> =>
-      endpoint === "/api/free-models"
-        ? { models: [model] }
-        : { connections: [connection], total: 1 },
-    ),
+    request: vi.fn(async (endpoint: string): Promise<unknown> => {
+      if (endpoint === "/api/free-models") return { models: [model] };
+      if (endpoint.startsWith("/api/combos"))
+        return { combos: [combo], total: 1 };
+      return { connections: [connection], total: 1 };
+    }),
   };
   const controller = new OmniRouteAccountsController(
     {
@@ -53,6 +67,7 @@ function expectUnavailable(result: unknown) {
     truncated: false,
     connections: [],
     models: [],
+    combos: [],
     billingVerified: false,
   });
   expect(JSON.stringify(result)).not.toContain("private");
@@ -85,11 +100,22 @@ describe("private OmniRoute account inventory", () => {
           creditTokens: 0,
         },
       ],
+      combos: [
+        {
+          id: "balanced",
+          name: "balanced-route",
+          displayName: "Balanced route",
+          active: true,
+          strategy: "priority",
+          models: ["provider-1/vendor/model:free", "provider-2/second/model"],
+        },
+      ],
       billingVerified: false,
     });
     expect(management.request.mock.calls).toEqual([
       ["/api/providers?limit=200&offset=0"],
       ["/api/free-models"],
+      ["/api/combos?limit=200&offset=0"],
     ]);
     expect(JSON.stringify(result)).not.toContain("private");
   });
@@ -112,16 +138,19 @@ describe("private OmniRoute account inventory", () => {
     management.request.mockImplementation(async (endpoint) =>
       endpoint === "/api/free-models"
         ? { models: Array.from({ length: 501 }, () => model) }
-        : {
-            connections: Array.from({ length: 201 }, () => connection),
-            total: 999,
-          },
+        : endpoint.startsWith("/api/combos")
+          ? { combos: Array.from({ length: 201 }, () => combo), total: 999 }
+          : {
+              connections: Array.from({ length: 201 }, () => connection),
+              total: 999,
+            },
     );
     const result = await controller.report();
     expect(result.truncated).toBe(true);
     expect(result.connections).toHaveLength(200);
     expect(result.models).toHaveLength(500);
-    expect(management.request).toHaveBeenCalledTimes(2);
+    expect(result.combos).toHaveLength(200);
+    expect(management.request).toHaveBeenCalledTimes(3);
   });
 
   it("reports a bounded upstream page as truncated when total exceeds the limit", async () => {
@@ -156,6 +185,21 @@ describe("private OmniRoute account inventory", () => {
     },
   );
 
+  it.each([null, [], {}, { combos: {} }, { combos: "private-invalid" }])(
+    "rejects malformed combo arrays: %j",
+    async (value) => {
+      const { controller, management } = fixture();
+      management.request.mockImplementation(async (endpoint) =>
+        endpoint === "/api/free-models"
+          ? { models: [model] }
+          : endpoint.startsWith("/api/combos")
+            ? value
+            : { connections: [connection], total: 1 },
+      );
+      expectUnavailable(await controller.report());
+    },
+  );
+
   it("filters invalid identifiers and malformed rows", async () => {
     const { controller, management } = fixture();
     management.request.mockImplementation(async (endpoint) =>
@@ -170,16 +214,18 @@ describe("private OmniRoute account inventory", () => {
               { ...model, modelId: "x".repeat(201) },
             ],
           }
-        : {
-            connections: [
-              connection,
-              null,
-              [],
-              { ...connection, id: "../bad" },
-              { ...connection, provider: "bad provider" },
-              { ...connection, id: "x".repeat(101) },
-            ],
-          },
+        : endpoint.startsWith("/api/combos")
+          ? { combos: [combo] }
+          : {
+              connections: [
+                connection,
+                null,
+                [],
+                { ...connection, id: "../bad" },
+                { ...connection, provider: "bad provider" },
+                { ...connection, id: "x".repeat(101) },
+              ],
+            },
     );
     const result = await controller.report();
     expect(result.connections).toHaveLength(1);
@@ -199,14 +245,16 @@ describe("private OmniRoute account inventory", () => {
               },
             ],
           }
-        : {
-            connections: [
-              {
-                ...connection,
-                name: "accessToken=private-label " + "x".repeat(250),
-              },
-            ],
-          },
+        : endpoint.startsWith("/api/combos")
+          ? { combos: [combo] }
+          : {
+              connections: [
+                {
+                  ...connection,
+                  name: "accessToken=private-label " + "x".repeat(250),
+                },
+              ],
+            },
     );
     const result = await controller.report();
     expect(result.connections[0]!.name).toHaveLength(200);
@@ -229,7 +277,9 @@ describe("private OmniRoute account inventory", () => {
     management.request.mockImplementation(async (endpoint) =>
       endpoint === "/api/free-models"
         ? { models: [{ ...model, monthlyTokens: value, creditTokens: value }] }
-        : { connections: [] },
+        : endpoint.startsWith("/api/combos")
+          ? { combos: [] }
+          : { connections: [] },
     );
     expect((await controller.report()).models[0]).toMatchObject({
       monthlyTokens: null,
@@ -262,20 +312,23 @@ describe("private OmniRoute account inventory", () => {
     ]);
   });
 
-  it.each(["/api/providers?limit=200&offset=0", "/api/free-models"])(
-    "hides raw upstream failures from %s",
-    async (failedEndpoint) => {
-      const { controller, management } = fixture();
-      management.request.mockImplementation(async (endpoint) => {
-        if (endpoint === failedEndpoint)
-          throw new Error(`private-secret ${gateway}`);
-        return endpoint === "/api/free-models"
-          ? { models: [] }
+  it.each([
+    "/api/providers?limit=200&offset=0",
+    "/api/free-models",
+    "/api/combos?limit=200&offset=0",
+  ])("hides raw upstream failures from %s", async (failedEndpoint) => {
+    const { controller, management } = fixture();
+    management.request.mockImplementation(async (endpoint) => {
+      if (endpoint === failedEndpoint)
+        throw new Error(`private-secret ${gateway}`);
+      return endpoint === "/api/free-models"
+        ? { models: [] }
+        : endpoint.startsWith("/api/combos")
+          ? { combos: [] }
           : { connections: [] };
-      });
-      expectUnavailable(await controller.report());
-    },
-  );
+    });
+    expectUnavailable(await controller.report());
+  });
 });
 
 describe("OmniRoute account inventory API guard", () => {
@@ -291,7 +344,9 @@ describe("OmniRoute account inventory API guard", () => {
         async (endpoint) =>
           (endpoint === "/api/free-models"
             ? { models: [model] }
-            : { connections: [connection], total: 1 }) as never,
+            : endpoint.startsWith("/api/combos")
+              ? { combos: [combo], total: 1 }
+              : { connections: [connection], total: 1 }) as never,
       );
     try {
       const route = "/api/settings/omniroute/accounts";

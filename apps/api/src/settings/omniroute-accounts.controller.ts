@@ -41,6 +41,7 @@ export class OmniRouteAccountsController {
       truncated: false,
       connections: [],
       models: [],
+      combos: [],
       billingVerified: false,
     };
     try {
@@ -49,15 +50,18 @@ export class OmniRouteAccountsController {
         !this.management.configured
       )
         throw new Error("Gateway management unavailable");
-      const [providers, catalog] = await Promise.all([
+      const [providers, catalog, comboReport] = await Promise.all([
         this.management.request("/api/providers?limit=200&offset=0"),
         this.management.request("/api/free-models"),
+        this.management.request("/api/combos?limit=200&offset=0"),
       ]);
       const providerData = object(providers);
       const catalogData = object(catalog);
+      const combosData = object(comboReport);
       if (
         !Array.isArray(providerData.connections) ||
-        !Array.isArray(catalogData.models)
+        !Array.isArray(catalogData.models) ||
+        !Array.isArray(combosData.combos)
       )
         throw new Error("Unexpected management response");
       return {
@@ -65,7 +69,9 @@ export class OmniRouteAccountsController {
         truncated:
           providerData.connections.length > 200 ||
           (count(providerData.total) ?? 0) > 200 ||
-          catalogData.models.length > 500,
+          catalogData.models.length > 500 ||
+          combosData.combos.length > 200 ||
+          (count(combosData.total) ?? 0) > 200,
         connections: providerData.connections
           .slice(0, 200)
           .flatMap((raw: unknown) => {
@@ -102,6 +108,39 @@ export class OmniRouteAccountsController {
                 },
               ]
             : [];
+        }),
+        combos: combosData.combos.slice(0, 200).flatMap((raw: unknown) => {
+          const row = object(raw);
+          const id = identifier(row.id);
+          const name = text(row.name, 200);
+          if (!id || !name) return [];
+          const models = Array.isArray(row.models)
+            ? row.models.slice(0, 100).flatMap((item: unknown) => {
+                if (typeof item === "string") {
+                  const modelId = identifier(item, true);
+                  return modelId ? [modelId] : [];
+                }
+                const model = object(item);
+                const provider = identifier(model.provider);
+                const modelId = identifier(
+                  model.modelId ?? model.model ?? model.name,
+                  true,
+                );
+                return modelId
+                  ? [provider ? `${provider}/${modelId}` : modelId]
+                  : [];
+              })
+            : [];
+          return [
+            {
+              id,
+              name,
+              displayName: text(row.displayName, 200),
+              active: typeof row.isActive === "boolean" ? row.isActive : null,
+              strategy: text(row.strategy, 60),
+              models,
+            },
+          ];
         }),
         billingVerified: false,
       };

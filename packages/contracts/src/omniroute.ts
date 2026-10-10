@@ -80,6 +80,14 @@ export interface OmniRouteAccountsReport {
     monthlyTokens: number | null;
     creditTokens: number | null;
   }[];
+  combos: {
+    id: string;
+    name: string;
+    displayName: string;
+    active: boolean | null;
+    strategy: string;
+    models: string[];
+  }[];
   billingVerified: false;
 }
 

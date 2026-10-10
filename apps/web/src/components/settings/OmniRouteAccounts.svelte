@@ -116,6 +116,32 @@
         {/each}
       </ul>
     </details>
+    <details>
+      <summary>Combo-routes ({report.combos.length})</summary>
+      <p>
+        Alleen route-metadata. De instellingen wijzigen niets; gebruik of
+        beschikbaarheid wordt hiermee niet gegarandeerd.
+      </p>
+      {#if !report.combos.length}<p>Geen combo-routes gevonden.</p>{/if}
+      <ul>
+        {#each report.combos as combo, index (index)}
+          <li>
+            <strong>{combo.displayName || combo.name}</strong><span
+              >{combo.name} · {combo.active === true
+                ? "Actief"
+                : combo.active === false
+                  ? "Uitgeschakeld"
+                  : "Status onbekend"}</span
+            ><span>Strategie: {combo.strategy || "onbekend"}</span>
+            <ul>
+              {#each combo.models as model, modelIndex (`${modelIndex}-${model}`)}
+                <li>{model}</li>
+              {/each}
+            </ul>
+          </li>
+        {/each}
+      </ul>
+    </details>
   {/if}
 </section>
 
