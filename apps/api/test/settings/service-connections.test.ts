@@ -730,6 +730,31 @@ describe("read-only connection probes", () => {
     }
   });
 
+  it("tests Node-RED with a bounded read-only settings request", async () => {
+    const fake = await service((_entry, response) =>
+      json(response, 200, { credential: "private-response-body" }),
+    );
+    try {
+      const result = await request("post", "/node-red/test", {
+        values: { url: `http://127.0.0.1:${fake.port}` },
+      });
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ ok: true, status: 200 });
+      expect(fake.seen).toHaveLength(1);
+      expect(fake.seen[0]).toMatchObject({
+        method: "GET",
+        url: "/settings",
+        body: "",
+      });
+      expect(JSON.stringify([result.body, nova.audits])).not.toContain(
+        "private-response-body",
+      );
+      expect(fs.existsSync(path.join(directory, "services.json"))).toBe(false);
+    } finally {
+      fake.close();
+    }
+  });
+
   it("checks MQTT once and closes without publishing or subscribing", async () => {
     const client = new EventEmitter();
     const end = vi.fn(),
