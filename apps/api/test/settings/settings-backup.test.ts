@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { HelperPreferences } from "@nova/contracts";
 import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
@@ -12,6 +13,7 @@ import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { ValidationError } from "../../src/core/errors/validation.error.js";
 import { SettingsBackupService } from "../../src/settings/settings-backup.service.js";
 import { SettingsStore } from "../../src/settings/store/settings.store.js";
+import type { WallpaperPort } from "../../src/settings/wallpaper.port.js";
 import { ADMIN, createApp, playbook, webhook } from "./helpers.js";
 
 const incoming = () => ({
@@ -38,6 +40,20 @@ const requestBody = () => ({
   mode: "replace",
   acknowledgeEffects: true,
 });
+const helperChoice = { mode: "both" as const, display: 2 };
+const helperPreferences: HelperPreferences = {
+  autohide: false,
+  contrast: true,
+  shape: "mist",
+  wardrobe: { theme: "gold", seasonal: false, birthday: "10-10" },
+  cues: {
+    enabled: true,
+    volume: 0.7,
+    theme: "playful",
+    cues: { done: false, touch: true, "listening-start": false },
+    quiet: { enabled: true, start: "23:15", end: "06:30" },
+  },
+};
 const cleanups: (() => void)[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
@@ -113,6 +129,62 @@ function fixture() {
 }
 
 describe("settings backup private approvals", () => {
+  it("previews helper changes without writes and restores the entire preference configuration after confirmation", () => {
+    const f = fixture();
+    const before = f.bytes();
+    const prepared = f.prepare({
+      ...requestBody(),
+      data: { ...incoming(), helper: helperChoice, helperPreferences },
+    });
+    expect(prepared.summary).toMatchObject({
+      helperChanged: true,
+      helperPreferencesChanged: true,
+    });
+    expect(f.bytes()).toEqual(before);
+    expect(prepared.action!.args).not.toHaveProperty("helper");
+    expect(prepared.action!.args).not.toHaveProperty("helperPreferences");
+    expect(f.confirm(prepared).ok).toBe(true);
+    expect(f.store.get().helper).toEqual(helperChoice);
+    expect(f.store.get().helperPreferences).toEqual(helperPreferences);
+  });
+
+  it.each(["merge", "replace"])(
+    "preserves existing helper settings when old version-one backups omit them in %s mode",
+    (mode) => {
+      const f = fixture();
+      f.store.update((next) => {
+        next.helper = helperChoice;
+        next.helperPreferences = structuredClone(helperPreferences);
+      });
+      const prepared = f.prepare({ ...requestBody(), mode });
+      expect(prepared.summary).toMatchObject({
+        helperChanged: false,
+        helperPreferencesChanged: false,
+      });
+      expect(f.confirm(prepared).ok).toBe(true);
+      expect(f.store.get().helper).toEqual(helperChoice);
+      expect(f.store.get().helperPreferences).toEqual(helperPreferences);
+    },
+  );
+
+  it.each(["helper", "preferences"])(
+    "rejects stale confirmation after %s changes without restoring its earlier configuration",
+    (field) => {
+      const f = fixture();
+      const prepared = f.prepare({
+        ...requestBody(),
+        data: { ...incoming(), helper: helperChoice, helperPreferences },
+      });
+      f.store.update((next) => {
+        if (field === "helper") next.helper.mode = "helper";
+        else next.helperPreferences.cues.volume = 0.25;
+      });
+      const changedBytes = f.bytes();
+      expect(f.confirm(prepared)).toMatchObject({ ok: false });
+      expect(f.bytes()).toEqual(changedBytes);
+    },
+  );
+
   it("prepares counts-only dangerous 60-second session-bound approvals without writing or leaking the private candidate", () => {
     const f = fixture();
     const before = f.bytes();
@@ -378,6 +450,164 @@ describe("settings backup private approvals", () => {
 });
 
 describe("settings backup validation and HTTP boundary", () => {
+  it.each([
+    { helper: { ...helperChoice, secret: "Bearer helper-extra-secret" } },
+    { helper: { mode: "unknown", display: 2 } },
+    { helper: { ...helperChoice, display: -1 } },
+    { helper: { ...helperChoice, display: "2" } },
+    {
+      helperPreferences: {
+        ...helperPreferences,
+        secret: "Bearer preference-extra-secret",
+      },
+    },
+    {
+      helperPreferences: {
+        ...helperPreferences,
+        wardrobe: {
+          ...helperPreferences.wardrobe,
+          secret: "Bearer wardrobe-extra-secret",
+        },
+      },
+    },
+    {
+      helperPreferences: {
+        ...helperPreferences,
+        cues: { ...helperPreferences.cues, extra: "Bearer cue-extra-secret" },
+      },
+    },
+    {
+      helperPreferences: {
+        ...helperPreferences,
+        wardrobe: {
+          ...helperPreferences.wardrobe,
+          birthday: "Bearer birthday-secret",
+        },
+      },
+    },
+  ])(
+    "rejects invalid or secret-bearing helper backup fields without saving %j",
+    (fields) => {
+      const f = fixture();
+      const before = f.bytes();
+      const body = { ...requestBody(), data: { ...incoming(), ...fields } };
+      expect(() => f.backup.prepare(body)).toThrow(ValidationError);
+      expect(f.bytes()).toEqual(before);
+      expect(f.record).not.toHaveBeenCalled();
+      try {
+        f.backup.prepare(body);
+      } catch (error) {
+        expect(JSON.stringify(error)).not.toContain("Bearer");
+      }
+    },
+  );
+
+  it("exports and imports every helper option without calling the Windows wallpaper, helper or hotkey ports", async () => {
+    const displays = vi.fn(async () => ({ ok: true as const, displays: [] }));
+    const setWallpaper = vi.fn(async () => ({
+      ok: true as const,
+      displays: [],
+    }));
+    const setMode = vi.fn(async () => ({ ok: true as const, displays: [] }));
+    const helperSize = vi.fn(async () => ({ ok: true as const }));
+    const hotkeys = vi.fn(async () => ({ ok: true }));
+    const port: WallpaperPort = {
+      configured: true,
+      displays,
+      setWallpaper,
+      setMode,
+      helperSize,
+      helperPreferences: hotkeys,
+    };
+    const nova = await createApp({ wallpaper: port });
+    const filename = nova.app.get(NovaConfig).dataFile("settings.json");
+    nova.store.update((next) => {
+      next.helper = helperChoice;
+      next.helperPreferences = structuredClone(helperPreferences);
+    });
+    try {
+      const exported = await nova.api.get("/api/settings/export").set(ADMIN);
+      expect(exported.body).toMatchObject({
+        version: 1,
+        helper: helperChoice,
+        helperPreferences,
+      });
+      nova.store.update((next) => {
+        next.helper = { mode: "wallpaper", display: 0 };
+        next.helperPreferences.contrast = false;
+        next.helperPreferences.wardrobe = {
+          theme: "nova",
+          seasonal: true,
+          birthday: "",
+        };
+      });
+      const before = fs.readFileSync(filename);
+      const preview = await nova.api
+        .post("/api/settings/import/prepare")
+        .set(ADMIN)
+        .send({
+          data: exported.body,
+          mode: "replace",
+          acknowledgeEffects: true,
+        });
+      expect(preview.status).toBe(200);
+      expect(preview.body.summary).toMatchObject({
+        helperChanged: true,
+        helperPreferencesChanged: true,
+      });
+      expect(fs.readFileSync(filename)).toEqual(before);
+      const { sessionId, confirmationId } = preview.body.action;
+      expect(
+        (
+          await nova.api
+            .post("/api/settings/import")
+            .set(ADMIN)
+            .send({ sessionId, confirmationId, approve: true })
+        ).body.ok,
+      ).toBe(true);
+      expect(nova.store.get().helper).toEqual(helperChoice);
+      expect(nova.store.get().helperPreferences).toEqual(helperPreferences);
+      expect(
+        (await nova.api.get("/api/settings/helper/preferences")).body,
+      ).toEqual(helperPreferences);
+      for (const call of [displays, setWallpaper, setMode, helperSize, hotkeys])
+        expect(call).not.toHaveBeenCalled();
+    } finally {
+      await nova.app.close();
+    }
+  });
+
+  it("projects only known wardrobe fields from legacy GET, PUT and export without revealing unknown secret extras", async () => {
+    const nova = await createApp();
+    const secret = "Bearer legacy-wardrobe-secret";
+    const legacyPreferences = {
+      ...helperPreferences,
+      wardrobe: { ...helperPreferences.wardrobe!, privateExtra: secret },
+    };
+    nova.store.update((next) => {
+      next.helperPreferences = legacyPreferences;
+    });
+    try {
+      const current = await nova.api.get("/api/settings/helper/preferences");
+      const exported = await nova.api.get("/api/settings/export").set(ADMIN);
+      expect(current.body).toEqual(helperPreferences);
+      expect(exported.body.helperPreferences).toEqual(helperPreferences);
+      expect(JSON.stringify([current.body, exported.body])).not.toContain(
+        secret,
+      );
+      const saved = await nova.api
+        .put("/api/settings/helper/preferences")
+        .set(ADMIN)
+        .send(legacyPreferences);
+      expect(saved.status).toBe(200);
+      expect(saved.body.preferences).toEqual(helperPreferences);
+      expect(JSON.stringify(saved.body)).not.toContain(secret);
+      expect(nova.store.get().helperPreferences).toEqual(helperPreferences);
+    } finally {
+      await nova.app.close();
+    }
+  });
+
   it("rejects visible credential copies in HTTP preview with unchanged bytes and no public or audit leaks", async () => {
     const nova = await createApp();
     const filename = nova.app.get(NovaConfig).dataFile("settings.json");

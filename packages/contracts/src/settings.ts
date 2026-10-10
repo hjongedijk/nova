@@ -315,6 +315,9 @@ export interface PublicConfig {
 
 /** GET /settings/export, and the body of POST /settings/import. */
 export interface SettingsBackup {
+  /** Optional to retain compatibility with earlier version-one exports. */
+  helper?: { mode: HelperMode; display: number };
+  helperPreferences?: HelperPreferences;
   format: "nova-settings";
   version: 1;
   exportedAt: string;
@@ -333,6 +336,8 @@ export interface ImportResult {
 }
 
 export interface SettingsImportSummary {
+  helperChanged: boolean;
+  helperPreferencesChanged: boolean;
   personaChanged: boolean;
   quickActionsChanged: boolean;
   toolOverridesChanged: boolean;

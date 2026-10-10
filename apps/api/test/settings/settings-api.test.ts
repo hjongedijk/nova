@@ -537,6 +537,22 @@ describe("the settings API", () => {
     expect((await call("put", "/sidebar", { items: sidebar })).status).toBe(
       200,
     );
+    nova.store.update((settings) => {
+      settings.helper = { mode: "both", display: 2 };
+      settings.helperPreferences = {
+        autohide: false,
+        contrast: true,
+        shape: "ring",
+        wardrobe: { theme: "violet", seasonal: false, birthday: "10-10" },
+        cues: {
+          enabled: true,
+          volume: 0.6,
+          theme: "playful",
+          cues: { done: false, file: true },
+          quiet: { enabled: true, start: "23:00", end: "06:00" },
+        },
+      };
+    });
     const backup = await call("get", "/export");
     const contents = (reply: Reply) => {
       const copy: Record<string, unknown> = { ...reply };
@@ -558,6 +574,13 @@ describe("the settings API", () => {
       settings.widgets = [];
       settings.sidebar = null;
       settings.toolOverrides = {};
+      settings.helper = { mode: "wallpaper", display: 0 };
+      settings.helperPreferences.contrast = false;
+      settings.helperPreferences.wardrobe = {
+        theme: "nova",
+        seasonal: true,
+        birthday: "",
+      };
     });
     expect(
       (await call("post", "/import", { data: backup, mode: "replace" })).status,
@@ -565,6 +588,10 @@ describe("the settings API", () => {
     const restored = await call("get", "/export");
     const actual = contents(restored);
     expect(actual).toEqual(expected);
+    expect(nova.store.get().helper).toEqual({ mode: "both", display: 2 });
+    expect(nova.store.get().helperPreferences).toEqual(
+      backup.helperPreferences,
+    );
     const overview = await call("get", "/");
     expect(overview.skills).toMatchObject([{ id: "filmavond" }]);
     expect(overview.widgets).toMatchObject([{ id: widgetId }]);
@@ -626,6 +653,8 @@ describe("the settings API", () => {
         [
           "exportedAt",
           "format",
+          "helper",
+          "helperPreferences",
           "persona",
           "quickActions",
           "sidebar",
@@ -906,6 +935,7 @@ describe("the helper overlay choice", () => {
         enabled: true,
         volume: 0.35,
         theme: "soft",
+        cues: {},
         quiet: { enabled: false, start: "22:00", end: "07:00" },
       },
     });

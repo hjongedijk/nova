@@ -154,6 +154,7 @@ try {
     let importPrepares = 0;
     let importWrites = 0;
     let usageReads = 0;
+    let helperAgentWrites = 0;
     const backup = {
       format: "nova-settings",
       version: 1,
@@ -164,6 +165,19 @@ try {
       skills: overview.skills,
       widgets: [],
       sidebar: null,
+      helper: { mode: "helper", display: 1 },
+      helperPreferences: {
+        autohide: false,
+        contrast: true,
+        shape: "orb",
+        wardrobe: { theme: "gold", seasonal: false, birthday: "" },
+        cues: {
+          enabled: false,
+          volume: 0.15,
+          theme: "minimal",
+          quiet: { enabled: true, start: "22:00", end: "07:00" },
+        },
+      },
     };
     const missingHeaders = [
       {
@@ -196,6 +210,14 @@ try {
       const request = route.request();
       const url = new URL(request.url());
       const endpoint = url.pathname.slice(4);
+      if (
+        request.method() !== "GET" &&
+        (endpoint === "/settings/helper" ||
+          endpoint.startsWith("/settings/helper/") ||
+          endpoint === "/settings/wallpaper" ||
+          endpoint.startsWith("/windows/"))
+      )
+        helperAgentWrites++;
       let data = {};
       if (endpoint === "/settings/windows/status")
         data = {
@@ -666,6 +688,8 @@ try {
             quickActionsChanged: false,
             toolOverridesChanged: false,
             sidebarChanged: true,
+            helperChanged: true,
+            helperPreferencesChanged: true,
             missingSecrets: missingHeaders,
           },
           action: {
@@ -1463,6 +1487,7 @@ try {
       ),
     });
     const backupFile = page.getByLabel("Back-upbestand", { exact: true });
+    const helperWritesBeforeImport = helperAgentWrites;
     const backupMode = page.getByRole("combobox", {
       name: "Hoe importeren",
       exact: true,
@@ -1552,6 +1577,11 @@ try {
         0,
         "Preview must not persist imported settings",
       );
+      assert.equal(
+        helperAgentWrites,
+        helperWritesBeforeImport,
+        "Import previews must not apply helper settings on the PC",
+      );
       assert.equal(await backupFile.isDisabled(), true);
       assert.equal(await backupMode.isDisabled(), true);
     };
@@ -1578,6 +1608,18 @@ try {
       /Gereedschapsinstellingen: blijven gelijk/,
     );
     assert.match(await importReview.innerText(), /Zijbalkindeling: wijzigt/);
+    assert.match(
+      await importReview.innerText(),
+      /Gewenste schermmodus: wijzigt/,
+    );
+    assert.match(
+      await importReview.innerText(),
+      /Helperinstellingen: wijzigen/,
+    );
+    assert.match(
+      await importReview.innerText(),
+      /De schermmodus wordt alleen bewaard. Pas die op de pc toe via Apparaten/,
+    );
     assert.match(
       await importReview.innerText(),
       /Geïmporteerde webhooks kunnen actief worden/,
@@ -1640,6 +1682,11 @@ try {
       .waitFor();
     assert.equal(importWrites, 1);
     assert.equal(importPrepares, 3);
+    assert.equal(
+      helperAgentWrites,
+      helperWritesBeforeImport,
+      "Confirming an import must store the desired helper mode without applying it on the PC",
+    );
     assert.equal(
       await page.evaluate(() => globalThis.backupLabelRan),
       undefined,

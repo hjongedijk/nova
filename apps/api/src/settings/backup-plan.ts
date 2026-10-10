@@ -2,6 +2,7 @@ import type { Widget } from "@nova/contracts";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import {
+  normalizeHelperPreferences as rawNormalizeHelperPreferences,
   normalizePersona as rawnormalizePersona,
   normalizeQuickActions as rawnormalizeQuickActions,
   normalizeSidebar as rawnormalizeSidebar,
@@ -36,6 +37,7 @@ const normalizeSidebar = checked(rawnormalizeSidebar);
 const normalizeToolOverride = checked(rawnormalizeToolOverride);
 const normalizeSkill = checked(rawNormalizeSkill);
 const normalizeWidget = checked(rawNormalizeWidget);
+const normalizeHelperPreferences = checked(rawNormalizeHelperPreferences);
 
 export const MAX_BACKUP_BYTES = 1_000_000;
 const MAX_SKILLS = 50;
@@ -54,6 +56,8 @@ const fields = [
   "skills",
   "widgets",
   "sidebar",
+  "helper",
+  "helperPreferences",
 ];
 
 export interface BackupPlanSummary {
@@ -69,6 +73,8 @@ export interface BackupPlanSummary {
   quickActionsChanged: boolean;
   toolOverridesChanged: boolean;
   sidebarChanged: boolean;
+  helperChanged: boolean;
+  helperPreferencesChanged: boolean;
   missingSecrets: { skill: string; headers: string[] }[];
 }
 
@@ -91,6 +97,63 @@ function stableId(raw: Record<string, unknown>, generated: string): string {
   if (typeof raw.id !== "string" || !ID.test(raw.id))
     fail("Een vaardigheid of paneel heeft een ongeldige ID.");
   return raw.id;
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  required: string[],
+  optional: string[] = [],
+): void {
+  if (
+    required.some((key) => !Object.hasOwn(value, key)) ||
+    Object.keys(value).some(
+      (key) => !required.includes(key) && !optional.includes(key),
+    )
+  )
+    fail(
+      "De helperinstellingen bevatten ontbrekende of niet-ondersteunde velden.",
+    );
+}
+
+function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
+  const body = object(value);
+  exactKeys(body, ["autohide", "contrast", "shape", "cues"], ["wardrobe"]);
+  const cues = object(body.cues);
+  exactKeys(cues, ["enabled", "volume", "theme", "quiet"], ["cues"]);
+  const quiet = object(cues.quiet);
+  exactKeys(quiet, ["enabled", "start", "end"]);
+  if (
+    typeof body.shape !== "string" ||
+    typeof cues.theme !== "string" ||
+    typeof quiet.start !== "string" ||
+    typeof quiet.end !== "string"
+  )
+    fail("De helperinstellingen bevatten ongeldige waarden.");
+  const perCue = Object.hasOwn(cues, "cues") ? object(cues.cues) : undefined;
+  let wardrobe: Record<string, unknown> | undefined;
+  if (Object.hasOwn(body, "wardrobe")) {
+    const raw = object(body.wardrobe);
+    exactKeys(raw, ["theme", "seasonal", "birthday"]);
+    if (typeof raw.theme !== "string") fail("De orbkleuren zijn ongeldig.");
+    wardrobe = {
+      theme: raw.theme,
+      seasonal: raw.seasonal,
+      birthday: raw.birthday,
+    };
+  }
+  return normalizeHelperPreferences({
+    autohide: body.autohide,
+    contrast: body.contrast,
+    shape: body.shape,
+    cues: {
+      enabled: cues.enabled,
+      volume: cues.volume,
+      theme: cues.theme,
+      quiet: { enabled: quiet.enabled, start: quiet.start, end: quiet.end },
+      ...(perCue ? { cues: perCue } : {}),
+    },
+    ...(wardrobe ? { wardrobe } : {}),
+  });
 }
 
 /** A private detached candidate. Callers must expose only the summary before confirmation. */
@@ -306,6 +369,25 @@ export function buildBackupPlan(
       >[],
     };
   }
+  if (Object.hasOwn(input, "helper")) {
+    const helper = object(input.helper);
+    exactKeys(helper, ["mode", "display"]);
+    if (
+      (helper.mode !== "wallpaper" &&
+        helper.mode !== "helper" &&
+        helper.mode !== "both") ||
+      typeof helper.display !== "number" ||
+      !Number.isInteger(helper.display) ||
+      helper.display < 0 ||
+      helper.display > 8
+    )
+      fail(
+        "Kies achtergrond, helper of beide en een beeldscherm van 0 tot en met 8.",
+      );
+    next.helper = { mode: helper.mode, display: helper.display };
+  }
+  if (Object.hasOwn(input, "helperPreferences"))
+    next.helperPreferences = helperPreferences(input.helperPreferences);
   const privateValues = [...new Set(secretValues)];
   const assertPublicText = (value: string): void => {
     if (
@@ -339,6 +421,8 @@ export function buildBackupPlan(
     quickActions: next.quickActions,
     toolOverrides: next.toolOverrides,
     sidebar: next.sidebar,
+    helper: next.helper,
+    helperPreferences: next.helperPreferences,
   });
   const safeSummary = (value: string): string => {
     let clean = sanitize(value);
@@ -372,6 +456,11 @@ export function buildBackupPlan(
         JSON.stringify(current.toolOverrides),
       sidebarChanged:
         JSON.stringify(next.sidebar) !== JSON.stringify(current.sidebar),
+      helperChanged:
+        JSON.stringify(next.helper) !== JSON.stringify(current.helper),
+      helperPreferencesChanged:
+        JSON.stringify(next.helperPreferences) !==
+        JSON.stringify(current.helperPreferences),
       missingSecrets: missingSecrets.map(({ skill, headers }) => ({
         skill: safeSummary(skill),
         headers: headers.map(safeSummary),

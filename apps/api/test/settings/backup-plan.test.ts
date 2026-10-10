@@ -97,6 +97,198 @@ describe("bounded private settings backup plan", () => {
     ]);
     expect(JSON.stringify(next)).not.toContain("stored-private-token");
   });
+  it.each(["merge", "replace"])(
+    "preserves legacy optional helper fields for %s",
+    (mode) => {
+      const state = current();
+      const { next, summary } = buildBackupPlan(backup(), mode, state);
+      expect(next.helper).toEqual(state.helper);
+      expect(next.helperPreferences).toEqual(state.helperPreferences);
+      expect(summary).toMatchObject({
+        helperChanged: false,
+        helperPreferencesChanged: false,
+      });
+      expect(next.helper).not.toBe(state.helper);
+      expect(next.helperPreferences).not.toBe(state.helperPreferences);
+    },
+  );
+  it("imports complete canonical helper preferences with independent change flags", () => {
+    const state = current();
+    const preferences = {
+      ...state.helperPreferences,
+      shape: "mist",
+      wardrobe: { theme: "gold", seasonal: true, birthday: "12-25" },
+      cues: {
+        ...state.helperPreferences.cues,
+        theme: "playful",
+        cues: { greet: false, goodnight: true },
+      },
+    };
+    const data = backup({
+      helper: { mode: "both", display: 8 },
+      helperPreferences: preferences,
+    });
+    const before = structuredClone(data);
+    const { next, summary } = buildBackupPlan(data, "replace", state);
+    expect(next.helper).toEqual({ mode: "both", display: 8 });
+    expect(next.helperPreferences).toEqual(preferences);
+    expect(summary).toMatchObject({
+      helperChanged: true,
+      helperPreferencesChanged: true,
+    });
+    expect(next.standingApprovals).toEqual(state.standingApprovals);
+    expect(JSON.stringify(summary)).not.toContain("private-grant");
+    expect(data).toEqual(before);
+    expect(state.helper).toEqual({ mode: "helper", display: 2 });
+    next.helperPreferences.wardrobe!.theme = "nova";
+    expect(preferences.wardrobe.theme).toBe("gold");
+  });
+  it("canonicalizes omitted per-cue defaults and reports unchanged canonical roundtrip", () => {
+    const state = current();
+    const normalized = buildBackupPlan(
+      backup({ helperPreferences: state.helperPreferences }),
+      "merge",
+      state,
+    ).next;
+    expect(normalized.helperPreferences.cues.cues).toEqual({});
+    const result = buildBackupPlan(
+      backup({
+        helper: normalized.helper,
+        helperPreferences: normalized.helperPreferences,
+      }),
+      "merge",
+      normalized,
+    );
+    expect(result.summary).toMatchObject({
+      helperChanged: false,
+      helperPreferencesChanged: false,
+    });
+    expect(result.next.helperPreferences).toEqual(normalized.helperPreferences);
+  });
+  it.each([
+    null,
+    undefined,
+    [],
+    {},
+    { mode: "both" },
+    { display: 0 },
+    { mode: "invalid", display: 0 },
+    { mode: "both", display: "0" },
+    { mode: "both", display: -1 },
+    { mode: "both", display: 9 },
+    { mode: "both", display: 1.5 },
+    { mode: "both", display: 0, apiKey: "private-token" },
+  ])("rejects malformed helper choice %j", (helper) =>
+    rejects(backup({ helper })),
+  );
+  it.each(["root", "cues", "quiet", "wardrobe", "perCue"])(
+    "rejects unknown sensitive helper preference fields in %s",
+    (where) => {
+      const preferences: Record<string, unknown> = structuredClone(
+        current().helperPreferences,
+      ) as unknown as Record<string, unknown>;
+      const cues = preferences.cues as Record<string, unknown>;
+      if (where === "root") preferences.apiKey = "private-token";
+      if (where === "cues") cues.apiKey = "private-token";
+      if (where === "quiet")
+        (cues.quiet as Record<string, unknown>).password = "private-token";
+      if (where === "wardrobe")
+        preferences.wardrobe = {
+          theme: "gold",
+          seasonal: true,
+          birthday: "",
+          accessToken: "private-token",
+        };
+      if (where === "perCue") cues.cues = { apiKey: true };
+      rejects(backup({ helperPreferences: preferences }));
+    },
+  );
+  it.each([null, undefined, [], {}, "preferences"])(
+    "rejects malformed helper preferences %j",
+    (helperPreferences) => rejects(backup({ helperPreferences })),
+  );
+  it.each(["cues", "quiet", "wardrobe", "perCue"])(
+    "rejects malformed nested helper preference %s",
+    (where) => {
+      for (const invalid of [null, undefined, [], "invalid"]) {
+        const preferences = structuredClone(
+          current().helperPreferences,
+        ) as unknown as Record<string, unknown>;
+        const cues = preferences.cues as Record<string, unknown>;
+        if (where === "cues") preferences.cues = invalid;
+        if (where === "quiet") cues.quiet = invalid;
+        if (where === "wardrobe") preferences.wardrobe = invalid;
+        if (where === "perCue") cues.cues = invalid;
+        rejects(backup({ helperPreferences: preferences }));
+      }
+    },
+  );
+  it("reuses existing helper value validation with bounded volumes and fixed errors", () => {
+    for (const volume of [-1, 1.01, NaN, Infinity, "0.5"]) {
+      const preferences = current().helperPreferences;
+      rejects(
+        backup({
+          helperPreferences: {
+            ...preferences,
+            cues: { ...preferences.cues, volume },
+          },
+        }),
+      );
+    }
+    const preferences = current().helperPreferences;
+    rejects(
+      backup({ helperPreferences: { ...preferences, shape: "private-token" } }),
+    );
+    rejects(
+      backup({
+        helperPreferences: {
+          ...preferences,
+          cues: {
+            ...preferences.cues,
+            quiet: { enabled: true, start: "25:00", end: "07:00" },
+          },
+        },
+      }),
+    );
+    rejects(
+      backup({
+        helperPreferences: {
+          ...preferences,
+          wardrobe: { theme: "gold", seasonal: false, birthday: "99-99" },
+        },
+      }),
+    );
+  });
+  it("includes helper preferences and choice in the complete public secret scan", () => {
+    const preferences = {
+      ...current().helperPreferences,
+      wardrobe: { theme: "gold", seasonal: true, birthday: "12-25" },
+    };
+    const secretSkill = (value: string) => ({
+      ...webhook(),
+      http: { ...webhook().http, secretHeaders: [{ name: "X-Token", value }] },
+    });
+    rejects(
+      backup({
+        skills: [secretSkill("12-25")],
+        helperPreferences: preferences,
+      }),
+    );
+    rejects(
+      backup({
+        skills: [secretSkill("both")],
+        helper: { mode: "both", display: 1 },
+      }),
+    );
+    const state = current();
+    state.helperPreferences = {
+      ...state.helperPreferences,
+      wardrobe: { theme: "gold", seasonal: true, birthday: "12-25" },
+    };
+    const stored = normalizeSkill(secretSkill("12-25"));
+    state.skills = [stored as unknown as Record<string, unknown>];
+    rejects(backup(), "merge", state);
+  });
   it("merges detached settings while preserving excluded settings and optional fields", () => {
     const state = current();
     const before = structuredClone(state);
@@ -123,6 +315,8 @@ describe("bounded private settings backup plan", () => {
       quickActionsChanged: false,
       toolOverridesChanged: false,
       sidebarChanged: false,
+      helperChanged: false,
+      helperPreferencesChanged: false,
       missingSecrets: [],
     });
     expect(state).toEqual(before);
@@ -415,14 +609,9 @@ describe("bounded private settings backup plan", () => {
         ValidationError,
       ),
   );
-  it.each([
-    "helper",
-    "helperPreferences",
-    "services",
-    "standingApprovals",
-    "unknown",
-  ])("rejects unsupported top-level field %s", (field) =>
-    rejects(backup({ [field]: {} })),
+  it.each(["services", "standingApprovals", "unknown"])(
+    "rejects unsupported top-level field %s",
+    (field) => rejects(backup({ [field]: {} })),
   );
   it.each(["skills", "widgets"])(
     "rejects supplied malformed %s lists",

@@ -43,6 +43,7 @@ import { PublicRoute, SettingsGuard } from "./settings.guard.js";
 import {
   BUILTIN_PANELS,
   MAX_PAGES,
+  normalizeHelperPreferences,
   normalizeQuickActions,
   normalizeSidebar,
   normalizeToolOverride,
@@ -545,7 +546,9 @@ export class SettingsController {
   @Get("helper/preferences")
   @PublicRoute()
   getHelperPreferences(): HelperPreferences {
-    return this.settings.get().helperPreferences;
+    return normalizeHelperPreferences({
+      ...this.settings.get().helperPreferences,
+    });
   }
 
   @Put("helper/preferences")
@@ -553,90 +556,7 @@ export class SettingsController {
     ok: true;
     preferences: HelperPreferences;
   } {
-    const shape = body?.shape;
-    const cues = body?.cues as Record<string, unknown> | undefined;
-    const quiet = cues?.quiet as Record<string, unknown> | undefined;
-    if (
-      typeof body?.autohide !== "boolean" ||
-      typeof body.contrast !== "boolean" ||
-      !["orb", "ring", "mist"].includes(String(shape)) ||
-      !cues ||
-      typeof cues.enabled !== "boolean" ||
-      typeof cues.volume !== "number" ||
-      !Number.isFinite(cues.volume) ||
-      cues.volume < 0 ||
-      cues.volume > 1 ||
-      !["soft", "playful", "minimal"].includes(String(cues.theme)) ||
-      !quiet ||
-      typeof quiet.enabled !== "boolean" ||
-      !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(quiet.start)) ||
-      !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(quiet.end))
-    )
-      throw new ValidationError(["Ongeldige helperinstellingen."]);
-    const names = [
-      "listening-start",
-      "listening-end",
-      "thinking",
-      "done",
-      "notice",
-      "error",
-      "approved",
-      "declined",
-      "greet",
-      "goodnight",
-      "file",
-      "touch",
-      "dizzy",
-      "heart",
-      "wake",
-    ];
-    const perCue: Record<string, boolean> = {};
-    if (cues.cues !== undefined) {
-      if (
-        !cues.cues ||
-        typeof cues.cues !== "object" ||
-        Array.isArray(cues.cues)
-      )
-        throw new ValidationError(["Ongeldige geluiden."]);
-      for (const [key, value] of Object.entries(cues.cues)) {
-        if (!names.includes(key) || typeof value !== "boolean")
-          throw new ValidationError(["Onbekend geluid."]);
-        perCue[key] = value;
-      }
-    }
-    const wardrobe = body.wardrobe as Record<string, unknown> | undefined;
-    if (
-      wardrobe &&
-      (!["nova", "violet", "gold"].includes(String(wardrobe.theme)) ||
-        typeof wardrobe.seasonal !== "boolean" ||
-        typeof wardrobe.birthday !== "string" ||
-        (wardrobe.birthday !== "" &&
-          !/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(wardrobe.birthday)))
-    )
-      throw new ValidationError(["Ongeldige orbkleuren of verjaardag."]);
-    const preferences: HelperPreferences = {
-      ...(wardrobe
-        ? {
-            wardrobe: wardrobe as unknown as NonNullable<
-              HelperPreferences["wardrobe"]
-            >,
-          }
-        : {}),
-      autohide: body.autohide,
-      contrast: body.contrast,
-      shape: shape as HelperPreferences["shape"],
-      cues: {
-        enabled: cues.enabled,
-        volume: cues.volume,
-        theme: cues.theme as HelperPreferences["cues"]["theme"],
-        cues: perCue,
-        quiet: {
-          enabled: quiet.enabled,
-          start: String(quiet.start),
-          end: String(quiet.end),
-        },
-      },
-    };
+    const preferences = normalizeHelperPreferences(body);
     this.log(
       "helper_preferences",
       preferences as unknown as Record<string, unknown>,
@@ -714,6 +634,10 @@ export class SettingsController {
       skills: skillsOf(settings).map(publicSkill),
       widgets: widgetsOf(settings),
       sidebar: (settings.sidebar?.items ?? null) as SettingsBackup["sidebar"],
+      helper: { mode: settings.helper.mode, display: settings.helper.display },
+      helperPreferences: normalizeHelperPreferences({
+        ...settings.helperPreferences,
+      }),
     };
   }
 

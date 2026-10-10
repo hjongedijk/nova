@@ -95,8 +95,8 @@
   <h3>Exporteren</h3>
   <p class="hint">
     Een bestand met je vaardigheden, aanpassingen aan gereedschappen, eigen
-    regels en snelle opdrachten. Geheime waarden zitten er bewust niet in; die
-    vul je na het importeren opnieuw in.
+    regels, snelle opdrachten en helperinstellingen. Geheime waarden zitten er
+    bewust niet in; die vul je na het importeren opnieuw in.
   </p>
   <Button onclick={download}>Back-up downloaden</Button>
   <h3>Importeren</h3>
@@ -170,11 +170,25 @@
             ? "wijzigt"
             : "blijft gelijk"}
         </li>
+        <li>
+          Gewenste schermmodus: {pending.summary.helperChanged
+            ? "wijzigt"
+            : "blijft gelijk"}
+        </li>
+        <li>
+          Helperinstellingen: {pending.summary.helperPreferencesChanged
+            ? "wijzigen"
+            : "blijven gelijk"}
+        </li>
       </ul>
       <p>
         Geïmporteerde webhooks kunnen actief worden volgens dit bestand.
         Controleer zelf hun doelen en acties.
       </p>
+      {#if pending.summary.helperChanged}<p>
+          De schermmodus wordt alleen bewaard. Pas die op de pc toe via
+          Apparaten.
+        </p>{/if}
       {#if pending.summary.missingSecrets.length}
         <p>Geheime headers moet je opnieuw invullen:</p>
         <ul>
