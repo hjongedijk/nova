@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { SettingsMutationsService } from "./settings-mutations.service.js";
 import { UpdatesController } from "./updates.controller.js";
 import { UpdatesService } from "./updates.service.js";
 import { RoutingModule } from "../routing/routing.module.js";
@@ -36,6 +37,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
   ],
   providers: [
     SettingsGuard,
+    SettingsMutationsService,
     UpdatesService,
     ServiceConnectionsStore,
     ServiceConnectionsAdapter,

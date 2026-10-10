@@ -1,4 +1,8 @@
 import {
+  MAX_SKILLS,
+  SettingsMutationsService,
+} from "./settings-mutations.service.js";
+import {
   Body,
   Controller,
   Delete,
@@ -61,7 +65,6 @@ import { SettingsStore } from "./store/settings.store.js";
 import { WALLPAPER_PORT, type WallpaperPort } from "./wallpaper.port.js";
 import { fetchWidget, normalizeWidget } from "./widgets/widgets.js";
 
-const MAX_SKILLS = 50;
 const MAX_WIDGETS = 20;
 
 type Body_ = Record<string, unknown> | undefined;
@@ -86,6 +89,7 @@ export class SettingsController {
     private readonly publicConfig: PublicConfigService,
     private readonly assistant: SkillAssistantService,
     private readonly playbooks: PlaybooksService,
+    private readonly mutations: SettingsMutationsService,
     @Optional()
     @Inject(WALLPAPER_PORT)
     private readonly wallpaper?: WallpaperPort,
@@ -134,10 +138,7 @@ export class SettingsController {
 
   @Put("persona")
   setPersona(@Body() body: Body_): { ok: true; persona: string } {
-    const persona = normalizePersona(body?.text);
-    this.settings.update((settings) => void (settings.persona = persona));
-    this.log("persona", { length: persona.length });
-    return { ok: true, persona };
+    return this.mutations.setPersona(body?.text);
   }
 
   @Put("quick-actions")
@@ -212,17 +213,7 @@ export class SettingsController {
 
   @Post("skills")
   create(@Body() body: unknown): { ok: true; skill: Skill } {
-    const { skills } = this.settings.get();
-    if (skills.length >= MAX_SKILLS)
-      throw new ValidationError([`Maximaal ${MAX_SKILLS} vaardigheden.`]);
-    const skill = normalizeSkill(body, {
-      takenIds: skillsOf({ skills }).map((item) => item.id),
-    });
-    this.settings.update(
-      (settings) => void settings.skills.push(skill as never),
-    );
-    this.log("skill-created", { skill: skill.id, type: skill.type });
-    return { ok: true, skill: publicSkill(skill) };
+    return this.mutations.createSkill(body);
   }
 
   @Put("skills/:id")
@@ -230,18 +221,7 @@ export class SettingsController {
     @Param("id") id: string,
     @Body() body: unknown,
   ): { ok: true; skill: Skill } {
-    const existing = skillsOf(this.settings.get()).find(
-      (item) => item.id === id,
-    );
-    if (!existing) throw new NotFoundException("Die vaardigheid bestaat niet.");
-    const skill = normalizeSkill(body, { existing });
-    this.settings.update((settings) => {
-      settings.skills = settings.skills.map((item) =>
-        (item as StoredSkill).id === skill.id ? (skill as never) : item,
-      );
-    });
-    this.log("skill-updated", { skill: skill.id, version: skill.version });
-    return { ok: true, skill: publicSkill(skill) };
+    return this.mutations.updateSkill(id, body);
   }
 
   @Delete("skills/:id")
