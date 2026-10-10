@@ -16,6 +16,8 @@ export interface ToolDefinition {
   timeoutMs?: number;
   /** Private execution identity for standing approvals; never sent to the model. */
   approvalRevision?: string;
+  /** False for changes that require a fresh confirmation every time. */
+  allowStandingApproval?: boolean;
   /** False when the tool exists but cannot work right now (missing configuration). */
   enabled?: boolean;
 }

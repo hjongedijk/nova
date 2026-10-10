@@ -134,7 +134,11 @@ function normalizeHttp(
     const name = clean(row?.name);
     if (!/^[A-Za-z][A-Za-z0-9-]{0,39}$/.test(name))
       fail(`Ongeldige headernaam: “${name}”.`);
-    if (/^(?:host|content-length|connection|transfer-encoding)$/i.test(name))
+    if (
+      /^(?:host|content-length|connection|transfer-encoding|x-nova-admin|x-nova-pin)$/i.test(
+        name,
+      )
+    )
       fail(`De header “${name}” kan niet worden ingesteld.`);
     if (names.has(name.toLowerCase()))
       fail(`De header “${name}” staat er twee keer in.`);

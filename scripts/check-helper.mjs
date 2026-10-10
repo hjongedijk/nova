@@ -106,16 +106,25 @@ import assert from "node:assert/strict";
         request = route.request().postDataJSON();
         const now = await page.evaluate(() => Date.now());
         const events =
-          kind === "confirm"
+          kind === "confirm" || kind === "settings-confirm"
             ? [
                 [
                   "confirmation",
                   {
-                    confirmationId: "smoke-confirm",
+                    confirmationId: `smoke-${kind}`,
                     sessionId: request.sessionId,
-                    tool: "ha_call",
+                    tool:
+                      kind === "settings-confirm"
+                        ? "settings_persona_set"
+                        : "ha_call",
+                    ...(kind === "settings-confirm"
+                      ? { allowAlways: false }
+                      : {}),
                     risk: "CONFIRM",
-                    args: { entity_id: "light.woonkamer", service: "turn_on" },
+                    args:
+                      kind === "settings-confirm"
+                        ? { text: "Spreek rustig en bondig." }
+                        : { entity_id: "light.woonkamer", service: "turn_on" },
                     createdAt: now,
                     expiresAt: now + 60000,
                   },
@@ -348,6 +357,22 @@ import assert from "node:assert/strict";
       );
       await page.keyboard.press("n");
       await page.waitForFunction(() => !document.querySelector(".hp-confirm"));
+      kind = "settings-confirm";
+      await page
+        .getByRole("textbox", { name: "Bericht aan NOVA" })
+        .fill("Pas mijn persoonlijke regels aan.");
+      await page.getByRole("button", { name: "Verstuur", exact: true }).click();
+      await page.waitForSelector(".hc:not(.done)");
+      assert.match(
+        await page.locator(".hc:not(.done)").innerText(),
+        /Spreek rustig en bondig/,
+      );
+      assert.equal(
+        await page.getByRole("button", { name: "Altijd", exact: true }).count(),
+        0,
+      );
+      await page.keyboard.press("n");
+      await page.waitForFunction(() => !document.querySelector(".hp-confirm"));
       await page
         .getByRole("button", { name: "Helperinstellingen", exact: true })
         .click();
@@ -376,7 +401,7 @@ import assert from "node:assert/strict";
     await browser.close();
   }
   console.log(
-    "Helper browser checks passed at 1x/2x: views, ticker/model, notices/snooze, attachment retry/cleanup, choices, persistent confirmation and N shortcut.",
+    "Helper browser checks passed at 1x/2x: views, ticker/model, notices/snooze, attachment retry/cleanup, choices, persistent confirmation, fresh settings confirmation without Always and N shortcut.",
   );
 })().catch((error) => {
   console.error(error.stack);

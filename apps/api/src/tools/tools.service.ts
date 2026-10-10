@@ -76,6 +76,14 @@ export interface ModelTool {
 /** Sessions that are not a conversation: nothing about them is remembered. */
 const SYSTEM_SESSIONS = new Set(["health", "overview", "dashboard", "sidebar"]);
 
+/** Personal changes do not enable devices or integrations and still need fresh confirmation. */
+const PERSONAL_SETTINGS_TOOLS = new Set([
+  "settings_persona_set",
+  "settings_instruction_create",
+  "settings_skill_toggle",
+  "settings_skills",
+]);
+
 /** Read-only tools the dashboard may poll without writing to the action log. */
 const DASHBOARD_TOOLS = new Set([
   "proxmox_guests",
@@ -160,7 +168,10 @@ export class ToolsService implements OnModuleInit {
         const switchedOff = override?.enabled === false;
         const available =
           raw.enabled !== false &&
-          (this.config.extensionsEnabled || source.source === "nova");
+          (this.config.extensionsEnabled ||
+            source.source === "nova" ||
+            (source.source === "settings" &&
+              PERSONAL_SETTINGS_TOOLS.has(raw.name)));
         const definition = {
           ...raw,
           description: override?.description || raw.description,
@@ -286,6 +297,9 @@ export class ToolsService implements OnModuleInit {
       parameters: tool.definition.parameters,
       description: tool.definition.description,
       risk: tool.definition.risk,
+      ...(tool.definition.allowStandingApproval === false
+        ? { allowStandingApproval: false }
+        : {}),
     });
     const cleaned = coerceArguments(tool.definition.parameters, transportArgs);
     if (
@@ -322,6 +336,9 @@ export class ToolsService implements OnModuleInit {
       if (
         risk !== "READ_ONLY" &&
         !name.startsWith("memory_") &&
+        !(
+          tool.source.source === "settings" && PERSONAL_SETTINGS_TOOLS.has(name)
+        ) &&
         !this.config.actionsEnabled
       )
         return finish({
@@ -347,6 +364,7 @@ export class ToolsService implements OnModuleInit {
         const grants = this.settings.get().standingApprovals ?? [];
         const standing =
           risk === "CONFIRM" &&
+          tool.definition.allowStandingApproval !== false &&
           !unknownArguments &&
           grants.some(
             (grant) =>
@@ -362,6 +380,7 @@ export class ToolsService implements OnModuleInit {
             args,
             risk,
             schemaFingerprint,
+            tool.definition.allowStandingApproval !== false,
           );
           return finish({ ok: false, requiresConfirmation: true, action });
         }
@@ -371,6 +390,7 @@ export class ToolsService implements OnModuleInit {
           always &&
           matches &&
           risk === "CONFIRM" &&
+          tool.definition.allowStandingApproval !== false &&
           !unknownArguments &&
           approved.schemaFingerprint === schemaFingerprint &&
           !standing

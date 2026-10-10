@@ -132,3 +132,11 @@ Typed chat allows useful lists, links, code and fuller explanations. Speech reco
 Rules store argument and schema/execution fingerprints, a sanitized display scope and creation time. Changing parameters, risk, source identity or schema requires a new confirmation. Webhook skill execution settings contribute a private revision; changing its endpoint/body/credentials invalidates the rule. MCP connections receive a private generation revision, so reconnecting invalidates existing permissions. Private revision fields never reach the model or public tool metadata.
 
 Creation, automatic execution and revocation are audited; log failure prevents grant creation/execution. Every reused approval is marked in the live ticker. Revoke individual rules in Settings → Behavior. The settings API only lists/revokes rules; backup export/import cannot create them. Rules are limited to 100 and never store raw secrets. Permission applies across local conversation sessions until revoked, changed or invalidated.
+
+## Personal settings through chat
+
+NOVA can replace personal conversation rules, create an instruction skill and enable or disable an existing instruction skill through dedicated settings tools. Each change requires a new, session-bound confirmation valid for 60 seconds. The confirmation shows the proposed text or skill identifier; these tools never offer or reuse “Altijd”. Changing the persona or skill configuration invalidates a pending approval. Changes use the same validation and storage as the settings page and are audited.
+
+The read-only skill list exposes identifiers, names, types, enabled state and versions, without credentials or HTTP bindings. Chat cannot create or enable webhook bindings, edit service credentials, change access controls or add executable code through these settings tools. Manage those bindings on the settings page. Webhook skills and custom panels reject `x-nova-admin` and `x-nova-pin` headers, including legacy stored headers at request time.
+
+Night mode and model selection through chat are still pending their corresponding features. Instruction skills describe a workflow using existing tools; they do not grant new permissions.

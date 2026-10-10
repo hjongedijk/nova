@@ -39,7 +39,7 @@ Phase J latest block: 381 tests in 35 files; format/lint/typecheck/build passed 
 Production settings browser checks passed for all sections, search/keyboard/deep links, mobile, save, PIN expiry/lock, model measurements and explicit release checks.
 Production helper regression checks passed at 1x/2x. Screenshots use fixtures; no real phone proof.
 
-Next: shared settings mutation boundary and fresh-confirmation chat controls (J7), then continue J3 OmniRoute account/policy management using `docs/omniroute-admin-api.md`; onboarding follows its policy wizard.
+Next: continue J3 native OmniRoute management and account/policy management using `docs/omniroute-admin-api.md`; onboarding follows its policy wizard. J7 personal changes are implemented; night mode and model changes await their owning features.
 J2.3 restart button, complete history/backup and service-specific management remain unfinished. J4 waits for C.
 Service config: `core/config/service-connections.ts`; store/adapter/controller: `settings/services/`.
 Saved gateway URL changes are blocked until provenance is verified; connection tests never establish free billing.
@@ -61,3 +61,5 @@ had five unrelated five-second timeouts; four-worker and updated standard runs p
 Latest checked block: private Windows status and shortcut management in Apparaten. 381 Node24 tests/gates green;
 production settings and helper browser tests pass at 1x/2x/mobile. New device screenshots use fixture data only.
 No PowerShell/agent source changed; native PC behavior remains unverified.
+
+Latest block: J7 persona replacement, instruction creation/toggle and credential-header boundary. 417 tests in 37 files and all Node24 gates passed; four additional renewal-handler tests passed after review. Production settings/helper browser checks passed, including fresh personal confirmation without “Altijd”. Shared mutations committed as `507aacd`; this feature block follows it locally. Pending confirmations whose configuration changed are cancelled with an explicit request to retry. J7 checkboxes remain partial for future night/model and code/MCP boundaries. No push/release authorized for J.

@@ -21,7 +21,7 @@
       onclick={() => answerCard(card.id, false)}
       >Annuleren <kbd aria-hidden="true">N</kbd></button
     >
-    {#if card.risk === "CONFIRM"}
+    {#if card.risk === "CONFIRM" && card.allowAlways !== false}
       <button
         type="button"
         class="hc-no"

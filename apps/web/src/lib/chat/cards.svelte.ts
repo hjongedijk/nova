@@ -6,6 +6,7 @@ import { getSessionId } from "./session.ts";
 export interface Card {
   id: string;
   risk?: PendingConfirmation["risk"];
+  allowAlways?: boolean;
   label: string;
   /** Buttons are locked (answered, or the time ran out). */
   locked: boolean;
@@ -33,6 +34,13 @@ export const isConfirmReply = (text: string): boolean =>
 /** The sentence on a card: what is about to happen. */
 export function confirmationLabel(action: PendingConfirmation): string {
   const args = action.args as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- free-form tool arguments
+  const expiry = "Bevestiging verloopt na 60 seconden.";
+  if (action.tool === "settings_persona_set")
+    return `Eigen regels vervangen: ${args.text || "(regels wissen)"}. ${expiry}`;
+  if (action.tool === "settings_instruction_create")
+    return `Instructie “${args.name}” toevoegen: ${args.instructions}${args.description ? `\nBeschrijving: ${args.description}` : ""}${args.examples?.length ? `\nVoorbeelden: ${args.examples.join("; ")}` : ""}. ${expiry}`;
+  if (action.tool === "settings_skill_toggle")
+    return `Instructie “${args.id}” ${args.enabled ? "aanzetten" : "uitzetten"}. ${expiry}`;
   const values = { ...args, ...args?.data };
   const changes = [
     values.temperature !== undefined ? `${values.temperature} °C` : null,
@@ -82,6 +90,7 @@ export function addCard(action: PendingConfirmation | null | undefined): void {
   cards.push({
     id,
     risk: action.risk,
+    allowAlways: action.allowAlways,
     label: confirmationLabel(action),
     locked: false,
     done: false,

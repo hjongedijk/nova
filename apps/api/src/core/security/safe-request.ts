@@ -127,6 +127,15 @@ export async function sendRequest(
     allowPrivate = false,
     signal,
   } = options;
+  // Imported or older skills must not turn the settings UI's authorization into a model tool.
+  if (
+    Object.keys(headers).some((name) =>
+      /^x-nova-(?:admin|pin)$/i.test(name.trim()),
+    )
+  )
+    throw new Error(
+      "NOVA-beheerheaders zijn alleen voor het instellingenscherm.",
+    );
   const url = assertSkillTarget(target, { allowPrivate });
   const client = url.protocol === "https:" ? https : http;
   const payload = body === undefined ? undefined : Buffer.from(body);

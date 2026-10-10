@@ -12,6 +12,11 @@ import { SettingsStore } from "./store/settings.store.js";
 
 export const MAX_SKILLS = 50;
 
+export interface SettingsMutationOrigin {
+  sessionId: string;
+  confirmation: "confirmed_tool";
+}
+
 /** Shared validation and persistence for personal settings. Service credentials have a separate owner. */
 @Injectable()
 export class SettingsMutationsService {
@@ -20,25 +25,35 @@ export class SettingsMutationsService {
     private readonly audit: AuditService,
   ) {}
 
-  private log(what: string, detail: Record<string, unknown>): void {
+  private log(
+    what: string,
+    detail: Record<string, unknown>,
+    origin?: SettingsMutationOrigin,
+  ): void {
     this.audit.record({
-      sessionId: "settings",
+      sessionId: origin?.sessionId ?? "settings",
       tool: "settings_change",
-      risk: "SAFE",
-      confirmation: "admin_ui",
+      risk: origin ? "CONFIRM" : "SAFE",
+      confirmation: origin?.confirmation ?? "admin_ui",
       arguments: { what, ...detail },
       result: { ok: true },
     });
   }
 
-  setPersona(value: unknown): { ok: true; persona: string } {
+  setPersona(
+    value: unknown,
+    origin?: SettingsMutationOrigin,
+  ): { ok: true; persona: string } {
     const persona = normalizePersona(value);
     this.settings.update((settings) => void (settings.persona = persona));
-    this.log("persona", { length: persona.length });
+    this.log("persona", { length: persona.length }, origin);
     return { ok: true, persona };
   }
 
-  createSkill(body: unknown): { ok: true; skill: Skill } {
+  createSkill(
+    body: unknown,
+    origin?: SettingsMutationOrigin,
+  ): { ok: true; skill: Skill } {
     const skills = this.settings.get().skills as unknown as StoredSkill[];
     if (skills.length >= MAX_SKILLS)
       throw new ValidationError([`Maximaal ${MAX_SKILLS} vaardigheden.`]);
@@ -48,11 +63,15 @@ export class SettingsMutationsService {
     this.settings.update(
       (settings) => void settings.skills.push(skill as never),
     );
-    this.log("skill-created", { skill: skill.id, type: skill.type });
+    this.log("skill-created", { skill: skill.id, type: skill.type }, origin);
     return { ok: true, skill: publicSkill(skill) };
   }
 
-  updateSkill(id: string, body: unknown): { ok: true; skill: Skill } {
+  updateSkill(
+    id: string,
+    body: unknown,
+    origin?: SettingsMutationOrigin,
+  ): { ok: true; skill: Skill } {
     const existing = (
       this.settings.get().skills as unknown as StoredSkill[]
     ).find((item) => item.id === id);
@@ -63,7 +82,11 @@ export class SettingsMutationsService {
         (item as StoredSkill).id === skill.id ? (skill as never) : item,
       );
     });
-    this.log("skill-updated", { skill: skill.id, version: skill.version });
+    this.log(
+      "skill-updated",
+      { skill: skill.id, version: skill.version },
+      origin,
+    );
     return { ok: true, skill: publicSkill(skill) };
   }
 }

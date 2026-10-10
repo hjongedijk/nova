@@ -41,4 +41,6 @@ export interface PendingConfirmation {
   createdAt: number;
   expiresAt: number;
   schemaFingerprint?: string;
+  /** False when the action cannot create or reuse an Always permission. */
+  allowAlways?: boolean;
 }

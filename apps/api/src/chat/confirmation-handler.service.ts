@@ -77,6 +77,19 @@ export class ConfirmationHandler {
       action,
       always,
     );
+    if (result.requiresConfirmation && result.action) {
+      if (
+        this.confirmations.peek(sessionId)?.confirmationId ===
+        result.action.confirmationId
+      )
+        this.confirmations.cancel(sessionId, "confirmation_changed");
+      const reply =
+        "De instellingen zijn gewijzigd. Ik heb niets uitgevoerd. Vraag het opnieuw, dan kun je de actuele wijziging bevestigen.";
+      const failed = { ...result, ok: false, error: reply };
+      delete failed.requiresConfirmation;
+      delete failed.action;
+      return { reply, result: failed };
+    }
     // Something to read came back (command output): say what it was, not just that it is done.
     if (result.ok && hasOutput(result))
       return {
