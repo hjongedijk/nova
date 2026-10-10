@@ -132,7 +132,7 @@ Deep links use `section=voice`, `personality`, `models`, `abilities`, `skills`, 
 If `NOVA_ADMIN_PIN` is set, unlock first. The PIN stays only in browser memory, expires after fifteen minutes,
 and can be cleared with **Instellingen vergrendelen**. Repeated wrong guesses are throttled by the API.
 
-Settings writes are accepted only from the settings screen (they need the header `x-nova-admin: 1`), are validated like an import, and are written to the action log.
+Settings HTTP writes are accepted only from the settings screen (they need the header `x-nova-admin: 1`), are validated like an import, and are written to the action log.
 
 ## Settings workspace
 
@@ -208,3 +208,11 @@ all four current shortcuts. Saving writes only those shortcut names, needs setti
 existing audit path. Agent warnings and failed acknowledgements remain visible. A download is the agent bundled
 with this NOVA build; checking the latest NOVA release is a separate explicit action in **Systeem**.
 No status test opens the helper, changes a display or starts a process.
+
+### Personal changes through chat
+
+NOVA can replace personal conversation rules, add an instruction skill and enable or disable an existing instruction skill. Each change asks for a fresh confirmation and is audited; these tools cannot use a standing approval. Credentials, service settings and webhook bindings remain in the settings screen. Night-mode and model-selection chat controls are still pending. See [tools and safety](tools-and-safety.md#personal-settings-through-chat).
+
+### Native OmniRoute overview
+
+In Models, click **OmniRoute-overzicht laden** to inspect native executable skill metadata owned by NOVA or shared globally, the separate documentation catalog and instance-wide prompt status/size. The overview requires settings authorization and the original verified gateway endpoint. It performs only fixed management reads; other owners, handler code and prompt contents are excluded. At most the first 200 runtime entries are inspected, with an explicit notice when more exist. Gateway skill status may be cached for one minute. Native mode changes and prompt editing remain unfinished; NOVA's own skills and memory keep their existing editors.

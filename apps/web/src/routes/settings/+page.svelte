@@ -5,6 +5,7 @@
   import ConnectionsSection from "#components/settings/ConnectionsSection.svelte";
   import ConnectionHistory from "#components/settings/ConnectionHistory.svelte";
   import ModelMetrics from "#components/settings/ModelMetrics.svelte";
+  import NativeGateway from "#components/settings/NativeGateway.svelte";
   import UpdatesSection from "#components/settings/UpdatesSection.svelte";
   import WindowsAgentPanel from "#components/settings/WindowsAgentPanel.svelte";
   import AbilitiesTab from "#components/settings/AbilitiesTab.svelte";
@@ -170,6 +171,7 @@
           {:else if section === "models"}
             <ConnectionsSection ids={["omniroute"]} />
             <ModelMetrics />
+            <NativeGateway />
             <AdminDialog embedded initialView="providers" />
             <h2>OmniRoute</h2>
             <AdminDialog embedded initialView="gateway" />

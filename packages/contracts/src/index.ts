@@ -12,3 +12,4 @@ export type * from "./home.js";
 export type * from "./dashboard.js";
 export type * from "./admin.js";
 export type * from "./shell.js";
+export type * from "./omniroute.js";

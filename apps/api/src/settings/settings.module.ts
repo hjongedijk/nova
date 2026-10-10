@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { SettingsSource } from "./settings.source.js";
+import { NativeGatewayController } from "./native-gateway.controller.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import { UpdatesController } from "./updates.controller.js";
 import { UpdatesService } from "./updates.service.js";
@@ -35,6 +36,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     ServiceConnectionsController,
     ModelMetricsController,
     UpdatesController,
+    NativeGatewayController,
   ],
   providers: [
     SettingsGuard,

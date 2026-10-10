@@ -25,6 +25,8 @@ is never exported and is never overwritten. A UI rollback can use the previous r
 To restore the snapshot, stop NOVA and replace `settings.json` with the snapshot, retaining its permissions.
 The import roundtrip also preserves existing persona/actions/tools/skills/widgets/sidebar IDs and values.
 
+The Models section also exposes an explicit native OmniRoute overview: NOVA/global skill metadata, separate documentation and gateway prompt status. It performs no installation or execution.
+
 ## Proof
 
 `scripts/check-settings.mjs` uses fixtures only and checks every section at desktop 1x/2x and 390 px mobile,
@@ -32,13 +34,14 @@ search, keyboard Enter navigation, deep links, saving, PIN expiry, explicit lock
 to the local production preview to check its built assets. API tests cover preservation, null defaults,
 snapshot protection/permissions and PIN throttling.
 
-| View        | Desktop 1x                           | Desktop 2x                           | Mobile                                   |
-| ----------- | ------------------------------------ | ------------------------------------ | ---------------------------------------- |
-| General     | ![](img/settings-general-1x.png)     | ![](img/settings-general-2x.png)     | ![](img/settings-general-mobile.png)     |
-| Models      | ![](img/settings-models-1x.png)      | ![](img/settings-models-2x.png)      | ![](img/settings-models-mobile.png)      |
-| Devices     | ![](img/settings-devices-1x.png)     | ![](img/settings-devices-2x.png)     | ![](img/settings-devices-mobile.png)     |
-| System      | ![](img/settings-system-1x.png)      | ![](img/settings-system-2x.png)      | ![](img/settings-system-mobile.png)      |
-| Personality | ![](img/settings-personality-1x.png) | ![](img/settings-personality-2x.png) | ![](img/settings-personality-mobile.png) |
+| View           | Desktop 1x                           | Desktop 2x                           | Mobile                                   |
+| -------------- | ------------------------------------ | ------------------------------------ | ---------------------------------------- |
+| General        | ![](img/settings-general-1x.png)     | ![](img/settings-general-2x.png)     | ![](img/settings-general-mobile.png)     |
+| Models         | ![](img/settings-models-1x.png)      | ![](img/settings-models-2x.png)      | ![](img/settings-models-mobile.png)      |
+| Native gateway | ![](img/settings-native-1x.png)      | ![](img/settings-native-2x.png)      | ![](img/settings-native-mobile.png)      |
+| Devices        | ![](img/settings-devices-1x.png)     | ![](img/settings-devices-2x.png)     | ![](img/settings-devices-mobile.png)     |
+| System         | ![](img/settings-system-1x.png)      | ![](img/settings-system-2x.png)      | ![](img/settings-system-mobile.png)      |
+| Personality    | ![](img/settings-personality-1x.png) | ![](img/settings-personality-2x.png) | ![](img/settings-personality-mobile.png) |
 
 No real phone or Windows-PC test has been performed for this settings transition. Connection editors, bounded adapters and connection history are now implemented.
 Onboarding, complete-system backups, service-specific controls and upstream account/model management remain later phase J work.

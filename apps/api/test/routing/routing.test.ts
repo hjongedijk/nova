@@ -131,7 +131,9 @@ describe("RoutingService verified SQLite policy", () => {
     );
     Object.assign(process.env, env);
     db = new DatabaseSync(env.OMNIROUTE_DATABASE);
+    // Build the fixture atomically; avoid a disk sync for each inserted row.
     db.exec(`
+      BEGIN;
       CREATE TABLE key_value (namespace TEXT, key TEXT, value TEXT);
       CREATE TABLE api_keys (
         key TEXT, is_active INTEGER, revoked_at TEXT,
@@ -158,6 +160,7 @@ describe("RoutingService verified SQLite policy", () => {
       JSON.stringify(["auto"]),
       JSON.stringify(["fixture-connection"]),
     );
+    db.exec("COMMIT");
     writePolicy(policy());
     routing = new RoutingService(new NovaConfig());
   });

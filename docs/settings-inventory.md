@@ -93,3 +93,5 @@ There is no current settings page/deep-link/search/wizard, in-app service creden
 Service connection editors and bounded read-only checks are now available for nine services;
 see the service inventory's update for endpoint ownership and remaining gaps. Service credentials
 are absent from this overview and its backup; their presence flags are served separately behind the PIN guard.
+
+Personal chat tools share persona/instruction validation and persistence with the settings page. Fresh confirmations cannot become standing rules; credentials and HTTP bindings have no chat setter. Models now has an explicit native OmniRoute overview behind the PIN guard: owned/global runtime metadata, separate documentation, and instance-global prompt status/size. Runtime handlers and other owners are excluded; mutations remain unfinished.

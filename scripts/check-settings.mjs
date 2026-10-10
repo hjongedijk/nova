@@ -192,7 +192,40 @@ try {
               "Fixture changes <script>window.fixtureInjected = true</script>",
           },
         };
-      } else if (endpoint === "/settings/models/metrics")
+      } else if (endpoint === "/settings/omniroute/native")
+        data = {
+          available: true,
+          truncated: false,
+          skills: [
+            {
+              id: "fixture-native",
+              name: "Gedeelde voorbeeldskill",
+              version: "1.0.0",
+              scope: "global",
+              enabled: false,
+              mode: "off",
+            },
+          ],
+          documentation: [
+            {
+              id: "fixture-doc",
+              name: "Gateway-documentatie",
+              description: "Vaste API-documentatie",
+            },
+          ],
+          prompt: { enabled: false, prefixCharacters: 0, suffixCharacters: 0 },
+        };
+      else if (
+        endpoint === "/settings/omniroute/native/documentation/fixture-doc"
+      )
+        data = {
+          available: true,
+          id: "fixture-doc",
+          name: "Gateway-documentatie",
+          documentation:
+            "<script>globalThis.nativeDocumentRan = true</script>\nDocumentatie is tekst.",
+        };
+      else if (endpoint === "/settings/models/metrics")
         data = {
           updatedAt: "2026-10-10T09:00:00Z",
           available: true,
@@ -324,6 +357,37 @@ try {
     assert.equal(await page.locator(".settings-sidebar nav a").count(), 1);
     await page.locator("#settingsSearch").press("Enter");
     await page.waitForURL("**/settings?section=models");
+    await page
+      .getByRole("button", { name: "OmniRoute-overzicht laden", exact: true })
+      .click();
+    await page.getByText("Gedeelde voorbeeldskill", { exact: true }).waitFor();
+    await page
+      .getByRole("button", { name: "Lees Gateway-documentatie", exact: true })
+      .click();
+    assert.match(
+      await page
+        .locator('section[aria-label="OmniRoute-skills en prompts"] pre')
+        .innerText(),
+      /<script>/,
+    );
+    assert.equal(
+      await page.evaluate(() => globalThis.nativeDocumentRan),
+      undefined,
+    );
+    await page
+      .getByRole("button", { name: "OmniRoute-overzicht laden", exact: true })
+      .click();
+    await page
+      .locator('section[aria-label="OmniRoute-skills en prompts"] pre')
+      .waitFor({ state: "detached" });
+    await page
+      .locator('section[aria-label="OmniRoute-skills en prompts"]')
+      .screenshot({
+        path: path.join(
+          screenshots,
+          `settings-native-${width === 390 ? "mobile" : `${scale}x`}.png`,
+        ),
+      });
     await page
       .getByText("Geverifieerde gratis route beschikbaar", { exact: true })
       .waitFor();
@@ -472,7 +536,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks and Windows shortcuts.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts and native gateway documentation.",
   );
 } finally {
   await browser.close();

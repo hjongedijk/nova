@@ -1,4 +1,6 @@
 import type {
+  NativeGatewayReport,
+  NativeSkillDocument,
   WindowsAgentStatus,
   UpdateReport,
   ModelMetricsReport,
@@ -48,6 +50,10 @@ const write = <T>(
 const enc = encodeURIComponent;
 
 export const getSettings = () => read<SettingsOverview>("");
+export const getNativeGateway = () =>
+  read<NativeGatewayReport>("/omniroute/native");
+export const getNativeSkillDocument = (id: string) =>
+  read<NativeSkillDocument>(`/omniroute/native/documentation/${enc(id)}`);
 export const getModelMetrics = () =>
   read<ModelMetricsReport>("/models/metrics");
 export const getUpdates = () => read<UpdateReport>("/updates");

@@ -35,11 +35,11 @@ Run Node checks with Node 24 (host Node 22 is below the repository engine requir
 Use `scripts/check-helper.mjs`; its fixtures contain test data only.
 PowerShell syntax/geometry checks do not prove Windows kiosk/tray/audio/display behavior.
 
-Phase J latest block: 381 tests in 35 files; format/lint/typecheck/build passed in Node 24 Docker.
+Phase J latest block: 452 tests in 39 files; format/lint/typecheck/build passed in Node 24 Docker.
 Production settings browser checks passed for all sections, search/keyboard/deep links, mobile, save, PIN expiry/lock, model measurements and explicit release checks.
 Production helper regression checks passed at 1x/2x. Screenshots use fixtures; no real phone proof.
 
-Next: continue J3 native OmniRoute management and account/policy management using `docs/omniroute-admin-api.md`; onboarding follows its policy wizard. J7 personal changes are implemented; night mode and model changes await their owning features.
+Next: J3 native skill mode/prompt editing and account/policy management using `docs/omniroute-admin-api.md`; onboarding follows its policy wizard. Mode updates must verify persisted SQLite values, not the upstream echo or cached registry. J7 personal changes are implemented; night mode and model changes await their owning features.
 J2.3 restart button, complete history/backup and service-specific management remain unfinished. J4 waits for C.
 Service config: `core/config/service-connections.ts`; store/adapter/controller: `settings/services/`.
 Saved gateway URL changes are blocked until provenance is verified; connection tests never establish free billing.
@@ -63,3 +63,7 @@ production settings and helper browser tests pass at 1x/2x/mobile. New device sc
 No PowerShell/agent source changed; native PC behavior remains unverified.
 
 Latest block: J7 persona replacement, instruction creation/toggle and credential-header boundary. 417 tests in 37 files and all Node24 gates passed; four additional renewal-handler tests passed after review. Production settings/helper browser checks passed, including fresh personal confirmation without “Altijd”. Shared mutations committed as `507aacd`; this feature block follows it locally. Pending confirmations whose configuration changed are cancelled with an explicit request to retry. J7 checkboxes remain partial for future night/model and code/MCP boundaries. No push/release authorized for J.
+
+Latest J3 visibility block: `settings/native-gateway.controller.ts`, `NativeGateway.svelte`, shared `contracts/omniroute.ts`. Explicit fixed management reads expose NOVA/global skill metadata, separate documentation and global prompt enabled/size only. Other owners, handlers, schemas and prompt contents stay private. 31 boundary/API tests added; gateway origin/CSRF and native cache behavior researched against v3.8.51. Native mutations remain pending.
+
+The first 452-test runs hit chat/SQLite setup time-outs. SQLite fixture setup inserted each row in its own transaction; batching setup into one atomic transaction preserved real read-only database checks. Standard test run then passed all 452 without increasing time-outs or reducing worker settings. Gates and build passed; final production native-overview browser checks passed at 1x/2x/mobile, including escaped documentation. Screenshots reviewed. Only new native screenshots should be committed, not regenerated unrelated fixtures.
