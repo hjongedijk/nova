@@ -605,6 +605,17 @@ export interface ToolSwitchRollbackResult {
   ok: true;
   auditWarning?: string;
 }
+export interface ToolDescriptionRevision {
+  id: string;
+  at: string;
+  tool: string;
+  before: string | null;
+  after: string | null;
+}
+export interface ToolDescriptionHistory {
+  revisions: ToolDescriptionRevision[];
+  truncated: boolean;
+}
 export interface SidebarRevision {
   id: string;
   at: string;

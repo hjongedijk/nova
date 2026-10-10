@@ -37,6 +37,7 @@ import type {
   HelperPreferenceRollbackResult,
   ToolSwitchHistory,
   ToolSwitchRollbackResult,
+  ToolDescriptionHistory,
   SidebarHistory,
   SidebarRollbackResult,
   PersonaHistory,
@@ -169,13 +170,21 @@ export const rollbackQuickActions = (id: string) =>
   );
 
 export const saveToolOverride = (name: string, override: ToolOverride) =>
-  write<{ ok: true; override: ToolOverride }>(
+  write<{ ok: true; override: ToolOverride; historyWarning?: string }>(
     "PUT",
     `/tools/${enc(name)}`,
     override,
   );
+export const getToolDescriptionHistory = (name: string) =>
+  read<ToolDescriptionHistory>(`/tools/${enc(name)}/description-history`);
+export const rollbackToolDescription = (name: string, id: string) =>
+  write<{ ok: true; description: string | null; auditWarning?: string }>(
+    "POST",
+    `/tools/${enc(name)}/description-history/${enc(id)}/rollback`,
+    {},
+  );
 export const resetTool = (name: string) =>
-  write<{ ok: true }>("DELETE", `/tools/${enc(name)}`);
+  write<{ ok: true; historyWarning?: string }>("DELETE", `/tools/${enc(name)}`);
 
 export const setAbility = (id: string, enabled: boolean) =>
   write<{ ok: true; auditWarning?: string }>("PUT", `/abilities/${enc(id)}`, {

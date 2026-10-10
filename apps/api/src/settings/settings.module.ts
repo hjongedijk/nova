@@ -30,6 +30,7 @@ import { SidebarHistory } from "./sidebar-history.service.js";
 import { PersonaHistoryService } from "./persona-history.service.js";
 import { InstructionSkillHistory } from "./instruction-skill-history.service.js";
 import { QuickActionsHistory } from "./quick-actions-history.service.js";
+import { ToolDescriptionHistoryService } from "./tool-description-history.service.js";
 import { SkillAssistantService } from "./ai/skill-assistant.service.js";
 import { PlaybooksService } from "./playbooks.service.js";
 import { PublicConfigService } from "./public-config.service.js";
@@ -90,6 +91,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     PersonaHistoryService,
     InstructionSkillHistory,
     QuickActionsHistory,
+    ToolDescriptionHistoryService,
     SkillsSource,
     PlaybooksService,
     PublicConfigService,

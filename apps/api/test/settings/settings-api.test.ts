@@ -369,6 +369,47 @@ describe("the settings API", () => {
     expect(restored.description).toBe("Return supplied text");
   });
 
+  it("restores only tool descriptions and rejects stale or secret history", async () => {
+    await call("put", "/tools/echo", {
+      description: "Mijn eerste uitleg voor echo",
+    });
+    await call("put", "/tools/echo", {
+      description: "Mijn tweede uitleg voor echo",
+    });
+    const history = await call("get", "/tools/echo/description-history");
+    expect(history.revisions[0].after).toBe("Mijn tweede uitleg voor echo");
+    const revision = history.revisions[0];
+    await call(
+      "post",
+      `/tools/echo/description-history/${revision.id}/rollback`,
+      {},
+    );
+    const echo = (await call("get", "/")).tools.find(
+      (item: { name: string }) => item.name === "echo",
+    );
+    expect(echo.description).toBe("Mijn eerste uitleg voor echo");
+    expect(echo.enabled).toBe(true);
+    expect(
+      (
+        await call(
+          "post",
+          `/tools/echo/description-history/${revision.id}/rollback`,
+          {},
+        )
+      ).status,
+    ).toBe(409);
+    const unsafe = await call("put", "/tools/echo", {
+      description: "Open https://user:pass@example.test",
+    });
+    expect(unsafe.historyWarning).toMatch(/geheim/i);
+    expect(
+      JSON.stringify(await call("get", "/tools/echo/description-history")),
+    ).not.toContain("user:pass");
+    expect(JSON.stringify(nova.audits)).not.toContain("user:pass");
+    const reset = await call("delete", "/tools/echo");
+    expect(reset.historyWarning).toMatch(/geheim/i);
+  });
+
   it("sets personal rules and quick actions, including going back to the defaults", async () => {
     expect(
       (await call("put", "/persona", { text: "Spreek me aan met Harm." }))

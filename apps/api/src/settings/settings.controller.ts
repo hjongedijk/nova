@@ -6,6 +6,7 @@ import { SidebarHistory } from "./sidebar-history.service.js";
 import { PersonaHistoryService } from "./persona-history.service.js";
 import { InstructionSkillHistory } from "./instruction-skill-history.service.js";
 import { QuickActionsHistory } from "./quick-actions-history.service.js";
+import { ToolDescriptionHistoryService } from "./tool-description-history.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
@@ -102,6 +103,7 @@ export class SettingsController {
     private readonly personaHistory: PersonaHistoryService,
     private readonly instructionSkillHistory: InstructionSkillHistory,
     private readonly quickActionsHistory: QuickActionsHistory,
+    private readonly toolDescriptionHistory: ToolDescriptionHistoryService,
     @Optional()
     @Inject(WALLPAPER_PORT)
     private readonly wallpaper?: WallpaperPort,
@@ -201,8 +203,10 @@ export class SettingsController {
   setTool(
     @Param("name") name: string,
     @Body() body: Body_,
-  ): { ok: true; override: ToolOverride } {
+  ): { ok: true; override: ToolOverride; historyWarning?: string } {
     const override = normalizeToolOverride(name, body);
+    const beforeDescription =
+      this.settings.get().toolOverrides[name]?.description ?? null;
     const before = this.tools
       .list()
       .find((tool) => tool.name === name)?.enabled;
@@ -210,27 +214,79 @@ export class SettingsController {
       if (Object.keys(override).length) settings.toolOverrides[name] = override;
       else delete settings.toolOverrides[name];
     });
+    const afterDescription =
+      this.settings.get().toolOverrides[name]?.description ?? null;
+    this.toolDescriptionHistory.record(
+      name,
+      beforeDescription,
+      afterDescription,
+    );
     const after = this.tools.list().find((tool) => tool.name === name)?.enabled;
     if (before !== undefined && after !== undefined)
       this.toolHistory.record({ [name]: before }, { [name]: after });
-    this.log("tool", { tool: name, ...override });
-    return { ok: true, override };
+    this.log("tool", {
+      tool: name,
+      ...(override.enabled === false ? { enabled: false } : {}),
+      ...(override.description !== undefined
+        ? { descriptionLength: override.description.length }
+        : {}),
+    });
+    return {
+      ok: true,
+      override,
+      ...(this.toolDescriptionHistory.lastWarning
+        ? { historyWarning: this.toolDescriptionHistory.lastWarning }
+        : {}),
+    };
   }
 
   @Delete("tools/:name")
-  resetTool(@Param("name") name: string): { ok: true } {
+  resetTool(@Param("name") name: string): {
+    ok: true;
+    historyWarning?: string;
+  } {
     normalizeToolOverride(name, {});
+    const beforeDescription =
+      this.settings.get().toolOverrides[name]?.description ?? null;
     const before = this.tools
       .list()
       .find((tool) => tool.name === name)?.enabled;
     this.settings.update(
       (settings) => void delete settings.toolOverrides[name],
     );
+    this.toolDescriptionHistory.record(name, beforeDescription, null);
     const after = this.tools.list().find((tool) => tool.name === name)?.enabled;
     if (before !== undefined && after !== undefined)
       this.toolHistory.record({ [name]: before }, { [name]: after });
     this.log("tool-reset", { tool: name });
-    return { ok: true };
+    return {
+      ok: true,
+      ...(this.toolDescriptionHistory.lastWarning
+        ? { historyWarning: this.toolDescriptionHistory.lastWarning }
+        : {}),
+    };
+  }
+
+  @Get("tools/:name/description-history")
+  toolDescriptionHistoryList(@Param("name") name: string) {
+    this.toolDescriptionHistory.current(name);
+    return this.toolDescriptionHistory.list(name);
+  }
+
+  @Post("tools/:name/description-history/:id/rollback")
+  @HttpCode(200)
+  rollbackToolDescription(
+    @Param("name") name: string,
+    @Param("id") id: string,
+  ) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige wijziging."]);
+    const revision = this.toolDescriptionHistory
+      .list(name)
+      .revisions.find((row) => row.id === id);
+    if (!revision)
+      throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
+    return this.toolDescriptionHistory.rollback(id);
   }
 
   /** Switch a whole ability on or off: every tool in it. */
