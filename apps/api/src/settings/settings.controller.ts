@@ -4,6 +4,7 @@ import { HelperPreferencesHistory } from "./helper-preferences-history.service.j
 import { ToolSwitchHistory } from "./tool-switch-history.service.js";
 import { SidebarHistory } from "./sidebar-history.service.js";
 import { PersonaHistoryService } from "./persona-history.service.js";
+import { InstructionSkillHistory } from "./instruction-skill-history.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
@@ -98,6 +99,7 @@ export class SettingsController {
     private readonly toolHistory: ToolSwitchHistory,
     private readonly sidebarHistory: SidebarHistory,
     private readonly personaHistory: PersonaHistoryService,
+    private readonly instructionSkillHistory: InstructionSkillHistory,
     @Optional()
     @Inject(WALLPAPER_PORT)
     private readonly wallpaper?: WallpaperPort,
@@ -400,6 +402,20 @@ export class SettingsController {
       truncated: entries.length === 500 || versions.length > 20,
       versions: versions.slice(0, 20).reverse(),
     };
+  }
+
+  @Get("skills/:id/content-history")
+  instructionSkillContentHistory(@Param("id") id: string) {
+    return this.instructionSkillHistory.list(id);
+  }
+
+  @Post("skills/:id/content-history/:revision/rollback")
+  @HttpCode(200)
+  rollbackInstructionSkill(
+    @Param("id") id: string,
+    @Param("revision") revision: string,
+  ) {
+    return this.instructionSkillHistory.rollback(id, revision);
   }
 
   /** NOVA proposes a better version of a skill. Nothing is saved: the screen shows the proposal. */

@@ -1,6 +1,16 @@
 <script lang="ts">
-  import type { Skill, SkillVersionHistory } from "@nova/contracts";
-  import { draftSkill, skillVersions, updateSkill } from "#lib/api/settings.ts";
+  import type {
+    InstructionSkillContentHistory,
+    Skill,
+    SkillVersionHistory,
+  } from "@nova/contracts";
+  import {
+    draftSkill,
+    getInstructionSkillContentHistory,
+    rollbackInstructionSkillContent,
+    skillVersions,
+    updateSkill,
+  } from "#lib/api/settings.ts";
   import Badge from "#components/ui/Badge.svelte";
   import Button from "#components/ui/Button.svelte";
   import Details from "#components/ui/Details.svelte";
@@ -26,6 +36,9 @@
   let making = $state(false);
   let histories = $state<Record<string, SkillVersionHistory>>({});
   let historyBusy = $state<string | null>(null);
+  let contentHistories = $state<Record<string, InstructionSkillContentHistory>>(
+    {},
+  );
 
   async function make(): Promise<void> {
     making = true;
@@ -69,6 +82,40 @@
         history.currentVersion === requestedVersion
       )
         histories[skill.id] = history;
+      if (skill.type === "instruction") {
+        const content = await getInstructionSkillContentHistory(skill.id);
+        if (
+          settings.data?.skills.find((item) => item.id === skill.id)
+            ?.version === requestedVersion &&
+          content.currentVersion === requestedVersion
+        )
+          contentHistories[skill.id] = content;
+      }
+    } catch (error) {
+      fail(error);
+    } finally {
+      historyBusy = null;
+    }
+  }
+
+  async function rollbackContent(skill: Skill, revision: string) {
+    if (
+      skill.type !== "instruction" ||
+      !window.confirm(
+        "Deze instructies herstellen? NOVA voert de vaardigheid niet uit.",
+      )
+    )
+      return;
+    historyBusy = skill.id;
+    try {
+      await rollbackInstructionSkillContent(skill.id, revision);
+      delete histories[skill.id];
+      delete contentHistories[skill.id];
+      await afterChange(`Instructies van “${skill.name}” hersteld.`);
+      const updated = settings.data?.skills.find(
+        (item) => item.id === skill.id,
+      );
+      if (updated) await showVersions(updated);
     } catch (error) {
       fail(error);
     } finally {
@@ -161,7 +208,8 @@
               <p class="hint">
                 Versiegegevens uit de laatste {histories[skill.id]!
                   .scannedEntries} auditregels. De inhoud en geheime headers staan
-                hier niet.
+                hier niet. Voor instructies kun je hieronder eerdere inhoud bekijken
+                en herstellen.
               </p>
               {#if histories[skill.id]!.versions.length}
                 <ol>
@@ -179,6 +227,29 @@
                   De lijst is begrensd; oudere versies ontbreken mogelijk.
                 </p>{/if}
             </div>
+          {/if}
+          {#if skill.type === "instruction" && contentHistories[skill.id]?.currentVersion === skill.version}
+            <h4>Inhoudsgeschiedenis</h4>
+            {#each contentHistories[skill.id]!.revisions as revision (revision.id)}
+              <details>
+                <summary
+                  ><time datetime={revision.at}>{revision.at}</time> · versie {revision
+                    .after.version}</summary
+                >
+                <p><strong>Voor</strong></p>
+                <pre>{revision.before.instructions}</pre>
+                <p><strong>Na</strong></p>
+                <pre>{revision.after.instructions}</pre>
+                <Button
+                  disabled={historyBusy === skill.id}
+                  onclick={() => rollbackContent(skill, revision.id)}
+                  >Herstel deze versie</Button
+                >
+              </details>
+            {/each}
+            {#if contentHistories[skill.id]!.truncated}<p class="hint">
+                Oudere wijzigingen ontbreken.
+              </p>{/if}
           {/if}
         </li>
       {/each}

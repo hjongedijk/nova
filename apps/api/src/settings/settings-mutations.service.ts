@@ -4,6 +4,7 @@ import { AuditService } from "../core/audit/audit.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { normalizePersona } from "./settings-validation.js";
 import { PersonaHistoryService } from "./persona-history.service.js";
+import { InstructionSkillHistory } from "./instruction-skill-history.service.js";
 import {
   normalizeSkill,
   publicSkill,
@@ -25,6 +26,7 @@ export class SettingsMutationsService {
     private readonly settings: SettingsStore,
     private readonly audit: AuditService,
     private readonly personaHistory: PersonaHistoryService,
+    private readonly skillHistory: InstructionSkillHistory,
   ) {}
 
   private log(
@@ -96,6 +98,7 @@ export class SettingsMutationsService {
         (item as StoredSkill).id === skill.id ? (skill as never) : item,
       );
     });
+    this.skillHistory.record(existing, skill);
     this.log(
       "skill-updated",
       { skill: skill.id, version: skill.version },

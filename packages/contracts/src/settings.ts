@@ -107,6 +107,20 @@ export interface SkillVersionHistory {
   versions: { version: number; at: string; action: "created" | "updated" }[];
 }
 
+/** Private, PIN-protected content history for instruction skills only. */
+export interface InstructionSkillContentRevision {
+  id: string;
+  skillId: string;
+  at: string;
+  before: { version: number; instructions: string };
+  after: { version: number; instructions: string };
+}
+export interface InstructionSkillContentHistory {
+  currentVersion: number;
+  revisions: InstructionSkillContentRevision[];
+  truncated: boolean;
+}
+
 /** POST /settings/skills/test */
 export type SkillTestResult =
   | { ok: true; type: "instruction"; matched: boolean; phrase: string }

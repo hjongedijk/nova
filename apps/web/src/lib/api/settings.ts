@@ -9,6 +9,8 @@ import type {
   OmniRouteAccountRemovalResult,
   MqttOverview,
   QdrantOverview,
+  InstructionSkill,
+  InstructionSkillContentHistory,
 } from "@nova/contracts";
 import type {
   NativeGatewayReport,
@@ -133,6 +135,14 @@ export const rollbackPersonaRevision = (id: string) =>
   write<PersonaRollbackResult>(
     "POST",
     `/persona/history/${enc(id)}/rollback`,
+    {},
+  );
+export const getInstructionSkillContentHistory = (id: string) =>
+  read<InstructionSkillContentHistory>(`/skills/${enc(id)}/content-history`);
+export const rollbackInstructionSkillContent = (id: string, revision: string) =>
+  write<{ ok: true; skill: InstructionSkill }>(
+    "POST",
+    `/skills/${enc(id)}/content-history/${enc(revision)}/rollback`,
     {},
   );
 
