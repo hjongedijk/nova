@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
 import {
@@ -57,6 +57,10 @@ describe("RoutingService", () => {
       expect(config.omniUrl).toBe("http://other-gateway.invalid/v1");
       const routing = new RoutingService(config);
       expect(routing.status()).toMatchObject({
+        ready: false,
+        status: "GATEWAY_PROVENANCE_UNVERIFIED",
+      });
+      expect(routing.verifyForManagement()).toMatchObject({
         ready: false,
         status: "GATEWAY_PROVENANCE_UNVERIFIED",
       });
@@ -192,6 +196,94 @@ describe("RoutingService verified SQLite policy", () => {
     expect(JSON.stringify(routing.status())).not.toContain(
       "fixture-private-key",
     );
+  });
+
+  it("keeps a pending management change blocked across service instances", () => {
+    expect(routing.assertFree().ready).toBe(true);
+    fs.writeFileSync(
+      path.join(directory, "free-routing-management-block.json"),
+      JSON.stringify({ pending: true }),
+    );
+    for (const service of [routing, new RoutingService(new NovaConfig())]) {
+      expect(service.status()).toMatchObject({
+        ready: false,
+        policyVerified: false,
+        status: "POLICY_CHANGE_PENDING",
+      });
+      expect(() => service.assertFree()).toThrow(FreeRoutingBlockedError);
+    }
+  });
+
+  it.each(["malformed", "dangling symlink", "directory"])(
+    "blocks any existing management marker, including a %s",
+    (kind) => {
+      const marker = path.join(directory, "free-routing-management-block.json");
+      if (kind === "dangling symlink")
+        fs.symlinkSync(path.join(directory, "missing-marker-target"), marker);
+      else if (kind === "directory") fs.mkdirSync(marker);
+      else fs.writeFileSync(marker, "not-json");
+      expect(routing.status()).toMatchObject({
+        ready: false,
+        status: "POLICY_CHANGE_PENDING",
+      });
+      expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
+    },
+  );
+
+  it("allows management verification without authorizing inference or removing its marker", () => {
+    const marker = path.join(directory, "free-routing-management-block.json");
+    fs.writeFileSync(marker, "{}");
+    expect(routing.verifyForManagement()).toMatchObject({
+      ready: true,
+      policyVerified: true,
+    });
+    expect(fs.existsSync(marker)).toBe(true);
+    expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
+    db.exec("UPDATE provider_connections SET is_active=0");
+    expect(routing.verifyForManagement()).toMatchObject({
+      ready: false,
+      policyVerified: false,
+    });
+  });
+
+  it("checks a management marker before the test-only unrestricted bypass", () => {
+    process.env.FREE_ONLY = "false";
+    process.env.NODE_ENV = "test";
+    const service = new RoutingService(new NovaConfig());
+    expect(service.status().ready).toBe(true);
+    fs.writeFileSync(
+      path.join(directory, "free-routing-management-block.json"),
+      "{}",
+    );
+    expect(service.status()).toMatchObject({
+      ready: false,
+      status: "POLICY_CHANGE_PENDING",
+    });
+    expect(() => service.assertFree()).toThrow(FreeRoutingBlockedError);
+    db.exec("UPDATE api_keys SET revoked_at='2026-10-10T12:00:00Z'");
+    expect(service.verifyForManagement().ready).toBe(false);
+  });
+
+  it("fails closed when the management marker cannot be inspected", () => {
+    const stat = vi.spyOn(fs, "lstatSync").mockImplementation(() => {
+      throw Object.assign(new Error("private filesystem failure"), {
+        code: "EACCES",
+      });
+    });
+    try {
+      const status = routing.status();
+      expect(status).toMatchObject({
+        ready: false,
+        policyVerified: false,
+        status: "POLICY_UNAVAILABLE",
+      });
+      expect(JSON.stringify(status)).not.toContain(
+        "private filesystem failure",
+      );
+      expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
+    } finally {
+      stat.mockRestore();
+    }
   });
 
   it.each([

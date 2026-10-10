@@ -82,3 +82,17 @@ export interface OmniRouteAccountsReport {
   }[];
   billingVerified: false;
 }
+
+export interface OmniRouteAccountRemovalPrepared {
+  ok: boolean;
+  error?: string;
+  name?: string;
+  action?: PendingConfirmation;
+}
+export interface OmniRouteAccountRemovalResult {
+  ok: boolean;
+  error?: string;
+  verified?: boolean | null;
+  routeReady?: boolean;
+  auditWarning?: string;
+}

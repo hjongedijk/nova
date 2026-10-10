@@ -1,4 +1,8 @@
-import type { OmniRouteAccountsReport } from "@nova/contracts";
+import type {
+  OmniRouteAccountsReport,
+  OmniRouteAccountRemovalPrepared,
+  OmniRouteAccountRemovalResult,
+} from "@nova/contracts";
 import type {
   NativeGatewayReport,
   NativeSkillDocument,
@@ -226,3 +230,21 @@ export const rollbackConnection = (id: string) =>
 
 export const getOmniRouteAccounts = () =>
   read<OmniRouteAccountsReport>("/omniroute/accounts");
+
+export const prepareOmniRouteAccountRemoval = (id: string) =>
+  write<OmniRouteAccountRemovalPrepared>(
+    "POST",
+    `/omniroute/accounts/${enc(id)}/removal/prepare`,
+    { acknowledgeEffects: true },
+  );
+export const confirmOmniRouteAccountRemoval = (
+  id: string,
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteAccountRemovalResult>(
+    "POST",
+    `/omniroute/accounts/${enc(id)}/removal/confirm`,
+    { sessionId, confirmationId, approve },
+  );

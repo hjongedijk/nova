@@ -40,6 +40,13 @@ export class FreeRoutingBlockedError extends Error {}
  */
 @Injectable()
 export class RoutingService {
+  private managementBlocked = false;
+
+  /** Retain a stop if durable marker removal or restoration fails. */
+  setManagementBlocked(blocked: boolean): void {
+    this.managementBlocked = blocked;
+  }
+
   constructor(private readonly config: NovaConfig) {}
 
   private policy(): Policy {
@@ -57,6 +64,36 @@ export class RoutingService {
   }
 
   status(): RoutingStatus {
+    if (this.managementBlocked)
+      return {
+        freeOnly: true,
+        ready: false,
+        policyVerified: false,
+        status: "POLICY_CHANGE_PENDING",
+        reason:
+          "Routing management changes require fresh verification. Inference is blocked.",
+      };
+    try {
+      fs.lstatSync(this.config.dataFile("free-routing-management-block.json"));
+      return {
+        freeOnly: true,
+        ready: false,
+        policyVerified: false,
+        status: "POLICY_CHANGE_PENDING",
+        reason:
+          "Routing management changes require fresh verification. Inference is blocked.",
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+        return {
+          freeOnly: true,
+          ready: false,
+          policyVerified: false,
+          status: "POLICY_UNAVAILABLE",
+          reason:
+            "Free-only configuration cannot be verified. Inference is blocked.",
+        };
+    }
     if (this.config.omniUrl !== this.config.verifiedOmniUrl)
       return {
         freeOnly: true,
@@ -72,6 +109,24 @@ export class RoutingService {
         freeOnly: false,
         ready: true,
         status: "TEST_OR_EXPLICIT_UNRESTRICTED_MODE",
+      };
+    return this.inspectPolicy();
+  }
+
+  /** Management proof only: this never authorizes inference through a pending change. */
+  verifyForManagement(): RoutingStatus {
+    return this.inspectPolicy();
+  }
+
+  private inspectPolicy(): RoutingStatus {
+    if (this.config.omniUrl !== this.config.verifiedOmniUrl)
+      return {
+        freeOnly: true,
+        ready: false,
+        policyVerified: false,
+        status: "GATEWAY_PROVENANCE_UNVERIFIED",
+        reason:
+          "The configured endpoint is not bound to the locally verified OmniRoute database.",
       };
     try {
       const policy = this.policy();

@@ -145,6 +145,10 @@ try {
     let persona = overview.persona;
     let updateChecks = 0;
     let accountsReads = 0;
+    let accountInventoryGate = null;
+    let releaseAccountInventory;
+    let accountWrites = 0;
+    let accountRemoved = false;
     let nativeMode = "off";
     let nativePreparedMode = "off";
     let nativeWrites = 0;
@@ -205,19 +209,22 @@ try {
         };
       } else if (endpoint === "/settings/omniroute/accounts") {
         accountsReads++;
+        if (accountInventoryGate) await accountInventoryGate;
         data = {
           available: true,
           truncated: false,
           billingVerified: false,
-          connections: [
-            {
-              id: "fixture-account",
-              provider: "fixture",
-              name: "Voorbeeldaccount",
-              active: true,
-              credentialPresent: true,
-            },
-          ],
+          connections: accountRemoved
+            ? []
+            : [
+                {
+                  id: "fixture-account",
+                  provider: "fixture",
+                  name: "Voorbeeldaccount",
+                  active: true,
+                  credentialPresent: true,
+                },
+              ],
           models: [
             {
               provider: "fixture",
@@ -229,6 +236,40 @@ try {
             },
           ],
         };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/accounts/fixture-account/removal/prepare"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        assert.equal(request.postDataJSON().acknowledgeEffects, true);
+        const now = await page.evaluate(() => Date.now());
+        data = {
+          ok: true,
+          name: "Voorbeeldaccount",
+          action: {
+            confirmationId: "55555555-5555-4555-8555-555555555555",
+            sessionId: "settings-account:66666666-6666-4666-8666-666666666666",
+            tool: "omniroute_account_remove",
+            args: {
+              id: "fixture-account",
+              revision: "private-fixture-revision",
+            },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: now,
+            expiresAt: now + 60000,
+          },
+        };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/accounts/fixture-account/removal/confirm"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        if (request.postDataJSON().approve) {
+          accountWrites++;
+          accountRemoved = true;
+          data = { ok: true, verified: true, routeReady: false };
+        } else data = { ok: true };
       } else if (endpoint === "/settings/omniroute/native")
         data = {
           available: true,
@@ -511,6 +552,126 @@ try {
         `settings-accounts-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
+    accountInventoryGate = new Promise((resolve) => {
+      releaseAccountInventory = resolve;
+    });
+    await accounts
+      .getByRole("button", { name: "Accounts en catalogus laden", exact: true })
+      .click();
+    await accounts
+      .getByRole("button", { name: "Laden…", exact: true })
+      .waitFor();
+    assert.equal(
+      await accounts
+        .getByRole("button", {
+          name: "Verwijder Voorbeeldaccount",
+          exact: true,
+        })
+        .isDisabled(),
+      true,
+    );
+    releaseAccountInventory();
+    accountInventoryGate = null;
+    await accounts
+      .getByRole("button", { name: "Accounts en catalogus laden", exact: true })
+      .waitFor();
+    assert.equal(
+      await accounts
+        .getByRole("button", {
+          name: "Verwijder Voorbeeldaccount",
+          exact: true,
+        })
+        .isDisabled(),
+      false,
+    );
+    const removal = page.getByRole("group", {
+      name: "Gateway-account verwijderen",
+    });
+    const chooseRemoval = async () => {
+      await accounts
+        .getByRole("button", {
+          name: "Verwijder Voorbeeldaccount",
+          exact: true,
+        })
+        .click();
+      assert.equal(
+        await removal
+          .getByRole("button", {
+            name: "Accountverwijdering voorbereiden",
+            exact: true,
+          })
+          .isDisabled(),
+        true,
+      );
+      await removal.getByRole("checkbox").check();
+      await removal
+        .getByRole("button", {
+          name: "Accountverwijdering voorbereiden",
+          exact: true,
+        })
+        .click();
+      await removal
+        .getByRole("button", {
+          name: "Bevestig accountverwijdering",
+          exact: true,
+        })
+        .waitFor();
+    };
+    await chooseRemoval();
+    assert.equal(accountWrites, 0);
+    assert.equal(
+      await accounts
+        .getByRole("button", {
+          name: "Accounts en catalogus laden",
+          exact: true,
+        })
+        .isDisabled(),
+      true,
+    );
+    await removal.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-account-removal-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+    await removal
+      .getByRole("button", {
+        name: "Annuleer accountverwijdering",
+        exact: true,
+      })
+      .click();
+    await removal.waitFor({ state: "hidden" });
+    assert.equal(accountWrites, 0);
+    await chooseRemoval();
+    await page.clock.fastForward(60001);
+    assert.equal(
+      await removal
+        .getByRole("button", {
+          name: "Bevestig accountverwijdering",
+          exact: true,
+        })
+        .isDisabled(),
+      true,
+    );
+    await removal
+      .getByRole("button", {
+        name: "Annuleer accountverwijdering",
+        exact: true,
+      })
+      .click();
+    await removal.waitFor({ state: "hidden" });
+    await chooseRemoval();
+    await removal
+      .getByRole("button", {
+        name: "Bevestig accountverwijdering",
+        exact: true,
+      })
+      .click();
+    await accounts
+      .getByText("Geen accounts gevonden.", { exact: true })
+      .waitFor();
+    assert.equal(accountWrites, 1);
+    assert.match(await accounts.innerText(), /AI blijft geblokkeerd/);
 
     await page
       .getByRole("button", { name: "OmniRoute-overzicht laden", exact: true })
@@ -880,7 +1041,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory and confirmed deletion.",
   );
 } finally {
   await browser.close();

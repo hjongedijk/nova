@@ -19,6 +19,8 @@ The route is "ready" only when all of these hold:
 - Every provider in the policy's `blockedProviders` is also blocked in OmniRoute.
 - The policy has at least one enabled model, and every enabled model is a catalog entry that is `nativeAutoEligible` and passes the free-access classification below.
 
+Management changes also block inference while `free-routing-management-block.json` exists. A failed or partial account operation retains that stop until fresh verification succeeds; restarting does not clear it. Compound filesystem failures retain an in-memory stop as well.
+
 Anything else, including a missing or unreadable policy file or database, blocks inference. The status is visible in the interface and at `GET /api/providers` (fields such as `ready`, `status`, `reason`), with the values `POLICY_DRIFT_BLOCKED` and `POLICY_UNAVAILABLE` for the failure cases.
 
 ### Free-access classification

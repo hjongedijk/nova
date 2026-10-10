@@ -1,8 +1,23 @@
 <script lang="ts">
-  import type { OmniRouteAccountsReport } from "@nova/contracts";
+  import OmniRouteAccountRemoval from "./OmniRouteAccountRemoval.svelte";
+  import type {
+    OmniRouteAccountRemovalResult,
+    OmniRouteAccountsReport,
+  } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
   import { getOmniRouteAccounts } from "#lib/api/settings.ts";
   let report = $state<OmniRouteAccountsReport | null>(null);
+  let selection = $state<{ id: string; name: string } | null>(null);
+  let notice = $state("");
+  function removed(result?: OmniRouteAccountRemovalResult) {
+    if (result?.verified === true && selection && report) {
+      report.connections = report.connections.filter(
+        (account) => account.id !== selection?.id,
+      );
+      notice = `Account verwijderd en gecontroleerd. ${result.routeReady ? "Gratis route opnieuw geverifieerd." : "AI blijft geblokkeerd. Controleer je gratis routebeleid."}${result.auditWarning ? ` ${result.auditWarning}` : ""}`;
+    }
+    selection = null;
+  }
   let busy = $state(false);
   let error = $state("");
   async function load() {
@@ -26,9 +41,15 @@
     Bekijk aangesloten accounts en de catalogus van OmniRoute. Een gratis label
     bewijst niet dat jouw account kosteloos werkt.
   </p>
-  <Button onclick={load} disabled={busy}
+  <Button onclick={load} disabled={busy || !!selection}
     >{busy ? "Laden…" : "Accounts en catalogus laden"}</Button
   >
+  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if selection}{#key selection.id}<OmniRouteAccountRemoval
+        id={selection.id}
+        name={selection.name}
+        done={removed}
+      />{/key}{/if}
   {#if error}<p role="status">{error}</p>{/if}
   {#if report && !report.available}<p role="status">{report.error}</p>{/if}
   {#if report?.available}
@@ -55,6 +76,16 @@
             >{account.credentialPresent
               ? "Sleutel aanwezig"
               : "Geen sleutel gemeld"}</span
+          >
+          <Button
+            disabled={busy || !!selection}
+            onclick={() => {
+              selection = {
+                id: account.id,
+                name: account.name || account.provider,
+              };
+              notice = "";
+            }}>Verwijder {account.name || account.provider}</Button
           >
         </li>
       {/each}

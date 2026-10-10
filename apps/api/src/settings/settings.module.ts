@@ -1,3 +1,5 @@
+import { OmniRouteAccountRemovalController } from "./omniroute-account-removal.controller.js";
+import { OmniRouteAccountRemoval } from "./omniroute-account-removal.service.js";
 import { OmniRouteAccountsController } from "./omniroute-accounts.controller.js";
 import { Module } from "@nestjs/common";
 import { SettingsSource } from "./settings.source.js";
@@ -46,6 +48,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     NativeSkillModesController,
     NativePromptController,
     OmniRouteAccountsController,
+    OmniRouteAccountRemovalController,
   ],
   providers: [
     SettingsGuard,
@@ -53,6 +56,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     SettingsSource,
     NativeSkillModesService,
     NativePromptService,
+    OmniRouteAccountRemoval,
     UpdatesService,
     ServiceConnectionsStore,
     ServiceConnectionsAdapter,
