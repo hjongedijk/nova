@@ -1,6 +1,7 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { RoutingService } from "../routing/routing.service.js";
+import { ModelMetricsService } from "../routing/model-metrics.service.js";
 import type { ModelTool } from "../tools/tools.service.js";
 
 export interface ModelToolCall {
@@ -67,7 +68,16 @@ export class OmniRouteClient {
   constructor(
     private readonly config: NovaConfig,
     private readonly routing: RoutingService,
+    @Optional() private readonly metrics?: ModelMetricsService,
   ) {}
+
+  private recordResponse(
+    model: unknown,
+    provider: unknown,
+    started: number,
+  ): void {
+    this.metrics?.observe(model, provider, Date.now() - started);
+  }
 
   get configured(): boolean {
     return Boolean(
@@ -158,6 +168,7 @@ export class OmniRouteClient {
       };
       const message = data.choices?.[0]?.message;
       if (!message) throw new Error("OmniRoute returned no assistant message");
+      this.recordResponse(data.model, data.provider, started);
       return {
         assistant: message,
         model: data.model ?? null,
@@ -269,6 +280,7 @@ export class OmniRouteClient {
       if (buffer.trim()) consume(buffer.trim());
       if (!finished)
         throw new Error("OmniRoute stream ended before completion");
+      this.recordResponse(model, provider, started);
       return {
         assistant: {
           role: "assistant",

@@ -126,15 +126,11 @@ Everything NOVA writes lives in the data folder (`nova-data/` in production, `de
 
 ## Settings screen
 
-Open it from the menu in the interface (title "Instellingen"). If `NOVA_ADMIN_PIN` is set it asks for the PIN first. Its tabs:
-
-| Tab                | What you configure                                                                                                                                                                                                                                                                                                                                                                         |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Wat NOVA kan       | "Abilities": the individual tools grouped into things a person understands (weather, lookup and news, timers and lists, smart home, servers, Windows PC, ...). Switch a group or a single tool off, or edit a tool's description. Shows each tool's risk level.                                                                                                                            |
-| Eigen vaardigheden | Your own **skills**: instruction skills (a playbook NOVA follows with its existing tools, for example a "movie night" routine) and webhook skills (an HTTP call with your own parameters, which becomes a real tool named `skill_<id>` with risk `READ_ONLY`, `SAFE` or `CONFIRM`). There is an AI assistant to draft and improve skills, a test panel and a run history. Up to 50 skills. |
-| Zijbalk            | Which side panels are shown, in which column and on which page, and your **custom panels** (value, list, buttons, note) fed by a web address. Up to 20 custom panels.                                                                                                                                                                                                                      |
-| Gedrag             | Sound on this device (voice, "Hey NOVA", microphone test), NOVA's persona and personal rules, and the quick actions on the home screen.                                                                                                                                                                                                                                                    |
-| Meer               | Connected devices (the Windows PC: wallpaper per display, helper, mode; agent download), and back-up: export and import of all settings.                                                                                                                                                                                                                                                   |
+Open **Instellingen** from the main menu, or `/settings?section=general`. The page has twelve sections and search.
+Deep links use `section=voice`, `personality`, `models`, `abilities`, `skills`, `automation`, `connections`,
+`devices`, `memory`, `safety` or `system`. The inventory and screenshots are in [settings design](settings-design.md).
+If `NOVA_ADMIN_PIN` is set, unlock first. The PIN stays only in browser memory, expires after fifteen minutes,
+and can be cleared with **Instellingen vergrendelen**. Repeated wrong guesses are throttled by the API.
 
 Settings writes are accepted only from the settings screen (they need the header `x-nova-admin: 1`), are validated like an import, and are written to the action log.
 
@@ -183,3 +179,21 @@ were saved and the local history remains available.
 
 These connection settings and Node-RED flows are not yet included in the existing version-one
 settings download; complete-system export/import remains phase J work.
+
+## Model observations and release checks
+
+**Modellen** shows rolling gateway measurements for the past 24 hours: requests, failures, average latency,
+time to first token and output speed. The gateway may serve other clients, so these aggregates are not
+NOVA-only. Only identifiers and numbers are projected; request bodies, account details and credentials are excluded.
+The last completed NOVA model response is held in private volatile memory since boot and is available only
+through the guarded settings endpoint. It is excluded from public component status and model prompts.
+No active inference probe runs; a historical success does not prove current availability or free billing.
+The existing fail-closed route verifier remains authoritative.
+
+**Systeem** shows the running `NOVA_VERSION` and an explicit **Controleer op nieuwe release** button.
+Opening the page does not contact GitHub. A check reads the public latest stable release of `hjongedijk/nova`,
+without credentials; concurrent checks are shared and results cached for five minutes. Release notes are
+rendered as plain text, bounded to 12,000 characters. Redirects, excessive responses, malformed releases,
+network failures and rate limits produce generic Dutch errors. The check does not install or restart anything.
+Development builds cannot be compared with release numbers. A failed refresh retains the last fetched release,
+with an explicit error and check timestamp.

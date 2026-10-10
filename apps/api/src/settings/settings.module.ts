@@ -1,4 +1,8 @@
 import { Module } from "@nestjs/common";
+import { UpdatesController } from "./updates.controller.js";
+import { UpdatesService } from "./updates.service.js";
+import { RoutingModule } from "../routing/routing.module.js";
+import { ModelMetricsController } from "./model-metrics.controller.js";
 import { ServiceConnectionsController } from "./services/service-connections.controller.js";
 import { ServiceConnectionsStore } from "./services/service-connections.store.js";
 import { ServiceConnectionsAdapter } from "./services/service-connections.adapter.js";
@@ -22,14 +26,17 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
  * PublicConfigService for the chat and the dashboard.
  */
 @Module({
-  imports: [SettingsStoreModule],
+  imports: [SettingsStoreModule, RoutingModule],
   controllers: [
     SettingsController,
     WidgetsController,
     ServiceConnectionsController,
+    ModelMetricsController,
+    UpdatesController,
   ],
   providers: [
     SettingsGuard,
+    UpdatesService,
     ServiceConnectionsStore,
     ServiceConnectionsAdapter,
     SkillsSource,

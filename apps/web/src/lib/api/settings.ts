@@ -1,4 +1,6 @@
 import type {
+  UpdateReport,
+  ModelMetricsReport,
   ImportResult,
   ServiceConnection,
   ServiceConnectionRevision,
@@ -45,6 +47,10 @@ const write = <T>(
 const enc = encodeURIComponent;
 
 export const getSettings = () => read<SettingsOverview>("");
+export const getModelMetrics = () =>
+  read<ModelMetricsReport>("/models/metrics");
+export const getUpdates = () => read<UpdateReport>("/updates");
+export const checkUpdates = () => write<UpdateReport>("POST", "/updates/check");
 
 export const savePersona = (text: string) =>
   write<{ ok: true; persona: string }>("PUT", "/persona", { text });

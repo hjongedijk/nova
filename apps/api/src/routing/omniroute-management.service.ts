@@ -45,6 +45,7 @@ interface SkillSummary {
 export class OmniRouteManagement {
   private cookie: string | null = null;
   private loginPromise: Promise<void> | null = null;
+  private activeRequests = 0;
   private snapshot: { at: number; data: OmniRouteStatus } | null = null;
   /** Replaceable in tests. */
   fetcher: Fetcher = (...args) => fetch(...args);
@@ -61,10 +62,23 @@ export class OmniRouteManagement {
     scope?: string;
     fetcher?: Fetcher;
   }): void {
-    if (options.url) this.urlOverride = options.url;
-    if (options.password) this.passwordOverride = options.password;
-    if (options.scope) this.scopeOverride = options.scope;
-    if (options.fetcher) this.fetcher = options.fetcher;
+    const changed =
+      (options.url !== undefined && options.url !== this.urlOverride) ||
+      (options.password !== undefined &&
+        options.password !== this.passwordOverride) ||
+      (options.scope !== undefined && options.scope !== this.scopeOverride) ||
+      (options.fetcher !== undefined && options.fetcher !== this.fetcher);
+    if (changed && (this.loginPromise || this.activeRequests > 0))
+      throw new Error("OmniRoute management configuration is in use");
+    if (changed) {
+      this.cookie = null;
+      this.snapshot = null;
+    }
+    if (options.url !== undefined) this.urlOverride = options.url;
+    if (options.password !== undefined)
+      this.passwordOverride = options.password;
+    if (options.scope !== undefined) this.scopeOverride = options.scope;
+    if (options.fetcher !== undefined) this.fetcher = options.fetcher;
   }
 
   private get url(): string {
@@ -132,31 +146,66 @@ export class OmniRouteManagement {
   ): Promise<T> {
     if (!endpoint.startsWith("/api/") || endpoint.includes(".."))
       throw new Error("Invalid OmniRoute endpoint");
-    if (!this.cookie) await this.login();
-    const response = await this.fetcher(`${this.url}${endpoint}`, {
-      method: options.method ?? "GET",
-      headers: { "content-type": "application/json", cookie: this.cookie! },
-      ...(options.body === undefined
-        ? {}
-        : { body: JSON.stringify(options.body) }),
-      signal: AbortSignal.timeout(10_000),
-      redirect: "error",
-    });
-    if (response.status === 401 && retry) {
-      this.cookie = null;
-      await this.login();
-      return this.request<T>(endpoint, options, false);
+    this.activeRequests += 1;
+    try {
+      if (!this.cookie) await this.login();
+      const response = await this.fetcher(`${this.url}${endpoint}`, {
+        method: options.method ?? "GET",
+        headers: { "content-type": "application/json", cookie: this.cookie! },
+        ...(options.body === undefined
+          ? {}
+          : { body: JSON.stringify(options.body) }),
+        signal: AbortSignal.timeout(10_000),
+        redirect: "error",
+      });
+      if (response.status === 401 && retry) {
+        this.cookie = null;
+        await this.login();
+        return this.request<T>(endpoint, options, false);
+      }
+      if (!response.ok)
+        throw new Error(
+          `OmniRoute management request failed (${response.status})`,
+        );
+      if (response.status === 204) return {} as T;
+      return (await this.readResponse(response, options.raw === true)) as T;
+    } finally {
+      this.activeRequests -= 1;
     }
-    if (!response.ok)
-      throw new Error(
-        `OmniRoute management request failed (${response.status})`,
-      );
-    if (response.status === 204) return {} as T;
-    return (
-      options.raw
-        ? (await response.text()).slice(0, 16_000)
-        : await response.json()
-    ) as T;
+  }
+
+  private async readResponse(
+    response: Response,
+    raw: boolean,
+  ): Promise<unknown> {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("OmniRoute management response is invalid");
+    const decoder = new TextDecoder();
+    let bytes = 0;
+    let text = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > 2_000_000) {
+          await reader.cancel().catch(() => undefined);
+          throw new Error("OmniRoute management response is too large");
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } catch {
+      throw new Error("OmniRoute management response could not be read");
+    } finally {
+      reader.releaseLock();
+    }
+    if (raw) return text.slice(0, 16_000);
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error("OmniRoute management response is invalid");
+    }
   }
 
   async skills(

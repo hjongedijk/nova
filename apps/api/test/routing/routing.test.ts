@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
@@ -80,6 +81,165 @@ describe("RoutingService", () => {
     process.env.NODE_ENV = "test";
     expect(new RoutingService(new NovaConfig()).status().ready).toBe(true);
   });
+});
+
+describe("RoutingService verified SQLite policy", () => {
+  let directory: string;
+  let db: DatabaseSync;
+  let routing: RoutingService;
+  let previous: Record<string, string | undefined>;
+  const model = "fixture-provider/free-model";
+  const candidate = {
+    provider: "fixture-provider",
+    modelId: "free-model",
+    freeType: "recurring-daily",
+    billingVerified: true,
+    hardStopGuaranteed: true,
+    accountFreeVerified: true,
+    nativeAutoEligible: true,
+    nativeQuota: { status: "SAFE" },
+    tos: "allowed",
+  };
+  const policy = () => ({
+    route: "auto",
+    enabledModels: [model],
+    verifiedProviders: ["fixture-provider"],
+    verifiedConnectionIds: ["fixture-connection"],
+    blockedProviders: ["paid-provider"],
+    nativeModelAllowlist: [model],
+    catalog: [{ ...candidate, nativeQuota: { ...candidate.nativeQuota } }],
+  });
+  const writePolicy = (value: unknown) =>
+    fs.writeFileSync(
+      path.join(directory, "free-routing-policy.json"),
+      JSON.stringify(value),
+    );
+
+  beforeEach(() => {
+    directory = fs.mkdtempSync(path.join(os.tmpdir(), "nova-policy-proof-"));
+    const env = {
+      NOVA_DATA_DIR: directory,
+      OMNIROUTE_DATABASE: path.join(directory, "gateway.sqlite"),
+      OMNIROUTE_URL: "http://fixture-gateway.invalid/v1",
+      OMNIROUTE_API_KEY: "fixture-private-key",
+      OMNIROUTE_MODEL: "auto",
+      FREE_ONLY: "true",
+      NODE_ENV: "production",
+    };
+    previous = Object.fromEntries(
+      Object.keys(env).map((key) => [key, process.env[key]]),
+    );
+    Object.assign(process.env, env);
+    db = new DatabaseSync(env.OMNIROUTE_DATABASE);
+    db.exec(`
+      CREATE TABLE key_value (namespace TEXT, key TEXT, value TEXT);
+      CREATE TABLE api_keys (
+        key TEXT, is_active INTEGER, revoked_at TEXT,
+        model_access_mode TEXT, allowed_models TEXT,
+        allowed_connections TEXT, allow_auto_combos INTEGER
+      );
+    `);
+    const settings = {
+      freeAccessPolicy: "strict",
+      hidePaidModels: true,
+      excludeTosAvoid: true,
+      modelVisibilityAllowlist: [model],
+      blockedProviders: ["paid-provider"],
+    };
+    const insert = db.prepare(
+      "INSERT INTO key_value VALUES ('settings', ?, ?)",
+    );
+    for (const [key, value] of Object.entries(settings))
+      insert.run(key, JSON.stringify(value));
+    db.prepare(
+      "INSERT INTO api_keys VALUES (?, 1, NULL, 'restricted', ?, ?, 0)",
+    ).run(
+      env.OMNIROUTE_API_KEY,
+      JSON.stringify(["auto"]),
+      JSON.stringify(["fixture-connection"]),
+    );
+    writePolicy(policy());
+    routing = new RoutingService(new NovaConfig());
+  });
+
+  afterEach(() => {
+    db.close();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("accepts a verified free auto route from a real read-only SQLite database", () => {
+    expect(routing.assertFree()).toMatchObject({
+      freeOnly: true,
+      ready: true,
+      policyVerified: true,
+      status: "OK",
+      route: "auto",
+      enabledModels: [model],
+    });
+    expect(JSON.stringify(routing.status())).not.toContain(
+      "fixture-private-key",
+    );
+  });
+
+  it.each([
+    [
+      "native free policy",
+      "UPDATE key_value SET value='\"permissive\"' WHERE key='freeAccessPolicy'",
+    ],
+    [
+      "paid-model visibility",
+      "UPDATE key_value SET value='false' WHERE key='hidePaidModels'",
+    ],
+    [
+      "native model allowlist",
+      "UPDATE key_value SET value='[]' WHERE key='modelVisibilityAllowlist'",
+    ],
+    [
+      "key model restriction",
+      'UPDATE api_keys SET allowed_models=\'["auto","paid-model"]\'',
+    ],
+    [
+      "key connection restriction",
+      "UPDATE api_keys SET allowed_connections='[\"unverified-connection\"]'",
+    ],
+    ["key revocation", "UPDATE api_keys SET revoked_at='2026-10-10T12:00:00Z'"],
+  ])(
+    "blocks inference after %s drift, without a restart",
+    (_name, mutation) => {
+      expect(routing.assertFree().ready).toBe(true);
+      db.exec(mutation);
+      expect(routing.status()).toMatchObject({
+        ready: false,
+        policyVerified: false,
+        status: "POLICY_DRIFT_BLOCKED",
+      });
+      expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
+    },
+  );
+
+  it.each(["paid", "ineligible", "exhausted"])(
+    "blocks inference when the verified model becomes %s",
+    (change) => {
+      expect(routing.assertFree().ready).toBe(true);
+      const changed = policy();
+      const modelCandidate = changed.catalog[0];
+      if (!modelCandidate) throw new Error("Missing model fixture");
+      if (change === "paid") Object.assign(modelCandidate, { paid: true });
+      if (change === "ineligible") modelCandidate.nativeAutoEligible = false;
+      if (change === "exhausted")
+        modelCandidate.nativeQuota.status = "EXHAUSTED";
+      writePolicy(changed);
+      expect(routing.status()).toMatchObject({
+        ready: false,
+        policyVerified: true,
+      });
+      expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
+    },
+  );
 });
 
 describe("OmniRouteManagement", () => {

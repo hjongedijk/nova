@@ -11,7 +11,7 @@ Do not record credentials, personal messages or actual deployment configuration 
 - User approved push/release of A, then immediate work on J. Future phase releases still require their phase approval.
 - Phase A tags v0.1.9/v0.1.10 published agent assets, but Docker Hub throttling/timeouts prevented image publishing.
 - Commit `3534257` configures Docker's registry mirror for QEMU, BuildKit and base-image pulls; v0.1.11 succeeded: CI/release green, amd64/arm64 image and both release assets verified.
-- Phase J in progress: 44/259 tasks overall; standalone settings, navigation/search, preservation, PIN and nine private service connections verified.
+- Phase J in progress: 46/259 tasks overall; settings block `81ceebe` verified; private model metrics and explicit release checks also built and tested.
 - This file must be updated with test outcomes and the next unfinished step before a usage-limit pause.
 - Resume automatically when the host allows execution; this file cannot restart an ended session or increase quota.
 
@@ -35,11 +35,11 @@ Run Node checks with Node 24 (host Node 22 is below the repository engine requir
 Use `scripts/check-helper.mjs`; its fixtures contain test data only.
 PowerShell syntax/geometry checks do not prove Windows kiosk/tray/audio/display behavior.
 
-Phase J first block: 320 tests in 31 files; format/lint/typecheck/build passed in Node 24 Docker.
-Production settings browser checks passed for all sections, search/keyboard/deep links, mobile, save, PIN expiry and lock.
+Phase J latest block: 373 tests in 34 files; format/lint/typecheck/build passed in Node 24 Docker.
+Production settings browser checks passed for all sections, search/keyboard/deep links, mobile, save, PIN expiry/lock, model measurements and explicit release checks.
 Production helper regression checks passed at 1x/2x. Screenshots use fixtures; no real phone proof.
 
-Next: continue J3 OmniRoute management using `docs/omniroute-admin-api.md`; onboarding follows its policy wizard.
+Next: finish Windows/helper management J6.5, then continue J3 OmniRoute account/policy management using `docs/omniroute-admin-api.md`; onboarding follows its policy wizard.
 J2.3 restart button, complete history/backup and service-specific management remain unfinished. J4 waits for C.
 Service config: `core/config/service-connections.ts`; store/adapter/controller: `settings/services/`.
 Saved gateway URL changes are blocked until provenance is verified; connection tests never establish free billing.
@@ -51,3 +51,9 @@ Claude-Mem supports Codex and stores/retrieves session observations, but its cur
 and AI observation providers. No install was performed. For now, reuse this local checkpoint and the inventory.
 Any later installation needs a confirmed local capture/recall path and bounded observation cost; it must not capture secrets.
 Upstream inspected 2026-10-09: https://github.com/thedotmack/claude-mem.
+
+Private model observations: `routing/model-metrics.service.ts`; captured by `chat/omniroute-client.service.ts`.
+Release metadata: `settings/updates.service.ts` and controller; no automatic network access or installation.
+Management responses capped at 2 MB, raw documentation at 16,000 characters; session resets on reconfiguration.
+SQLite fixtures prove verified routing and drift rejection. Test workers use 50% CPU: full default-concurrency run
+had five unrelated five-second timeouts; four-worker and updated standard runs passed all 373 tests.

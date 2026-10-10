@@ -28,7 +28,7 @@ The import roundtrip also preserves existing persona/actions/tools/skills/widget
 ## Proof
 
 `scripts/check-settings.mjs` uses fixtures only and checks every section at desktop 1x/2x and 390 px mobile,
-search, keyboard Enter navigation, deep links, saving, PIN expiry and explicit lock. Set `NOVA_SETTINGS_TEST_URL`
+search, keyboard Enter navigation, deep links, saving, PIN expiry, explicit lock, private model metrics and an explicit release check. Set `NOVA_SETTINGS_TEST_URL`
 to the local production preview to check its built assets. API tests cover preservation, null defaults,
 snapshot protection/permissions and PIN throttling.
 
@@ -36,6 +36,7 @@ snapshot protection/permissions and PIN throttling.
 | ----------- | ------------------------------------ | ------------------------------------ | ---------------------------------------- |
 | General     | ![](img/settings-general-1x.png)     | ![](img/settings-general-2x.png)     | ![](img/settings-general-mobile.png)     |
 | Models      | ![](img/settings-models-1x.png)      | ![](img/settings-models-2x.png)      | ![](img/settings-models-mobile.png)      |
+| System      | ![](img/settings-system-1x.png)      | ![](img/settings-system-2x.png)      | ![](img/settings-system-mobile.png)      |
 | Personality | ![](img/settings-personality-1x.png) | ![](img/settings-personality-2x.png) | ![](img/settings-personality-mobile.png) |
 
 No real phone or Windows-PC test has been performed for this settings transition. Connection editors, bounded adapters and connection history are now implemented.

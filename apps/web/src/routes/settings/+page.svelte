@@ -4,6 +4,8 @@
   import { goto } from "$app/navigation";
   import ConnectionsSection from "#components/settings/ConnectionsSection.svelte";
   import ConnectionHistory from "#components/settings/ConnectionHistory.svelte";
+  import ModelMetrics from "#components/settings/ModelMetrics.svelte";
+  import UpdatesSection from "#components/settings/UpdatesSection.svelte";
   import AbilitiesTab from "#components/settings/AbilitiesTab.svelte";
   import SkillsTab from "#components/settings/SkillsTab.svelte";
   import SidebarTab from "#components/settings/SidebarTab.svelte";
@@ -166,6 +168,7 @@
           {:else if section === "skills"}<SkillsTab />
           {:else if section === "models"}
             <ConnectionsSection ids={["omniroute"]} />
+            <ModelMetrics />
             <AdminDialog embedded initialView="providers" />
             <h2>OmniRoute</h2>
             <AdminDialog embedded initialView="gateway" />
@@ -192,6 +195,7 @@
             />
           {:else if section === "safety"}<BehaviorTab part="approvals" />
           {:else if section === "system"}
+            <UpdatesSection />
             <ConnectionHistory />
             <BackupSection />
             <h2>Actielog</h2>

@@ -143,12 +143,59 @@ try {
     const services = structuredClone(initialServices);
     let tested = false;
     let persona = overview.persona;
+    let updateChecks = 0;
     await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
       const request = route.request();
       const url = new URL(request.url());
       const endpoint = url.pathname.slice(4);
       let data = {};
-      if (endpoint === "/settings/services") data = { services };
+      if (endpoint === "/settings/updates")
+        data = {
+          running: "v0.1.10",
+          checkedAt: null,
+          updateAvailable: null,
+          latest: null,
+        };
+      else if (endpoint === "/settings/updates/check") {
+        updateChecks++;
+        data = {
+          running: "v0.1.10",
+          checkedAt: "2026-10-10T09:00:00Z",
+          updateAvailable: true,
+          latest: {
+            version: "v0.1.11",
+            url: "https://github.com/hjongedijk/nova/releases/tag/v0.1.11",
+            publishedAt: "2026-10-10T08:00:00Z",
+            notes:
+              "Fixture changes <script>window.fixtureInjected = true</script>",
+          },
+        };
+      } else if (endpoint === "/settings/models/metrics")
+        data = {
+          updatedAt: "2026-10-10T09:00:00Z",
+          available: true,
+          windowHours: 24,
+          routeReady: true,
+          lastResponse: {
+            model: "fixture:free",
+            provider: "fixture",
+            latencyMs: 500,
+            at: "2026-10-10T08:59:00Z",
+          },
+          models: [
+            {
+              provider: "fixture",
+              model: "fixture:free",
+              requests: 5,
+              failures: 1,
+              averageMs: 1200,
+              firstTokenMs: 200,
+              tokensPerSecond: 20,
+              enabled: true,
+            },
+          ],
+        };
+      else if (endpoint === "/settings/services") data = { services };
       else if (endpoint === "/settings/services/history")
         data = { revisions: [] };
       else if (
@@ -260,6 +307,11 @@ try {
       .waitFor();
     assert.equal(await page.locator("#adminDialog").count(), 0);
     assert.equal(await page.locator(".admin-embedded").count(), 2);
+    await page
+      .getByText("5 aanvragen · 1 mislukt · gemiddeld 1.200 ms")
+      .waitFor();
+    await page.getByRole("button", { name: "Metingen vernieuwen" }).click();
+    await page.getByRole("button", { name: "Metingen vernieuwen" }).waitFor();
     await page.screenshot({
       path: path.join(
         screenshots,
@@ -286,6 +338,28 @@ try {
         `Horizontal overflow in ${section} at ${width}`,
       );
     }
+    assert.equal(updateChecks, 0, "Opening settings must not contact GitHub");
+    await page
+      .getByRole("button", { name: "Controleer op nieuwe release" })
+      .click();
+    await page
+      .getByText("Een nieuwe versie is beschikbaar.", { exact: false })
+      .waitFor();
+    assert.equal(updateChecks, 1);
+    await page.getByText("Wat is veranderd?", { exact: true }).click();
+    assert(
+      (await page.locator(".updates pre").innerText()).includes("<script>"),
+    );
+    assert.equal(
+      await page.evaluate(() => Object.hasOwn(globalThis, "fixtureInjected")),
+      false,
+    );
+    await page.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-system-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
     await page.goto(`${base}/settings?section=connections`);
     const connection = page
       .locator(".connection-editor")
@@ -355,7 +429,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry and lock.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks.",
   );
 } finally {
   await browser.close();

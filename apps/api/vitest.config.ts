@@ -7,6 +7,8 @@ export default defineConfig({
     include: ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
     setupFiles: ["test/setup.ts"],
+    // Leave CPU room for PDF workers, MCP subprocesses and a running local stack.
+    maxWorkers: "50%",
   },
   plugins: [swc.vite({ module: { type: "es6" } })],
 });

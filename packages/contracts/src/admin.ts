@@ -55,6 +55,44 @@ export interface GatewayReport {
   cache?: { hits: number; misses: number; entries: number };
 }
 
+export interface UpdateReport {
+  running: string;
+  checkedAt: string | null;
+  updateAvailable: boolean | null;
+  latest: {
+    version: string;
+    url: string;
+    notes: string;
+    publishedAt: string | null;
+  } | null;
+  error?: string;
+}
+
+/** Private settings dashboard. Observations are not availability or billing guarantees. */
+export interface ModelMetricsReport {
+  updatedAt: string;
+  available: boolean;
+  error?: string;
+  windowHours: 24;
+  routeReady: boolean;
+  models: {
+    provider: string;
+    model: string;
+    requests: number;
+    failures: number;
+    averageMs: number | null;
+    firstTokenMs: number | null;
+    tokensPerSecond: number | null;
+    enabled: boolean;
+  }[];
+  lastResponse: {
+    model: string;
+    provider: string | null;
+    latencyMs: number | null;
+    at: string;
+  } | null;
+}
+
 /** GET /api/audit */
 export interface AuditLogEntry {
   id?: string;
