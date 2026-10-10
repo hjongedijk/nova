@@ -135,3 +135,5 @@ J8.3 configuration documentation now covers every variable in `.env.example`, di
 J8.1 service-adapter API coverage is complete: 35 focused tests exercise all nine configured adapters, including fake-service probes, MQTT cleanup without publish/subscribe, restart-time migration, secret masking in responses/history/audit, redirects, and transport/auth failures. No external service was contacted.
 
 J8.2 browser coverage uses Playwright against the production build for all twelve sections, search, keyboard navigation, deep links, saves, PIN expiry, and confirmed backup flows at desktop 1x/2x and 390 px mobile. No physical phone was tested.
+
+Latest Node 24 verification: 1,044 API tests pass across 54 files with one worker. Format, lint and typecheck pass; the production build passed immediately before the test-only Node-RED coverage addition. Production-browser checks pass on the current built UI.
