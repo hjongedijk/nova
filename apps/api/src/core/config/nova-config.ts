@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import fs from "node:fs";
 import path from "node:path";
+import { applyConnectionOverrides } from "./service-connections.js";
 
 const text = (name: string, fallback = "") =>
   process.env[name]?.trim() || fallback;
@@ -54,6 +55,8 @@ export class NovaConfig {
 
   // AI
   readonly omniUrl = url("OMNIROUTE_URL", "http://omniroute:20128/v1");
+  /** Environment endpoint identifies the gateway whose database is verified locally. */
+  readonly verifiedOmniUrl = this.omniUrl;
   readonly omniKey = text("OMNIROUTE_API_KEY");
   readonly omniModel = text("OMNIROUTE_MODEL", "auto");
   readonly omniAdminPassword = text("OMNIROUTE_ADMIN_PASSWORD");
@@ -135,6 +138,7 @@ export class NovaConfig {
   readonly checkTargets = text("JARVIS_CHECK_TARGETS");
 
   constructor() {
+    applyConnectionOverrides(this);
     fs.mkdirSync(this.dataDir, { recursive: true });
   }
 

@@ -1,6 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { DEFAULT_QUICK_ACTIONS } from "../../src/settings/store/settings.store.js";
 import type { WallpaperPort } from "../../src/settings/wallpaper.port.js";
 import {
@@ -472,6 +480,150 @@ describe("the settings API", () => {
         .skills.map((item) => item.id as string)
         .sort(),
     ).toEqual(["extra", "filmavond", "garagedeur"]);
+  });
+
+  it("preserves existing user settings and stable IDs through replace import", async () => {
+    await call("post", "/skills", playbook());
+    await call("put", "/persona", {
+      text: "Een rustige persoonlijke assistent.",
+    });
+    await call("put", "/quick-actions", {
+      items: [{ label: "Filmavond", prompt: "Start filmavond" }],
+    });
+    await call("put", "/tools/echo", {
+      enabled: false,
+      description: "Return the supplied text without changing it.",
+    });
+    const widget = await call("post", "/widgets", {
+      type: "note",
+      title: "Mijn notitie",
+      text: "Bewaar deze tekst.",
+      enabled: true,
+    });
+    expect(widget.status).toBe(201);
+    const widgetId = (widget.widget as { id: string }).id;
+    const sidebar = [
+      { id: "systeem", column: "right", page: 2, shown: false },
+      { id: `w:${widgetId}`, column: "left", page: 3, shown: true },
+    ];
+    expect((await call("put", "/sidebar", { items: sidebar })).status).toBe(
+      200,
+    );
+    const backup = await call("get", "/export");
+    const contents = (reply: Reply) => {
+      const copy: Record<string, unknown> = { ...reply };
+      delete copy.status;
+      delete copy.exportedAt;
+      copy.skills = (copy.skills as Record<string, unknown>[]).map((skill) => {
+        const imported = { ...skill };
+        delete imported.createdAt;
+        delete imported.updatedAt;
+        return imported;
+      });
+      return copy;
+    };
+    const expected = contents(backup);
+    nova.store.update((settings) => {
+      settings.persona = "Changed";
+      settings.quickActions = [];
+      settings.skills = [];
+      settings.widgets = [];
+      settings.sidebar = null;
+      settings.toolOverrides = {};
+    });
+    expect(
+      (await call("post", "/import", { data: backup, mode: "replace" })).status,
+    ).toBe(200);
+    const restored = await call("get", "/export");
+    const actual = contents(restored);
+    expect(actual).toEqual(expected);
+    const overview = await call("get", "/");
+    expect(overview.skills).toMatchObject([{ id: "filmavond" }]);
+    expect(overview.widgets).toMatchObject([{ id: widgetId }]);
+    expect(overview.sidebar).toEqual(expect.arrayContaining(sidebar));
+  });
+
+  it("restores null quick actions and sidebar defaults while omitted fields preserve them", async () => {
+    const actions = [{ label: "Eigen knop", prompt: "Wat is het weer?" }];
+    const sidebar = [{ id: "systeem", column: "right", page: 2, shown: false }];
+    await call("put", "/quick-actions", { items: actions });
+    await call("put", "/sidebar", { items: sidebar });
+    const custom = nova.store.get();
+    expect(
+      (
+        await call("post", "/import", {
+          data: { format: "nova-settings", skills: [] },
+          mode: "merge",
+        })
+      ).status,
+    ).toBe(200);
+    expect(nova.store.get().quickActions).toEqual(custom.quickActions);
+    expect(nova.store.get().sidebar).toEqual(custom.sidebar);
+    expect(
+      (
+        await call("post", "/import", {
+          data: {
+            format: "nova-settings",
+            skills: [],
+            quickActions: null,
+            sidebar: null,
+          },
+          mode: "replace",
+        })
+      ).status,
+    ).toBe(200);
+    expect(nova.store.get().quickActions).toBeNull();
+    expect(nova.store.get().sidebar).toBeNull();
+    const overview = await call("get", "/");
+    expect(overview.quickActions).toEqual(DEFAULT_QUICK_ACTIONS);
+    expect(overview.quickActionsAreDefault).toBe(true);
+    expect(overview.sidebar).toEqual(
+      expect.arrayContaining([
+        { id: "systeem", column: "left", page: 1, shown: true },
+      ]),
+    );
+  });
+
+  it("takes the private migration snapshot only behind the overview guard", async () => {
+    const snapshot = vi.spyOn(nova.store, "backupBeforeSettingsPage");
+    try {
+      await call("get", "/public", undefined, {});
+      await call("get", "/export");
+      expect(snapshot).not.toHaveBeenCalled();
+      expect((await call("get", "/")).status).toBe(200);
+      expect(snapshot).toHaveBeenCalledOnce();
+      const exported = await call("get", "/export");
+      expect(Object.keys(exported).sort()).toEqual(
+        [
+          "exportedAt",
+          "format",
+          "persona",
+          "quickActions",
+          "sidebar",
+          "skills",
+          "status",
+          "toolOverrides",
+          "version",
+          "widgets",
+        ].sort(),
+      );
+      const pinned = await createApp({ env: { NOVA_ADMIN_PIN: "4321" } });
+      const deniedSnapshot = vi.spyOn(pinned.store, "backupBeforeSettingsPage");
+      try {
+        expect((await pinned.api.get("/api/settings")).status).toBe(401);
+        expect(deniedSnapshot).not.toHaveBeenCalled();
+        expect(
+          (await pinned.api.get("/api/settings").set("x-nova-pin", "4321"))
+            .status,
+        ).toBe(200);
+        expect(deniedSnapshot).toHaveBeenCalledOnce();
+      } finally {
+        deniedSnapshot.mockRestore();
+        await pinned.app.close();
+      }
+    } finally {
+      snapshot.mockRestore();
+    }
   });
 
   it("has a ceiling on the number of skills", async () => {

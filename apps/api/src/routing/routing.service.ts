@@ -57,6 +57,16 @@ export class RoutingService {
   }
 
   status(): RoutingStatus {
+    if (this.config.omniUrl !== this.config.verifiedOmniUrl)
+      return {
+        freeOnly: true,
+        ready: false,
+        policyVerified: false,
+        status: "GATEWAY_PROVENANCE_UNVERIFIED",
+        reason:
+          "The configured endpoint is not bound to the locally verified OmniRoute database.",
+      };
+
     if (!this.config.freeOnly && process.env.NODE_ENV === "test")
       return {
         freeOnly: false,

@@ -137,3 +137,49 @@ Open it from the menu in the interface (title "Instellingen"). If `NOVA_ADMIN_PI
 | Meer               | Connected devices (the Windows PC: wallpaper per display, helper, mode; agent download), and back-up: export and import of all settings.                                                                                                                                                                                                                                                   |
 
 Settings writes are accepted only from the settings screen (they need the header `x-nova-admin: 1`), are validated like an import, and are written to the action log.
+
+## Settings workspace
+
+Open `/settings` from NOVA's menu. Each section has a stable deep link, for example
+`/settings?section=voice`, `/settings?section=skills` or `/settings?section=system`.
+Search accepts names such as “stem”, “model” and “back-up”; press Enter to open the first match.
+Existing skills, widgets, sidebar layout, persona and quick actions retain their storage and APIs.
+See [settings inventory](settings-inventory.md) and [service inventory](settings-services-inventory.md)
+for which values are still environment-only while phase J is in progress.
+
+When a PIN is configured, it is held only in browser memory for fifteen minutes. Reloading the page,
+closing the tab or choosing “Instellingen vergrendelen” requires entering it again.
+Five incorrect supplied PINs block that client for five minutes; ordinary requests without a PIN
+show the unlock form without counting as failed attempts.
+
+The page transition keeps one private, server-local snapshot named `settings.json.before-settings-page-v1`.
+It is readable only by NOVA, includes existing private skill configuration and is never part of a download.
+See [settings design and preservation](settings-design.md) for rollback and screenshot evidence.
+
+### Service connections managed in NOVA
+
+The Models, Connections and Devices sections edit OmniRoute, Home Assistant, Proxmox, Qdrant, MQTT,
+Node-RED, Windows-agent, Termix and Pangolin connection settings. Saved fields in `/data/services.json`
+override environment bootstrap values on the next NOVA start. This private file is written atomically
+at mode 0600. Blank replacement-secret fields keep their old value; an explicit erase checkbox clears it.
+Credentials are never returned to the browser or stored in the visible history.
+
+Connection tests use unsaved input without persisting it. They issue bounded read-only HTTP requests
+or open and close an MQTT connection without publishing. A successful response proves reachability,
+not free billing, complete tool access or action verification. The screen distinguishes saved values
+from the running connection and shows when NOVA must be restarted. No container restart button is
+available until a restricted container-control channel is implemented.
+
+OmniRoute inference remains bound to the environment endpoint whose mounted database NOVA verifies.
+A different saved endpoint blocks inference, including test bypasses, and a connection probe refuses
+to send credentials to that unverified target. Updating the gateway requires a matching trusted
+deployment and a new free-route check; changing a URL alone cannot establish that trust.
+
+The System section lists the latest hundred connection changes. Nonsecret fields can be restored
+when those fields have not subsequently changed. Unrelated later edits are preserved. Secret changes
+require entering the desired value again. An audit failure before persistence prevents the change;
+if the final audit message fails after persistence, the response clearly reports that the values
+were saved and the local history remains available.
+
+These connection settings and Node-RED flows are not yet included in the existing version-one
+settings download; complete-system export/import remains phase J work.

@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
@@ -22,6 +25,52 @@ describe("RoutingService", () => {
     });
     expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
     expect(routing.providerInventory()).toEqual([]);
+  });
+
+  it("blocks a persisted gateway redirect before policy lookup and the test bypass", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nova-gateway-test-"),
+    );
+    const env = {
+      NOVA_DATA_DIR: directory,
+      OMNIROUTE_URL: "http://verified-gateway.invalid/v1",
+      OMNIROUTE_DATABASE: path.join(directory, "missing-gateway.sqlite"),
+      FREE_ONLY: "false",
+      NODE_ENV: "test",
+    };
+    const previous = Object.fromEntries(
+      Object.keys(env).map((key) => [key, process.env[key]]),
+    );
+    try {
+      Object.assign(process.env, env);
+      fs.writeFileSync(
+        path.join(directory, "services.json"),
+        JSON.stringify({
+          version: 1,
+          services: { omniroute: { url: "http://other-gateway.invalid/v1" } },
+          history: [],
+        }),
+      );
+      const config = new NovaConfig();
+      expect(config.verifiedOmniUrl).toBe(env.OMNIROUTE_URL);
+      expect(config.omniUrl).toBe("http://other-gateway.invalid/v1");
+      const routing = new RoutingService(config);
+      expect(routing.status()).toMatchObject({
+        ready: false,
+        status: "GATEWAY_PROVENANCE_UNVERIFIED",
+      });
+      expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
+      expect(fs.existsSync(env.OMNIROUTE_DATABASE)).toBe(false);
+      expect(
+        fs.existsSync(path.join(directory, "free-routing-policy.json")),
+      ).toBe(false);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("the test bypass exists only under NODE_ENV=test, never in production", () => {

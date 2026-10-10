@@ -394,3 +394,40 @@ export interface HelperPreferences {
     quiet: { enabled: boolean; start: string; end: string };
   };
 }
+
+/* ---------- private service connection management ---------- */
+export interface ServiceConnectionField {
+  key: string;
+  label: string;
+  kind: "url" | "text" | "boolean" | "secret";
+  source: "environment" | "settings";
+  value?: string | boolean;
+  set?: boolean;
+}
+export interface ServiceConnection {
+  id: string;
+  label: string;
+  fields: ServiceConnectionField[];
+  restartRequired: boolean;
+}
+export interface ServiceConnectionRevision {
+  id: string;
+  service: string;
+  at: string;
+  before: Record<string, string | boolean>;
+  after: Record<string, string | boolean>;
+  secretChanges: string[];
+  revertedFrom?: string;
+}
+export interface ServiceConnectionTest {
+  ok: boolean;
+  message: string;
+  checkedAt: string;
+  status?: number;
+}
+
+export interface ServiceConnectionWrite {
+  ok: true;
+  services: ServiceConnection[];
+  auditWarning?: string;
+}

@@ -19,6 +19,10 @@
   import "./admin.css";
 
   type View = "integrations" | "providers" | "gateway" | "memories" | "audit";
+  let {
+    embedded = false,
+    initialView = "integrations",
+  }: { embedded?: boolean; initialView?: View } = $props();
   const VIEWS: [View, string][] = [
     ["integrations", "Integraties"],
     ["providers", "Gratis AI"],
@@ -84,7 +88,13 @@
   }
 
   $effect(() => {
-    if (!dialog) return;
+    if (embedded) {
+      void load(initialView);
+    }
+  });
+
+  $effect(() => {
+    if (embedded || !dialog) return;
     if (dialogs.admin && !dialog.open) {
       dialog.showModal();
       void load();
@@ -102,26 +112,16 @@
   </section>
 {/snippet}
 
-<dialog
-  id="adminDialog"
-  bind:this={dialog}
-  aria-labelledby="adminTitle"
-  onclose={() => (dialogs.admin = false)}
->
-  <div class="admin-heading">
-    <h2 id="adminTitle">NOVA beheer</h2>
-    <Button id="adminClose" onclick={() => dialog?.close()}>Sluiten</Button>
-  </div>
-  <nav class="admin-nav" aria-label="Beheerschermen">
-    {#each VIEWS as [id, name] (id)}
-      <Button data-view={id} aria-current={view === id} onclick={() => load(id)}
-        >{name}</Button
-      >
-    {/each}
-  </nav>
-  <p id="adminMessage" role="status">{message}</p>
-  <div id="adminContent">
-    {#if dialogs.admin && loaded}
+{#snippet content()}
+  <p
+    id={embedded ? undefined : "adminMessage"}
+    class="admin-message"
+    role="status"
+  >
+    {message}
+  </p>
+  <div id={embedded ? undefined : "adminContent"} class="admin-content">
+    {#if (embedded || dialogs.admin) && loaded}
       {#if loaded.view === "integrations"}
         {@const data = loaded.data}
         {#each NAMES as [key, name] (key)}
@@ -269,4 +269,32 @@
       {/if}
     {/if}
   </div>
-</dialog>
+{/snippet}
+
+{#if embedded}
+  <div class="admin-embedded">
+    {@render content()}
+  </div>
+{:else}
+  <dialog
+    id="adminDialog"
+    bind:this={dialog}
+    aria-labelledby="adminTitle"
+    onclose={() => (dialogs.admin = false)}
+  >
+    <div class="admin-heading">
+      <h2 id="adminTitle">NOVA beheer</h2>
+      <Button id="adminClose" onclick={() => dialog?.close()}>Sluiten</Button>
+    </div>
+    <nav class="admin-nav" aria-label="Beheerschermen">
+      {#each VIEWS as [id, name] (id)}
+        <Button
+          data-view={id}
+          aria-current={view === id}
+          onclick={() => load(id)}>{name}</Button
+        >
+      {/each}
+    </nav>
+    {@render content()}
+  </dialog>
+{/if}

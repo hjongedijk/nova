@@ -1,0 +1,287 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import type {
+    ServiceConnection,
+    ServiceConnectionTest,
+  } from "@nova/contracts";
+  import {
+    getServiceConnections,
+    saveServiceConnection,
+    testServiceConnection,
+  } from "#lib/api/settings.ts";
+  import { fail, say } from "./state.svelte.ts";
+  let { ids }: { ids?: string[] } = $props();
+  let services = $state<ServiceConnection[]>([]);
+  let drafts = $state<Record<string, Record<string, string | boolean>>>({});
+  let clear = $state<Record<string, Record<string, boolean>>>({});
+  let tests = $state<Record<string, ServiceConnectionTest>>({});
+  let busy = $state<string | null>(null);
+  let error = $state("");
+  const shown = $derived(
+    services.filter((item) => !ids || ids.includes(item.id)),
+  );
+  function reset(service: ServiceConnection) {
+    drafts[service.id] = Object.fromEntries(
+      service.fields.map((field) => [
+        field.key,
+        field.kind === "secret" ? "" : (field.value ?? ""),
+      ]),
+    );
+    clear[service.id] = {};
+  }
+  async function load() {
+    try {
+      services = (await getServiceConnections()).services;
+      services.forEach(reset);
+      error = "";
+    } catch (e) {
+      error =
+        e instanceof Error
+          ? e.message
+          : "De koppelingen zijn niet beschikbaar.";
+    }
+  }
+  onMount(() => {
+    void load();
+  });
+  const cleared = (id: string) =>
+    Object.entries(clear[id] ?? {})
+      .filter(([, value]) => value)
+      .map(([key]) => key);
+  function changedValues(service: ServiceConnection) {
+    return Object.fromEntries(
+      service.fields.flatMap((field) => {
+        const value = drafts[service.id]?.[field.key];
+        if (
+          value === undefined ||
+          (field.kind === "secret" ? value === "" : value === field.value)
+        )
+          return [];
+        return [[field.key, value]];
+      }),
+    );
+  }
+  async function apply(service: ServiceConnection, test: boolean) {
+    busy = service.id;
+    try {
+      if (test)
+        tests[service.id] = await testServiceConnection(
+          service.id,
+          changedValues(service),
+          cleared(service.id),
+        );
+      else {
+        const result = await saveServiceConnection(
+          service.id,
+          changedValues(service),
+          cleared(service.id),
+        );
+        services = result.services;
+        const saved = services.find((item) => item.id === service.id)!;
+        reset(saved);
+        delete tests[service.id];
+        say(
+          result.auditWarning ??
+            (saved.restartRequired
+              ? "Opgeslagen. Herstart NOVA om deze koppeling toe te passen."
+              : "De koppeling is opgeslagen."),
+          result.auditWarning ? "bad" : "ok",
+        );
+      }
+    } catch (e) {
+      fail(e);
+    } finally {
+      busy = null;
+    }
+  }
+</script>
+
+<section class="connections-section">
+  <p class="hint">
+    Opgeslagen waarden zijn leidend. Een gewijzigd adres of geheim wordt
+    toegepast bij de volgende start van NOVA. Testen gebruikt de ingevulde
+    waarden en slaat niets op.
+  </p>
+  {#if error}<p role="status">{error}</p>
+    <button type="button" onclick={load}>Opnieuw proberen</button>{/if}
+  {#each shown as service (service.id)}
+    <details class="connection-editor">
+      <summary
+        ><strong>{service.label}</strong><span
+          >{service.restartRequired
+            ? "Herstart nodig"
+            : "Bekijk of wijzig"}</span
+        ></summary
+      >
+      {#if service.id === "omniroute"}
+        <p class="hint">
+          Een ander gateway-adres vraagt een nieuwe gratis-route-controle. Tot
+          die controle klopt, antwoordt NOVA niet via die gateway.
+        </p>
+      {/if}
+      <form
+        onsubmit={(event) => {
+          event.preventDefault();
+          void apply(service, false);
+        }}
+      >
+        <fieldset disabled={busy !== null}>
+          <legend class="connection-legend">{service.label} instellen</legend>
+          {#each service.fields as field (field.key)}
+            {@const key = `${service.id}-${field.key}`}
+            <div class="connection-field">
+              {#if field.kind === "boolean"}
+                <label class="connection-check"
+                  ><input
+                    id={key}
+                    type="checkbox"
+                    checked={drafts[service.id]?.[field.key] === true}
+                    onchange={(event) => {
+                      drafts[service.id]![field.key] =
+                        event.currentTarget.checked;
+                    }}
+                  />{field.label}</label
+                >
+              {:else}
+                <label for={key}>{field.label}</label>
+                <input
+                  id={key}
+                  type={field.kind === "secret"
+                    ? "password"
+                    : field.kind === "url"
+                      ? "url"
+                      : "text"}
+                  autocomplete={field.kind === "secret"
+                    ? "new-password"
+                    : "off"}
+                  maxlength={field.kind === "secret" ? 4096 : 500}
+                  value={String(drafts[service.id]?.[field.key] ?? "")}
+                  placeholder={field.kind === "secret"
+                    ? field.set
+                      ? "Ingesteld · leeg laten om te bewaren"
+                      : "Nog niet ingesteld"
+                    : ""}
+                  oninput={(event) => {
+                    drafts[service.id]![field.key] = event.currentTarget.value;
+                  }}
+                />
+              {/if}
+              <small
+                >{field.source === "settings"
+                  ? "Opgeslagen in NOVA"
+                  : "Startwaarde"}{field.kind === "secret"
+                  ? field.set
+                    ? " · geheim ingesteld"
+                    : " · geen geheim ingesteld"
+                  : ""}</small
+              >
+              {#if field.kind === "secret" && field.set}
+                <label class="connection-check"
+                  ><input
+                    type="checkbox"
+                    checked={clear[service.id]?.[field.key] ?? false}
+                    onchange={(event) => {
+                      clear[service.id]![field.key] =
+                        event.currentTarget.checked;
+                    }}
+                  />Dit geheim wissen bij opslaan of testen</label
+                >
+              {/if}
+            </div>
+          {/each}
+          <div class="set-toolbar">
+            <button type="submit">Opslaan</button><button
+              type="button"
+              onclick={() => apply(service, true)}>Verbinding testen</button
+            >
+          </div>
+        </fieldset>
+      </form>
+      {#if service.restartRequired}<p class="connection-pending">
+          Herstart nodig. De draaiende service gebruikt nog de vorige
+          verbinding.
+        </p>{/if}
+      {#if tests[service.id]}<p
+          role="status"
+          class:connection-failed={!tests[service.id]!.ok}
+        >
+          {tests[service.id]!.message}
+        </p>{/if}
+    </details>
+  {/each}
+  {#if services.length === 0 && !error}<p>
+      Verbindingsinstellingen laden…
+    </p>{/if}
+</section>
+
+<style>
+  .connection-editor {
+    border-top: 1px solid var(--line);
+    padding: 16px 0;
+  }
+  .connection-editor summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    cursor: pointer;
+  }
+  .connection-editor summary span,
+  .connection-field small {
+    color: var(--dim);
+    font-size: 12px;
+  }
+  .connection-editor fieldset {
+    margin: 20px 0 0;
+    padding: 0;
+    border: 0;
+  }
+  .connection-legend {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .connection-field {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 18px;
+    max-width: 650px;
+  }
+  .connection-field label {
+    font-size: 13px;
+  }
+  .connection-field input:not([type="checkbox"]) {
+    width: 100%;
+    border: 1px solid var(--line);
+    background: #112338;
+    color: var(--mist);
+    padding: 10px 12px;
+    font: inherit;
+  }
+  .connection-check {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .connection-editor button,
+  .connections-section > button {
+    padding: 10px 16px;
+    background: #112338;
+    color: var(--mist);
+    border: 1px solid var(--line);
+    font: inherit;
+    cursor: pointer;
+  }
+  .connection-editor button:disabled {
+    opacity: 0.6;
+    cursor: wait;
+  }
+  .connection-pending {
+    color: var(--amber);
+  }
+  .connection-failed {
+    color: var(--alert);
+  }
+</style>

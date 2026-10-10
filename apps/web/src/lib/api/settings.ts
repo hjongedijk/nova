@@ -1,5 +1,9 @@
 import type {
   ImportResult,
+  ServiceConnection,
+  ServiceConnectionRevision,
+  ServiceConnectionTest,
+  ServiceConnectionWrite,
   HelperPreferences,
   Skill,
   SkillDraftResult,
@@ -21,12 +25,8 @@ import type {
   QuickAction,
 } from "@nova/contracts";
 import { getJson, sendJson } from "./client.ts";
-import { storage } from "#lib/util/storage.ts";
-
-/** The PIN lives in localStorage and goes along as x-nova-pin. */
-export const PIN_KEY = "novaPin";
-export const getPin = (): string => storage.get(PIN_KEY, "");
-export const setPin = (pin: string): void => storage.set(PIN_KEY, pin);
+import { getPin } from "./pin-session.ts";
+export { getPin, setPin, PIN_KEY } from "./pin-session.ts";
 
 /** Every settings call carries these; writes also need x-nova-admin. */
 function headers(): Record<string, string> {
@@ -139,3 +139,32 @@ export const getHelperPreferences = () =>
   read<HelperPreferences>("/helper/preferences");
 export const persistHelperPreferences = (preferences: HelperPreferences) =>
   write<{ ok: true }>("PUT", "/helper/preferences", preferences);
+
+/* ---------- service connections (credentials never returned) ---------- */
+export const getServiceConnections = () =>
+  read<{ services: ServiceConnection[] }>("/services");
+export const saveServiceConnection = (
+  id: string,
+  values: Record<string, string | boolean>,
+  clearSecrets: string[] = [],
+) =>
+  write<ServiceConnectionWrite>("PUT", `/services/${enc(id)}`, {
+    values,
+    clearSecrets,
+  });
+export const testServiceConnection = (
+  id: string,
+  values: Record<string, string | boolean>,
+  clearSecrets: string[] = [],
+) =>
+  write<ServiceConnectionTest>("POST", `/services/${enc(id)}/test`, {
+    values,
+    clearSecrets,
+  });
+export const getConnectionHistory = () =>
+  read<{ revisions: ServiceConnectionRevision[] }>("/services/history");
+export const rollbackConnection = (id: string) =>
+  write<ServiceConnectionWrite>(
+    "POST",
+    `/services/history/${enc(id)}/rollback`,
+  );

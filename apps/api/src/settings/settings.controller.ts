@@ -110,6 +110,7 @@ export class SettingsController {
 
   @Get()
   overview(): SettingsOverview {
+    this.settings.backupBeforeSettingsPage();
     const settings = this.settings.get();
     const tools = this.tools.list();
     return {
@@ -754,9 +755,11 @@ export class SettingsController {
     const persona =
       data.persona !== undefined ? normalizePersona(data.persona) : undefined;
     const actions =
-      data.quickActions == null
+      data.quickActions === undefined
         ? undefined
-        : normalizeQuickActions(data.quickActions);
+        : data.quickActions === null
+          ? null
+          : normalizeQuickActions(data.quickActions);
     const incomingWidgets = Array.isArray(data.widgets)
       ? (data.widgets as Record<string, unknown>[])
       : [];
@@ -792,7 +795,8 @@ export class SettingsController {
         0,
         MAX_WIDGETS,
       ) as never[];
-      if (Array.isArray(data.sidebar))
+      if (data.sidebar === null) settings.sidebar = null;
+      else if (Array.isArray(data.sidebar))
         settings.sidebar = {
           items: normalizeSidebar(
             (data.sidebar as { id?: string }[]).filter(

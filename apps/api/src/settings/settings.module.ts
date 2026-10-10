@@ -1,4 +1,7 @@
 import { Module } from "@nestjs/common";
+import { ServiceConnectionsController } from "./services/service-connections.controller.js";
+import { ServiceConnectionsStore } from "./services/service-connections.store.js";
+import { ServiceConnectionsAdapter } from "./services/service-connections.adapter.js";
 import { SkillAssistantService } from "./ai/skill-assistant.service.js";
 import { PlaybooksService } from "./playbooks.service.js";
 import { PublicConfigService } from "./public-config.service.js";
@@ -20,9 +23,15 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
  */
 @Module({
   imports: [SettingsStoreModule],
-  controllers: [SettingsController, WidgetsController],
+  controllers: [
+    SettingsController,
+    WidgetsController,
+    ServiceConnectionsController,
+  ],
   providers: [
     SettingsGuard,
+    ServiceConnectionsStore,
+    ServiceConnectionsAdapter,
     SkillsSource,
     PlaybooksService,
     PublicConfigService,

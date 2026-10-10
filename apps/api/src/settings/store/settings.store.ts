@@ -119,6 +119,25 @@ export class SettingsStore {
     return this.cache;
   }
 
+  /** Keep the original bytes before the settings-page transition, including private skill headers.
+   * The snapshot stays local at 0600, is never exported, and an existing snapshot is never overwritten.
+   */
+  backupBeforeSettingsPage(): void {
+    const backup = `${this.file}.before-settings-page-v1`;
+    if (fs.existsSync(backup) || !fs.existsSync(this.file)) return;
+    const temporary = `${backup}.${process.pid}.tmp`;
+    try {
+      fs.writeFileSync(temporary, fs.readFileSync(this.file), { mode: 0o600 });
+      fs.chmodSync(temporary, 0o600);
+      // Link a fully written file without replacing a snapshot another request already made.
+      fs.linkSync(temporary, backup);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
+  }
+
   /** A copy: changing it changes nothing. */
   get(): NovaSettings {
     return structuredClone(this.load());

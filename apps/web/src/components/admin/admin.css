@@ -1,6 +1,6 @@
-/* The admin dialog, carried over from the current interface. Everything is scoped to #adminDialog. */
+/* Shared admin content, shown in the modal or the settings page. */
 
-#adminDialog {
+:is(#adminDialog, .admin-embedded) {
   width: min(820px, calc(100vw - 24px));
   max-height: 86vh;
   overflow: auto;
@@ -18,12 +18,12 @@
   backdrop-filter: blur(6px);
 }
 
-#adminDialog :focus-visible {
+:is(#adminDialog, .admin-embedded) :focus-visible {
   outline: 2px solid var(--glow);
   outline-offset: 3px;
 }
 
-#adminDialog .admin-heading {
+:is(#adminDialog, .admin-embedded) .admin-heading {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -32,47 +32,47 @@
   margin-bottom: 16px;
 }
 
-#adminDialog .admin-heading h2 {
+:is(#adminDialog, .admin-embedded) .admin-heading h2 {
   margin: 0;
   font: 300 21px/1 var(--sans);
 }
 
-#adminDialog .admin-nav {
+:is(#adminDialog, .admin-embedded) .admin-nav {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 14px;
 }
 
-#adminDialog .admin-nav .btn[aria-current="true"] {
+:is(#adminDialog, .admin-embedded) .admin-nav .btn[aria-current="true"] {
   border-color: var(--glow);
   color: var(--glow);
 }
 
-#adminMessage {
+:is(#adminMessage, .admin-message) {
   color: var(--dim);
   font-size: 13px;
   min-height: 1.2em;
   margin: 0 0 6px;
 }
 
-#adminContent {
+:is(#adminContent, .admin-content) {
   min-height: 120px;
 }
 
-#adminContent .admin-row {
+:is(#adminContent, .admin-content) .admin-row {
   border-bottom: 1px solid var(--line);
   padding: 12px 0;
   overflow-wrap: anywhere;
 }
 
-#adminContent .admin-row p {
+:is(#adminContent, .admin-content) .admin-row p {
   margin: 5px 0;
   font-size: 14px;
   color: var(--dim);
 }
 
-#adminContent .admin-row .btn {
+:is(#adminContent, .admin-content) .admin-row .btn {
   margin-top: 6px;
 }
 
@@ -87,15 +87,28 @@
   padding: 10px;
 }
 
-#adminDialog summary {
+:is(#adminDialog, .admin-embedded) summary {
   cursor: pointer;
   margin-top: 12px;
 }
 
-#adminContent .confirmation-controls {
+:is(#adminContent, .admin-content) .confirmation-controls {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
   margin-bottom: 14px;
+}
+
+:is(#adminDialog, .admin-embedded).admin-embedded {
+  width: 100%;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--mist);
 }
