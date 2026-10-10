@@ -325,6 +325,8 @@ export interface SettingsBackup {
   /** Optional to retain compatibility with earlier version-one exports. */
   helper?: { mode: HelperMode; display: number };
   helperPreferences?: HelperPreferences;
+  /** Optional in older v1 files. Contains named user lists, not timers or alerts. */
+  lists?: Record<string, SettingsBackupListItem[]>;
   format: "nova-settings";
   version: 1;
   exportedAt: string;
@@ -336,15 +338,23 @@ export interface SettingsBackup {
   sidebar: SidebarItem[] | null;
 }
 
+export interface SettingsBackupListItem {
+  id: string;
+  text: string;
+  addedAt: string;
+}
+
 export interface ImportResult {
   ok: true;
   imported: number;
+  importedLists: number;
   missingSecrets: MissingSecret[];
 }
 
 export interface SettingsImportSummary {
   helperChanged: boolean;
   helperPreferencesChanged: boolean;
+  listsChanged: boolean;
   personaChanged: boolean;
   quickActionsChanged: boolean;
   toolOverridesChanged: boolean;
@@ -354,6 +364,9 @@ export interface SettingsImportSummary {
   totalSkills: number;
   incomingWidgets: number;
   totalWidgets: number;
+  incomingLists: number;
+  totalLists: number;
+  removedLists: number;
   replacedSkills: number;
   removedSkills: number;
   removedWidgets: number;

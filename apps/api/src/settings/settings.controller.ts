@@ -1,4 +1,5 @@
 import { SettingsBackupService } from "./settings-backup.service.js";
+import { MAX_BACKUP_BYTES } from "./backup-plan.js";
 import { HelperPreferencesHistory } from "./helper-preferences-history.service.js";
 import { ToolSwitchHistory } from "./tool-switch-history.service.js";
 import { SidebarHistory } from "./sidebar-history.service.js";
@@ -759,7 +760,7 @@ export class SettingsController {
   @Get("export")
   exportSettings(): SettingsBackup {
     const settings = this.settings.get();
-    return {
+    const backup: SettingsBackup = {
       format: "nova-settings",
       version: 1,
       exportedAt: new Date().toISOString(),
@@ -774,7 +775,13 @@ export class SettingsController {
       helperPreferences: normalizeHelperPreferences({
         ...settings.helperPreferences,
       }),
+      lists: this.backups.exportLists(),
     };
+    if (Buffer.byteLength(JSON.stringify(backup), "utf8") > MAX_BACKUP_BYTES)
+      throw new ValidationError([
+        "De instellingen zijn te groot voor een back-up van 1 MB.",
+      ]);
+    return backup;
   }
 
   @Post("import/prepare")

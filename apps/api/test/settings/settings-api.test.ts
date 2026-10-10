@@ -10,6 +10,7 @@ import {
   vi,
 } from "vitest";
 import { DEFAULT_QUICK_ACTIONS } from "../../src/settings/store/settings.store.js";
+import { JarvisStateStore } from "../../src/planning/jarvis-state.store.js";
 import type { WallpaperPort } from "../../src/settings/wallpaper.port.js";
 import {
   ADMIN,
@@ -713,13 +714,24 @@ describe("the settings API", () => {
       expect(snapshot).not.toHaveBeenCalled();
       expect((await call("get", "/")).status).toBe(200);
       expect(snapshot).toHaveBeenCalledOnce();
+      nova.app.get(JarvisStateStore).replaceLists({
+        boodschappen: [
+          {
+            id: "1234abcd",
+            text: "brood",
+            addedAt: "2026-10-10T10:00:00.000Z",
+          },
+        ],
+      });
       const exported = await call("get", "/export");
+      expect(exported.lists.boodschappen[0].text).toBe("brood");
       expect(Object.keys(exported).sort()).toEqual(
         [
           "exportedAt",
           "format",
           "helper",
           "helperPreferences",
+          "lists",
           "persona",
           "quickActions",
           "sidebar",

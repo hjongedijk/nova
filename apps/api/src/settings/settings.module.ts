@@ -6,6 +6,7 @@ import { OmniRouteAccountRemovalController } from "./omniroute-account-removal.c
 import { OmniRouteAccountRemoval } from "./omniroute-account-removal.service.js";
 import { OmniRouteAccountsController } from "./omniroute-accounts.controller.js";
 import { Module } from "@nestjs/common";
+import { PlanningModule } from "../planning/planning.module.js";
 import { SettingsSource } from "./settings.source.js";
 import { ConfirmationsModule } from "../confirmations/confirmations.module.js";
 import { NativeGatewayController } from "./native-gateway.controller.js";
@@ -46,7 +47,12 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
  * PublicConfigService for the chat and the dashboard.
  */
 @Module({
-  imports: [SettingsStoreModule, RoutingModule, ConfirmationsModule],
+  imports: [
+    SettingsStoreModule,
+    RoutingModule,
+    ConfirmationsModule,
+    PlanningModule,
+  ],
   controllers: [
     SettingsController,
     ToolUsageController,

@@ -1,4 +1,4 @@
-import type { Widget } from "@nova/contracts";
+import type { SettingsBackupListItem, Widget } from "@nova/contracts";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import {
@@ -42,6 +42,8 @@ const normalizeHelperPreferences = checked(rawNormalizeHelperPreferences);
 export const MAX_BACKUP_BYTES = 1_000_000;
 const MAX_SKILLS = 50;
 const MAX_WIDGETS = 20;
+const MAX_LISTS = 100;
+const MAX_LIST_ITEMS = 100;
 const ID = /^[a-z0-9_]{1,40}$/;
 const HEADER = /^[A-Za-z][A-Za-z0-9-]{0,39}$/;
 const FORBIDDEN_HEADER =
@@ -58,6 +60,7 @@ const fields = [
   "sidebar",
   "helper",
   "helperPreferences",
+  "lists",
 ];
 
 export interface BackupPlanSummary {
@@ -66,6 +69,9 @@ export interface BackupPlanSummary {
   totalSkills: number;
   incomingWidgets: number;
   totalWidgets: number;
+  incomingLists: number;
+  totalLists: number;
+  removedLists: number;
   replacedSkills: number;
   removedSkills: number;
   removedWidgets: number;
@@ -75,11 +81,61 @@ export interface BackupPlanSummary {
   sidebarChanged: boolean;
   helperChanged: boolean;
   helperPreferencesChanged: boolean;
+  listsChanged: boolean;
   missingSecrets: { skill: string; headers: string[] }[];
 }
 
 function fail(message: string): never {
   throw new ValidationError([message]);
+}
+export function normalizeBackupLists(
+  value: unknown,
+): Record<string, SettingsBackupListItem[]> {
+  const raw = object(value);
+  if (Object.keys(raw).length > MAX_LISTS) fail("Maximaal 100 lijsten.");
+  const normalized: Record<string, SettingsBackupListItem[]> = {};
+  for (const [name, rawItems] of Object.entries(raw)) {
+    if (
+      !name ||
+      name.length > 40 ||
+      name !== name.trim().toLowerCase() ||
+      sanitize(name) !== name ||
+      !Array.isArray(rawItems) ||
+      rawItems.length > MAX_LIST_ITEMS
+    )
+      fail("De back-up bevat een ongeldige lijst.");
+    const seenIds = new Set<string>();
+    const seenTexts = new Set<string>();
+    normalized[name] = rawItems.map((rawItem) => {
+      const item = object(rawItem);
+      if (
+        Object.keys(item).some(
+          (key) => !["id", "text", "addedAt"].includes(key),
+        ) ||
+        typeof item.id !== "string" ||
+        !/^[a-f0-9]{8}$/i.test(item.id) ||
+        typeof item.text !== "string" ||
+        !item.text.trim() ||
+        item.text !== item.text.trim() ||
+        item.text.length > 200 ||
+        sanitize(item.text) !== item.text ||
+        typeof item.addedAt !== "string" ||
+        !Number.isFinite(Date.parse(item.addedAt))
+      )
+        fail("De back-up bevat een ongeldig lijstitem.");
+      const textKey = item.text.toLowerCase();
+      if (seenIds.has(item.id) || seenTexts.has(textKey))
+        fail("Een lijstitem staat dubbel in de back-up.");
+      seenIds.add(item.id);
+      seenTexts.add(textKey);
+      return {
+        id: item.id.toLowerCase(),
+        text: item.text,
+        addedAt: new Date(item.addedAt).toISOString(),
+      };
+    });
+  }
+  return normalized;
 }
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -161,7 +217,12 @@ export function buildBackupPlan(
   data: unknown,
   mode: unknown,
   current: NovaSettings,
-): { next: NovaSettings; summary: BackupPlanSummary } {
+  currentLists: Record<string, SettingsBackupListItem[]> = {},
+): {
+  next: NovaSettings;
+  nextLists: Record<string, SettingsBackupListItem[]>;
+  summary: BackupPlanSummary;
+} {
   const raw = object(data);
   if (mode !== "merge" && mode !== "replace")
     fail("Kies samenvoegen of vervangen voor de back-up.");
@@ -188,11 +249,47 @@ export function buildBackupPlan(
   }
   const incoming = list(input, "skills");
   const incomingWidgets = list(input, "widgets");
+  const listsProvided = Object.hasOwn(input, "lists");
+  const incomingLists = listsProvided ? object(input.lists) : {};
+  if (Object.keys(incomingLists).length > MAX_LISTS)
+    fail("Maximaal 100 lijsten.");
   if (incoming.length > MAX_SKILLS) fail("Maximaal 50 vaardigheden.");
   if (incomingWidgets.length > MAX_WIDGETS) fail("Maximaal 20 panelen.");
   const oldSkills = new Map(
     next.skills.map((skill) => [String(skill.id), skill]),
   );
+  const oldLists = listsProvided
+    ? normalizeBackupLists(currentLists)
+    : structuredClone(currentLists);
+  const importedLists = listsProvided
+    ? normalizeBackupLists(incomingLists)
+    : {};
+  const nextLists = structuredClone(
+    listsProvided && mode === "replace" ? {} : oldLists,
+  );
+  if (listsProvided) {
+    for (const [name, items] of Object.entries(importedLists)) {
+      if (mode === "replace") {
+        nextLists[name] = items;
+        continue;
+      }
+      const merged = [...(nextLists[name] ?? [])];
+      for (const item of items) {
+        const existingIndex = merged.findIndex(
+          (row) =>
+            row.id === item.id ||
+            row.text.toLowerCase() === item.text.toLowerCase(),
+        );
+        if (existingIndex < 0) merged.push(item);
+        else merged[existingIndex] = item;
+      }
+      if (merged.length > MAX_LIST_ITEMS)
+        fail("Samenvoegen levert een lijst met meer dan 100 items op.");
+      nextLists[name] = merged;
+    }
+  }
+  if (Object.keys(nextLists).length > MAX_LISTS)
+    fail("Samenvoegen levert meer dan 100 lijsten op.");
   const skills = new Map(mode === "merge" ? oldSkills : []);
   const seenSkills = new Set<string>();
   const missingSecrets: BackupPlanSummary["missingSecrets"] = [];
@@ -423,6 +520,7 @@ export function buildBackupPlan(
     sidebar: next.sidebar,
     helper: next.helper,
     helperPreferences: next.helperPreferences,
+    ...(listsProvided ? { lists: nextLists } : {}),
   });
   const safeSummary = (value: string): string => {
     let clean = sanitize(value);
@@ -432,12 +530,21 @@ export function buildBackupPlan(
   };
   return {
     next,
+    nextLists,
     summary: {
       mode,
       incomingSkills: incoming.length,
       totalSkills: skills.size,
       incomingWidgets: incomingWidgets.length,
       totalWidgets: widgets.size,
+      incomingLists: Object.keys(importedLists).length,
+      totalLists: Object.keys(nextLists).length,
+      removedLists:
+        listsProvided && mode === "replace"
+          ? Object.keys(oldLists).filter(
+              (name) => !Object.hasOwn(importedLists, name),
+            ).length
+          : 0,
       replacedSkills: [...seenSkills].filter((id) => oldSkills.has(id)).length,
       removedSkills:
         mode === "replace"
@@ -461,6 +568,7 @@ export function buildBackupPlan(
       helperPreferencesChanged:
         JSON.stringify(next.helperPreferences) !==
         JSON.stringify(current.helperPreferences),
+      listsChanged: JSON.stringify(nextLists) !== JSON.stringify(oldLists),
       missingSecrets: missingSecrets.map(({ skill, headers }) => ({
         skill: safeSummary(skill),
         headers: headers.map(safeSummary),

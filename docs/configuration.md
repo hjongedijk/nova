@@ -3,7 +3,7 @@
 NOVA is configured in two places:
 
 1. **Environment variables**, read once at start-up by `apps/api/src/core/config/nova-config.ts` (the single source of truth). In production they come from the `.env` file next to `deploy/docker-compose.yml`; in development from the `.env` in the repository root. [`.env.example`](../.env.example) lists the common ones. Change a value, then recreate the container (`docker compose up -d`).
-2. **The Settings screen** in the web interface, stored in `settings.json` in the data folder. See [Settings screen](#settings-screen).
+2. **The Settings screen** in the web interface. NOVA-owned preferences live in `settings.json`; service connections live separately in `services.json`. See [Settings screen](#settings-screen).
 
 Notes on the tables below:
 
@@ -28,6 +28,7 @@ Notes on the tables below:
 | `NOVA_CERT_DIR`           | `<data dir>/certs`                                | Folder with `cert.pem`, `key.pem` and optionally `nova-ca.crt`.                                                                                                                         | no     |
 | `NOVA_WEB_DIR`            | `apps/web/build` (`/app/web` in the image)        | The built web app. When absent (development), Vite serves the web app instead.                                                                                                          | no     |
 | `NOVA_AGENTS_DIR`         | `agents` in the repo (`/app/agents` in the image) | Where the Windows agent files are served from.                                                                                                                                          | no     |
+| `NOVA_RESTART_ENABLED`    | `false` (`true` in official compose)              | Enables a guarded NOVA process restart request. It is enabled only in the official compose deployment with `restart: unless-stopped`.                                                   | no     |
 | `JARVIS_EXTENSIONS`       | `true`                                            | Set to `false` to switch off every tool source except NOVA's own `nova` source (includes MCP, Home Assistant, Proxmox and so on).                                                       | no     |
 
 ## AI through OmniRoute
@@ -113,16 +114,19 @@ The weather, news, Wikipedia, currency, market, ISS and similar tools use public
 
 Everything NOVA writes lives in the data folder (`nova-data/` in production, `dev-data/` in development):
 
-| File or folder             | What                                                                                                                                                                                                        |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `settings.json`            | Everything from the Settings screen: persona, quick actions, tool switches, skills, panels, sidebar, helper choice. May contain secret header values of skills, so it is readable only by NOVA (mode 0600). |
-| `memory.json`              | Short-term conversation history and session context.                                                                                                                                                        |
-| `actions.jsonl`            | The action log, one JSON line per event, append-only (mode 0600).                                                                                                                                           |
-| `jarvis-state.json`        | Timers, lists, alerts and component state.                                                                                                                                                                  |
-| `free-routing-policy.json` | The free-model policy NOVA checks before any inference. See [OmniRoute and free routing](omniroute.md).                                                                                                     |
-| `mcp-servers.json`         | Optional own MCP server list (overrides the default).                                                                                                                                                       |
-| `workspace/`               | Not created by NOVA: the folder the default `filesystem` MCP server is pointed at (`/data/workspace`). Create it if you want to use that server.                                                            |
-| `certs/`                   | `cert.pem`, `key.pem`, optional `nova-ca.crt` for HTTPS.                                                                                                                                                    |
+| File or folder                                                                        | What                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings.json`                                                                       | NOVA-owned preferences: persona, quick actions, tool switches, skills, panels, sidebar, helper choice and preferences, plus scoped standing approvals. May contain skill secret headers; mode 0600. |
+| `services.json`                                                                       | Service connection values and bounded connection history. Secret fields are private; mode 0600.                                                                                                     |
+| `helper-preferences-history.json`, `tool-switch-history.json`, `sidebar-history.json` | Bounded private change histories for helper appearance, tool enabled states and sidebar layout. Each is written with mode 0600.                                                                     |
+| `memory.json`                                                                         | Short-term conversation history and session context.                                                                                                                                                |
+| `actions.jsonl`                                                                       | The action log, one JSON line per event, append-only (mode 0600).                                                                                                                                   |
+| `jarvis-state.json`                                                                   | Timers, named user lists, alerts and component state. Only named lists are included in settings backups; active timers and alerts remain local.                                                     |
+| `settings-import-transaction.json`                                                    | Short-lived 0600 recovery journal while a confirmed import updates settings and named lists; removed after both stores commit.                                                                      |
+| `free-routing-policy.json`                                                            | The free-model policy NOVA checks before any inference. See [OmniRoute and free routing](omniroute.md).                                                                                             |
+| `mcp-servers.json`                                                                    | Optional own MCP server list (overrides the default).                                                                                                                                               |
+| `workspace/`                                                                          | Not created by NOVA: the folder the default `filesystem` MCP server is pointed at (`/data/workspace`). Create it if you want to use that server.                                                    |
+| `certs/`                                                                              | `cert.pem`, `key.pem`, optional `nova-ca.crt` for HTTPS.                                                                                                                                            |
 
 ## Settings screen
 
@@ -142,6 +146,33 @@ Search accepts names such as “stem”, “model” and “back-up”; press En
 Existing skills, widgets, sidebar layout, persona and quick actions retain their storage and APIs.
 See [settings inventory](settings-inventory.md) and [service inventory](settings-services-inventory.md)
 for which values are still environment-only while phase J is in progress.
+
+### What the Settings screen can change
+
+The **Connections** and **Devices** sections can save connection addresses and credentials for
+OmniRoute, Home Assistant, Proxmox, Qdrant, MQTT, Node-RED, the Windows agent, Termix and Pangolin.
+These saved values override the corresponding environment bootstrap values after NOVA starts;
+the UI marks changes that need a restart. Secret values stay server-side in `services.json` and are
+never exported. The Models section also reads account/model metadata and can write NOVA's verified
+free-routing policy, but it does not edit provider credentials or OmniRoute's upstream route/model
+settings.
+
+Persona, quick actions, tool overrides, skills, widgets, sidebar layout, helper mode/display and
+helper appearance preferences are stored in `settings.json`. The MCP server list is an editable data
+file, not yet a Settings editor. Node-RED flow configuration remains owned by Node-RED and is not
+managed from the Settings screen.
+
+### Values that remain environment or deployment controlled
+
+The service fields above use `.env` or compose as their initial values. The following controls do
+not have a Settings editor: public URL and Settings PIN; language/time zone; ports and data/certificate
+paths; OmniRoute's required `auto` model, mounted database path and compression mode; global action
+policy and tool-call limits; MCP file path; memory backend and embedding model/dimensions; weather
+fallback coordinates; Node-RED shared secret; reachability-check targets; and host metrics address.
+The free-only routing verifier remains mandatory in production, regardless of `FREE_ONLY`. Change
+deployment variables in compose/`.env` and recreate the NOVA container. `NOVA_RESTART_ENABLED` is
+the exception: the official compose file sets it so NOVA can request its own supervised restart after
+a guarded confirmation.
 
 When a PIN is configured, it is held only in browser memory for fifteen minutes. Reloading the page,
 closing the tab or choosing “Instellingen vergrendelen” requires entering it again.
@@ -163,8 +194,9 @@ Credentials are never returned to the browser or stored in the visible history.
 Connection tests use unsaved input without persisting it. They issue bounded read-only HTTP requests
 or open and close an MQTT connection without publishing. A successful response proves reachability,
 not free billing, complete tool access or action verification. The screen distinguishes saved values
-from the running connection and shows when NOVA must be restarted. No container restart button is
-available until a restricted container-control channel is implemented.
+from the running connection and shows when NOVA must be restarted. In the official Compose deployment,
+the guarded Restart NOVA button is available when supported changes are pending; the process exits
+gracefully and Compose restarts it. Other deployment forms show the restart-required message only.
 
 OmniRoute inference remains bound to the environment endpoint whose mounted database NOVA verifies.
 A different saved endpoint blocks inference, including test bypasses, and a connection probe refuses
@@ -178,13 +210,13 @@ Connection credentials remain outside the visible history and require entering t
 again. Tool history contains only tool names and enabled states. Sidebar history contains only panel
 placement and visibility, never panel content, prompts or source addresses.
 
-Version-one settings backups include persona, quick actions, tool overrides, skills, widgets, sidebar layout, helper appearance and helper sound preferences. Helper mode and display are included as saved choices only; import never commands the Windows agent to apply them. Import first validates a detached candidate (maximum 1,000,000 bytes) and shows changed categories, additions, replacements, removals and missing secret header names. It requires a fresh DANGEROUS confirmation valid for 60 seconds and one use; changing settings in the meantime invalidates the import. Preparation never writes settings. Unknown versions, invalid modes, duplicate IDs, over-capacity merges and broken widget/sidebar references are rejected rather than silently truncated.
+Version-one settings backups include persona, quick actions, tool overrides, skills, widgets, sidebar layout, helper appearance and helper sound preferences, plus named user lists such as shopping and to-do lists. Older v1 files that omit lists preserve current lists in both merge and replace modes. Active timers, alerts and watchdog state are excluded. List imports are bounded to 100 lists with at most 100 items each; merge updates matching item IDs or text and replace applies only when a `lists` field is present. Helper mode and display are included as saved choices only; import never commands the Windows agent to apply them. Import first validates a detached candidate (maximum 1,000,000 bytes) and shows changed categories, additions, replacements, removals and missing secret header names. It requires a fresh DANGEROUS confirmation valid for 60 seconds and one use; changing settings or lists in the meantime invalidates the import. Preparation never writes settings. A private recovery journal restores both prior stores on startup if a process stops during the multi-file commit. Unknown versions, invalid modes, duplicate IDs, over-capacity merges and broken widget/sidebar references are rejected rather than silently truncated.
 
 Secret header values are never exported or restored from a file. A merge retains existing private headers only when the target URL, method and declared header names match exactly; changed targets require entering the secrets again. Recognized secrets and declared credential values in visible imported settings are rejected before any write. The public confirmation and audit contain counts only; candidates and revision hashes remain private and expire autonomously. Permanent approval grants cannot be imported. An audit failure before applying blocks the import; a failure after saving produces an explicit warning.
 
 The guarded API uses POST `/api/settings/import/prepare` with `{data, mode, acknowledgeEffects: true}`. POST `/api/settings/import` now accepts only `{sessionId, confirmationId, approve}` from that preparation; old direct-import bodies are rejected. The settings screen performs both steps and supports cancellation and expiry.
 
-The version-one download includes local quick-action and widget lists, as well as the other fields
+The version-one download includes local quick-action, widget and named planning lists, as well as the other fields
 above. It excludes connection settings, provider/model accounts, Node-RED flows, secret values,
 standing permissions, native hotkeys, memories and conversation history. Connection and flow owners
 are external to this file; complete-system export/import remains unfinished. Node-RED flow backup

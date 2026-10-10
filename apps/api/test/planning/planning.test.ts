@@ -49,6 +49,42 @@ afterEach(() => {
 });
 
 describe("tools", () => {
+  it("replaces backed-up lists without touching timers or alerts and keeps the state private", () => {
+    store.data.timers.push({
+      id: "11111111",
+      label: "old timer",
+      fireAt: Date.now() + 60_000,
+    });
+    store.data.alerts.push({
+      id: "alert",
+      key: "disk",
+      severity: "warning",
+      title: "Disk",
+      detail: "low",
+      at: new Date().toISOString(),
+    });
+    store.data.watch.down.disk = Date.now();
+    store.data.lists.boodschappen = [
+      { id: "22222222", text: "brood", addedAt: new Date().toISOString() },
+    ];
+    const replacement = {
+      taken: [
+        { id: "33333333", text: "was", addedAt: new Date().toISOString() },
+      ],
+    };
+
+    store.replaceLists(replacement);
+
+    expect(store.getListsSnapshot()).toEqual(replacement);
+    expect(store.data.timers).toHaveLength(1);
+    expect(store.data.alerts).toHaveLength(1);
+    expect(store.data.watch.down).toHaveProperty("disk");
+    expect(fs.statSync(store.file).mode & 0o777).toBe(0o600);
+    store.reload();
+    expect(store.getListsSnapshot()).toEqual(replacement);
+    expect(store.data.timers).toHaveLength(1);
+  });
+
   it("lists the tools with their risks", () => {
     const risk = Object.fromEntries(
       source.definitions().map((d) => [d.name, d.risk]),

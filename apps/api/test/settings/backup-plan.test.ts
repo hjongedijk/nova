@@ -82,6 +82,80 @@ const rejects = (data: unknown, mode: unknown = "merge", state = current()) =>
   expect(() => buildBackupPlan(data, mode, state)).toThrow(ValidationError);
 
 describe("bounded private settings backup plan", () => {
+  it("merges named list items by ID or text, replaces lists only when supplied and counts removals", () => {
+    const existing = {
+      boodschappen: [
+        { id: "11111111", text: "brood", addedAt: "2026-10-09T10:00:00.000Z" },
+      ],
+      taken: [
+        { id: "22222222", text: "was", addedAt: "2026-10-09T10:00:00.000Z" },
+      ],
+    };
+    const imported = {
+      boodschappen: [
+        { id: "33333333", text: "melk", addedAt: "2026-10-10T10:00:00.000Z" },
+      ],
+    };
+    const merged = buildBackupPlan(
+      backup({ lists: imported }),
+      "merge",
+      current(),
+      existing,
+    );
+    expect(merged.nextLists).toEqual({
+      boodschappen: [...existing.boodschappen, ...imported.boodschappen],
+      taken: existing.taken,
+    });
+    expect(merged.summary).toMatchObject({
+      incomingLists: 1,
+      totalLists: 2,
+      removedLists: 0,
+      listsChanged: true,
+    });
+    const replacement = buildBackupPlan(
+      backup({ lists: imported }),
+      "replace",
+      current(),
+      existing,
+    );
+    expect(replacement.nextLists).toEqual(imported);
+    expect(replacement.summary.removedLists).toBe(1);
+    const legacy = buildBackupPlan(backup(), "replace", current(), existing);
+    expect(legacy.nextLists).toEqual(existing);
+    expect(legacy.summary.listsChanged).toBe(false);
+  });
+
+  it("rejects malformed, oversized, duplicate or secret-bearing list entries", () => {
+    const base = {
+      id: "1234abcd",
+      text: "brood",
+      addedAt: "2026-10-10T10:00:00Z",
+    };
+    rejects(backup({ lists: { Boodschappen: [base] } }));
+    rejects(backup({ lists: { boodschappen: [{ ...base, id: "short" }] } }));
+    rejects(
+      backup({ lists: { boodschappen: [base, { ...base, id: "87654321" }] } }),
+    );
+    rejects(
+      backup({
+        skills: [
+          {
+            ...webhook(),
+            http: {
+              ...webhook().http,
+              secretHeaders: [
+                { name: "X-Token", value: "stored-private-token" },
+              ],
+            },
+          },
+        ],
+        lists: {
+          boodschappen: [{ ...base, text: "stored-private-token" }],
+        },
+      }),
+    );
+  });
+
   it("accepts the actual public export shape without restoring exported secret declarations", () => {
     const exported = publicSkill(storedWebhook());
     const { next, summary } = buildBackupPlan(
@@ -308,6 +382,9 @@ describe("bounded private settings backup plan", () => {
       totalSkills: 1,
       incomingWidgets: 1,
       totalWidgets: 1,
+      incomingLists: 0,
+      totalLists: 0,
+      removedLists: 0,
       replacedSkills: 0,
       removedSkills: 0,
       removedWidgets: 0,
@@ -317,6 +394,7 @@ describe("bounded private settings backup plan", () => {
       sidebarChanged: false,
       helperChanged: false,
       helperPreferencesChanged: false,
+      listsChanged: false,
       missingSecrets: [],
     });
     expect(state).toEqual(before);

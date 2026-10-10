@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import type { InfrastructureEvent } from "@nova/contracts";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { MqttService } from "../core/mqtt/mqtt.service.js";
 
@@ -86,6 +87,28 @@ export class JarvisStateStore {
       fs.renameSync(tmp, this.file);
     } catch (error) {
       this.log.warn(`could not save state: ${(error as Error).message}`);
+    }
+  }
+
+  /** Snapshot only user lists; active timers and system state are intentionally excluded from backups. */
+  getListsSnapshot(): Record<string, StoredListItem[]> {
+    return structuredClone(this.data.lists);
+  }
+
+  /** Replace lists atomically without touching timers, alerts or watchdog state. */
+  replaceLists(lists: Record<string, StoredListItem[]>): void {
+    const next = { ...this.data, lists: structuredClone(lists) };
+    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    const temporary = `${this.file}.${process.pid}.tmp`;
+    try {
+      fs.writeFileSync(temporary, JSON.stringify(next, null, 1), {
+        mode: 0o600,
+      });
+      fs.chmodSync(temporary, 0o600);
+      fs.renameSync(temporary, this.file);
+      this.state = next;
+    } finally {
+      fs.rmSync(temporary, { force: true });
     }
   }
 

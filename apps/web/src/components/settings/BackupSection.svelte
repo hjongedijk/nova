@@ -75,7 +75,7 @@
       if (!result.ok) return say(result.error, "bad");
       if (!approve) return say("Import geannuleerd.", "ok");
       await afterChange(
-        `${result.imported} vaardigheden geïmporteerd.${result.missingSecrets.length ? ` Vul de geheime headers opnieuw in bij: ${result.missingSecrets.map((item) => item.skill).join(", ")}.` : ""}${result.auditWarning ? ` ${result.auditWarning}` : ""}`,
+        `${result.imported} vaardigheden en ${result.importedLists ?? 0} lijsten geïmporteerd.${result.missingSecrets.length ? ` Vul de geheime headers opnieuw in bij: ${result.missingSecrets.map((item) => item.skill).join(", ")}.` : ""}${result.auditWarning ? ` ${result.auditWarning}` : ""}`,
       );
     } catch {
       say(
@@ -95,8 +95,9 @@
   <h3>Exporteren</h3>
   <p class="hint">
     Een bestand met je vaardigheden, aanpassingen aan gereedschappen, eigen
-    regels, snelle opdrachten en helperinstellingen. Geheime waarden zitten er
-    bewust niet in; die vul je na het importeren opnieuw in.
+    regels, snelle opdrachten, helperinstellingen en je boodschappen- en
+    takenlijsten. Actieve timers en meldingen worden niet overgezet. Geheime
+    waarden zitten er bewust niet in; die vul je na het importeren opnieuw in.
   </p>
   <Button onclick={download}>Back-up downloaden</Button>
   <h3>Importeren</h3>
@@ -129,7 +130,8 @@
   </Field>
   <p>
     Maximaal 1 MB. NOVA controleert het bestand vóór de import. Services, flows,
-    geheimen en permanente toestemmingen zitten niet in deze back-up.
+    actieve timers, meldingen, geheimen en permanente toestemmingen zitten niet
+    in deze back-up.
   </p>
   {#if pending}
     <div
@@ -145,9 +147,11 @@
       </p>
       <p>
         Na import: {pending.summary.totalSkills} vaardigheden en {pending
-          .summary.totalWidgets} panelen. {pending.summary.replacedSkills} vaardigheden
-        worden vervangen; {pending.summary.removedSkills} vaardigheden en {pending
-          .summary.removedWidgets} panelen worden verwijderd.
+          .summary.totalWidgets} panelen en {pending.summary.totalLists} lijsten.
+        {pending.summary.replacedSkills} vaardigheden worden vervangen; {pending
+          .summary.removedSkills} vaardigheden en {pending.summary
+          .removedWidgets} panelen en {pending.summary.removedLists} lijsten worden
+        verwijderd.
       </p>
       <ul>
         <li>
@@ -159,6 +163,12 @@
           Snelle opdrachten: {pending.summary.quickActionsChanged
             ? "wijzigen"
             : "blijven gelijk"}
+        </li>
+        <li>
+          Lijsten: {pending.summary.listsChanged
+            ? "wijzigen"
+            : "blijven gelijk"}
+          ({pending.summary.incomingLists} inkomend)
         </li>
         <li>
           Gereedschapsinstellingen: {pending.summary.toolOverridesChanged

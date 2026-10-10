@@ -65,9 +65,10 @@ function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-settings-backup-"));
   const filename = path.join(dir, "settings.json");
   cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const store = new SettingsStore({
+  const config = {
     dataFile: (name: string) => path.join(dir, name),
-  } as NovaConfig);
+  } as NovaConfig;
+  const store = new SettingsStore(config);
   store.update((next) => {
     next.persona = "Old private persona";
     next.skills = [
@@ -81,9 +82,23 @@ function fixture() {
   }));
   const audit = { record } as unknown as AuditService;
   const confirmations = new ConfirmationsService(audit);
+  let lists: Record<string, { id: string; text: string; addedAt: string }[]> =
+    {};
+  const planning = {
+    getListsSnapshot: () => structuredClone(lists),
+    replaceLists: (next: typeof lists) => {
+      lists = structuredClone(next);
+    },
+  };
   let now = 1000;
   confirmations.now = () => now;
-  const backup = new SettingsBackupService(store, confirmations, audit);
+  const backup = new SettingsBackupService(
+    store,
+    confirmations,
+    audit,
+    planning as never,
+    config,
+  );
   cleanups.push(() => backup.onModuleDestroy());
   const prepare = (body: unknown = requestBody()) => {
     const prepared = backup.prepare(body);
@@ -114,9 +129,14 @@ function fixture() {
   return {
     dir,
     filename,
+    journalFile: path.join(dir, "settings-import-transaction.json"),
     store,
     record,
     confirmations,
+    getLists: () => structuredClone(lists),
+    setLists: (next: typeof lists) => {
+      lists = structuredClone(next);
+    },
     backup,
     prepare,
     confirm,
@@ -197,6 +217,9 @@ describe("settings backup private approvals", () => {
       removedSkills: 1,
       totalSkills: 1,
       totalWidgets: 1,
+      incomingLists: 0,
+      totalLists: 0,
+      removedLists: 0,
     });
     expect(first.action).toMatchObject({
       tool: "settings_import",
@@ -208,16 +231,22 @@ describe("settings backup private approvals", () => {
         mode: "replace",
         incomingSkills: 1,
         incomingWidgets: 1,
+        incomingLists: 0,
+        totalLists: 0,
+        removedLists: 0,
         removedSkills: 1,
         removedWidgets: 0,
       },
     });
     expect(Object.keys(first.action!.args).sort()).toEqual([
+      "incomingLists",
       "incomingSkills",
       "incomingWidgets",
       "mode",
+      "removedLists",
       "removedSkills",
       "removedWidgets",
+      "totalLists",
     ]);
     expect(first.action!.sessionId).toMatch(/^settings-import:/);
     expect(first.action!.sessionId).not.toBe(second.action!.sessionId);
@@ -243,6 +272,7 @@ describe("settings backup private approvals", () => {
     expect(f.confirm(prepared)).toEqual({
       ok: true,
       imported: 1,
+      importedLists: 0,
       missingSecrets: [],
     });
     expect(f.store.get()).toMatchObject({
@@ -258,6 +288,158 @@ describe("settings backup private approvals", () => {
     expect(fs.statSync(f.filename).mode & 0o777).toBe(0o600);
     expect(f.confirm(prepared)).toMatchObject({ ok: false });
     f.assertPrivate(f.record.mock.calls);
+  });
+
+  it("exports and restores named lists with merge semantics and explicit preview counts", () => {
+    const f = fixture();
+    const bread = {
+      id: "11111111",
+      text: "brood",
+      addedAt: "2026-10-09T10:00:00.000Z",
+    };
+    f.setLists({ boodschappen: [bread] });
+    expect(f.backup.exportLists()).toEqual({ boodschappen: [bread] });
+    const data = {
+      ...incoming(),
+      lists: {
+        boodschappen: [
+          { id: "22222222", text: "melk", addedAt: "2026-10-10T10:00:00.000Z" },
+        ],
+        taken: [
+          {
+            id: "33333333",
+            text: "was doen",
+            addedAt: "2026-10-10T10:00:00.000Z",
+          },
+        ],
+      },
+    };
+    const prepared = f.prepare({
+      data,
+      mode: "merge",
+      acknowledgeEffects: true,
+    });
+    expect(prepared.summary).toMatchObject({
+      incomingLists: 2,
+      totalLists: 2,
+      removedLists: 0,
+      listsChanged: true,
+    });
+    expect(f.confirm(prepared)).toMatchObject({ ok: true, importedLists: 2 });
+    expect(f.getLists()).toEqual({
+      boodschappen: [bread, ...data.lists.boodschappen],
+      taken: data.lists.taken,
+    });
+  });
+
+  it("rejects list changes made after preview before consuming the import", () => {
+    const f = fixture();
+    const prepared = f.prepare({
+      ...requestBody(),
+      data: {
+        ...incoming(),
+        lists: {
+          boodschappen: [
+            {
+              id: "44444444",
+              text: "kaas",
+              addedAt: "2026-10-10T10:00:00.000Z",
+            },
+          ],
+        },
+      },
+    });
+    f.setLists({
+      taken: [
+        {
+          id: "55555555",
+          text: "afspraak",
+          addedAt: "2026-10-10T11:00:00.000Z",
+        },
+      ],
+    });
+    expect(f.confirm(prepared)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Instellingen zijn intussen gewijzigd"),
+    });
+    expect(f.getLists()).toHaveProperty("taken");
+  });
+
+  it("restores the prior list snapshot if the settings file cannot be committed", () => {
+    const f = fixture();
+    const previous = {
+      boodschappen: [
+        { id: "66666666", text: "koffie", addedAt: "2026-10-10T08:00:00.000Z" },
+      ],
+    };
+    f.setLists(previous);
+    const prepared = f.prepare({
+      ...requestBody(),
+      data: {
+        ...incoming(),
+        lists: {
+          boodschappen: [
+            {
+              id: "77777777",
+              text: "thee",
+              addedAt: "2026-10-10T09:00:00.000Z",
+            },
+          ],
+        },
+      },
+    });
+    vi.spyOn(f.store, "update").mockImplementationOnce(() => {
+      expect(fs.statSync(f.journalFile).mode & 0o777).toBe(0o600);
+      throw new Error("fixture settings write failure");
+    });
+    expect(f.confirm(prepared)).toMatchObject({ ok: false });
+    expect(f.getLists()).toEqual(previous);
+    expect(fs.existsSync(f.journalFile)).toBe(false);
+  });
+
+  it("recovers the prior settings and lists from a durable journal at startup", () => {
+    const f = fixture();
+    const previousSettings = f.store.get();
+    f.store.update((next) => {
+      next.persona = "Partially imported";
+    });
+    const previousLists = {
+      boodschappen: [
+        {
+          id: "88888888",
+          text: "melk",
+          addedAt: "2026-10-10T08:00:00.000Z",
+        },
+      ],
+    };
+    f.setLists({
+      taken: [
+        {
+          id: "99999999",
+          text: "partial",
+          addedAt: "2026-10-10T09:00:00.000Z",
+        },
+      ],
+    });
+    const payload = { previousSettings, previousLists };
+    fs.writeFileSync(
+      f.journalFile,
+      JSON.stringify({
+        version: 1,
+        ...payload,
+        digest: crypto
+          .createHash("sha256")
+          .update(JSON.stringify(payload))
+          .digest("hex"),
+      }),
+      { mode: 0o600 },
+    );
+
+    f.backup.onModuleInit();
+
+    expect(f.store.get()).toEqual(previousSettings);
+    expect(f.getLists()).toEqual(previousLists);
+    expect(fs.existsSync(f.journalFile)).toBe(false);
   });
 
   it("rejects cross-session and wrong IDs without consuming matching consent", () => {
@@ -298,6 +480,7 @@ describe("settings backup private approvals", () => {
       ok: true,
       cancelled: true,
       imported: 0,
+      importedLists: 0,
       missingSecrets: [],
     });
     expect(f.confirm(prepared)).toMatchObject({ ok: false });

@@ -34,14 +34,18 @@ search, keyboard Enter navigation, deep links, saving, PIN expiry, explicit lock
 to the local production preview to check its built assets. API tests cover preservation, null defaults,
 snapshot protection/permissions and PIN throttling.
 
-| View           | Desktop 1x                           | Desktop 2x                           | Mobile                                   |
-| -------------- | ------------------------------------ | ------------------------------------ | ---------------------------------------- |
-| General        | ![](img/settings-general-1x.png)     | ![](img/settings-general-2x.png)     | ![](img/settings-general-mobile.png)     |
-| Models         | ![](img/settings-models-1x.png)      | ![](img/settings-models-2x.png)      | ![](img/settings-models-mobile.png)      |
-| Native gateway | ![](img/settings-native-1x.png)      | ![](img/settings-native-2x.png)      | ![](img/settings-native-mobile.png)      |
-| Devices        | ![](img/settings-devices-1x.png)     | ![](img/settings-devices-2x.png)     | ![](img/settings-devices-mobile.png)     |
-| System         | ![](img/settings-system-1x.png)      | ![](img/settings-system-2x.png)      | ![](img/settings-system-mobile.png)      |
-| Personality    | ![](img/settings-personality-1x.png) | ![](img/settings-personality-2x.png) | ![](img/settings-personality-mobile.png) |
+| View            | Desktop 1x                               | Desktop 2x                               | Mobile                                       |
+| --------------- | ---------------------------------------- | ---------------------------------------- | -------------------------------------------- |
+| General         | ![](img/settings-general-1x.png)         | ![](img/settings-general-2x.png)         | ![](img/settings-general-mobile.png)         |
+| Models          | ![](img/settings-models-1x.png)          | ![](img/settings-models-2x.png)          | ![](img/settings-models-mobile.png)          |
+| Native gateway  | ![](img/settings-native-1x.png)          | ![](img/settings-native-2x.png)          | ![](img/settings-native-mobile.png)          |
+| Devices         | ![](img/settings-devices-1x.png)         | ![](img/settings-devices-2x.png)         | ![](img/settings-devices-mobile.png)         |
+| System          | ![](img/settings-system-1x.png)          | ![](img/settings-system-2x.png)          | ![](img/settings-system-mobile.png)          |
+| Personality     | ![](img/settings-personality-1x.png)     | ![](img/settings-personality-2x.png)     | ![](img/settings-personality-mobile.png)     |
+| Helper history  | ![](img/settings-helper-history-1x.png)  | ![](img/settings-helper-history-2x.png)  | ![](img/settings-helper-history-mobile.png)  |
+| Tool history    | ![](img/settings-tool-history-1x.png)    | ![](img/settings-tool-history-2x.png)    | ![](img/settings-tool-history-mobile.png)    |
+| Sidebar history | ![](img/settings-sidebar-history-1x.png) | ![](img/settings-sidebar-history-2x.png) | ![](img/settings-sidebar-history-mobile.png) |
+| Backup import   | ![](img/settings-backup-confirm-1x.png)  | ![](img/settings-backup-confirm-2x.png)  | ![](img/settings-backup-confirm-mobile.png)  |
 
 No real phone or Windows-PC test has been performed for this settings transition. Connection editors, bounded adapters and connection history are now implemented.
 Onboarding, complete-system backups, service-specific controls and upstream account/model management remain later phase J work.

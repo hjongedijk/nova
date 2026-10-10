@@ -245,6 +245,15 @@ try {
           quiet: { enabled: true, start: "22:00", end: "07:00" },
         },
       },
+      lists: {
+        boodschappen: [
+          {
+            id: "1234abcd",
+            text: "brood",
+            addedAt: "2026-10-10T10:00:00.000Z",
+          },
+        ],
+      },
     };
     const missingHeaders = [
       {
@@ -902,6 +911,9 @@ try {
             totalSkills: 1,
             incomingWidgets: 0,
             totalWidgets: 0,
+            incomingLists: 1,
+            totalLists: 1,
+            removedLists: 0,
             replacedSkills: 1,
             removedSkills: 0,
             removedWidgets: 1,
@@ -911,13 +923,21 @@ try {
             sidebarChanged: true,
             helperChanged: true,
             helperPreferencesChanged: true,
+            listsChanged: true,
             missingSecrets: missingHeaders,
           },
           action: {
             confirmationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             sessionId: "settings-import:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
             tool: "settings_import",
-            args: { mode: "replace", incomingSkills: 1, incomingWidgets: 0 },
+            args: {
+              mode: "replace",
+              incomingSkills: 1,
+              incomingWidgets: 0,
+              incomingLists: 1,
+              totalLists: 1,
+              removedLists: 0,
+            },
             risk: "DANGEROUS",
             allowAlways: false,
             createdAt: now,
@@ -937,9 +957,20 @@ try {
         );
         if (confirmation.approve) {
           importWrites++;
-          data = { ok: true, imported: 1, missingSecrets: missingHeaders };
+          data = {
+            ok: true,
+            imported: 1,
+            importedLists: 1,
+            missingSecrets: missingHeaders,
+          };
         } else
-          data = { ok: true, cancelled: true, imported: 0, missingSecrets: [] };
+          data = {
+            ok: true,
+            cancelled: true,
+            imported: 0,
+            importedLists: 0,
+            missingSecrets: [],
+          };
       } else if (endpoint === "/settings/export")
         data = {
           ...overview,
@@ -1844,7 +1875,7 @@ try {
     );
     assert.match(
       await importReview.innerText(),
-      /1 vaardigheden worden vervangen; 0 vaardigheden en 1 panelen worden verwijderd/,
+      /1 vaardigheden worden vervangen; 0 vaardigheden en 1 panelen en 0 lijsten worden verwijderd/,
     );
     assert.match(await importReview.innerText(), /Eigen regels: wijzigen/);
     assert.match(
@@ -1926,7 +1957,7 @@ try {
     await importReview.waitFor({ state: "detached" });
     await page
       .locator("#settingsMessage")
-      .filter({ hasText: "1 vaardigheden geïmporteerd." })
+      .filter({ hasText: "1 vaardigheden en 1 lijsten geïmporteerd." })
       .waitFor();
     assert.equal(importWrites, 1);
     assert.equal(importPrepares, 3);
