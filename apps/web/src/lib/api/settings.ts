@@ -8,6 +8,7 @@ import type {
   OmniRouteAccountRemovalPrepared,
   OmniRouteAccountRemovalResult,
   MqttOverview,
+  QdrantOverview,
 } from "@nova/contracts";
 import type {
   NativeGatewayReport,
@@ -228,6 +229,8 @@ export const getServiceConnections = () =>
   read<{ services: ServiceConnection[] }>("/services");
 export const getMqttOverview = () =>
   read<MqttOverview>("/services/mqtt/overview");
+export const getQdrantOverview = () =>
+  read<QdrantOverview>("/services/qdrant/overview");
 export const saveServiceConnection = (
   id: string,
   values: Record<string, string | boolean>,

@@ -480,6 +480,19 @@ export interface MqttOverview {
   recent: MqttRecentMessage[];
 }
 
+export interface QdrantOverview {
+  ok: boolean;
+  message: string;
+  truncated: boolean;
+  collections: {
+    name: string;
+    points: number | null;
+    indexedVectors: number | null;
+    segments: number | null;
+    status: string;
+  }[];
+}
+
 export interface ServiceConnectionWrite {
   ok: true;
   services: ServiceConnection[];

@@ -428,6 +428,107 @@ describe("service connection management", () => {
 });
 
 describe("read-only connection probes", () => {
+  it("shows bounded Qdrant collection metadata through the guarded route", async () => {
+    const fake = await service((entry, response) => {
+      if (entry.url === "/collections")
+        json(response, 200, {
+          result: { collections: [{ name: "nova_memory" }, { name: "other" }] },
+        });
+      else
+        json(response, 200, {
+          result: {
+            points_count: 12,
+            indexed_vectors_count: 10,
+            segments_count: 2,
+            status: "green",
+            secret: "private-detail",
+          },
+        });
+    });
+    try {
+      await request("put", "/qdrant", {
+        values: {
+          url: `http://127.0.0.1:${fake.port}`,
+          apiKey: "private-qdrant-key",
+        },
+      });
+      const result = await nova.api
+        .get("/api/settings/services/qdrant/overview")
+        .set(ADMIN);
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({
+        ok: true,
+        collections: [
+          {
+            name: "nova_memory",
+            points: 12,
+            indexedVectors: 10,
+            segments: 2,
+            status: "green",
+          },
+          {
+            name: "other",
+            points: 12,
+            indexedVectors: 10,
+            segments: 2,
+            status: "green",
+          },
+        ],
+      });
+      expect(JSON.stringify(result.body)).not.toContain("private-detail");
+      expect(JSON.stringify([result.body, nova.audits])).not.toContain(
+        "private-qdrant-key",
+      );
+      expect(fake.seen).toHaveLength(3);
+      expect(
+        fake.seen.every(
+          (request) => request.headers["api-key"] === "private-qdrant-key",
+        ),
+      ).toBe(true);
+      expect(
+        fake.seen.every(
+          (request) => request.method === "GET" && request.body === "",
+        ),
+      ).toBe(true);
+    } finally {
+      fake.close();
+    }
+  });
+
+  it("limits Qdrant detail reads to twenty safe collection names", async () => {
+    const fake = await service((entry, response) => {
+      if (entry.url === "/collections")
+        json(response, 200, {
+          result: {
+            collections: [
+              ...Array.from({ length: 20 }, (_, index) => ({
+                name: `collection_${index}`,
+              })),
+              { name: "../credentials" },
+            ],
+          },
+        });
+      else json(response, 200, { result: { points_count: 0 } });
+    });
+    try {
+      await request("put", "/qdrant", {
+        values: { url: `http://127.0.0.1:${fake.port}` },
+      });
+      const result = await nova.api
+        .get("/api/settings/services/qdrant/overview")
+        .set(ADMIN);
+      expect(result.status).toBe(200);
+      expect(result.body.collections).toHaveLength(20);
+      expect(result.body.truncated).toBe(true);
+      expect(fake.seen).toHaveLength(21);
+      expect(
+        fake.seen.some((request) => request.url?.includes("credentials")),
+      ).toBe(false);
+    } finally {
+      fake.close();
+    }
+  });
+
   it.each([
     [
       "omniroute",

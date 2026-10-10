@@ -33,6 +33,9 @@ export class ServiceConnectionsController {
   @Get("mqtt/overview") mqttOverview() {
     return this.mqtt.overview();
   }
+  @Get("qdrant/overview") qdrantOverview() {
+    return this.adapters.qdrantOverview(this.store.effective("qdrant"));
+  }
   @Get(":id/status") status(@Param("id") id: string) {
     return { test: this.adapters.status(id) };
   }

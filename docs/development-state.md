@@ -49,6 +49,8 @@ Helper preferences and saved mode/display are now included in version-one settin
 
 J6.2 MQTT overview now lists fixed publisher topics, connection state and at most 50 process-local send summaries behind SettingsGuard. Timer, alert and conversation content stays hidden; delivery callbacks report client acceptance, not broker receipt. No inbound subscription was added. Full Node24 gates passed: 1,015 tests in 50 files, format, lint, typecheck and build. Production browser checks passed at 1x/2x/mobile, including duplicate timestamps; connection and MQTT screenshots reviewed. Continue J; no J push/release approval.
 
+J6.1 Qdrant now has an explicit PIN-guarded read-only overview for up to 20 safe collection names, point/index counts, segment counts and collection status. Names and counts are projected; no points are read, no writes occur, and the key stays server-side. Unsupported names or excess collections set the truncation notice. It does not report byte size or implement memory checks, cleanup or reindexing, so J6.1 remains partial. Full Node24 gates passed: 1,017 tests in 50 files, format, lint, typecheck and build. Production browser checks passed at 1x/2x/mobile with explicit-load behavior; screenshots reviewed.
+
 ## Memory tooling decision
 
 Claude-Mem supports Codex and stores/retrieves session observations, but its current installer also offers hosted memory

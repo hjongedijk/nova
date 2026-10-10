@@ -19,6 +19,123 @@ export class ServiceConnectionsAdapter {
     return this.last.get(id) ?? null;
   }
 
+  async qdrantOverview(values: ConnectionValues) {
+    const base = String(values.url ?? "").replace(/\/$/, "");
+    if (!base)
+      return {
+        ok: false as const,
+        message: "Vul eerst het Qdrant-adres in.",
+        collections: [],
+        truncated: false,
+      };
+    const headers: Record<string, string> = values.apiKey
+      ? { "api-key": String(values.apiKey) }
+      : {};
+    try {
+      const list = await requestJson<{
+        result?: { collections?: unknown };
+      }>(`${base}/collections`, {
+        headers,
+        timeoutMs: 5000,
+        signal: AbortSignal.timeout(6000),
+      });
+      if (list.status < 200 || list.status >= 300)
+        return {
+          ok: false as const,
+          message: "Qdrant weigerde het collectieoverzicht.",
+          collections: [],
+          truncated: false,
+        };
+      const raw = list.data?.result?.collections;
+      if (!Array.isArray(raw))
+        return {
+          ok: false as const,
+          message: "Qdrant gaf een ongeldig collectieoverzicht.",
+          collections: [],
+          truncated: false,
+        };
+      const names = raw.flatMap((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry))
+          return [];
+        const name = (entry as { name?: unknown }).name;
+        return typeof name === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(name)
+          ? [name]
+          : [];
+      });
+      const selected = names.slice(0, 20);
+      const collections = await Promise.all(
+        selected.map(async (name) => {
+          try {
+            const response = await requestJson<{
+              result?: {
+                points_count?: unknown;
+                indexed_vectors_count?: unknown;
+                segments_count?: unknown;
+                status?: unknown;
+              };
+            }>(`${base}/collections/${encodeURIComponent(name)}`, {
+              headers,
+              timeoutMs: 5000,
+              signal: AbortSignal.timeout(6000),
+            });
+            const result = response.data?.result;
+            const count = (value: unknown) =>
+              typeof value === "number" &&
+              Number.isSafeInteger(value) &&
+              value >= 0
+                ? value
+                : null;
+            return {
+              name,
+              points:
+                response.status >= 200 && response.status < 300
+                  ? count(result?.points_count)
+                  : null,
+              indexedVectors:
+                response.status >= 200 && response.status < 300
+                  ? count(result?.indexed_vectors_count)
+                  : null,
+              segments:
+                response.status >= 200 && response.status < 300
+                  ? count(result?.segments_count)
+                  : null,
+              status:
+                response.status >= 200 &&
+                response.status < 300 &&
+                ["green", "yellow", "red", "grey"].includes(
+                  String(result?.status),
+                )
+                  ? String(result?.status)
+                  : "unknown",
+            };
+          } catch {
+            return {
+              name,
+              points: null,
+              indexedVectors: null,
+              segments: null,
+              status: "unknown",
+            };
+          }
+        }),
+      );
+      return {
+        ok: true as const,
+        message: "Alleen collectiegegevens gelezen; er is niets gewijzigd.",
+        collections,
+        truncated:
+          names.length > selected.length || names.length !== raw.length,
+      };
+    } catch {
+      return {
+        ok: false as const,
+        message: "Qdrant reageert niet binnen zes seconden.",
+        collections: [],
+        truncated: false,
+      };
+    }
+  }
+
   async test(
     id: string,
     values: ConnectionValues,

@@ -2,12 +2,14 @@
   import { onMount } from "svelte";
   import type {
     MqttOverview,
+    QdrantOverview,
     ServiceConnection,
     ServiceConnectionTest,
   } from "@nova/contracts";
   import {
     getServiceConnections,
     getMqttOverview,
+    getQdrantOverview,
     saveServiceConnection,
     testServiceConnection,
   } from "#lib/api/settings.ts";
@@ -21,6 +23,8 @@
   let error = $state("");
   let mqttOverview = $state<MqttOverview | null>(null);
   let mqttError = $state("");
+  let qdrantOverview = $state<QdrantOverview | null>(null);
+  let qdrantError = $state("");
   const shown = $derived(
     services.filter((item) => !ids || ids.includes(item.id)),
   );
@@ -106,6 +110,18 @@
     } catch (e) {
       mqttError =
         e instanceof Error ? e.message : "MQTT-overzicht niet beschikbaar.";
+    } finally {
+      busy = null;
+    }
+  }
+  async function loadQdrantOverview() {
+    busy = "qdrant-overview";
+    try {
+      qdrantOverview = await getQdrantOverview();
+      qdrantError = "";
+    } catch (e) {
+      qdrantError =
+        e instanceof Error ? e.message : "Qdrant-overzicht niet beschikbaar.";
     } finally {
       busy = null;
     }
@@ -241,8 +257,7 @@
             <h4>Recente berichten</h4>
             {#if mqttOverview.recent.length}
               <ul>
-                {#each mqttOverview.recent as message, index (index)}<li
-                  >
+                {#each mqttOverview.recent as message, index (index)}<li>
                     <code>{message.topic}</code> · {message.summary} · {message.delivery ===
                     "accepted"
                       ? "aangenomen"
@@ -258,6 +273,47 @@
               dat de MQTT-client de verzending aannam; NOVA bevestigt geen
               ontvangst. Berichten van andere apparaten worden niet gelezen.
             </p>
+          {/if}
+        </section>
+      {/if}
+      {#if service.id === "qdrant"}
+        <section aria-label="Qdrant-collecties" class="mqtt-overview">
+          <h3>Qdrant-geheugen</h3>
+          <p class="hint">
+            Lees collectieaantallen en indexstatus op verzoek. Er worden geen
+            punten gelezen of gewijzigd.
+          </p>
+          <button
+            type="button"
+            disabled={busy !== null}
+            onclick={loadQdrantOverview}>Collecties controleren</button
+          >
+          {#if qdrantError}<p role="status" class="connection-failed">
+              {qdrantError}
+            </p>{/if}
+          {#if qdrantOverview}
+            <p role="status">{qdrantOverview.message}</p>
+            {#if qdrantOverview.ok}
+              {#if qdrantOverview.collections.length}
+                <ul>
+                  {#each qdrantOverview.collections as collection (collection.name)}<li
+                    >
+                      <code>{collection.name}</code> · {collection.points ??
+                        "onbekend"} punten · {collection.indexedVectors ??
+                        "onbekend"} geïndexeerd · {collection.segments ??
+                        "onbekend"} segmenten · {collection.status}
+                    </li>{/each}
+                </ul>
+              {:else}<p>Geen collecties gevonden.</p>{/if}
+              {#if qdrantOverview.truncated}<p class="hint">
+                  Maximaal 20 collecties; niet-ondersteunde namen worden
+                  weggelaten.
+                </p>{/if}
+              <p class="hint">
+                Dit toont geen opslaggrootte in bytes. Opschonen en herindexeren
+                worden hier niet uitgevoerd.
+              </p>
+            {/if}
           {/if}
         </section>
       {/if}

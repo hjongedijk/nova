@@ -147,6 +147,34 @@ const initialServices = [
     ],
     restartRequired: false,
   },
+  {
+    id: "qdrant",
+    label: "Qdrant",
+    fields: [
+      {
+        key: "url",
+        label: "Adres",
+        kind: "url",
+        source: "environment",
+        value: "http://qdrant:6333",
+      },
+      {
+        key: "apiKey",
+        label: "Toegangssleutel",
+        kind: "secret",
+        source: "environment",
+        set: false,
+      },
+      {
+        key: "collection",
+        label: "Geheugencollectie",
+        kind: "text",
+        source: "environment",
+        value: "nova_memory",
+      },
+    ],
+    restartRequired: false,
+  },
 ];
 const browser = await chromium.launch({
   headless: true,
@@ -171,6 +199,7 @@ try {
     const services = structuredClone(initialServices);
     let tested = false;
     let mqttReads = 0;
+    let qdrantReads = 0;
     let persona = overview.persona;
     let updateChecks = 0;
     let accountsReads = 0;
@@ -632,6 +661,22 @@ try {
               at: "2026-10-10T10:00:00Z",
               summary: "Timergebeurtenis · label verborgen",
               delivery: "accepted",
+            },
+          ],
+        };
+      } else if (endpoint === "/settings/services/qdrant/overview") {
+        qdrantReads++;
+        data = {
+          ok: true,
+          message: "Alleen collectiegegevens gelezen; er is niets gewijzigd.",
+          truncated: false,
+          collections: [
+            {
+              name: "nova_memory",
+              points: 12,
+              indexedVectors: 10,
+              segments: 2,
+              status: "green",
             },
           ],
         };
@@ -1779,6 +1824,23 @@ try {
       path: path.join(
         screenshots,
         `settings-mqtt-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+    const qdrant = page
+      .locator(".connection-editor")
+      .filter({ has: page.locator("summary", { hasText: "Qdrant" }) });
+    await qdrant.locator("summary").click();
+    assert.equal(qdrantReads, 0, "Qdrant inspection runs only on request");
+    await qdrant
+      .getByRole("button", { name: "Collecties controleren" })
+      .click();
+    await qdrant.getByText("nova_memory", { exact: true }).waitFor();
+    assert.equal(qdrantReads, 1);
+    await qdrant.scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-qdrant-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
     const connection = page
