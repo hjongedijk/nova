@@ -217,6 +217,8 @@ try {
     let helperAgentWrites = 0;
     let helperPreferenceHistoryReads = 0;
     let helperPreferenceHistoryWrites = 0;
+    let toolSwitchHistoryReads = 0;
+    let toolSwitchHistoryWrites = 0;
     let restartRequests = 0;
     const backup = {
       format: "nova-settings",
@@ -700,6 +702,26 @@ try {
             cues: { enabled: true, volume: 0.35, theme: "soft" },
           },
         };
+      } else if (endpoint === "/settings/tools/history") {
+        toolSwitchHistoryReads++;
+        data = {
+          truncated: false,
+          revisions: [
+            {
+              id: "66666666-6666-4666-8666-666666666666",
+              at: "2026-10-10T11:00:00Z",
+              before: { weather_forecast: true },
+              after: { weather_forecast: false },
+            },
+          ],
+        };
+      } else if (
+        endpoint.startsWith("/settings/tools/history/") &&
+        endpoint.endsWith("/rollback")
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        toolSwitchHistoryWrites++;
+        data = { ok: true };
       } else if (endpoint === "/settings/services/restart") {
         if (request.method() === "POST") {
           assert.equal(request.headers()["x-nova-admin"], "1");
@@ -2030,6 +2052,32 @@ try {
       .waitFor();
     assert.equal(helperPreferenceHistoryReads, 2);
     assert.equal(helperPreferenceHistoryWrites, 1);
+    const toolHistory = page.getByRole("region", {
+      name: "Gereedschap wijzigingsgeschiedenis",
+    });
+    assert.equal(
+      toolSwitchHistoryReads,
+      0,
+      "Tool history loads only on request",
+    );
+    await toolHistory
+      .getByRole("button", { name: "Gereedschapsgeschiedenis laden" })
+      .click();
+    await toolHistory.getByText(/weather_forecast: aan → uit/).waitFor();
+    await toolHistory.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-tool-history-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+    await toolHistory
+      .getByRole("button", { name: "Deze wijziging terugdraaien" })
+      .click();
+    await toolHistory
+      .getByText("Gereedschapswijziging teruggedraaid.", { exact: true })
+      .waitFor();
+    assert.equal(toolSwitchHistoryReads, 2);
+    assert.equal(toolSwitchHistoryWrites, 1);
     await page.goto(`${base}/settings?section=personality`);
     await page.locator("#behaviorText").waitFor();
     pinned = true;
@@ -2056,7 +2104,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory and confirmed deletion, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports, explicit bounded tool history, source/name filters and unused tools.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory and confirmed deletion, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports, explicit helper/tool settings history and rollback, bounded tool usage history, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();

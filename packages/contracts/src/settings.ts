@@ -532,6 +532,21 @@ export interface HelperPreferenceRollbackResult {
   preferences: HelperPreferences;
   auditWarning?: string;
 }
+export interface ToolSwitchRevision {
+  id: string;
+  at: string;
+  before: Record<string, boolean>;
+  after: Record<string, boolean>;
+  revertedFrom?: string;
+}
+export interface ToolSwitchHistory {
+  revisions: ToolSwitchRevision[];
+  truncated: boolean;
+}
+export interface ToolSwitchRollbackResult {
+  ok: true;
+  auditWarning?: string;
+}
 
 /** Private projections of the bounded audit tail, with no arguments or session identifiers. */
 export interface ToolUsageReport {

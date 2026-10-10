@@ -120,6 +120,17 @@ describe("the settings API", () => {
       expect(
         (await send("get", "/helper/preferences/history", {})).status,
       ).toBe(401);
+      expect((await send("get", "/tools/history", {})).status).toBe(401);
+      expect(
+        (
+          await pinned.api
+            .post(
+              "/api/settings/tools/history/00000000-0000-0000-0000-000000000000/rollback",
+            )
+            .set("x-nova-pin", "4321")
+            .send({})
+        ).status,
+      ).toBe(403);
       expect(
         (
           await pinned.api
@@ -755,22 +766,47 @@ describe("the settings API", () => {
   });
 
   it("groups tools in abilities and switches a whole ability", async () => {
+    await call("put", "/tools/echo", {
+      description: "Aangepaste echo-omschrijving.",
+    });
     const overview = await call("get", "/");
     const system = overview.abilities.find(
       (a: { id: string }) => a.id === "systeem",
     );
     expect(system.tools).toContain("echo");
     expect(system.total).toBe(system.tools.length);
+    const historyBefore = (await call("get", "/tools/history")).revisions;
     const off = await call("put", "/abilities/systeem", { enabled: false });
     expect(off.status).toBe(200);
-    expect(nova.store.get().toolOverrides.echo).toEqual({ enabled: false });
+    expect(nova.store.get().toolOverrides.echo).toEqual({
+      enabled: false,
+      description: "Aangepaste echo-omschrijving.",
+    });
+    const history = await call("get", "/tools/history");
+    expect(history.revisions).toHaveLength(historyBefore.length + 1);
+    expect(history.revisions[0].after.echo).toBe(false);
+    expect(JSON.stringify(history.revisions[0])).not.toContain(
+      "Aangepaste echo-omschrijving.",
+    );
     expect(
       (await call("get", "/")).abilities.find(
         (a: { id: string }) => a.id === "systeem",
       ).state,
     ).toBe("off");
-    await call("put", "/abilities/systeem", { enabled: true });
-    expect(nova.store.get().toolOverrides.echo).toBeUndefined();
+    const restored = await call(
+      "post",
+      `/tools/history/${history.revisions[0].id}/rollback`,
+      {},
+    );
+    expect(restored.status).toBe(200);
+    expect(nova.store.get().toolOverrides.echo).toEqual({
+      description: "Aangepaste echo-omschrijving.",
+    });
+    expect(
+      (await call("get", "/")).tools.find(
+        (item: { name: string }) => item.name === "echo",
+      ).description,
+    ).toBe("Aangepaste echo-omschrijving.");
     const missing = await call("put", "/abilities/bestaat-niet", {
       enabled: true,
     });

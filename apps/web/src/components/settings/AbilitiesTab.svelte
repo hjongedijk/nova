@@ -15,11 +15,12 @@
   async function flip(ability: Ability, on: boolean, box: HTMLInputElement) {
     box.disabled = true;
     try {
-      await setAbility(ability.id, on);
+      const result = await setAbility(ability.id, on);
       await afterChange(
-        on
-          ? `${ability.name} staat aan.`
-          : `${ability.name} staat uit. NOVA doet dit nu niet meer.`,
+        result.auditWarning ??
+          (on
+            ? `${ability.name} staat aan.`
+            : `${ability.name} staat uit. NOVA doet dit nu niet meer.`),
       );
     } catch (error) {
       box.checked = !on;

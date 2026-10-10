@@ -24,6 +24,7 @@ import { ServiceConnectionsAdapter } from "./services/service-connections.adapte
 import { ServiceRestartController } from "./services/service-restart.controller.js";
 import { ServiceRestart } from "./services/service-restart.service.js";
 import { HelperPreferencesHistory } from "./helper-preferences-history.service.js";
+import { ToolSwitchHistory } from "./tool-switch-history.service.js";
 import { SkillAssistantService } from "./ai/skill-assistant.service.js";
 import { PlaybooksService } from "./playbooks.service.js";
 import { PublicConfigService } from "./public-config.service.js";
@@ -74,6 +75,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
     ServiceConnectionsAdapter,
     ServiceRestart,
     HelperPreferencesHistory,
+    ToolSwitchHistory,
     SkillsSource,
     PlaybooksService,
     PublicConfigService,

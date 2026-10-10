@@ -1,5 +1,6 @@
 import { SettingsBackupService } from "./settings-backup.service.js";
 import { HelperPreferencesHistory } from "./helper-preferences-history.service.js";
+import { ToolSwitchHistory } from "./tool-switch-history.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
@@ -91,6 +92,7 @@ export class SettingsController {
     private readonly mutations: SettingsMutationsService,
     private readonly backups: SettingsBackupService,
     private readonly helperHistory: HelperPreferencesHistory,
+    private readonly toolHistory: ToolSwitchHistory,
     @Optional()
     @Inject(WALLPAPER_PORT)
     private readonly wallpaper?: WallpaperPort,
@@ -157,10 +159,16 @@ export class SettingsController {
     @Body() body: Body_,
   ): { ok: true; override: ToolOverride } {
     const override = normalizeToolOverride(name, body);
+    const before = this.tools
+      .list()
+      .find((tool) => tool.name === name)?.enabled;
     this.settings.update((settings) => {
       if (Object.keys(override).length) settings.toolOverrides[name] = override;
       else delete settings.toolOverrides[name];
     });
+    const after = this.tools.list().find((tool) => tool.name === name)?.enabled;
+    if (before !== undefined && after !== undefined)
+      this.toolHistory.record({ [name]: before }, { [name]: after });
     this.log("tool", { tool: name, ...override });
     return { ok: true, override };
   }
@@ -168,21 +176,31 @@ export class SettingsController {
   @Delete("tools/:name")
   resetTool(@Param("name") name: string): { ok: true } {
     normalizeToolOverride(name, {});
+    const before = this.tools
+      .list()
+      .find((tool) => tool.name === name)?.enabled;
     this.settings.update(
       (settings) => void delete settings.toolOverrides[name],
     );
+    const after = this.tools.list().find((tool) => tool.name === name)?.enabled;
+    if (before !== undefined && after !== undefined)
+      this.toolHistory.record({ [name]: before }, { [name]: after });
     this.log("tool-reset", { tool: name });
     return { ok: true };
   }
 
   /** Switch a whole ability on or off: every tool in it. */
   @Put("abilities/:id")
-  setAbility(@Param("id") id: string, @Body() body: Body_): { ok: true } {
+  setAbility(
+    @Param("id") id: string,
+    @Body() body: Body_,
+  ): { ok: true; auditWarning?: string } {
     if (typeof body?.enabled !== "boolean")
       throw new ValidationError(["Kies aan of uit."]);
     const enabled = body.enabled;
     const group = groupTools(this.tools.list()).find((item) => item.id === id);
     if (!group) throw new NotFoundException("Dat onderdeel bestaat niet.");
+    const before = this.toolHistory.current(group.tools);
     this.settings.update((settings) => {
       for (const name of group.tools) {
         const current = { ...settings.toolOverrides[name] };
@@ -192,12 +210,32 @@ export class SettingsController {
         else delete settings.toolOverrides[name];
       }
     });
+    const after = this.toolHistory.current(group.tools);
+    this.toolHistory.record(before, after);
     this.log("ability", {
       ability: group.id,
       enabled,
       tools: group.tools.length,
     });
-    return { ok: true };
+    return {
+      ok: true,
+      ...(this.toolHistory.lastWarning
+        ? { auditWarning: this.toolHistory.lastWarning }
+        : {}),
+    };
+  }
+
+  @Get("tools/history")
+  toolSwitchHistory() {
+    return this.toolHistory.list();
+  }
+
+  @Post("tools/history/:id/rollback")
+  @HttpCode(200)
+  rollbackToolSwitches(@Param("id") id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige wijziging."]);
+    return this.toolHistory.rollback(id);
   }
 
   /* ---------- skills ---------- */

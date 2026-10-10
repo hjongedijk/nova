@@ -8,6 +8,7 @@
   import ConnectionsSection from "#components/settings/ConnectionsSection.svelte";
   import ConnectionHistory from "#components/settings/ConnectionHistory.svelte";
   import HelperPreferencesHistory from "#components/settings/HelperPreferencesHistory.svelte";
+  import ToolSwitchHistory from "#components/settings/ToolSwitchHistory.svelte";
   import ModelMetrics from "#components/settings/ModelMetrics.svelte";
   import NativeGateway from "#components/settings/NativeGateway.svelte";
   import UpdatesSection from "#components/settings/UpdatesSection.svelte";
@@ -210,6 +211,7 @@
             <UpdatesSection />
             <ConnectionHistory />
             <HelperPreferencesHistory />
+            <ToolSwitchHistory />
             <BackupSection />
             <h2>Actielog</h2>
             <AdminDialog embedded initialView="audit" />

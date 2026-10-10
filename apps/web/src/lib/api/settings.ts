@@ -32,6 +32,8 @@ import type {
   ServiceRestartResult,
   HelperPreferenceHistory,
   HelperPreferenceRollbackResult,
+  ToolSwitchHistory,
+  ToolSwitchRollbackResult,
   HelperPreferences,
   Skill,
   SkillDraftResult,
@@ -138,7 +140,9 @@ export const resetTool = (name: string) =>
   write<{ ok: true }>("DELETE", `/tools/${enc(name)}`);
 
 export const setAbility = (id: string, enabled: boolean) =>
-  write<{ ok: true }>("PUT", `/abilities/${enc(id)}`, { enabled });
+  write<{ ok: true; auditWarning?: string }>("PUT", `/abilities/${enc(id)}`, {
+    enabled,
+  });
 
 /* ---------- skills ---------- */
 
@@ -240,6 +244,14 @@ export const rollbackHelperPreferenceRevision = (id: string) =>
   write<HelperPreferenceRollbackResult>(
     "POST",
     `/helper/preferences/history/${enc(id)}/rollback`,
+    {},
+  );
+export const getToolSwitchHistory = () =>
+  read<ToolSwitchHistory>("/tools/history");
+export const rollbackToolSwitchRevision = (id: string) =>
+  write<ToolSwitchRollbackResult>(
+    "POST",
+    `/tools/history/${enc(id)}/rollback`,
     {},
   );
 
