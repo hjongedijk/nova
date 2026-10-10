@@ -1,7 +1,5 @@
-import {
-  MAX_SKILLS,
-  SettingsMutationsService,
-} from "./settings-mutations.service.js";
+import { SettingsBackupService } from "./settings-backup.service.js";
+import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
   Controller,
@@ -45,7 +43,6 @@ import { PublicRoute, SettingsGuard } from "./settings.guard.js";
 import {
   BUILTIN_PANELS,
   MAX_PAGES,
-  normalizePersona,
   normalizeQuickActions,
   normalizeSidebar,
   normalizeToolOverride,
@@ -90,6 +87,7 @@ export class SettingsController {
     private readonly assistant: SkillAssistantService,
     private readonly playbooks: PlaybooksService,
     private readonly mutations: SettingsMutationsService,
+    private readonly backups: SettingsBackupService,
     @Optional()
     @Inject(WALLPAPER_PORT)
     private readonly wallpaper?: WallpaperPort,
@@ -719,91 +717,15 @@ export class SettingsController {
     };
   }
 
+  @Post("import/prepare")
+  @HttpCode(200)
+  prepareImport(@Body() body: unknown) {
+    return this.backups.prepare(body);
+  }
+
   @Post("import")
   @HttpCode(200)
-  importSettings(@Body() body: Body_) {
-    const data = body?.data as Record<string, unknown> | undefined;
-    if (data?.format !== "nova-settings")
-      throw new ValidationError(["Dit is geen NOVA-back-up."]);
-    const replace = body?.mode === "replace";
-    const incoming = Array.isArray(data.skills)
-      ? (data.skills as unknown[])
-      : [];
-    if (incoming.length > MAX_SKILLS)
-      throw new ValidationError([`Maximaal ${MAX_SKILLS} vaardigheden.`]);
-    const missingSecrets: { skill: string; headers: string[] }[] = [];
-    const skills = incoming.map((value) => {
-      const raw = value as {
-        name?: string;
-        http?: { secretHeaders?: { name?: string }[] };
-      } | null;
-      const secretNames = (raw?.http?.secretHeaders ?? [])
-        .map((row) => row?.name)
-        .filter((name): name is string => Boolean(name));
-      if (secretNames.length)
-        missingSecrets.push({ skill: String(raw?.name), headers: secretNames });
-      const withoutSecrets = raw?.http
-        ? { ...raw, http: { ...raw.http, secretHeaders: [] } }
-        : raw;
-      return normalizeSkill(withoutSecrets, { takenIds: [] });
-    });
-    const persona =
-      data.persona !== undefined ? normalizePersona(data.persona) : undefined;
-    const actions =
-      data.quickActions === undefined
-        ? undefined
-        : data.quickActions === null
-          ? null
-          : normalizeQuickActions(data.quickActions);
-    const incomingWidgets = Array.isArray(data.widgets)
-      ? (data.widgets as Record<string, unknown>[])
-      : [];
-    if (incomingWidgets.length > MAX_WIDGETS)
-      throw new ValidationError([`Maximaal ${MAX_WIDGETS} panelen.`]);
-    const overrides: Record<string, ToolOverride> = {};
-    for (const [name, override] of Object.entries(
-      (data.toolOverrides ?? {}) as Record<string, Record<string, unknown>>,
-    )) {
-      const clean = normalizeToolOverride(name, override);
-      if (Object.keys(clean).length) overrides[name] = clean;
-    }
-    this.settings.update((settings) => {
-      const byId = new Map(
-        (replace ? [] : skillsOf(settings)).map((item) => [item.id, item]),
-      );
-      for (const skill of skills) byId.set(skill.id, skill);
-      settings.skills = [...byId.values()].slice(0, MAX_SKILLS) as never[];
-      if (persona !== undefined) settings.persona = persona;
-      if (actions !== undefined) settings.quickActions = actions;
-      settings.toolOverrides = replace
-        ? overrides
-        : { ...settings.toolOverrides, ...overrides };
-      const skillIds = skillsOf(settings).map((item) => item.id);
-      const widgetsById = new Map(
-        (replace ? [] : widgetsOf(settings)).map((item) => [item.id, item]),
-      );
-      for (const raw of incomingWidgets) {
-        const widget = normalizeWidget(raw, { takenIds: [], skillIds });
-        widgetsById.set(widget.id, widget);
-      }
-      settings.widgets = [...widgetsById.values()].slice(
-        0,
-        MAX_WIDGETS,
-      ) as never[];
-      if (data.sidebar === null) settings.sidebar = null;
-      else if (Array.isArray(data.sidebar))
-        settings.sidebar = {
-          items: normalizeSidebar(
-            (data.sidebar as { id?: string }[]).filter(
-              (item) =>
-                BUILTIN_PANELS.some((panel) => panel.id === item?.id) ||
-                widgetsOf(settings).some((w) => `w:${w.id}` === item?.id),
-            ),
-            settings,
-          ) as never[],
-        };
-    });
-    this.log("imported", { skills: skills.length, replace });
-    return { ok: true, imported: skills.length, missingSecrets };
+  importSettings(@Body() body: unknown) {
+    return this.backups.confirm(body);
   }
 }

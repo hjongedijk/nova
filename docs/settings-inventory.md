@@ -73,7 +73,7 @@ Settings updates write `settings_change` audit entries (`settings.controller.ts:
 Current `nova-settings` format version 1 contains `exportedAt`, `persona`, nullable `quickActions`, `toolOverrides`, sanitized `skills`, `widgets`, nullable `sidebar` (`packages/contracts/src/settings.ts:315`; `settings.controller.ts:709`).
 
 - Excluded: standing approvals and private hashes, helper preferences, helper mode/display, native hotkeys/views/wallpaper state, service/environment credentials, admin PIN, browser-local switches/volume, conversation history, memories and audit logs. This export is not a full deployment backup.
-- Secret webhook header values are excluded; names are exported so the importer can return `missingSecrets`. Import strips incoming secret values and does not manufacture grants (`settings.controller.ts:738`).
+- Secret webhook header values are excluded; names are exported so the importer can return `missingSecrets`. Import strips incoming secret values and does not manufacture grants (`settings/backup-plan.ts`). Private headers survive a merge only at the same URL/method with matching names. Recognized or declared secrets in any public candidate field reject preparation.
 - Merge keeps existing entries by ID and overlays incoming entries; replace clears the imported skill/widget/override collections before rebuilding. Persona/quick actions/sidebar are only changed where handled as present. The phase A import did not restore explicit null defaults; phase J fixes this (see transition below).
 - Stable skill IDs, widget IDs, descriptions, parameter schemas, sidebar ordering and user-created panels must survive the UI redesign. Use the existing API/store before introducing migration schemas. Existing regression coverage: `apps/api/test/settings/settings-api.test.ts:222` (secrets), line 422 (backup), and helper/approval tests in the same suite.
 
@@ -86,7 +86,7 @@ There is no current settings page/deep-link/search/wizard, in-app service creden
 - `/settings?section=<id>` now has twelve sections, navigation and shared search metadata. Legacy menu/dialog entry points redirect to it.
 - Existing editors and APIs remain in use; the storage schema is unchanged. Embedded admin reports retain memory confirmations and existing modal behavior.
 - Overview creates a private `settings.json.before-settings-page-v1` snapshot at 0600 before the transition. It is local, idempotent and never exported.
-- Backup import now restores defaults for explicit `quickActions:null` and `sidebar:null`; omitted fields preserve their current values.
+- Backup import restores defaults for explicit `quickActions:null` and `sidebar:null`; omitted fields preserve their current values. Guarded preparation validates a detached v1 candidate (maximum 1 MB) and shows additions/removals/changed categories. Applying requires a fresh 60-second single-use confirmation bound to unchanged current settings; direct legacy imports are rejected.
 - Browser PINs now live only in memory, expire after fifteen minutes and can be explicitly locked; legacy localStorage PINs are removed.
 - Five incorrect nonempty PIN attempts block that client for five minutes. Missing PIN reads do not consume attempts. Public route boundaries remain unchanged.
 

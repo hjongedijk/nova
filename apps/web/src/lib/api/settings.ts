@@ -19,7 +19,8 @@ import type {
   WindowsAgentStatus,
   UpdateReport,
   ModelMetricsReport,
-  ImportResult,
+  SettingsImportPrepared,
+  SettingsImportResult,
   ServiceConnection,
   ServiceConnectionRevision,
   ServiceConnectionTest,
@@ -179,8 +180,25 @@ export const setHelper = (mode: HelperMode, display: number) =>
   write<HelperState>("POST", "/helper", { mode, display });
 
 export const exportSettings = () => read<SettingsBackup>("/export");
-export const importSettings = (data: unknown, mode: "merge" | "replace") =>
-  write<ImportResult>("POST", "/import", { data, mode });
+export const prepareSettingsImport = (
+  data: unknown,
+  mode: "merge" | "replace",
+) =>
+  write<SettingsImportPrepared>("POST", "/import/prepare", {
+    data,
+    mode,
+    acknowledgeEffects: true,
+  });
+export const importSettings = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<SettingsImportResult>("POST", "/import", {
+    sessionId,
+    confirmationId,
+    approve,
+  });
 
 export const revokeStandingApproval = (id: string) =>
   write<{ ok: true }>("DELETE", `/standing-approvals/${enc(id)}`);

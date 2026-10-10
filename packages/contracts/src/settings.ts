@@ -1,3 +1,4 @@
+import type { PendingConfirmation } from "./chat.js";
 import type { Risk, ToolInfo } from "./tools.js";
 
 /* ---------- skills ---------- */
@@ -330,6 +331,30 @@ export interface ImportResult {
   imported: number;
   missingSecrets: MissingSecret[];
 }
+
+export interface SettingsImportSummary {
+  personaChanged: boolean;
+  quickActionsChanged: boolean;
+  toolOverridesChanged: boolean;
+  sidebarChanged: boolean;
+  mode: "merge" | "replace";
+  incomingSkills: number;
+  totalSkills: number;
+  incomingWidgets: number;
+  totalWidgets: number;
+  replacedSkills: number;
+  removedSkills: number;
+  removedWidgets: number;
+  missingSecrets: MissingSecret[];
+}
+export interface SettingsImportPrepared {
+  ok: true;
+  summary: SettingsImportSummary;
+  action: PendingConfirmation;
+}
+export type SettingsImportResult =
+  | (ImportResult & { cancelled?: true; auditWarning?: string })
+  | { ok: false; error: string };
 
 /* ---------- wallpaper on the Windows PC ---------- */
 

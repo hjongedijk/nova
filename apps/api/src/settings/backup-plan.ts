@@ -1,0 +1,381 @@
+import type { Widget } from "@nova/contracts";
+import { ValidationError } from "../core/errors/validation.error.js";
+import { sanitize } from "../core/security/sanitize.js";
+import {
+  normalizePersona as rawnormalizePersona,
+  normalizeQuickActions as rawnormalizeQuickActions,
+  normalizeSidebar as rawnormalizeSidebar,
+  normalizeToolOverride as rawnormalizeToolOverride,
+} from "./settings-validation.js";
+import {
+  normalizeSkill as rawNormalizeSkill,
+  publicSkill,
+  type StoredSkill,
+} from "./skills/skills.js";
+import type { NovaSettings } from "./store/settings.store.js";
+import { normalizeWidget as rawNormalizeWidget } from "./widgets/widgets.js";
+
+function checked<A extends unknown[], R>(
+  normalizer: (...args: A) => R,
+): (...args: A) => R {
+  return (...args) => {
+    try {
+      return normalizer(...args);
+    } catch (error) {
+      if (error instanceof ValidationError)
+        throw new ValidationError([
+          "De back-up bevat ongeldige vaardigheden, panelen of instellingen. Controleer de velden.",
+        ]);
+      throw error;
+    }
+  };
+}
+const normalizePersona = checked(rawnormalizePersona);
+const normalizeQuickActions = checked(rawnormalizeQuickActions);
+const normalizeSidebar = checked(rawnormalizeSidebar);
+const normalizeToolOverride = checked(rawnormalizeToolOverride);
+const normalizeSkill = checked(rawNormalizeSkill);
+const normalizeWidget = checked(rawNormalizeWidget);
+
+export const MAX_BACKUP_BYTES = 1_000_000;
+const MAX_SKILLS = 50;
+const MAX_WIDGETS = 20;
+const ID = /^[a-z0-9_]{1,40}$/;
+const HEADER = /^[A-Za-z][A-Za-z0-9-]{0,39}$/;
+const FORBIDDEN_HEADER =
+  /^(?:host|content-length|connection|transfer-encoding|x-nova-admin|x-nova-pin)$/i;
+const fields = [
+  "format",
+  "version",
+  "exportedAt",
+  "persona",
+  "quickActions",
+  "toolOverrides",
+  "skills",
+  "widgets",
+  "sidebar",
+];
+
+export interface BackupPlanSummary {
+  mode: "merge" | "replace";
+  incomingSkills: number;
+  totalSkills: number;
+  incomingWidgets: number;
+  totalWidgets: number;
+  replacedSkills: number;
+  removedSkills: number;
+  removedWidgets: number;
+  personaChanged: boolean;
+  quickActionsChanged: boolean;
+  toolOverridesChanged: boolean;
+  sidebarChanged: boolean;
+  missingSecrets: { skill: string; headers: string[] }[];
+}
+
+function fail(message: string): never {
+  throw new ValidationError([message]);
+}
+function object(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail("Ongeldige gegevens in de NOVA-back-up.");
+  return value as Record<string, unknown>;
+}
+function list(data: Record<string, unknown>, field: string): unknown[] {
+  if (!Object.hasOwn(data, field)) return [];
+  if (!Array.isArray(data[field]))
+    fail("Vaardigheden en panelen moeten lijsten zijn.");
+  return data[field];
+}
+function stableId(raw: Record<string, unknown>, generated: string): string {
+  if (!Object.hasOwn(raw, "id")) return generated;
+  if (typeof raw.id !== "string" || !ID.test(raw.id))
+    fail("Een vaardigheid of paneel heeft een ongeldige ID.");
+  return raw.id;
+}
+
+/** A private detached candidate. Callers must expose only the summary before confirmation. */
+export function buildBackupPlan(
+  data: unknown,
+  mode: unknown,
+  current: NovaSettings,
+): { next: NovaSettings; summary: BackupPlanSummary } {
+  const raw = object(data);
+  if (mode !== "merge" && mode !== "replace")
+    fail("Kies samenvoegen of vervangen voor de back-up.");
+  if (raw.format !== "nova-settings" || raw.version !== 1)
+    fail("Gebruik een NOVA-back-up van versie 1.");
+  if (Object.keys(raw).some((key) => !fields.includes(key)))
+    fail("De back-up bevat niet-ondersteunde instellingen.");
+  if (
+    Object.hasOwn(raw, "exportedAt") &&
+    (typeof raw.exportedAt !== "string" || raw.exportedAt.length > 100)
+  )
+    fail("Het exporttijdstip in de back-up is ongeldig.");
+  let input: Record<string, unknown>;
+  let next: NovaSettings;
+  try {
+    const serialized = JSON.stringify(raw);
+    if (Buffer.byteLength(serialized, "utf8") > MAX_BACKUP_BYTES)
+      fail("De back-up is te groot (maximaal 1 MB).");
+    input = structuredClone(raw);
+    next = structuredClone(current);
+  } catch (error) {
+    if (error instanceof ValidationError) throw error;
+    fail("De back-up moet geldige JSON-gegevens bevatten.");
+  }
+  const incoming = list(input, "skills");
+  const incomingWidgets = list(input, "widgets");
+  if (incoming.length > MAX_SKILLS) fail("Maximaal 50 vaardigheden.");
+  if (incomingWidgets.length > MAX_WIDGETS) fail("Maximaal 20 panelen.");
+  const oldSkills = new Map(
+    next.skills.map((skill) => [String(skill.id), skill]),
+  );
+  const skills = new Map(mode === "merge" ? oldSkills : []);
+  const seenSkills = new Set<string>();
+  const missingSecrets: BackupPlanSummary["missingSecrets"] = [];
+  const secretValues: string[] = [];
+  for (const skill of current.skills) {
+    if (skill.type !== "webhook") continue;
+    const http = object(skill.http);
+    if (Array.isArray(http.secretHeaders))
+      for (const entry of http.secretHeaders) {
+        const header = object(entry);
+        if (typeof header.value === "string" && header.value)
+          secretValues.push(header.value);
+      }
+  }
+  for (const value of incoming) {
+    const draft = object(value);
+    let names: string[] = [];
+    let http: Record<string, unknown> | undefined;
+    if (Object.hasOwn(draft, "http")) {
+      http = object(draft.http);
+      if (Object.hasOwn(http, "secretHeaders")) {
+        if (!Array.isArray(http.secretHeaders))
+          fail("Geheime headers moeten een lijst zijn.");
+        names = http.secretHeaders.map((value) => {
+          const header = object(value);
+          if (typeof header.name !== "string")
+            fail("Een geheime header heeft een ongeldige naam.");
+          const name = header.name.trim();
+          if (
+            !HEADER.test(name) ||
+            FORBIDDEN_HEADER.test(name) ||
+            sanitize(name) !== name
+          )
+            fail("Een geheime header heeft een ongeldige naam.");
+          if (
+            Object.keys(header).some(
+              (key) => !["name", "set", "value"].includes(key),
+            ) ||
+            (Object.hasOwn(header, "set") && header.set !== true) ||
+            (Object.hasOwn(header, "value") && typeof header.value !== "string")
+          )
+            fail("Een geheime header heeft ongeldige gegevens.");
+          if (typeof header.value === "string" && header.value)
+            secretValues.push(header.value);
+          return name;
+        });
+        if (
+          new Set(names.map((name) => name.toLowerCase())).size !== names.length
+        )
+          fail("Een geheime header staat er twee keer in.");
+      }
+    }
+    if (names.length && draft.type !== "webhook")
+      fail("Geheime headers horen alleen bij een webhook.");
+    const clean = normalizeSkill(
+      http ? { ...draft, http: { ...http, secretHeaders: [] } } : draft,
+    );
+    clean.id = stableId(draft, clean.id);
+    if (seenSkills.has(clean.id))
+      fail("Een vaardigheid staat twee keer in de back-up.");
+    seenSkills.add(clean.id);
+    const old =
+      mode === "merge"
+        ? (oldSkills.get(clean.id) as unknown as StoredSkill | undefined)
+        : undefined;
+    const oldHeaders = old?.type === "webhook" ? old.http.secretHeaders : [];
+    const oldNames = oldHeaders.map(({ name }) => name.toLowerCase());
+    const declarations = names.map((name) => name.toLowerCase());
+    const compatible =
+      clean.type === "webhook" &&
+      old?.type === "webhook" &&
+      clean.http.url === old.http.url &&
+      clean.http.method === old.http.method &&
+      oldNames.length === declarations.length &&
+      oldNames.every((name) => declarations.includes(name));
+    if (compatible && clean.type === "webhook") {
+      clean.http.secretHeaders = names.map((name) => ({
+        name,
+        value: oldHeaders.find(
+          (header) => header.name.toLowerCase() === name.toLowerCase(),
+        )!.value,
+      }));
+    } else {
+      const missing = new Map<string, string>();
+      for (const name of [...names, ...oldHeaders.map(({ name }) => name)])
+        missing.set(name.toLowerCase(), name);
+      if (missing.size)
+        missingSecrets.push({
+          skill: clean.name,
+          headers: [...missing.values()],
+        });
+    }
+    if (
+      clean.type === "webhook" &&
+      clean.http.headers.length + names.length > 8
+    )
+      fail("Maximaal 8 headers.");
+    if (
+      clean.type === "webhook" &&
+      clean.http.headers.some(({ name }) =>
+        declarations.includes(name.toLowerCase()),
+      )
+    )
+      fail("Een header staat twee keer in de back-up.");
+    skills.set(clean.id, clean as unknown as Record<string, unknown>);
+  }
+  if (skills.size > MAX_SKILLS)
+    fail("Samenvoegen levert meer dan 50 vaardigheden op.");
+  next.skills = [...skills.values()];
+  const skillIds = next.skills
+    .filter((skill) => skill.type === "webhook")
+    .map((skill) => String(skill.id));
+  const oldWidgets = new Map(
+    next.widgets.map((widget) => [String(widget.id), widget]),
+  );
+  const widgets = new Map(mode === "merge" ? oldWidgets : []);
+  const seenWidgets = new Set<string>();
+  for (const value of incomingWidgets) {
+    const draft = object(value);
+    const clean = normalizeWidget(draft, { skillIds });
+    clean.id = stableId(draft, clean.id);
+    if (seenWidgets.has(clean.id))
+      fail("Een paneel staat twee keer in de back-up.");
+    seenWidgets.add(clean.id);
+    widgets.set(clean.id, clean as unknown as Record<string, unknown>);
+  }
+  if (widgets.size > MAX_WIDGETS)
+    fail("Samenvoegen levert meer dan 20 panelen op.");
+  // Existing button panels also have to remain valid after imported skills replace their targets.
+  next.widgets = [...widgets.values()].map(
+    (widget) =>
+      normalizeWidget(widget, {
+        existing: widget as unknown as Widget,
+        skillIds,
+      }) as unknown as Record<string, unknown>,
+  );
+  if (Object.hasOwn(input, "persona"))
+    next.persona = normalizePersona(input.persona);
+  if (Object.hasOwn(input, "quickActions"))
+    next.quickActions =
+      input.quickActions === null
+        ? null
+        : normalizeQuickActions(input.quickActions);
+  const overrides = Object.hasOwn(input, "toolOverrides")
+    ? object(input.toolOverrides)
+    : {};
+  const cleanOverrides = Object.fromEntries(
+    Object.entries(overrides)
+      .map(
+        ([name, value]) =>
+          [name, normalizeToolOverride(name, object(value))] as const,
+      )
+      .filter(([, value]) => Object.keys(value).length),
+  );
+  next.toolOverrides =
+    mode === "replace"
+      ? cleanOverrides
+      : { ...next.toolOverrides, ...cleanOverrides };
+  if (Object.hasOwn(input, "sidebar")) {
+    next.sidebar =
+      input.sidebar === null
+        ? null
+        : {
+            items: normalizeSidebar(input.sidebar, next) as unknown as Record<
+              string,
+              unknown
+            >[],
+          };
+  } else if (next.sidebar) {
+    next.sidebar = {
+      items: normalizeSidebar(next.sidebar.items, next) as unknown as Record<
+        string,
+        unknown
+      >[],
+    };
+  }
+  const privateValues = [...new Set(secretValues)];
+  const assertPublicText = (value: string): void => {
+    if (
+      sanitize(value) !== value ||
+      privateValues.some((secret) =>
+        secret.length >= 4 ? value.includes(secret) : value === secret,
+      )
+    )
+      fail(
+        "De zichtbare instellingen bevatten een geheim. Verwijder dit uit de back-up of bestaande instellingen.",
+      );
+  };
+  const assertPublic = (value: unknown): void => {
+    if (typeof value === "string") assertPublicText(value);
+    else if (Array.isArray(value)) value.forEach(assertPublic);
+    else if (value && typeof value === "object") {
+      for (const [key, item] of Object.entries(value)) {
+        assertPublicText(key);
+        assertPublic(item);
+      }
+    }
+  };
+  // Check the complete result after collecting every declared secret, including later imports.
+  // Stored webhook credentials remain private and are deliberately absent from this projection.
+  assertPublic({
+    skills: next.skills.map((skill) =>
+      publicSkill(skill as unknown as StoredSkill),
+    ),
+    widgets: next.widgets,
+    persona: next.persona,
+    quickActions: next.quickActions,
+    toolOverrides: next.toolOverrides,
+    sidebar: next.sidebar,
+  });
+  const safeSummary = (value: string): string => {
+    let clean = sanitize(value);
+    for (const secret of secretValues)
+      clean = clean.split(secret).join("[redacted]");
+    return clean;
+  };
+  return {
+    next,
+    summary: {
+      mode,
+      incomingSkills: incoming.length,
+      totalSkills: skills.size,
+      incomingWidgets: incomingWidgets.length,
+      totalWidgets: widgets.size,
+      replacedSkills: [...seenSkills].filter((id) => oldSkills.has(id)).length,
+      removedSkills:
+        mode === "replace"
+          ? [...oldSkills.keys()].filter((id) => !seenSkills.has(id)).length
+          : 0,
+      removedWidgets:
+        mode === "replace"
+          ? [...oldWidgets.keys()].filter((id) => !seenWidgets.has(id)).length
+          : 0,
+      personaChanged: next.persona !== current.persona,
+      quickActionsChanged:
+        JSON.stringify(next.quickActions) !==
+        JSON.stringify(current.quickActions),
+      toolOverridesChanged:
+        JSON.stringify(next.toolOverrides) !==
+        JSON.stringify(current.toolOverrides),
+      sidebarChanged:
+        JSON.stringify(next.sidebar) !== JSON.stringify(current.sidebar),
+      missingSecrets: missingSecrets.map(({ skill, headers }) => ({
+        skill: safeSummary(skill),
+        headers: headers.map(safeSummary),
+      })),
+    },
+  };
+}

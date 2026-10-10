@@ -1,3 +1,4 @@
+import { SettingsBackupService } from "./settings-backup.service.js";
 import { FreePolicyWizardController } from "./free-policy-wizard.controller.js";
 import { FreePolicyWizard } from "./free-policy-wizard.service.js";
 import { OmniRouteAccountRemovalController } from "./omniroute-account-removal.controller.js";
@@ -56,6 +57,7 @@ import { WidgetsController } from "./widgets/widgets.controller.js";
   providers: [
     SettingsGuard,
     SettingsMutationsService,
+    SettingsBackupService,
     SettingsSource,
     NativeSkillModesService,
     NativePromptService,

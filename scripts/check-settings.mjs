@@ -151,6 +151,29 @@ try {
     let accountRemoved = false;
     let policyReads = 0;
     let policyWrites = 0;
+    let importPrepares = 0;
+    let importWrites = 0;
+    const backup = {
+      format: "nova-settings",
+      version: 1,
+      exportedAt: "2026-10-10",
+      persona: "Spreek warm en helder.",
+      quickActions: overview.quickActions,
+      toolOverrides: {},
+      skills: overview.skills,
+      widgets: [],
+      sidebar: null,
+    };
+    const missingHeaders = [
+      {
+        skill: "<script>globalThis.backupLabelRan = true</script>",
+        headers: ["Authorization"],
+      },
+      {
+        skill: "<script>globalThis.backupLabelRan = true</script>",
+        headers: ["X-API-Key"],
+      },
+    ];
     const policyAccountId = "77777777-7777-4777-8777-777777777777";
     let nativeMode = "off";
     let nativePreparedMode = "off";
@@ -568,7 +591,60 @@ try {
         };
       else if (endpoint === "/settings/wallpaper")
         data = { available: false, reason: "no-agent" };
-      else if (endpoint === "/settings/export")
+      else if (endpoint === "/settings/import/prepare") {
+        importPrepares++;
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        assert.deepEqual(request.postDataJSON(), {
+          data: backup,
+          mode: "replace",
+          acknowledgeEffects: true,
+        });
+        const now = await page.evaluate(() => Date.now());
+        data = {
+          ok: true,
+          summary: {
+            mode: "replace",
+            incomingSkills: 1,
+            totalSkills: 1,
+            incomingWidgets: 0,
+            totalWidgets: 0,
+            replacedSkills: 1,
+            removedSkills: 0,
+            removedWidgets: 1,
+            personaChanged: true,
+            quickActionsChanged: false,
+            toolOverridesChanged: false,
+            sidebarChanged: true,
+            missingSecrets: missingHeaders,
+          },
+          action: {
+            confirmationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            sessionId: "settings-import:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            tool: "settings_import",
+            args: { mode: "replace", incomingSkills: 1, incomingWidgets: 0 },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: now,
+            expiresAt: now + 60000,
+          },
+        };
+      } else if (endpoint === "/settings/import") {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        const confirmation = request.postDataJSON();
+        assert.equal(
+          confirmation.sessionId,
+          "settings-import:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        );
+        assert.equal(
+          confirmation.confirmationId,
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        );
+        if (confirmation.approve) {
+          importWrites++;
+          data = { ok: true, imported: 1, missingSecrets: missingHeaders };
+        } else
+          data = { ok: true, cancelled: true, imported: 0, missingSecrets: [] };
+      } else if (endpoint === "/settings/export")
         data = {
           ...overview,
           format: "nova-settings",
@@ -1197,6 +1273,189 @@ try {
         `settings-system-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
+    const backupFile = page.getByLabel("Back-upbestand", { exact: true });
+    const backupMode = page.getByRole("combobox", {
+      name: "Hoe importeren",
+      exact: true,
+    });
+    const acknowledgeImport = page.getByRole("checkbox", {
+      name: "Ik wil deze instellingen en vaardigheden importeren en controleer eerst de wijzigingen.",
+      exact: true,
+    });
+    const checkBackup = page.getByRole("button", {
+      name: "Back-up controleren",
+      exact: true,
+    });
+    await page.evaluate(() => {
+      globalThis.backupFileReads = 0;
+      const original = globalThis.File.prototype.text;
+      globalThis.restoreBackupFileText = () => {
+        globalThis.File.prototype.text = original;
+      };
+      globalThis.File.prototype.text = function () {
+        globalThis.backupFileReads++;
+        return original.call(this);
+      };
+    });
+    await backupFile.setInputFiles({
+      name: "oversize.json",
+      mimeType: "application/json",
+      buffer: Buffer.alloc(1_000_001),
+    });
+    assert.equal(await checkBackup.isDisabled(), true);
+    await acknowledgeImport.check();
+    await checkBackup.click();
+    await page
+      .locator("#settingsMessage")
+      .filter({ hasText: "De back-up is te groot (maximaal 1 MB)." })
+      .waitFor();
+    assert.equal(
+      await page.evaluate(() => globalThis.backupFileReads),
+      0,
+      "Oversized backups must be rejected before file reads",
+    );
+    assert.equal(importPrepares, 0);
+    await backupFile.setInputFiles({
+      name: "invalid.json",
+      mimeType: "application/json",
+      buffer: Buffer.from("not-json"),
+    });
+    assert.equal(
+      await acknowledgeImport.isChecked(),
+      false,
+      "Changing the file must reset acknowledgement",
+    );
+    await acknowledgeImport.check();
+    await checkBackup.click();
+    await page
+      .locator("#settingsMessage")
+      .filter({ hasText: "Dit bestand is geen geldige JSON." })
+      .waitFor();
+    assert.equal(
+      importPrepares,
+      0,
+      "Invalid JSON must not reach the import API",
+    );
+    assert.equal(importWrites, 0);
+    await backupFile.setInputFiles({
+      name: "backup.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(backup)),
+    });
+    await acknowledgeImport.check();
+    await backupMode.selectOption("replace");
+    assert.equal(
+      await acknowledgeImport.isChecked(),
+      false,
+      "Changing import mode must reset acknowledgement",
+    );
+    const importReview = page.getByRole("group", {
+      name: "Back-upimport controleren",
+      exact: true,
+    });
+    const prepareImport = async () => {
+      assert.equal(await checkBackup.isDisabled(), true);
+      await acknowledgeImport.check();
+      await checkBackup.click();
+      await importReview.waitFor();
+      assert.equal(
+        importWrites,
+        0,
+        "Preview must not persist imported settings",
+      );
+      assert.equal(await backupFile.isDisabled(), true);
+      assert.equal(await backupMode.isDisabled(), true);
+    };
+    await prepareImport();
+    assert.match(
+      await importReview.innerText(),
+      /Vervangen: 1 inkomende vaardigheden, 0 inkomende panelen/,
+    );
+    assert.match(
+      await importReview.innerText(),
+      /Na import: 1 vaardigheden en 0 panelen/,
+    );
+    assert.match(
+      await importReview.innerText(),
+      /1 vaardigheden worden vervangen; 0 vaardigheden en 1 panelen worden verwijderd/,
+    );
+    assert.match(await importReview.innerText(), /Eigen regels: wijzigen/);
+    assert.match(
+      await importReview.innerText(),
+      /Snelle opdrachten: blijven gelijk/,
+    );
+    assert.match(
+      await importReview.innerText(),
+      /Gereedschapsinstellingen: blijven gelijk/,
+    );
+    assert.match(await importReview.innerText(), /Zijbalkindeling: wijzigt/);
+    assert.match(
+      await importReview.innerText(),
+      /Geïmporteerde webhooks kunnen actief worden/,
+    );
+    await importReview
+      .getByText(`${missingHeaders[0].skill}: Authorization`, { exact: true })
+      .waitFor();
+    await importReview
+      .getByText(`${missingHeaders[1].skill}: X-API-Key`, { exact: true })
+      .waitFor();
+    assert.equal(
+      await importReview
+        .locator("li")
+        .filter({ hasText: missingHeaders[0].skill })
+        .count(),
+      2,
+      "Duplicate escaped skill names must both render their missing headers",
+    );
+    assert.equal(
+      await page.evaluate(() => globalThis.backupLabelRan),
+      undefined,
+    );
+    await importReview.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-backup-confirm-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+    const cancelImport = importReview.getByRole("button", {
+      name: "Annuleer back-upimport",
+      exact: true,
+    });
+    await cancelImport.click();
+    await importReview.waitFor({ state: "detached" });
+    await page
+      .locator("#settingsMessage")
+      .filter({ hasText: "Import geannuleerd." })
+      .waitFor();
+    assert.equal(importWrites, 0);
+    await prepareImport();
+    await page.clock.fastForward(60001);
+    const confirmImport = importReview.getByRole("button", {
+      name: "Bevestig back-upimport",
+      exact: true,
+    });
+    assert.equal(await confirmImport.isDisabled(), true);
+    await importReview
+      .getByRole("status")
+      .filter({ hasText: "Toestemming verlopen." })
+      .waitFor();
+    assert.equal(importWrites, 0);
+    await cancelImport.click();
+    await importReview.waitFor({ state: "detached" });
+    await prepareImport();
+    await confirmImport.click();
+    await importReview.waitFor({ state: "detached" });
+    await page
+      .locator("#settingsMessage")
+      .filter({ hasText: "1 vaardigheden geïmporteerd." })
+      .waitFor();
+    assert.equal(importWrites, 1);
+    assert.equal(importPrepares, 3);
+    assert.equal(
+      await page.evaluate(() => globalThis.backupLabelRan),
+      undefined,
+    );
+    await page.evaluate(() => globalThis.restoreBackupFileText());
     await page.goto(`${base}/settings?section=devices`);
     await page.getByText("2026-10-10.fixture", { exact: true }).waitFor();
     await page
@@ -1287,7 +1546,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory and confirmed deletion, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway documentation and confirmed native modes and global prompt replacement, explicit private account/catalog inventory and confirmed deletion, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports.",
   );
 } finally {
   await browser.close();

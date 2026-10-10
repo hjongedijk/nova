@@ -54,6 +54,34 @@ const call = async (
   body?: unknown,
   headers: Record<string, string> = ADMIN,
 ): Promise<Reply> => {
+  if (
+    method === "post" &&
+    route === "/import" &&
+    body &&
+    typeof body === "object" &&
+    Object.hasOwn(body, "data")
+  ) {
+    const request = body as { data: unknown; mode?: unknown };
+    const data =
+      request.data && typeof request.data === "object"
+        ? ({ ...request.data } as Record<string, unknown>)
+        : request.data;
+    if (data && typeof data === "object")
+      delete (data as Record<string, unknown>).status;
+    const prepared = await nova.api
+      .post("/api/settings/import/prepare")
+      .set(headers)
+      .send({ data, mode: request.mode, acknowledgeEffects: true });
+    if (prepared.status !== 200 || !prepared.body.action)
+      return { status: prepared.status, ...prepared.body };
+    const { sessionId, confirmationId } = prepared.body.action;
+    return call(
+      "post",
+      "/import",
+      { sessionId, confirmationId, approve: true },
+      headers,
+    );
+  }
   const response = await nova.api[method](`/api/settings${route}`)
     .set(headers)
     .send(body as object | undefined);
@@ -162,7 +190,7 @@ describe("the settings API", () => {
           mode: "replace",
         })
       ).status,
-    ).toBe(200);
+    ).toBe(400);
     expect(nova.store.get().standingApprovals).toEqual([]);
   });
 
@@ -552,7 +580,7 @@ describe("the settings API", () => {
     expect(
       (
         await call("post", "/import", {
-          data: { format: "nova-settings", skills: [] },
+          data: { format: "nova-settings", version: 1, skills: [] },
           mode: "merge",
         })
       ).status,
@@ -564,6 +592,7 @@ describe("the settings API", () => {
         await call("post", "/import", {
           data: {
             format: "nova-settings",
+            version: 1,
             skills: [],
             quickActions: null,
             sidebar: null,

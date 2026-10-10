@@ -177,6 +177,12 @@ require entering the desired value again. An audit failure before persistence pr
 if the final audit message fails after persistence, the response clearly reports that the values
 were saved and the local history remains available.
 
+Version-one settings backups include persona, quick actions, tool overrides, skills, widgets and sidebar layout. Import first validates a detached candidate (maximum 1,000,000 bytes) and shows changed categories, additions, replacements, removals and missing secret header names. It requires a fresh DANGEROUS confirmation valid for 60 seconds and one use; changing settings in the meantime invalidates the import. Preparation never writes settings. Unknown versions, invalid modes, duplicate IDs, over-capacity merges and broken widget/sidebar references are rejected rather than silently truncated.
+
+Secret header values are never exported or restored from a file. A merge retains existing private headers only when the target URL, method and declared header names match exactly; changed targets require entering the secrets again. Recognized secrets and declared credential values in visible imported settings are rejected before any write. The public confirmation and audit contain counts only; candidates and revision hashes remain private and expire autonomously. Permanent approval grants cannot be imported. An audit failure before applying blocks the import; a failure after saving produces an explicit warning.
+
+The guarded API uses POST `/api/settings/import/prepare` with `{data, mode, acknowledgeEffects: true}`. POST `/api/settings/import` now accepts only `{sessionId, confirmationId, approve}` from that preparation; old direct-import bodies are rejected. The settings screen performs both steps and supports cancellation and expiry.
+
 These connection settings and Node-RED flows are not yet included in the existing version-one
 settings download; complete-system export/import remains phase J work.
 
