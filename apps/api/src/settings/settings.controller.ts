@@ -5,6 +5,7 @@ import { ToolSwitchHistory } from "./tool-switch-history.service.js";
 import { SidebarHistory } from "./sidebar-history.service.js";
 import { PersonaHistoryService } from "./persona-history.service.js";
 import { InstructionSkillHistory } from "./instruction-skill-history.service.js";
+import { QuickActionsHistory } from "./quick-actions-history.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
@@ -100,6 +101,7 @@ export class SettingsController {
     private readonly sidebarHistory: SidebarHistory,
     private readonly personaHistory: PersonaHistoryService,
     private readonly instructionSkillHistory: InstructionSkillHistory,
+    private readonly quickActionsHistory: QuickActionsHistory,
     @Optional()
     @Inject(WALLPAPER_PORT)
     private readonly wallpaper?: WallpaperPort,
@@ -166,11 +168,33 @@ export class SettingsController {
 
   @Put("quick-actions")
   setQuickActions(@Body() body: Body_) {
+    const before = this.quickActionsHistory.current();
     const items =
       body?.reset === true ? null : normalizeQuickActions(body?.items);
     this.settings.update((settings) => void (settings.quickActions = items));
+    const quickActions = items ?? this.settings.quickActions();
+    this.quickActionsHistory.record(before, this.quickActionsHistory.current());
     this.log("quick-actions", { count: items?.length ?? "default" });
-    return { ok: true, quickActions: items ?? this.settings.quickActions() };
+    return {
+      ok: true,
+      quickActions,
+      ...(this.quickActionsHistory.lastWarning
+        ? { historyWarning: this.quickActionsHistory.lastWarning }
+        : {}),
+    };
+  }
+
+  @Get("quick-actions/history")
+  quickActionsHistoryList() {
+    return this.quickActionsHistory.list();
+  }
+
+  @Post("quick-actions/history/:id/rollback")
+  @HttpCode(200)
+  rollbackQuickActions(@Param("id") id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige wijziging."]);
+    return this.quickActionsHistory.rollback(id);
   }
 
   @Put("tools/:name")

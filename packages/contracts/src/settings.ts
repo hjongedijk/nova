@@ -296,6 +296,21 @@ export interface QuickAction {
   prompt: string;
 }
 
+export interface QuickActionRevision {
+  id: string;
+  at: string;
+  before: QuickActionSnapshot;
+  after: QuickActionSnapshot;
+}
+export interface QuickActionSnapshot {
+  isDefault: boolean;
+  items: QuickAction[];
+}
+export interface QuickActionHistory {
+  revisions: QuickActionRevision[];
+  truncated: boolean;
+}
+
 export interface ToolOverride {
   enabled?: false;
   description?: string;

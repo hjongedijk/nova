@@ -11,6 +11,7 @@ import type {
   QdrantOverview,
   InstructionSkill,
   InstructionSkillContentHistory,
+  QuickActionHistory,
 } from "@nova/contracts";
 import type {
   NativeGatewayReport,
@@ -147,13 +148,25 @@ export const rollbackInstructionSkillContent = (id: string, revision: string) =>
   );
 
 export const saveQuickActions = (items: QuickAction[]) =>
-  write<{ ok: true; quickActions: QuickAction[] }>("PUT", "/quick-actions", {
-    items,
-  });
+  write<{ ok: true; quickActions: QuickAction[]; historyWarning?: string }>(
+    "PUT",
+    "/quick-actions",
+    { items },
+  );
 export const resetQuickActions = () =>
-  write<{ ok: true; quickActions: QuickAction[] }>("PUT", "/quick-actions", {
-    reset: true,
-  });
+  write<{ ok: true; quickActions: QuickAction[]; historyWarning?: string }>(
+    "PUT",
+    "/quick-actions",
+    { reset: true },
+  );
+export const getQuickActionsHistory = () =>
+  read<QuickActionHistory>("/quick-actions/history");
+export const rollbackQuickActions = (id: string) =>
+  write<{ ok: true; quickActions: QuickAction[]; auditWarning?: string }>(
+    "POST",
+    `/quick-actions/history/${enc(id)}/rollback`,
+    {},
+  );
 
 export const saveToolOverride = (name: string, override: ToolOverride) =>
   write<{ ok: true; override: ToolOverride }>(

@@ -395,10 +395,42 @@ describe("the settings API", () => {
         })
       ).status,
     ).toBe(400);
+    const nextItems = [{ label: "Muziek", prompt: "Speel rustige muziek af" }];
+    await call("put", "/quick-actions", { items: nextItems });
+    const history = await call("get", "/quick-actions/history");
+    expect(history.revisions.length).toBeGreaterThanOrEqual(2);
+    const revision = history.revisions[0];
+    expect(revision.after.items).toEqual(nextItems);
+    expect(
+      (await call("post", `/quick-actions/history/${revision.id}/rollback`, {}))
+        .quickActions,
+    ).toEqual(items);
+    expect(
+      (await call("post", `/quick-actions/history/${revision.id}/rollback`, {}))
+        .status,
+    ).toBe(409);
+    const firstRevision = history.revisions[1];
+    expect(
+      (
+        await call(
+          "post",
+          `/quick-actions/history/${firstRevision.id}/rollback`,
+          {},
+        )
+      ).quickActions,
+    ).toEqual(DEFAULT_QUICK_ACTIONS);
+    expect((await call("get", "/")).quickActionsAreDefault).toBe(true);
     expect(
       (await call("put", "/quick-actions", { reset: true })).quickActions,
     ).toEqual(DEFAULT_QUICK_ACTIONS);
     expect((await call("get", "/")).quickActionsAreDefault).toBe(true);
+    const credentialText = "Open https://user:pass@example.test/status";
+    const secretResult = await call("put", "/quick-actions", {
+      items: [{ label: "Status", prompt: credentialText }],
+    });
+    expect(secretResult.historyWarning).toMatch(/geheim/i);
+    const safeHistory = await call("get", "/quick-actions/history");
+    expect(JSON.stringify(safeHistory)).not.toContain("user:pass");
   });
 
   it("shows examples in the public list only for skills that are on", async () => {
