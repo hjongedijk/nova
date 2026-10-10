@@ -133,3 +133,5 @@ J2.5 now also exports/imports named planning lists from `jarvis-state.json`. Lis
 J8.3 configuration documentation now covers every variable in `.env.example`, distinguishes Settings-owned values from environment/Compose ownership, and records the backup/history boundaries and Node-RED flow owner. `settings-design.md` includes the current reviewed backup-import preview at desktop 1x/2x and mobile. Production browser checks pass; mobile preview reviewed.
 
 J8.1 service-adapter API coverage is complete: 35 focused tests exercise all nine configured adapters, including fake-service probes, MQTT cleanup without publish/subscribe, restart-time migration, secret masking in responses/history/audit, redirects, and transport/auth failures. No external service was contacted.
+
+J8.2 browser coverage uses Playwright against the production build for all twelve sections, search, keyboard navigation, deep links, saves, PIN expiry, and confirmed backup flows at desktop 1x/2x and 390 px mobile. No physical phone was tested.
