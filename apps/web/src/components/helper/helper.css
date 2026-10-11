@@ -1,6 +1,6 @@
 /* Shared helper primitives: button, tab, chip, input, notice and status block. */
-html:has(body.helper),
-body.helper {
+html:has(.hp),
+body:has(.hp) {
   background: #091321;
   margin: 0;
   width: 100%;
@@ -16,6 +16,10 @@ body.helper {
   --hp-accent: #8dd8ff;
   color: var(--hp-text);
   font-family: "Segoe UI", system-ui, sans-serif;
+}
+html:has(.hp.contrast),
+body:has(.hp.contrast) {
+  background: #000;
 }
 .hp {
   height: 100dvh;
@@ -151,9 +155,23 @@ body.helper {
 .hp-content {
   padding: 6px 12px;
 }
+.hp-overview-layout {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.hp-overview-orb {
+  width: 64px;
+  height: 64px;
+}
+.hp-overview-orb canvas {
+  width: 64px;
+  height: 64px;
+}
 .hp-overview {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 .hp-block {
@@ -175,6 +193,12 @@ body.helper {
 .hp-block strong {
   font-size: 12px;
   font-weight: 500;
+}
+.hp-block.available {
+  border-left: 2px solid #8dd8ff;
+}
+.hp-block:not(.available) {
+  border-left: 2px solid #e9aa62;
 }
 .hp-integrations {
   display: flex;
@@ -236,6 +260,12 @@ body.helper {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.hp-chat-actions > .hp-mood {
+  flex: 0 0 auto;
+  color: var(--mist);
+  font-size: 0.7rem;
 }
 .hp-messages {
   overflow-y: auto;

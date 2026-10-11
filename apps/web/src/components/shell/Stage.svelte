@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { parseReply, type Word } from "#lib/chat/markdown.ts";
   import { registerStage } from "#lib/chat/stage.ts";
-  import { MODE_LABELS } from "#lib/entity/states.ts";
+  import { MODE_LABELS, MOOD_LABELS } from "#lib/entity/states.ts";
   import { chat } from "#lib/stores/chat.svelte.ts";
   import { shell } from "#lib/stores/shell.svelte.ts";
   import { playback } from "#lib/voice/audio.ts";
@@ -27,6 +27,14 @@
         ? "Zeg “Hey NOVA”, tik op mij of typ hieronder."
         : "Tik op mij om te spreken, of typ hieronder.",
   );
+  const roleLabels: Record<string, string> = {
+    conversation: "Gesprek",
+    code: "Code",
+    planning: "Denken en plannen",
+    summary: "Samenvatten",
+    vision: "Beeld",
+    embedding: "Inbedden",
+  };
 
   /** Words lit up so far, and whether the voice is playing (the answer dims until it is said). */
   let spoken = $state(0);
@@ -125,9 +133,33 @@
     {/each}{#if chat.streaming && blocks.length === 0}<span class="caret"
       ></span>{/if}
   </div>
+  {#if chat.model}
+    <p class="route-meta" aria-label="Gebruikte modelrol en model">
+      {roleLabels[chat.modelRole] ?? "Model"} · {chat.model}
+    </p>
+  {/if}
+  {#if chat.reply && chat.mood !== "neutral"}
+    <p class="mood-label" aria-label="Toon van het antwoord">
+      {MOOD_LABELS[chat.mood]}
+    </p>
+  {/if}
   <Dock />
   <p class="status-line" role="status">
     <span id="mode">{MODE_LABELS[chat.uiState] ?? chat.uiState}</span>
     <span id="voiceHint">{chat.hint || idleHint}</span>
   </p>
 </main>
+
+<style>
+  .route-meta {
+    margin: -0.5rem 1rem 0;
+    color: var(--mist);
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+  }
+  .mood-label {
+    margin: -0.45rem 1rem 0;
+    color: var(--mist);
+    font-size: 0.7rem;
+  }
+</style>

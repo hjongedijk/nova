@@ -12,7 +12,12 @@
       class="hc-yes"
       disabled={card.locked}
       onclick={() => answerCard(card.id, true)}
-      >Bevestigen <kbd aria-hidden="true">Y</kbd></button
+      >{card.tool === "code_file_write"
+        ? "Toepassen"
+        : card.tool === "code_self_save"
+          ? "Opslaan"
+          : "Bevestigen"}
+      <kbd aria-hidden="true">Y</kbd></button
     >
     <button
       type="button"

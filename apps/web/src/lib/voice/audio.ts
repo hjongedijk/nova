@@ -55,8 +55,11 @@ export function outputVolume(): number {
 }
 
 /** Through the analyser the element's own volume is not reliable everywhere, so a gain node does it there. */
-export function applyVolume(audio: HTMLAudioElement): void {
-  const volume = outputVolume();
+export function applyVolume(audio: HTMLAudioElement, multiplier = 1): void {
+  const scale = Number.isFinite(multiplier)
+    ? Math.min(1, Math.max(0, multiplier))
+    : 1;
+  const volume = outputVolume() * scale;
   const gain = (audio as AudioWithGraph)._gain;
   if (gain) {
     audio.volume = 1;

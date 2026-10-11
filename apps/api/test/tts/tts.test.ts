@@ -9,6 +9,8 @@ import { TtsService } from "../../src/tts/tts.service.js";
 describe("POST /api/tts", () => {
   let app: INestApplication;
   let calls = 0;
+  const voices: string[] = [];
+  const prosodies: Array<{ rate: number; pitch: number }> = [];
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -18,8 +20,10 @@ describe("POST /api/tts", () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix("api");
     app.useGlobalFilters(new ApiErrorFilter());
-    app.get(TtsService).engine = async (text) => {
+    app.get(TtsService).engine = async (text, voice, prosody) => {
       calls++;
+      voices.push(voice);
+      prosodies.push(prosody);
       return Buffer.from(`mp3:${text}`);
     };
     await app.init();
@@ -53,6 +57,44 @@ describe("POST /api/tts", () => {
     expect(again.headers["x-tts-cache"]).toBe("hit");
   });
 
+  it("uses only the reviewed voice list and separates cached audio by voice", async () => {
+    const start = voices.length;
+    await request(app.getHttpServer())
+      .post("/api/tts")
+      .send({ text: "Stemproef", voice: "nl-NL-ColetteNeural" })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post("/api/tts")
+      .send({ text: "Stemproef", voice: "unknown" })
+      .expect(200);
+    expect(voices.slice(start)).toEqual([
+      "nl-NL-ColetteNeural",
+      "nl-NL-FennaNeural",
+    ]);
+  });
+
+  it("bounds prosody, varies it slightly, and separates cached settings", async () => {
+    const startCalls = calls;
+    const start = prosodies.length;
+    await request(app.getHttpServer())
+      .post("/api/tts")
+      .send({
+        text: "Een natuurlijke zin.",
+        prosody: { rate: 100, pitch: -100 },
+      })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post("/api/tts")
+      .send({ text: "Een natuurlijke zin.", prosody: { rate: 5, pitch: 3 } })
+      .expect(200);
+    expect(calls).toBe(startCalls + 2);
+    expect(prosodies[start]?.rate).toBeGreaterThanOrEqual(-10);
+    expect(prosodies[start]?.rate).toBeLessThanOrEqual(10);
+    expect(prosodies[start]?.pitch).toBeGreaterThanOrEqual(-5);
+    expect(prosodies[start]?.pitch).toBeLessThanOrEqual(5);
+    expect(prosodies[start + 1]).not.toEqual(prosodies[start]);
+  });
+
   it("refuses empty and oversized text in Dutch", async () => {
     const empty = await request(app.getHttpServer())
       .post("/api/tts")
@@ -71,7 +113,8 @@ describe("POST /api/tts", () => {
       .expect(200);
     expect(response.body).toMatchObject({
       ok: true,
-      voice: "nl-NL-MaartenNeural",
+      voice: "nl-NL-FennaNeural",
+      voices: ["nl-NL-FennaNeural", "nl-NL-ColetteNeural", "nl-BE-DenaNeural"],
     });
   });
 });

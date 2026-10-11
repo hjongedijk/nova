@@ -13,6 +13,7 @@
     orb = startOrb({
       canvas,
       state: () => chat.uiState,
+      mood: () => chat.mood,
       shape: () => helper.shape,
       hue: helperHue,
       night: () => cueQuiet(helper.cues),

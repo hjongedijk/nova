@@ -9,6 +9,13 @@
   import DevicesSection from "#components/settings/DevicesSection.svelte";
   import SoundSection from "#components/settings/SoundSection.svelte";
   import { audioContext, ttsElement } from "#lib/voice/audio.ts";
+  import {
+    discoverInputDevices,
+    selectedInputDevice,
+    setSelectedInputDevice,
+    supportsSpeechInputSelection,
+  } from "#lib/voice/input-device.ts";
+  import { storage } from "#lib/util/storage.ts";
   let hotkeys = $state<Record<string, string>>({
     open: "Ctrl+Alt+N",
     speak: "Ctrl+Alt+Space",
@@ -17,7 +24,11 @@
   });
   let note = $state("");
   let outputs: MediaDeviceInfo[] = $state([]);
+  let inputs: MediaDeviceInfo[] = $state([]);
   let output = $state("");
+  let input = $state("");
+  let inputSupported = $state(false);
+  const outputDeviceKey = "novaAudioOutput";
   async function save() {
     try {
       const result = await saveHelperHotkeys(hotkeys);
@@ -33,6 +44,16 @@
       outputs = (await navigator.mediaDevices.enumerateDevices()).filter(
         (device) => device.kind === "audiooutput",
       );
+      const saved = storage.get(outputDeviceKey, "");
+      if (saved && outputs.some((device) => device.deviceId === saved)) {
+        output = saved;
+        await setOutput();
+      } else if (saved) {
+        output = "";
+        storage.set(outputDeviceKey, "");
+        note =
+          "Opgeslagen uitvoerapparaat niet gevonden; standaarduitvoer wordt gebruikt.";
+      }
     } catch {
       note = "Deze browser geeft geen uitvoerapparaten vrij.";
     }
@@ -49,12 +70,42 @@
       else if (audio.setSinkId && !ttsElement()._source)
         await audio.setSinkId(output);
       else throw new Error("Kies je uitvoer via Windows-geluidsinstellingen.");
-      note = "Uitvoerapparaat gekozen voor deze sessie.";
+      storage.set(outputDeviceKey, output);
+      note = output
+        ? "Uitvoerapparaat gekozen en op dit apparaat bewaard."
+        : "Standaarduitvoer gekozen.";
     } catch (error) {
       note = (error as Error).message;
+      output = "";
+      storage.set(outputDeviceKey, "");
     }
   }
+  async function findInputs() {
+    try {
+      inputs = await discoverInputDevices();
+      if (input && !inputs.some((device) => device.deviceId === input)) {
+        input = "";
+        setSelectedInputDevice("");
+        note =
+          "Opgeslagen microfoon niet gevonden; de standaardmicrofoon wordt weer gebruikt.";
+      } else {
+        note = inputs.length
+          ? "Microfoons gevonden. Je keuze geldt voor spreken en Hey NOVA."
+          : "Geen microfoon gevonden.";
+      }
+    } catch {
+      note = "Geef NOVA microfoontoegang om invoerapparaten te tonen.";
+    }
+  }
+  function setInput() {
+    setSelectedInputDevice(input);
+    note = input
+      ? "Microfoon gekozen voor spreken en Hey NOVA."
+      : "Standaardmicrofoon gekozen.";
+  }
   onMount(() => {
+    inputSupported = supportsSpeechInputSelection();
+    input = selectedInputDevice();
     void getHelperHotkeys()
       .then((result) => {
         if (result.preferences) {
@@ -90,13 +141,33 @@
 </details>
 <details>
   <summary>Microfoon en stem</summary><SoundSection />
-  <p>
-    Spraakherkenning gebruikt de standaardmicrofoon van je browser. Kies die in
-    Windows.
-  </p>
-  <a href="ms-settings:sound" class="hp-button">Windows-geluid</a>
+  {#if inputSupported}
+    <p>
+      De gekozen microfoon geldt voor spreken en Hey NOVA. NOVA stopt de opname
+      zodra luisteren eindigt.
+    </p>
+    <button class="hp-button" type="button" onclick={findInputs}
+      >Microfoons zoeken</button
+    >
+    <label
+      >Invoerapparaat<select bind:value={input} onchange={setInput}
+        ><option value="">Standaardmicrofoon</option
+        >{#if input && !inputs.some((device) => device.deviceId === input)}<option
+            value={input}>Opgeslagen microfoon (nog niet gecontroleerd)</option
+          >{/if}{#each inputs as device (device.deviceId)}<option
+            value={device.deviceId}>{device.label || "Microfoon"}</option
+          >{/each}</select
+      ></label
+    >
+  {:else}
+    <p>
+      Deze browser kan geen aparte invoermicrofoon aan spraakherkenning
+      koppelen. Kies de microfoon in Windows.
+    </p>
+    <a href="ms-settings:sound" class="hp-button">Windows-geluid</a>
+  {/if}
   <label
-    >Uitvoerapparaat<select bind:value={output} onchange={setOutput}
+    >Uitvoerapparaat<select bind:value={output} onchange={() => setOutput()}
       ><option value="">Standaard</option
       >{#each outputs as device (device.deviceId)}<option
           value={device.deviceId}>{device.label || "Audio-uitvoer"}</option

@@ -18,7 +18,7 @@
   import { getSessionId, resetSession } from "#lib/chat/session.ts";
   import "#lib/chat/ask.ts";
   import { loadPublicConfig } from "#lib/chat/index.ts";
-  import { MODE_LABELS } from "#lib/entity/states.ts";
+  import { MODE_LABELS, MOOD_LABELS } from "#lib/entity/states.ts";
   import { ask, chat } from "#lib/stores/chat.svelte.ts";
   import {
     dashboard,
@@ -33,17 +33,26 @@
     saveHelperPreferences,
   } from "#lib/stores/helper.svelte.ts";
   import { audioLevel } from "#lib/stores/audio-level.svelte.ts";
+  const MODEL_ROLE_LABELS: Record<string, string> = {
+    conversation: "Gesprek",
+    code: "Code",
+    planning: "Denken en plannen",
+    summary: "Samenvatten",
+    vision: "Beeld",
+    embedding: "Inbedden",
+  };
   import {
     createHelperCues,
     type HelperCuePlayer,
     HELPER_CUE_NAMES,
+    canSpeakFeedEvent,
   } from "#lib/voice/helper-cues.ts";
   import { audioContext, outputVolume, applyVolume } from "#lib/voice/audio.ts";
   import { storage } from "#lib/util/storage.ts";
   import { playback } from "#lib/voice/audio.ts";
   import { pressCore } from "#lib/voice/core.ts";
   import { initRecognition, stopListening } from "#lib/voice/recognition.ts";
-  import { stopSpeaking } from "#lib/voice/speaker.ts";
+  import { speak, stopSpeaking } from "#lib/voice/speaker.ts";
   import { installAudioUnlock } from "#lib/voice/unlock.ts";
   import { initWake, setWake, cancelAwait } from "#lib/voice/wake.ts";
   import "../../components/helper/helper.css";
@@ -97,6 +106,43 @@
   const visibleNotices = $derived(
     notices.filter((event) => !((snoozed[event.seq] ?? 0) > now)),
   );
+  const overviewBlocks = $derived([
+    {
+      name: "Server",
+      value: dashboard.overview?.proxmox
+        ? `${dashboard.overview.proxmox.guests.length} machines`
+        : "Niet bereikbaar",
+      detail:
+        dashboard.overview?.proxmox?.guests
+          .map((guest) => `${guest.name} (${guest.status})`)
+          .join(" · ") || "Servergegevens niet bereikbaar.",
+      available: !!dashboard.overview?.proxmox,
+    },
+    {
+      name: "Thuis",
+      value: dashboard.overview?.home ? "Verbonden" : "Niet bereikbaar",
+      detail: dashboard.overview?.home
+        ? "Home Assistant verbonden."
+        : "Thuisgegevens niet bereikbaar.",
+      available: !!dashboard.overview?.home,
+    },
+    {
+      name: "Timers",
+      value: dashboard.overview?.timers
+        ? `${dashboard.overview.timers.length} actief`
+        : "Onbekend",
+      detail:
+        dashboard.overview?.timers?.map((timer) => timer.label).join(" · ") ||
+        "Geen actieve timers.",
+      available: !!dashboard.overview?.timers,
+    },
+    {
+      name: "Agenda",
+      value: "Nog niet gekoppeld",
+      detail: "Agendakoppeling volgt in fase E.",
+      available: false,
+    },
+  ]);
   const busy = () =>
     chat.busy ||
     waiting ||
@@ -193,6 +239,8 @@
     chat.reply = "";
     chat.you = "";
     chat.model = "";
+    chat.modelRole = "";
+    chat.mood = "neutral";
     chat.toolResult = "";
   }
   function onKey(event: KeyboardEvent) {
@@ -448,6 +496,22 @@
         ].slice(0, 100);
         cuePlayer?.play("notice");
         open("notifications");
+        const spoken = events
+          .map((event) =>
+            [event.title, event.detail].filter(Boolean).join(". "),
+          )
+          .join(". ")
+          .slice(0, 360);
+        if (
+          spoken &&
+          canSpeakFeedEvent(
+            paused,
+            chat.busy || chat.uiState === "speaking" || audioLevel.speaking,
+            helper.cues,
+          )
+        ) {
+          void speak(spoken);
+        }
       }),
     ];
     return () => {
@@ -711,14 +775,20 @@
           >
         </section>
       {:else if view === "overview"}
-        <section class="hp-content hp-overview" aria-label="Overzicht">
-          {#each [{ name: "Server", value: dashboard.overview?.proxmox ? `${dashboard.overview.proxmox.guests.length} machines` : "Niet bereikbaar" }, { name: "Thuis", value: dashboard.overview?.home ? "Verbonden" : "Niet bereikbaar" }, { name: "Timers", value: dashboard.overview?.timers ? `${dashboard.overview.timers.length} actief` : "Onbekend" }, { name: "Agenda", value: "Nog niet gekoppeld" }] as block (block.name)}
-            <button
-              class="hp-block"
-              onclick={() => (detail = detail === block.name ? "" : block.name)}
-              ><span>{block.name}</span><strong>{block.value}</strong></button
-            >
-          {/each}
+        <section class="hp-content hp-overview-layout" aria-label="Overzicht">
+          <div class="hp-overview-orb" aria-hidden="true"><Orb /></div>
+          <div class="hp-overview">
+            {#each overviewBlocks as block (block.name)}
+              <button
+                class="hp-block"
+                class:available={block.available}
+                aria-expanded={detail === block.name}
+                onclick={() =>
+                  (detail = detail === block.name ? "" : block.name)}
+                ><span>{block.name}</span><strong>{block.value}</strong></button
+              >
+            {/each}
+          </div>
         </section>
         <div class="hp-integrations" aria-label="Koppelingen">
           {#each [{ name: "Proxmox", prefix: "proxmox_", ok: !!dashboard.overview?.proxmox }, { name: "Home Assistant", prefix: "ha_", ok: !!dashboard.overview?.home }, { name: "Node-RED", prefix: "nodered_", ok: dashboard.health?.nodeRed === true }, { name: "MQTT", prefix: "mqtt_", ok: dashboard.health?.mqtt === true }] as service (service.name)}<span
@@ -734,20 +804,10 @@
         </div>
         {#if detail}<div class="hp-detail">
             <strong>{detail}</strong><span
-              >{detail === "Agenda"
-                ? "Agendakoppeling volgt in fase E."
-                : detail === "Server"
-                  ? dashboard.overview?.proxmox?.guests
-                      .map((guest) => `${guest.name} (${guest.status})`)
-                      .join(" · ") || "Servergegevens niet bereikbaar."
-                  : detail === "Timers"
-                    ? dashboard.overview?.timers
-                        ?.map((timer) => timer.label)
-                        .join(" · ") || "Geen actieve timers."
-                    : dashboard.overview?.home
-                      ? "Home Assistant verbonden."
-                      : "Thuisgegevens niet bereikbaar."}</span
-            ><a href="/" target="_blank" rel="noopener">Open details ↗</a>
+              >{overviewBlocks.find((block) => block.name === detail)
+                ?.detail}</span
+            >
+            <a href="/" target="_blank" rel="noopener">Open details ↗</a>
           </div>{/if}
       {:else if view === "weather"}
         <section class="hp-content hp-extra" aria-label="Weer">
@@ -773,7 +833,16 @@
         </section>
       {:else if view === "chat"}
         <div class="hp-chat-actions">
-          <span>{chat.model || "Model nog niet gemeld"}</span><HelperUi
+          <span
+            >{chat.model
+              ? `${MODEL_ROLE_LABELS[chat.modelRole] ?? "Model"} · ${chat.model}`
+              : "Model nog niet gemeld"}</span
+          >
+          {#if chat.reply && chat.mood !== "neutral"}<span
+              class="hp-mood"
+              aria-label="Toon van het antwoord">{MOOD_LABELS[chat.mood]}</span
+            >{/if}
+          <HelperUi
             class="hp-button"
             disabled={chat.busy || waiting}
             onclick={clearChat}>Wis gesprek</HelperUi

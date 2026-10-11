@@ -23,7 +23,7 @@ export interface Recognizer {
   onend: (() => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onresult: ((event: SpeechResultEvent) => void) | null;
-  start(): void;
+  start(audioTrack?: MediaStreamTrack): void;
   stop(): void;
   abort(): void;
 }

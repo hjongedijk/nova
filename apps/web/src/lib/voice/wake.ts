@@ -6,7 +6,12 @@ import { showToast } from "#lib/stores/toasts.svelte.ts";
 import { storage } from "#lib/util/storage.ts";
 import { quietWallpaper } from "#lib/modes/wallpaper.ts";
 import { playback } from "./audio.ts";
+import { isSpeaking, stopSpeech } from "./speaker.ts";
+import { isSpeechEcho } from "./speech-echo.ts";
+import { cancelActiveAsk } from "#lib/chat/ask.ts";
 import { chime } from "./chime.ts";
+import { findWake } from "./wake-matcher.ts";
+export { findWake, WAKE_LOOSE, WAKE_STRICT } from "./wake-matcher.ts";
 import {
   recognizerCtor,
   type Recognizer,
@@ -14,22 +19,16 @@ import {
   type SpeechResult,
   type SpeechResultEvent,
 } from "./speech-types.ts";
+import {
+  onInputDeviceChange,
+  openSelectedInputStream,
+  selectedInputDevice,
+  stopInputStream,
+} from "./input-device.ts";
 
 /* ==========================================================
  * "Hey NOVA": the microphone listens along, and a chime says it heard you
  * ========================================================== */
-
-export const WAKE_STRICT =
-  /\b(?:nova|novah|novaa|nofa|nofah|noba|nowa|noova|nuva|no[\s-]va)\b/i;
-export const WAKE_LOOSE =
-  /\b(?:hey|hé|hee|he|hoi|hallo|ok|oké|okay|hi)[\s,.!?-]+(?:no[\s-]?[vbfw]a+h?|noah|nover|noe[\s-]?va|nu[\s-]?va)\b/i;
-
-export function findWake(text: string): { start: number; end: number } | null {
-  const match = WAKE_STRICT.exec(text) || WAKE_LOOSE.exec(text);
-  return match
-    ? { start: match.index, end: match.index + match[0].length }
-    : null;
-}
 
 /** What was said after the wake word, or the whole text when there is none. */
 export function afterWake(text: string): string {
@@ -49,6 +48,9 @@ let restartTimer: ReturnType<typeof setTimeout> | undefined;
 let startedAt = 0;
 let quickEnds = 0;
 let insecureWarned = false;
+let wakeInputStream: MediaStream | null = null;
+let wakeInputDevice = "";
+let wakeStartAttempt = 0;
 
 /** The wake word handler needs to know NOVA is not busy answering. */
 const busyTalking = () =>
@@ -105,7 +107,21 @@ function sendCommand(command: string, index: number): void {
   clearTimeout(settleTimer);
   finishAwait();
   shell.draft = "";
-  void ask(command, [], "voice");
+  const deadline = Date.now() + 10_000;
+  const send = () => {
+    if (!chat.busy) {
+      void ask(command, [], "voice");
+      return;
+    }
+    if (Date.now() < deadline) setTimeout(send, 60);
+    else
+      showToast({
+        severity: "info",
+        title: "Ik luisterde, maar was nog bezig",
+        detail: "Zeg Hey NOVA nog eens en probeer het opnieuw.",
+      });
+  };
+  send();
 }
 function sendWhenSettled(command: string, index: number): void {
   clearTimeout(settleTimer);
@@ -118,11 +134,16 @@ function sendWhenSettled(command: string, index: number): void {
 export function handleWakeResult(event: SpeechResultEvent): void {
   lastLength = event.results.length;
   for (let i = event.resultIndex; i < event.results.length; i++) {
-    if (busyTalking()) continue; // never answer our own voice
-    if (i <= sentIndex) continue; // this phrase was already answered
     const result = event.results[i];
     if (!result) continue;
     const heard = bestHeard(result);
+    if (isSpeaking() && findWake(heard) && !isSpeechEcho(heard, lastSpoken)) {
+      stopSpeech();
+      if (chat.busy) cancelActiveAsk();
+      if (!shell.awaiting) beginAwait({ withChime: false, index: i });
+    }
+    if (busyTalking() && !shell.awaiting) continue; // never answer our own voice
+    if (i <= sentIndex) continue; // this phrase was already answered
     if (!heard) continue;
     if (shell.awaiting) {
       if (i < awaitIndex) continue;
@@ -148,8 +169,8 @@ export function handleWakeResult(event: SpeechResultEvent): void {
   }
 }
 
-// NOVA only keeps listening after it spoke when it asked something ("Zal ik ...?", "Welke bedoel je?").
-// After a plain answer the microphone stays closed until "Hey NOVA" or a click on the sphere.
+// A short, silent follow-up window makes voice chat feel continuous without leaving the
+// explicit wake listener in command mode all day.
 let lastSpoken = "";
 const askedSomething = (text: string) => /\?/.test(String(text).slice(-160));
 
@@ -161,14 +182,18 @@ export function noteSpoken(text: string): void {
 /** Called when NOVA stops talking. */
 export function afterSpeech(): void {
   ignoreUntil = Date.now() + 900;
-  if (shell.wakeEnabled && shell.wakeActive && askedSomething(lastSpoken))
+  if (shell.wakeEnabled && shell.wakeActive)
     setTimeout(() => {
       if (!chat.busy && !playback.current && !shell.awaiting)
-        beginAwait({ withChime: false, ms: 6000 });
+        beginAwait({
+          withChime: false,
+          ms: askedSomething(lastSpoken) ? 6000 : 4000,
+        });
     }, 950);
 }
 
 function stopWake(): void {
+  wakeStartAttempt++;
   clearTimeout(restartTimer);
   const rec = wakeRec;
   wakeRec = null;
@@ -178,9 +203,12 @@ function stopWake(): void {
   } catch {
     /* already stopped */
   }
+  stopInputStream(wakeInputStream);
+  wakeInputStream = null;
+  wakeInputDevice = "";
 }
 
-function startWake(): void {
+async function startWake(): Promise<void> {
   if (!Ctor || !shell.wakeEnabled || wakeRec) return;
   if (!window.isSecureContext) {
     if (!insecureWarned) {
@@ -193,6 +221,7 @@ function startWake(): void {
     }
     return;
   }
+  const attempt = ++wakeStartAttempt;
   const rec = new Ctor();
   rec.lang = "nl-NL";
   rec.continuous = true;
@@ -212,6 +241,7 @@ function startWake(): void {
     ) {
       shell.wakeEnabled = false;
       storage.set("jarvisWake", "off");
+      stopWake();
       showToast({
         severity: "warning",
         title: "De microfoon is geblokkeerd",
@@ -224,22 +254,56 @@ function startWake(): void {
         title: "Geen microfoon gevonden",
         detail: "Sluit een microfoon aan.",
       });
+      shell.wakeEnabled = false;
+      storage.set("jarvisWake", "off");
+      stopWake();
     }
   };
   rec.onend = () => {
     shell.wakeActive = false;
     wakeRec = null;
-    if (!shell.wakeEnabled) return;
+    if (!shell.wakeEnabled || attempt !== wakeStartAttempt) return;
     // The browser ends continuous recognition now and then. Start again,
     // and back off when it keeps ending immediately (microphone busy).
     quickEnds = Date.now() - startedAt < 1500 ? quickEnds + 1 : 0;
     restartTimer = setTimeout(startWake, Math.min(5000, 250 * 2 ** quickEnds));
   };
-  wakeRec = rec;
   try {
-    rec.start();
+    const input = selectedInputDevice();
+    if (input && input !== wakeInputDevice) {
+      stopInputStream(wakeInputStream);
+      wakeInputStream = null;
+      wakeInputDevice = "";
+    }
+    if (input && !wakeInputStream) {
+      const stream = await openSelectedInputStream();
+      if (attempt !== wakeStartAttempt || !shell.wakeEnabled) {
+        stopInputStream(stream);
+        return;
+      }
+      wakeInputStream = stream;
+      wakeInputDevice = input;
+    }
+    if (attempt !== wakeStartAttempt || !shell.wakeEnabled) return;
+    const track = wakeInputStream?.getAudioTracks()[0];
+    if (wakeInputStream && !track)
+      throw new Error("The selected microphone has no audio track");
+    wakeRec = rec;
+    rec.start(track);
   } catch {
+    if (attempt !== wakeStartAttempt) return;
     wakeRec = null;
+    stopInputStream(wakeInputStream);
+    wakeInputStream = null;
+    wakeInputDevice = "";
+    shell.wakeEnabled = false;
+    storage.set("jarvisWake", "off");
+    showToast({
+      severity: "warning",
+      title: "Gekozen microfoon niet beschikbaar",
+      detail:
+        "Hey NOVA is uitgezet. Controleer de microfoon in de helperinstellingen en zet Hey NOVA daarna weer aan.",
+    });
   }
 }
 
@@ -269,9 +333,15 @@ export function initWake(): () => void {
     handle: handleWakeResult,
   };
   const timer = setTimeout(startWake, 400);
+  const removeInputListener = onInputDeviceChange(() => {
+    const wasEnabled = shell.wakeEnabled;
+    stopWake();
+    if (wasEnabled) void startWake();
+  });
   return () => {
     clearTimeout(timer);
     window.removeEventListener("pointerdown", onFirstTouch);
+    removeInputListener();
     clearTimeout(settleTimer);
     clearTimeout(awaitTimer);
     stopWake();

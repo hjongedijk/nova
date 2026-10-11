@@ -19,10 +19,19 @@ export class TtsController {
   @HttpCode(200)
   @Header("Cache-Control", "no-store")
   async speak(
-    @Body() body: { text?: unknown },
+    @Body()
+    body: {
+      text?: unknown;
+      voice?: unknown;
+      prosody?: unknown;
+    },
     @Res() response: Response,
   ): Promise<void> {
-    const { audio, cached } = await this.tts.speak(body?.text);
+    const { audio, cached } = await this.tts.speak(
+      body?.text,
+      body?.voice,
+      body?.prosody,
+    );
     response.setHeader("Content-Type", "audio/mpeg");
     response.setHeader("Content-Length", String(audio.length));
     if (cached) response.setHeader("X-TTS-Cache", "hit");

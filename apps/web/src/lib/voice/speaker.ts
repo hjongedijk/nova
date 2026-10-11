@@ -4,15 +4,11 @@ import { showToast } from "#lib/stores/toasts.svelte.ts";
 import { quietWallpaper } from "#lib/modes/wallpaper.ts";
 import { applyVolume, attachAnalyser, playback, ttsElement } from "./audio.ts";
 import { afterSpeech, noteSpoken } from "./wake.ts";
-
-/** What the voice should say for a piece of the (markdown) answer. */
-export const speechText = (text: string): string =>
-  String(text || "")
-    .trim()
-    .replace(/\*\*|`/g, "")
-    .replace(/\bNOVA\b/g, "Nova")
-    .replace(/^\s*#{1,6}\s+/gm, "")
-    .replace(/^\s*[-*•]\s+/gm, "");
+import { speechChunkBoundary, speechText } from "./speech-filter.ts";
+export { speechText } from "./speech-filter.ts";
+import { helper } from "#lib/stores/helper.svelte.ts";
+import { cueQuiet } from "./helper-cues.ts";
+import type { AssistantMood } from "#lib/stores/chat.svelte.ts";
 
 export interface Speaker {
   /** Add a piece of the answer as it streams in. */
@@ -24,6 +20,7 @@ export interface Speaker {
   done: Promise<void>;
   /** How far the voice is through everything fed so far (0 to 1), to light up the words as they are said. */
   progress(): number;
+  setMood(mood: AssistantMood): void;
 }
 
 const NO_SPEAKER: Speaker = {
@@ -32,6 +29,7 @@ const NO_SPEAKER: Speaker = {
   cancel() {},
   done: Promise.resolve(),
   progress: () => 0,
+  setMood() {},
 };
 
 let activeSpeaker: Speaker | null = null;
@@ -81,6 +79,7 @@ export function createSpeaker(): Speaker {
   let cancelled = false;
   let finished = false;
   let playIndex = 0;
+  let mood: AssistantMood = "neutral";
   let wake: (() => void) | null = null;
   let endCurrent: (() => void) | null = null;
   const nudge = () => {
@@ -88,7 +87,7 @@ export function createSpeaker(): Speaker {
     wake = null;
   };
   const load = (item: { text: string; audio?: Promise<string> }) =>
-    (item.audio ??= fetchSpeech(speechText(item.text), abort.signal).then(
+    (item.audio ??= fetchSpeech(speechText(item.text), abort.signal, mood).then(
       (blob) => URL.createObjectURL(blob),
     ));
   const prefetch = () => {
@@ -121,7 +120,7 @@ export function createSpeaker(): Speaker {
       tts.onerror = end;
       void attachAnalyser(tts).then(() => {
         if (cancelled) return end();
-        applyVolume(tts);
+        applyVolume(tts, cueQuiet(helper.cues) ? 0.7 : 1);
         setState("speaking");
         tts.play().catch((error: Error) => {
           if (error?.name === "NotAllowedError") soundBlockedToast();
@@ -178,23 +177,19 @@ export function createSpeaker(): Speaker {
       if (stopCurrentSpeech === cancel) stopCurrentSpeech = null;
       if (activeSpeaker === self) activeSpeaker = null;
       setState("ready");
-      afterSpeech();
+      if (!cancelled) afterSpeech();
     }
   })();
-  const sentence = /[.!?…]+["”')\]]*\s+|\n+/g;
   const speaker: Speaker = {
     feed(delta) {
       buffer += delta;
       fedChars += delta.length;
       for (;;) {
-        const min = items.length === 0 ? 12 : 30;
-        let cut = -1;
-        sentence.lastIndex = 0;
-        for (let m = sentence.exec(buffer); m; m = sentence.exec(buffer))
-          if (m.index + m[0].length >= min) {
-            cut = m.index + m[0].length;
-            break;
-          }
+        const cut = speechChunkBoundary(
+          buffer,
+          180,
+          items.length === 0 ? 12 : 30,
+        );
         if (cut < 0) return;
         push(buffer.slice(0, cut));
         buffer = buffer.slice(cut);
@@ -216,6 +211,9 @@ export function createSpeaker(): Speaker {
           ? (current.currentTime / current.duration) * length
           : 0;
       return fedChars > 0 ? Math.min(1, (playedChars + part) / fedChars) : 0;
+    },
+    setMood(value) {
+      mood = value;
     },
   };
   self = speaker;

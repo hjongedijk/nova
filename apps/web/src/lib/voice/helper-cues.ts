@@ -68,10 +68,10 @@ function minute(value: string): number | null {
 }
 
 export function cueQuiet(
-  preferences: CuePreferences,
+  preferences: CuePreferences | undefined,
   now = new Date(),
 ): boolean {
-  const quiet = preferences.quiet;
+  const quiet = preferences?.quiet;
   if (!quiet?.enabled) return false;
   const start = minute(quiet.start);
   const end = minute(quiet.end);
@@ -83,6 +83,16 @@ export function cueQuiet(
       ? current >= start && current < end
       : current >= start || current < end)
   );
+}
+
+/** Feed events stay visible during quiet hours; only an available helper may speak them. */
+export function canSpeakFeedEvent(
+  paused: boolean,
+  busy: boolean,
+  preferences: CuePreferences | undefined,
+  now = new Date(),
+): boolean {
+  return !paused && !busy && !cueQuiet(preferences, now);
 }
 
 export interface HelperCuePlayer {
