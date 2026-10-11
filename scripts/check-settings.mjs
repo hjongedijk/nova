@@ -277,6 +277,13 @@ try {
     let keyHistory = [];
     let keyTargetEnabled = false;
     let keyRollbackPrepared = false;
+    let keyModelMode = "all";
+    let keyModelAllowed = ["free/one", "free/two"];
+    let keyModelTargetMode = "restricted";
+    let keyModelTarget = ["free/one"];
+    let keyModelRollbackFrom = "";
+    let keyModelWrites = 0;
+    let keyModelHistory = [];
     let accountCreateWrites = 0;
     let accountKeyUpdateWrites = 0;
     let comboCreateWrites = 0;
@@ -435,6 +442,9 @@ try {
     let mcpRiskConfirms = 0;
     let mcpToolRisk = "SAFE";
     let mcpPendingRisk = "SAFE";
+    let mcpCatalogInstalled = false;
+    let mcpCatalogOperation = "add";
+    let mcpCatalogConfirms = 0;
     let skillVersion = 2;
     let skillContentReads = 0;
     let skillContentRollbacks = 0;
@@ -622,6 +632,7 @@ try {
               enabled: mcpEnabled,
               connected: mcpEnabled,
               toolCount: mcpEnabled ? 2 : 0,
+              defaultRisk: "CONFIRM",
               tools: mcpEnabled
                 ? [
                     { name: "echo", risk: "READ_ONLY" },
@@ -629,7 +640,68 @@ try {
                   ]
                 : [],
             },
+            ...(mcpCatalogInstalled
+              ? [
+                  {
+                    id: "context7",
+                    enabled: false,
+                    connected: false,
+                    toolCount: 0,
+                    defaultRisk: "CONFIRM",
+                    tools: [],
+                  },
+                ]
+              : []),
           ],
+        };
+      } else if (endpoint === "/settings/mcp/servers/catalog") {
+        data = {
+          installed: mcpCatalogInstalled ? ["context7"] : [],
+          available: mcpCatalogInstalled
+            ? []
+            : [
+                {
+                  id: "context7",
+                  label: "Context7",
+                  description: "Documentatie opzoeken.",
+                  rights: "Alleen documentatie lezen.",
+                  risk: "CONFIRM",
+                },
+              ],
+        };
+      } else if (
+        endpoint === "/settings/mcp/servers/context7/prepare-catalog" &&
+        request.method() === "POST"
+      ) {
+        mcpCatalogOperation = request.postDataJSON().operation;
+        assert.ok(["add", "remove"].includes(mcpCatalogOperation));
+        data = {
+          ok: true,
+          warning: "De beoordeelde MCP-server blijft uitgeschakeld.",
+          action: {
+            confirmationId: "12121212-1212-4121-8121-121212121212",
+            sessionId:
+              "settings-mcp-catalog:13131313-1313-4131-8131-131313131313",
+            tool: "settings_mcp_catalog_change",
+            args: { server: "context7", operation: "add" },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: 1791630000000,
+            expiresAt: 1791630060000,
+          },
+        };
+      } else if (
+        endpoint === "/settings/mcp/servers/confirm-catalog" &&
+        request.method() === "POST"
+      ) {
+        assert.equal(request.postDataJSON().approve, true);
+        mcpCatalogConfirms++;
+        mcpCatalogInstalled = mcpCatalogOperation === "add";
+        data = {
+          ok: true,
+          verified: true,
+          server: "context7",
+          operation: mcpCatalogOperation,
         };
       } else if (
         endpoint ===
@@ -958,6 +1030,121 @@ try {
             },
           ],
         };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/accounts/keys/fixture-client-key/model-access"
+      ) {
+        data = {
+          available: true,
+          accessMode: keyModelMode,
+          allowedModels: keyModelAllowed,
+          verifiedFreeModels: ["free/one", "free/two"],
+          revision: String(keyModelWrites + 1).padStart(64, "a"),
+        };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/accounts/keys/fixture-client-key/model-access/history"
+      ) {
+        data = { revisions: keyModelHistory, truncated: false };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/accounts/keys/fixture-client-key/model-access/prepare"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        const body = request.postDataJSON();
+        assert.equal(body.acknowledgeGlobalEffect, true);
+        assert.equal(
+          body.revision,
+          String(keyModelWrites + 1).padStart(64, "a"),
+        );
+        keyModelTarget = body.allowedModels;
+        keyModelTargetMode = "restricted";
+        keyModelRollbackFrom = "";
+        const now = await page.evaluate(() => Date.now());
+        data = {
+          ok: true,
+          name: "Client key",
+          modelCount: keyModelTarget.length,
+          action: {
+            confirmationId: "14141414-1414-4141-8141-141414141414",
+            sessionId:
+              "settings-key-model-access:14141414-1414-4141-8141-141414141414",
+            tool: "omniroute_key_model_access",
+            args: { id: "fixture-client-key", mode: "restricted" },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: now,
+            expiresAt: now + 60000,
+          },
+        };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/accounts/keys/fixture-client-key/model-access/prepare-rollback"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        assert.deepEqual(request.postDataJSON(), {
+          revisionId: "15151515-1515-4151-8151-151515151515",
+          acknowledgeGlobalEffect: true,
+        });
+        keyModelTargetMode = "all";
+        keyModelTarget = [];
+        keyModelRollbackFrom = "15151515-1515-4151-8151-151515151515";
+        const now = await page.evaluate(() => Date.now());
+        data = {
+          ok: true,
+          name: "Client key",
+          modelCount: 0,
+          warning:
+            "Dit herstelt onbeperkte modeltoegang voor alle clients met deze sleutel.",
+          action: {
+            confirmationId: "16161616-1616-4161-8161-161616161616",
+            sessionId:
+              "settings-key-model-access:16161616-1616-4161-8161-161616161616",
+            tool: "omniroute_key_model_access",
+            args: { id: "fixture-client-key", mode: "all" },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: now,
+            expiresAt: now + 60000,
+          },
+        };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/accounts/keys/fixture-client-key/model-access/confirm"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        if (request.postDataJSON().approve) {
+          keyModelWrites++;
+          const beforeMode = keyModelMode;
+          const beforeModels = [...keyModelAllowed];
+          keyModelMode = keyModelTargetMode;
+          keyModelAllowed =
+            keyModelTargetMode === "all"
+              ? ["free/one", "free/two"]
+              : [...keyModelTarget];
+          keyModelHistory.unshift({
+            id:
+              keyModelWrites === 1
+                ? "15151515-1515-4151-8151-151515151515"
+                : "17171717-1717-4171-8171-171717171717",
+            at: "2026-10-11T10:05:00.000Z",
+            keyId: "fixture-client-key",
+            name: "Client key",
+            beforeMode,
+            beforeModels: beforeMode === "all" ? [] : beforeModels,
+            afterMode: keyModelMode,
+            afterModels: keyModelMode === "all" ? [] : [...keyModelTarget],
+            ...(keyModelRollbackFrom
+              ? { revertedFrom: keyModelRollbackFrom }
+              : {}),
+          });
+          data = {
+            ok: true,
+            verified: true,
+            routeReady: true,
+            allowedModels: keyModelMode === "all" ? [] : keyModelAllowed,
+          };
+        } else data = { ok: true, cancelled: true };
       } else if (
         endpoint ===
         "/settings/omniroute/accounts/keys/fixture-client-key/activation/prepare"
@@ -3225,6 +3412,46 @@ try {
     await accounts.getByText("Actielogwaarschuwing proef").waitFor();
     assert.equal(keyActivationWrites, 2);
     assert.equal(keyEnabled, true);
+    const clientKey = accounts
+      .getByRole("listitem")
+      .filter({ hasText: "Client key" });
+    await clientKey
+      .getByRole("button", { name: "Modelrechten instellen" })
+      .click();
+    await clientKey.getByLabel("free/two").uncheck();
+    await clientKey
+      .getByLabel(
+        "Ik begrijp dat dit modeltoegang wijzigt voor alle OmniRoute-clients die deze sleutel gebruiken.",
+      )
+      .check();
+    await clientKey
+      .getByRole("button", { name: "Wijziging voorbereiden" })
+      .click();
+    await clientKey.getByRole("button", { name: "Bevestigen" }).click();
+    await accounts
+      .getByText(/Modeltoegang gewijzigd en gecontroleerd/)
+      .waitFor();
+    assert.equal(keyModelWrites, 1);
+    assert.equal(keyModelMode, "restricted");
+    assert.deepEqual(keyModelAllowed, ["free/one"]);
+    await clientKey
+      .getByRole("button", { name: "Wijzigingsgeschiedenis" })
+      .click();
+    const modelAccessHistory = accounts.getByRole("region", {
+      name: "Modelrechtenhistorie",
+    });
+    await modelAccessHistory.getByText(/alle modellen → free\/one/).waitFor();
+    await modelAccessHistory
+      .getByRole("button", { name: "Herstellen" })
+      .click();
+    await clientKey.getByRole("button", { name: "Bevestigen" }).click();
+    await accounts
+      .getByText(/Modeltoegang gewijzigd en gecontroleerd/)
+      .waitFor();
+    assert.equal(keyModelWrites, 2);
+    assert.equal(keyModelMode, "all");
+    assert.deepEqual(keyModelAllowed, ["free/one", "free/two"]);
+    assert.equal(keyModelHistory[0].revertedFrom, keyModelHistory[1].id);
     await accounts
       .getByRole("button", { name: "Verborgen modellen bekijken", exact: true })
       .click();
@@ -4310,6 +4537,11 @@ try {
     const mcp = page.getByRole("region", { name: "MCP-servers" });
     await mcp.getByRole("button", { name: "Status ophalen" }).click();
     await mcp.getByText("echo", { exact: true }).waitFor();
+    await mcp
+      .getByText(
+        "Standaardrisico voor gereedschappen zonder eigen instelling: CONFIRM.",
+      )
+      .waitFor();
     assert.equal(await mcp.getByLabel("Risico echo").inputValue(), "READ_ONLY");
     assert.equal(
       await mcp.getByLabel("Risico write_note").inputValue(),
@@ -4352,6 +4584,27 @@ try {
     assert.equal(mcpHistoryReads, 4);
     assert.equal(mcpToggleConfirms, 2);
     assert.equal(mcpEnabled, true);
+    const reviewedCatalog = mcp.getByRole("region", {
+      name: "Beoordeelde MCP-catalogus",
+    });
+    await reviewedCatalog.getByRole("button", { name: "Toevoegen" }).click();
+    await page
+      .getByText("MCP-server context7 toegevoegd en uitgeschakeld.")
+      .waitFor();
+    assert.equal(mcpCatalogConfirms, 1);
+    const context7 = mcp
+      .getByRole("list")
+      .first()
+      .getByRole("listitem")
+      .filter({ hasText: "context7" });
+    await context7
+      .getByRole("button", { name: "Uit catalogus verwijderen" })
+      .click();
+    await page
+      .getByText("MCP-server context7 verwijderd en verbinding gesloten.")
+      .waitFor();
+    assert.equal(mcpCatalogConfirms, 2);
+    assert.equal(mcpCatalogInstalled, false);
     assert.doesNotMatch(
       await mcp.innerText(),
       /private-input|secret-arg|command/,
@@ -5277,7 +5530,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note and value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note and value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();

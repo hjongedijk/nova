@@ -18,6 +18,70 @@ import assert from "node:assert/strict";
       });
       const page = await context.newPage();
       await page.clock.install();
+      await page.addInitScript(() => {
+        if (!localStorage.getItem("jarvisWake"))
+          localStorage.setItem("jarvisWake", "off");
+        window.__testMicRequests = [];
+        window.__testMicStopped = 0;
+        window.__testRecognitionTrack = null;
+        window.SpeechRecognition = class {
+          onstart = null;
+          onend = null;
+          onerror = null;
+          onresult = null;
+          constructor() {
+            window.__testRecognition = this;
+          }
+          start(track) {
+            window.__testRecognitionTrack = track?.id ?? "default";
+            this.onstart?.();
+          }
+          abort() {
+            this.onend?.();
+          }
+          stop() {
+            this.onend?.();
+          }
+        };
+        Object.defineProperty(navigator, "mediaDevices", {
+          configurable: true,
+          value: {
+            enumerateDevices: async () => [
+              {
+                kind: "audioinput",
+                deviceId: "microphone-one",
+                label: "Test microphone",
+              },
+              {
+                kind: "audiooutput",
+                deviceId: "speaker-one",
+                label: "Test speaker",
+              },
+            ],
+            getUserMedia: async (constraints) => {
+              window.__testMicRequests.push(constraints);
+              const track = {
+                id: "selected-mic-track",
+                kind: "audio",
+                readyState: "live",
+                stop() {
+                  window.__testMicStopped++;
+                },
+              };
+              return {
+                getTracks: () => [track],
+                getAudioTracks: () => [track],
+              };
+            },
+          },
+        });
+        Object.defineProperty(globalThis.AudioContext.prototype, "setSinkId", {
+          configurable: true,
+          value: async function (id) {
+            window.__testSinkId = id;
+          },
+        });
+      });
       let kind = "answer",
         fail = false,
         request;
@@ -154,6 +218,7 @@ import assert from "node:assert/strict";
               : [
                   ["tool_start", { name: "proxmox_guests" }],
                   ["tool_result", { name: "proxmox_guests", ok: true }],
+                  ["mood", { mood: "thoughtful" }],
                   [
                     "token",
                     {
@@ -166,6 +231,7 @@ import assert from "node:assert/strict";
                       model: "gratis-testmodel",
                       reply:
                         "Er draaien vier machines. De server ziet er rustig uit.",
+                      mood: "thoughtful",
                     },
                   ],
                 ];
@@ -193,10 +259,40 @@ import assert from "node:assert/strict";
           "/helper?view=compact",
       );
       await page.waitForSelector(".hp-title");
+      const speakingMeter = page.getByLabel("Stemvolume tijdens spreken");
+      assert.equal(await speakingMeter.count(), 1);
+      assert.equal(await speakingMeter.getAttribute("min"), "0");
+      assert.equal(await speakingMeter.getAttribute("max"), "1");
+      const helperBackgrounds = () =>
+        page.evaluate(() => {
+          const colors = [
+            window.getComputedStyle(document.documentElement).backgroundColor,
+            window.getComputedStyle(document.body).backgroundColor,
+            window.getComputedStyle(document.querySelector(".hp"))
+              .backgroundColor,
+          ];
+          return colors;
+        });
+      const normalBackgrounds = await helperBackgrounds();
+      assert.equal(new Set(normalBackgrounds).size, 1);
+      assert.notEqual(normalBackgrounds[0], "rgba(0, 0, 0, 0)");
       await page.waitForTimeout(400);
       const snap = async (name, width, height) => {
         await page.setViewportSize({ width, height });
         await page.waitForTimeout(200);
+        const bounds = await page.locator(".hp").evaluate((panel) => {
+          return {
+            panelWidth: panel.offsetWidth,
+            panelHeight: panel.offsetHeight,
+            width: window.innerWidth,
+            height: window.innerHeight,
+          };
+        });
+        assert.ok(
+          Math.abs(bounds.panelWidth - bounds.width) <= 1 &&
+            Math.abs(bounds.panelHeight - bounds.height) <= 1,
+          `helper size differs from viewport: ${JSON.stringify(bounds)}`,
+        );
         await page.screenshot({
           path: path.join(root, `docs/img/helper-${name}-${scale}x.png`),
         });
@@ -205,6 +301,14 @@ import assert from "node:assert/strict";
       await page
         .getByRole("button", { name: "Uitklappen", exact: true })
         .click();
+      await page.getByRole("button", { name: /Timers 0 actief/ }).click();
+      await page.getByText("Geen actieve timers.").waitFor();
+      await page.getByRole("button", { name: /Timers 0 actief/ }).click();
+      assert.equal(
+        await page.locator(".hp-overview-orb canvas").count(),
+        1,
+        "overview must show the orb beside its status cards",
+      );
       await snap("overview", 640, 180);
       await page
         .getByRole("button", { name: "Extra weergave toevoegen", exact: true })
@@ -223,10 +327,90 @@ import assert from "node:assert/strict";
       await page
         .getByRole("checkbox", { name: "Hoog contrast", exact: true })
         .check();
+      await page.waitForFunction(() => {
+        const html = window.getComputedStyle(
+          document.documentElement,
+        ).backgroundColor;
+        const body = window.getComputedStyle(document.body).backgroundColor;
+        const panel = window.getComputedStyle(
+          document.querySelector(".hp"),
+        ).backgroundColor;
+        return html === body && body === panel;
+      });
+      assert.equal(new Set(await helperBackgrounds()).size, 1);
       await snap("contrast", 640, 180);
       await page
         .getByRole("checkbox", { name: "Hoog contrast", exact: true })
         .uncheck();
+      await page.getByText("Microfoon en stem", { exact: true }).click();
+      await page.getByLabel("Uitvoerapparaat").selectOption("speaker-one");
+      await page.waitForFunction(
+        () => localStorage.getItem("novaAudioOutput") === "speaker-one",
+      );
+      assert.equal(
+        await page.evaluate(() => window.__testSinkId),
+        "speaker-one",
+      );
+      await page
+        .getByRole("button", { name: "Microfoons zoeken", exact: true })
+        .click();
+      await page.waitForFunction(() => window.__testMicStopped === 1);
+      await page.getByLabel("Invoerapparaat").selectOption("microphone-one");
+      await page.waitForFunction(
+        () => localStorage.getItem("novaAudioInput") === "microphone-one",
+      );
+      assert.deepEqual(await page.evaluate(() => window.__testMicRequests[0]), {
+        audio: true,
+      });
+      await page.getByRole("button", { name: "Spreek met NOVA" }).click();
+      await page.waitForFunction(
+        () => window.__testRecognitionTrack === "selected-mic-track",
+      );
+      assert.deepEqual(
+        await page.evaluate(() => window.__testMicRequests.at(-1)),
+        { audio: { deviceId: { exact: "microphone-one" } } },
+      );
+      await page.evaluate(() => window.__testRecognition.abort());
+      await page.waitForFunction(() => window.__testMicStopped === 2);
+      await page.evaluate(() => localStorage.setItem("jarvisWake", "on"));
+      await page.reload();
+      await page.waitForFunction(
+        () => window.__testRecognitionTrack === "selected-mic-track",
+      );
+      assert.deepEqual(await page.evaluate(() => window.__testMicRequests[0]), {
+        audio: { deviceId: { exact: "microphone-one" } },
+      });
+      await page.evaluate(() =>
+        window.dispatchEvent(
+          new CustomEvent("nova-helper-action", {
+            detail: { action: "pause", paused: true },
+          }),
+        ),
+      );
+      await page.reload();
+      await page.waitForSelector(".hp-title");
+      await page
+        .getByRole("button", { name: "Helperinstellingen", exact: true })
+        .click();
+      await page.getByText("Microfoon en stem", { exact: true }).click();
+      await page.waitForFunction(() => window.__testSinkId === "speaker-one");
+      assert.equal(
+        await page.getByLabel("Uitvoerapparaat").inputValue(),
+        "speaker-one",
+      );
+      await page.evaluate(() =>
+        localStorage.setItem("novaAudioOutput", "missing-device"),
+      );
+      await page.reload();
+      await page.waitForSelector(".hp-title");
+      await page
+        .getByRole("button", { name: "Helperinstellingen", exact: true })
+        .click();
+      await page.getByText("Microfoon en stem", { exact: true }).click();
+      await page.waitForFunction(
+        () => localStorage.getItem("novaAudioOutput") === "",
+      );
+      assert.equal(await page.getByLabel("Uitvoerapparaat").inputValue(), "");
 
       await page.getByRole("button", { name: "Chat", exact: true }).click();
       await page
@@ -237,6 +421,11 @@ import assert from "node:assert/strict";
         document
           .querySelector(".hp-chat-actions")
           ?.textContent.includes("gratis-testmodel"),
+      );
+      await page.getByText("Nadenkend", { exact: true }).waitFor();
+      assert.equal(
+        (await page.locator("body").innerText()).includes("NOVA_MOOD"),
+        false,
       );
       await snap("chat", 640, 340);
       assert.match(
@@ -401,7 +590,7 @@ import assert from "node:assert/strict";
     await browser.close();
   }
   console.log(
-    "Helper browser checks passed at 1x/2x: views, ticker/model, notices/snooze, attachment retry/cleanup, choices, persistent confirmation, fresh settings confirmation without Always and N shortcut.",
+    "Helper browser checks passed at 1x/2x: views, speech meter, input/output selection, chosen track for tap-to-talk and wake, microphone stream cleanup, ticker/model, notices/snooze, attachment retry/cleanup, choices, confirmations and N shortcut.",
   );
 })().catch((error) => {
   console.error(error.stack);

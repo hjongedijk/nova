@@ -32,6 +32,14 @@ export default tseslint.config(
     rules: { "@typescript-eslint/consistent-type-imports": "off" },
   },
   {
+    // Node-RED loads palette node modules through CommonJS and Node's EventEmitter input handler.
+    files: ["deploy/nodered/node-red-contrib-nova/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+      "@typescript-eslint/no-this-alias": "off",
+    },
+  },
+  {
     files: ["apps/web/**/*.{ts,svelte}"],
     languageOptions: { globals: { ...globals.browser } },
   },
