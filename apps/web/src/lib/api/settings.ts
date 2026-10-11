@@ -17,6 +17,7 @@ import type {
   OmniRouteAccountKeyUpdateResult,
   OmniRouteAccountRenamePrepared,
   OmniRouteAccountRenameResult,
+  OmniRouteAccountRenameHistory,
   OmniRouteAccountActivationPrepared,
   OmniRouteAccountActivationResult,
   OmniRouteActivationHistoryEntry,
@@ -1159,6 +1160,20 @@ export const prepareOmniRouteAccountRename = (
     "POST",
     "/omniroute/accounts/rename/prepare",
     { id, name, acknowledgeEffects },
+  );
+export const getOmniRouteAccountRenameHistory = (id: string) =>
+  read<OmniRouteAccountRenameHistory>(
+    `/omniroute/accounts/rename/${enc(id)}/history`,
+  );
+export const prepareOmniRouteAccountRenameRollback = (
+  id: string,
+  revisionId: string,
+  acknowledgeEffects: boolean,
+) =>
+  write<OmniRouteAccountRenamePrepared>(
+    "POST",
+    `/omniroute/accounts/rename/${enc(id)}/history/${enc(revisionId)}/prepare-rollback`,
+    { acknowledgeEffects },
   );
 export const confirmOmniRouteAccountRename = (
   sessionId: string,

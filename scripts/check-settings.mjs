@@ -290,6 +290,11 @@ try {
     let keyModelHistory = [];
     let accountCreateWrites = 0;
     let accountKeyUpdateWrites = 0;
+    let accountRenameWrites = 0;
+    let accountRenameHistoryReads = 0;
+    let accountRenameRollbackPrepares = 0;
+    let accountRenameTarget = "";
+    let accountName = "Voorbeeldaccount";
     let comboCreateWrites = 0;
     let comboUpdateWrites = 0;
     let comboName = "example-route";
@@ -1023,7 +1028,7 @@ try {
                 {
                   id: "fixture-account",
                   provider: "fixture",
-                  name: "Voorbeeldaccount",
+                  name: accountName,
                   active: true,
                   credentialPresent: true,
                 },
@@ -1413,6 +1418,125 @@ try {
             verified: true,
             id: "fixture-account",
             routeReady: true,
+          };
+        } else data = { ok: true };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/accounts/rename/fixture-account/history"
+      ) {
+        accountRenameHistoryReads++;
+        data = {
+          revisions:
+            accountRenameWrites === 0
+              ? []
+              : accountRenameWrites === 1
+                ? [
+                    {
+                      id: "77777777-7777-4777-8777-777777777777",
+                      at: "2026-10-11T10:00:00.000Z",
+                      accountId: "fixture-account",
+                      provider: "fixture",
+                      beforeName: "Voorbeeldaccount",
+                      afterName: "Nieuwe naam",
+                    },
+                  ]
+                : [
+                    {
+                      id: "88888888-8888-4888-8888-888888888888",
+                      at: "2026-10-11T10:01:00.000Z",
+                      accountId: "fixture-account",
+                      provider: "fixture",
+                      beforeName: "Nieuwe naam",
+                      afterName: "Voorbeeldaccount",
+                      revertedFrom: "77777777-7777-4777-8777-777777777777",
+                    },
+                    {
+                      id: "77777777-7777-4777-8777-777777777777",
+                      at: "2026-10-11T10:00:00.000Z",
+                      accountId: "fixture-account",
+                      provider: "fixture",
+                      beforeName: "Voorbeeldaccount",
+                      afterName: "Nieuwe naam",
+                    },
+                  ],
+        };
+      } else if (
+        endpoint ===
+          "/settings/omniroute/accounts/rename/fixture-account/history/77777777-7777-4777-8777-777777777777/prepare-rollback" &&
+        request.method() === "POST"
+      ) {
+        accountRenameRollbackPrepares++;
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        assert.deepEqual(request.postDataJSON(), { acknowledgeEffects: true });
+        accountRenameTarget = "Voorbeeldaccount";
+        const now = await page.evaluate(() => Date.now());
+        data = {
+          ok: true,
+          id: "fixture-account",
+          provider: "fixture",
+          oldName: "Nieuwe naam",
+          newName: "Voorbeeldaccount",
+          action: {
+            confirmationId: "99999999-7777-4777-8777-777777777777",
+            sessionId:
+              "settings-account-rename:99999999-7777-4777-8777-777777777777",
+            tool: "omniroute_account_rename",
+            args: {
+              id: "fixture-account",
+              provider: "fixture",
+              oldName: "Nieuwe naam",
+              newName: "Voorbeeldaccount",
+              rollbackRevisionId: "77777777-7777-4777-8777-777777777777",
+            },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: now,
+            expiresAt: now + 60000,
+          },
+        };
+      } else if (endpoint === "/settings/omniroute/accounts/rename/prepare") {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        assert.deepEqual(request.postDataJSON(), {
+          id: "fixture-account",
+          name: "Nieuwe naam",
+          acknowledgeEffects: true,
+        });
+        accountRenameTarget = "Nieuwe naam";
+        const now = await page.evaluate(() => Date.now());
+        data = {
+          ok: true,
+          id: "fixture-account",
+          provider: "fixture",
+          oldName: "Voorbeeldaccount",
+          newName: "Nieuwe naam",
+          action: {
+            confirmationId: "99999999-6666-4666-8666-666666666666",
+            sessionId:
+              "settings-account-rename:99999999-6666-4666-8666-666666666666",
+            tool: "omniroute_account_rename",
+            args: {
+              id: "fixture-account",
+              provider: "fixture",
+              oldName: "Voorbeeldaccount",
+              newName: "Nieuwe naam",
+            },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: now,
+            expiresAt: now + 60000,
+          },
+        };
+      } else if (endpoint === "/settings/omniroute/accounts/rename/confirm") {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        if (request.postDataJSON().approve) {
+          accountRenameWrites++;
+          accountName = accountRenameTarget;
+          data = {
+            ok: true,
+            verified: true,
+            id: "fixture-account",
+            provider: "fixture",
+            name: accountName,
           };
         } else data = { ok: true };
       } else if (endpoint === "/settings/omniroute/combos/create/prepare") {
@@ -3487,6 +3611,53 @@ try {
       await accounts.innerText(),
       /replacement-key-test-secret/,
     );
+    const accountRenamer = accounts.getByRole("region", {
+      name: "Accountnaam wijzigen fixture",
+    });
+    await accountRenamer
+      .getByRole("button", { name: "Naam wijzigen", exact: true })
+      .click();
+    await accountRenamer.getByLabel("Nieuwe accountnaam").fill("Nieuwe naam");
+    await accountRenamer
+      .getByRole("button", { name: "Controleren", exact: true })
+      .click();
+    await accountRenamer.getByText(/Wijzigen:/).waitFor();
+    const renameConfirm = accountRenamer.getByRole("button", {
+      name: "Naam wijzigen",
+      exact: true,
+    });
+    assert.equal(await renameConfirm.isDisabled(), true);
+    await accountRenamer.getByRole("checkbox").check();
+    await renameConfirm.click();
+    await accounts
+      .getByText(/Accountnaam gewijzigd en gecontroleerd voor Nieuwe naam/)
+      .waitFor();
+    assert.equal(accountRenameWrites, 1);
+    await accountRenamer
+      .getByRole("button", { name: "Geschiedenis laden", exact: true })
+      .click();
+    await accountRenamer.getByText("Voorbeeldaccount → Nieuwe naam").waitFor();
+    await accountRenamer
+      .getByRole("button", {
+        name: "Nieuwste wijziging herstellen",
+        exact: true,
+      })
+      .click();
+    await accountRenamer.getByText(/Herstellen:/).waitFor();
+    const renameRollbackConfirm = accountRenamer.getByRole("button", {
+      name: "Naam wijzigen",
+      exact: true,
+    });
+    assert.equal(await renameRollbackConfirm.isDisabled(), true);
+    await accountRenamer.getByRole("checkbox").check();
+    await renameRollbackConfirm.click();
+    await accounts
+      .getByText(/Accountnaam gewijzigd en gecontroleerd voor Voorbeeldaccount/)
+      .waitFor();
+    assert.equal(accountRenameWrites, 2);
+    assert.equal(accountRenameRollbackPrepares, 1);
+    assert(accountRenameHistoryReads >= 2);
+    assert.doesNotMatch(await accounts.innerText(), /private-fixture-secret/);
     await accounts
       .getByText("NOVA’s eigen sleutel is beschermd.", { exact: true })
       .waitFor();

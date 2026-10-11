@@ -65,7 +65,7 @@
     result?: OmniRouteAccountRenameResult,
   ) {
     if (!result?.verified) return;
-    notice = `Accountnaam gewijzigd en gecontroleerd voor ${result.name || id}; dit geldt voor alle OmniRoute-clients.${result.auditWarning ? ` ${result.auditWarning}` : ""}`;
+    notice = `Accountnaam gewijzigd en gecontroleerd voor ${result.name || id}; dit geldt voor alle OmniRoute-clients.${result.auditWarning ? ` ${result.auditWarning}` : ""}${result.historyWarning ? ` ${result.historyWarning}` : ""}`;
     await load();
   }
   function comboChanged(

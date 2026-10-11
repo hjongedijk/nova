@@ -1,13 +1,16 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import type {
+    OmniRouteAccountRenameHistoryEntry,
     OmniRouteAccountRenamePrepared,
     OmniRouteAccountRenameResult,
   } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
   import {
     confirmOmniRouteAccountRename,
+    getOmniRouteAccountRenameHistory,
     prepareOmniRouteAccountRename,
+    prepareOmniRouteAccountRenameRollback,
   } from "#lib/api/settings.ts";
 
   let {
@@ -28,8 +31,25 @@
   let pending = $state<OmniRouteAccountRenamePrepared | null>(null);
   let expired = $state(false);
   let acknowledged = $state(false);
+  let history = $state<OmniRouteAccountRenameHistoryEntry[]>([]);
+  let historyLoaded = $state(false);
+  let historyBusy = $state(false);
+  let isRollback = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
   onDestroy(() => clearTimeout(timer));
+
+  async function loadHistory() {
+    historyBusy = true;
+    error = "";
+    try {
+      history = (await getOmniRouteAccountRenameHistory(id)).revisions;
+      historyLoaded = true;
+    } catch {
+      error = "Accountgeschiedenis kon niet worden geladen.";
+    } finally {
+      historyBusy = false;
+    }
+  }
 
   async function prepare() {
     busy = true;
@@ -41,6 +61,7 @@
         return;
       }
       pending = result;
+      isRollback = false;
       expired = false;
       acknowledged = false;
       timer = setTimeout(
@@ -49,6 +70,34 @@
       );
     } catch {
       error = "Accountnaam kon niet worden voorbereid. Controleer je PIN.";
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function prepareRollback(revisionId: string) {
+    busy = true;
+    error = "";
+    try {
+      const result = await prepareOmniRouteAccountRenameRollback(
+        id,
+        revisionId,
+        true,
+      );
+      if (!result.ok || !result.action) {
+        error = result.error || "Herstel kon niet worden voorbereid.";
+        return;
+      }
+      pending = result;
+      isRollback = true;
+      expired = false;
+      acknowledged = false;
+      timer = setTimeout(
+        () => (expired = true),
+        Math.max(0, result.action.expiresAt - Date.now()),
+      );
+    } catch {
+      error = "Herstel kon niet worden voorbereid. Controleer je PIN.";
     } finally {
       busy = false;
     }
@@ -71,6 +120,7 @@
         done();
       } else if (result.verified === true) {
         editing = false;
+        await loadHistory();
         done(result);
       } else {
         error =
@@ -90,11 +140,12 @@
   {#if error}<p role="status">{error}</p>{/if}
   {#if pending}
     <p>
+      {isRollback ? "Herstellen:" : "Wijzigen:"}
       <strong>{pending.oldName}</strong> → <strong>{pending.newName}</strong> · {pending.provider}
     </p>
     <p>
-      De naam is zichtbaar voor alle OmniRoute-clients. Indien ingeschakeld,
-      OmniRoute kan de wijziging ook met zijn cloud synchroniseren.
+      De naam is zichtbaar voor alle OmniRoute-clients. Als Cloud-sync aanstaat,
+      kan OmniRoute de wijziging ook synchroniseren met OmniRoute Cloud.
     </p>
     <label>
       <input type="checkbox" bind:checked={acknowledged} /> Ik begrijp dat de naamswijziging
@@ -137,5 +188,28 @@
       }}
       disabled={busy}>Naam wijzigen</Button
     >
+    <Button onclick={loadHistory} disabled={busy || historyBusy}>
+      {historyBusy ? "Geschiedenis laden…" : "Geschiedenis laden"}
+    </Button>
+    {#if historyLoaded}
+      {#if history.length}
+        <ol aria-label={`Naamgeschiedenis ${provider}`}>
+          {#each history as revision, index (revision.id)}
+            <li>
+              <span>{revision.beforeName} → {revision.afterName}</span>
+              <time datetime={revision.at}
+                >{new Date(revision.at).toLocaleString("nl-NL")}</time
+              >
+              {#if index === 0}
+                <Button
+                  onclick={() => prepareRollback(revision.id)}
+                  disabled={busy}>Nieuwste wijziging herstellen</Button
+                >
+              {/if}
+            </li>
+          {/each}
+        </ol>
+      {:else}<p>Geen naamswijzigingen opgeslagen.</p>{/if}
+    {/if}
   {/if}
 </section>

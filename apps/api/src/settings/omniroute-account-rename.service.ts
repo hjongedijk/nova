@@ -1,7 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  OmniRouteAccountRenameHistoryEntry,
   OmniRouteAccountRenamePrepared,
   OmniRouteAccountRenameResult,
 } from "@nova/contracts";
@@ -31,18 +34,174 @@ const object = (value: unknown): Record<string, unknown> =>
     : {};
 const unavailable =
   "Account hernoemen is niet beschikbaar. Controleer de OmniRoute-koppeling.";
+const MAX_HISTORY = 100;
+type RenameRevision = OmniRouteAccountRenameHistoryEntry;
 
 /** Renames only an account's display name; never reads or changes credentials. */
 @Injectable()
 export class OmniRouteAccountRename {
   private readonly inFlight = new Set<string>();
+  private readonly historyFile: string;
 
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
     private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
-  ) {}
+  ) {
+    this.historyFile = config.dataFile("omniroute-account-rename-history.json");
+  }
+
+  private readHistory(): RenameRevision[] {
+    try {
+      const value: unknown = JSON.parse(
+        fs.readFileSync(this.historyFile, "utf8"),
+      );
+      if (!Array.isArray(value)) return [];
+      return value
+        .flatMap((item): RenameRevision[] => {
+          if (!item || typeof item !== "object" || Array.isArray(item))
+            return [];
+          const row = item as Record<string, unknown>;
+          if (
+            typeof row.id !== "string" ||
+            !/^[0-9a-f-]{36}$/i.test(row.id) ||
+            !validId(row.accountId) ||
+            typeof row.provider !== "string" ||
+            row.provider.length > 100 ||
+            sanitize(row.provider) !== row.provider ||
+            !validName(row.beforeName) ||
+            row.beforeName !== row.beforeName.trim() ||
+            sanitize(row.beforeName) !== row.beforeName ||
+            !validName(row.afterName) ||
+            row.afterName !== row.afterName.trim() ||
+            sanitize(row.afterName) !== row.afterName ||
+            row.beforeName === row.afterName ||
+            typeof row.at !== "string" ||
+            !Number.isFinite(Date.parse(row.at)) ||
+            (row.revertedFrom !== undefined &&
+              (typeof row.revertedFrom !== "string" ||
+                !/^[0-9a-f-]{36}$/i.test(row.revertedFrom)))
+          )
+            return [];
+          return [
+            {
+              id: row.id,
+              at: new Date(row.at).toISOString(),
+              accountId: row.accountId,
+              provider: row.provider,
+              beforeName: row.beforeName,
+              afterName: row.afterName,
+              ...(typeof row.revertedFrom === "string"
+                ? { revertedFrom: row.revertedFrom }
+                : {}),
+            },
+          ];
+        })
+        .slice(-MAX_HISTORY);
+    } catch {
+      return [];
+    }
+  }
+
+  private writeHistory(rows: RenameRevision[]): void {
+    fs.mkdirSync(path.dirname(this.historyFile), { recursive: true });
+    const temp = `${this.historyFile}.${process.pid}.tmp`;
+    let fd: number | undefined;
+    try {
+      fs.writeFileSync(temp, JSON.stringify(rows.slice(-MAX_HISTORY)), {
+        mode: 0o600,
+      });
+      fs.chmodSync(temp, 0o600);
+      fd = fs.openSync(temp, "r");
+      fs.fsyncSync(fd);
+      fs.closeSync(fd);
+      fd = undefined;
+      fs.renameSync(temp, this.historyFile);
+      const directory = fs.openSync(path.dirname(this.historyFile), "r");
+      try {
+        fs.fsyncSync(directory);
+      } finally {
+        fs.closeSync(directory);
+      }
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
+      fs.rmSync(temp, { force: true });
+    }
+  }
+
+  listHistory(accountId: string): { revisions: RenameRevision[] } {
+    if (!validId(accountId)) throw new ValidationError(["Ongeldig account."]);
+    return {
+      revisions: this.readHistory()
+        .filter((row) => row.accountId === accountId)
+        .slice(-20)
+        .reverse(),
+    };
+  }
+
+  private rollbackRevision(
+    accountId: string,
+    revisionId: string,
+  ): RenameRevision {
+    const rows = this.readHistory().filter(
+      (row) => row.accountId === accountId,
+    );
+    const selected = rows.find((row) => row.id === revisionId);
+    if (!selected) throw new Error("Deze accountwijziging bestaat niet meer.");
+    if (rows.at(-1)?.id !== selected.id)
+      throw new Error(
+        "Dit account is later gewijzigd. Herstel alleen de nieuwste wijziging.",
+      );
+    return selected;
+  }
+
+  async prepareRollback(
+    rawId: unknown,
+    rawRevisionId: unknown,
+    acknowledgeEffects: unknown,
+  ): Promise<OmniRouteAccountRenamePrepared> {
+    const id = typeof rawId === "string" ? rawId.trim() : "";
+    const revisionId =
+      typeof rawRevisionId === "string" ? rawRevisionId.trim() : "";
+    if (!validId(id) || !/^[0-9a-f-]{36}$/i.test(revisionId))
+      return { ok: false, error: "Ongeldige accountwijziging." };
+    try {
+      const revision = this.rollbackRevision(id, revisionId);
+      return this.prepare(
+        id,
+        revision.beforeName,
+        acknowledgeEffects,
+        revision.id,
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error ? error.message : "Herstel niet beschikbaar.",
+      };
+    }
+  }
+
+  private recordHistory(
+    entry: Omit<RenameRevision, "id" | "at">,
+  ): string | undefined {
+    if (
+      sanitize(entry.provider) !== entry.provider ||
+      sanitize(entry.beforeName) !== entry.beforeName ||
+      sanitize(entry.afterName) !== entry.afterName
+    )
+      return "Naamswijziging gecontroleerd, maar accountnamen die op geheimen lijken zijn overgeslagen in de geschiedenis.";
+    try {
+      this.writeHistory([
+        ...this.readHistory(),
+        { ...entry, id: crypto.randomUUID(), at: new Date().toISOString() },
+      ]);
+      return;
+    } catch {
+      return "Naamswijziging gecontroleerd, maar de wijzigingsgeschiedenis kon niet worden opgeslagen.";
+    }
+  }
 
   private assertGateway(): void {
     if (
@@ -135,6 +294,7 @@ export class OmniRouteAccountRename {
     rawId: unknown,
     rawName: unknown,
     acknowledgeEffects: unknown,
+    rollbackRevisionId?: string,
   ): Promise<OmniRouteAccountRenamePrepared> {
     const id = typeof rawId === "string" ? rawId.trim() : "";
     const name = typeof rawName === "string" ? rawName.trim() : "";
@@ -145,6 +305,11 @@ export class OmniRouteAccountRename {
     try {
       this.assertGateway();
       const account = await this.readAccount(id);
+      if (rollbackRevisionId) {
+        const revision = this.rollbackRevision(id, rollbackRevisionId);
+        if (account.name !== revision.afterName || name !== revision.beforeName)
+          throw new Error("Accountnaam is gewijzigd sinds de geschiedenis.");
+      }
       if (account.name === name)
         throw new Error("De nieuwe naam is gelijk aan de huidige naam.");
       await this.assertUnique(account.provider, name, id, account.name);
@@ -156,6 +321,7 @@ export class OmniRouteAccountRename {
           provider: account.provider,
           oldName: account.name,
           newName: name,
+          ...(rollbackRevisionId ? { rollbackRevisionId } : {}),
         },
         "DANGEROUS",
         undefined,
@@ -196,7 +362,9 @@ export class OmniRouteAccountRename {
         ok: false,
         error:
           error instanceof Error &&
-          /gelijk aan de huidige|bestaat al|onvolledig/.test(error.message)
+          /gelijk aan de huidige|bestaat al|onvolledig|gewijzigd sinds de geschiedenis|later gewijzigd|bestaat niet meer/.test(
+            error.message,
+          )
             ? error.message
             : unavailable,
       };
@@ -228,11 +396,15 @@ export class OmniRouteAccountRename {
     if (!action)
       return { ok: false, error: "Bevestiging verlopen. Kies opnieuw." };
     const { id, provider, oldName, newName } = action.args;
+    const rollbackRevisionId = action.args.rollbackRevisionId;
     if (
       !validId(id) ||
       typeof provider !== "string" ||
       typeof oldName !== "string" ||
-      !validName(newName)
+      !validName(newName) ||
+      (rollbackRevisionId !== undefined &&
+        (typeof rollbackRevisionId !== "string" ||
+          !/^[0-9a-f-]{36}$/i.test(rollbackRevisionId)))
     )
       return { ok: false, error: unavailable };
     if (this.inFlight.has(id))
@@ -247,6 +419,19 @@ export class OmniRouteAccountRename {
           error:
             "Account gewijzigd sinds voorbereiding. Controleer de actuele naam.",
         };
+      if (typeof rollbackRevisionId === "string") {
+        const revision = this.rollbackRevision(id, rollbackRevisionId);
+        if (
+          revision.provider !== provider ||
+          revision.afterName !== oldName ||
+          revision.beforeName !== newName
+        )
+          return {
+            ok: false,
+            error:
+              "Geschiedenis is gewijzigd. Laad de accountgeschiedenis opnieuw.",
+          };
+      }
       await this.assertUnique(provider, newName, id, oldName);
       this.audit.record({
         sessionId: "settings",
@@ -259,6 +444,9 @@ export class OmniRouteAccountRename {
           provider,
           oldName,
           newName,
+          ...(typeof rollbackRevisionId === "string"
+            ? { rollbackRevisionId }
+            : {}),
           affectsAllClients: true,
           cloudSyncMayRun: true,
         },
@@ -278,6 +466,15 @@ export class OmniRouteAccountRename {
           provider: String(sanitize(provider)).slice(0, 100),
           name: String(sanitize(newName)).slice(0, 200),
         };
+        result.historyWarning = this.recordHistory({
+          accountId: id,
+          provider,
+          beforeName: oldName,
+          afterName: newName,
+          ...(typeof rollbackRevisionId === "string"
+            ? { revertedFrom: rollbackRevisionId }
+            : {}),
+        });
         try {
           this.audit.record({
             sessionId: "settings",

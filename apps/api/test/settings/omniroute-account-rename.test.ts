@@ -21,6 +21,7 @@ afterEach(() => {
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-account-rename-"));
   const file = path.join(dir, "gateway.sqlite");
+  const historyFile = path.join(dir, "omniroute-account-rename-history.json");
   const db = new DatabaseSync(file);
   db.exec(
     "CREATE TABLE provider_connections(id TEXT PRIMARY KEY,provider TEXT,name TEXT,is_active INTEGER,updated_at TEXT)",
@@ -40,6 +41,7 @@ function fixture() {
     omniUrl: "http://fixture.invalid/v1",
     verifiedOmniUrl: "http://fixture.invalid/v1",
     omniDatabase: file,
+    dataFile: (name: string) => path.join(dir, name),
   };
   const record = vi.fn((entry: AuditRecord) => ({
     ...entry,
@@ -64,9 +66,9 @@ function fixture() {
       }
       expect(endpoint).toBe("/api/providers/account-1");
       if (options?.method === "PUT") {
-        expect(options.body).toEqual({ name: "Home Mistral" });
         const nextName = options.body?.name;
         if (typeof nextName !== "string") throw new Error("Missing name");
+        expect(options.body).toEqual({ name: nextName });
         if (persist)
           db.prepare(
             "UPDATE provider_connections SET name=?,updated_at='rev-2' WHERE id=?",
@@ -101,6 +103,7 @@ function fixture() {
     db,
     request,
     record,
+    historyFile,
     setPersist: (value: boolean) => (persist = value),
   };
 }
@@ -156,6 +159,120 @@ describe("OmniRoute provider account rename", () => {
     expect(JSON.stringify(f.record.mock.calls)).not.toMatch(
       /fixture-key|apiKey|credential/i,
     );
+  });
+
+  it("stores bounded private name history and restores only the latest change", async () => {
+    const f = fixture();
+    const changed = await f.rename.prepare("account-1", "Home Mistral", true);
+    const changedResult = await f.rename.confirm(
+      changed.action!.sessionId,
+      changed.action!.confirmationId,
+      true,
+    );
+    expect(changedResult).toMatchObject({ ok: true, verified: true });
+    const listed = f.rename.listHistory("account-1");
+    expect(listed.revisions).toHaveLength(1);
+    const original = listed.revisions[0]!;
+    expect(original).toMatchObject({
+      provider: "mistral",
+      beforeName: "Personal",
+      afterName: "Home Mistral",
+    });
+    expect(fs.statSync(f.historyFile).mode & 0o777).toBe(0o600);
+    const rollback = await f.rename.prepareRollback(
+      "account-1",
+      original.id,
+      true,
+    );
+    expect(rollback).toMatchObject({
+      ok: true,
+      oldName: "Home Mistral",
+      newName: "Personal",
+    });
+    const result = await f.rename.confirm(
+      rollback.action!.sessionId,
+      rollback.action!.confirmationId,
+      true,
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      verified: true,
+      name: "Personal",
+    });
+    const revisions = f.rename.listHistory("account-1").revisions;
+    expect(revisions).toHaveLength(2);
+    expect(revisions[0]).toMatchObject({
+      beforeName: "Home Mistral",
+      afterName: "Personal",
+      revertedFrom: original.id,
+    });
+    await expect(
+      f.rename.prepareRollback("account-1", original.id, true),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("later gewijzigd"),
+    });
+  });
+
+  it("does not store names that the secret sanitizer would redact", async () => {
+    const f = fixture();
+    const prepared = await f.rename.prepare(
+      "account-1",
+      "Bearer fixture-secret-value",
+      true,
+    );
+    const result = await f.rename.confirm(
+      prepared.action!.sessionId,
+      prepared.action!.confirmationId,
+      true,
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      verified: true,
+      historyWarning: expect.stringContaining("op geheimen lijken"),
+    });
+    expect(f.rename.listHistory("account-1").revisions).toEqual([]);
+  });
+
+  it("refuses rollback when the account changes after its fresh confirmation is prepared", async () => {
+    const f = fixture();
+    const changed = await f.rename.prepare("account-1", "Home Mistral", true);
+    await f.rename.confirm(
+      changed.action!.sessionId,
+      changed.action!.confirmationId,
+      true,
+    );
+    const revision = f.rename.listHistory("account-1").revisions[0]!;
+    const rollback = await f.rename.prepareRollback(
+      "account-1",
+      revision.id,
+      true,
+    );
+    const writesBefore = f.request.mock.calls.filter(
+      ([, options]) => options?.method === "PUT",
+    ).length;
+    f.db
+      .prepare(
+        "UPDATE provider_connections SET name='Changed elsewhere' WHERE id=?",
+      )
+      .run("account-1");
+    const result = await f.rename.confirm(
+      rollback.action!.sessionId,
+      rollback.action!.confirmationId,
+      true,
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("gewijzigd sinds voorbereiding"),
+    });
+    expect(
+      f.request.mock.calls.filter(([, options]) => options?.method === "PUT"),
+    ).toHaveLength(writesBefore);
+    expect(
+      f.db
+        .prepare("SELECT name FROM provider_connections WHERE id=?")
+        .get("account-1"),
+    ).toEqual({ name: "Changed elsewhere" });
   });
 
   it("rejects duplicate names and changed accounts before writing", async () => {

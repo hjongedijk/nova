@@ -1,4 +1,12 @@
-import { Body, Controller, HttpCode, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  UseGuards,
+} from "@nestjs/common";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { SettingsGuard } from "./settings.guard.js";
 import { OmniRouteAccountRename } from "./omniroute-account-rename.service.js";
@@ -18,6 +26,26 @@ const input = (body: unknown, keys: string[]) => {
 @UseGuards(SettingsGuard)
 export class OmniRouteAccountRenameController {
   constructor(private readonly renameAccount: OmniRouteAccountRename) {}
+
+  @Get(":id/history")
+  listHistory(@Param("id") id: string) {
+    return this.renameAccount.listHistory(id);
+  }
+
+  @Post(":id/history/:revision/prepare-rollback")
+  @HttpCode(200)
+  prepareRollback(
+    @Param("id") id: string,
+    @Param("revision") revision: string,
+    @Body() body: unknown,
+  ) {
+    const value = input(body, ["acknowledgeEffects"]);
+    return this.renameAccount.prepareRollback(
+      id,
+      revision,
+      value.acknowledgeEffects,
+    );
+  }
 
   @Post("prepare")
   @HttpCode(200)

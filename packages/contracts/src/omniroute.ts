@@ -341,6 +341,18 @@ export interface OmniRouteAccountRenamePrepared {
   newName?: string;
   action?: PendingConfirmation;
 }
+export interface OmniRouteAccountRenameHistoryEntry {
+  id: string;
+  at: string;
+  accountId: string;
+  provider: string;
+  beforeName: string;
+  afterName: string;
+  revertedFrom?: string;
+}
+export interface OmniRouteAccountRenameHistory {
+  revisions: OmniRouteAccountRenameHistoryEntry[];
+}
 export interface OmniRouteAccountRenameResult {
   ok: boolean;
   error?: string;
@@ -349,6 +361,7 @@ export interface OmniRouteAccountRenameResult {
   provider?: string;
   name?: string;
   auditWarning?: string;
+  historyWarning?: string;
 }
 export interface OmniRouteAccountRemovalResult {
   ok: boolean;
