@@ -19,6 +19,7 @@ type Revision = {
   widgetId: string;
   before: string;
   after: string;
+  createdSnapshot?: { title: string; enabled: boolean; text: string };
   revertedFrom?: string;
 };
 const safeText = (value: unknown): string | null =>
@@ -53,6 +54,19 @@ export class NoteWidgetHistory {
           const row = raw as Record<string, unknown>;
           const before = safeText(row.before);
           const after = safeText(row.after);
+          const createdSnapshot =
+            row.createdSnapshot &&
+            typeof row.createdSnapshot === "object" &&
+            !Array.isArray(row.createdSnapshot)
+              ? (row.createdSnapshot as Record<string, unknown>)
+              : undefined;
+          const createdTitle = safeText(createdSnapshot?.title);
+          const createdText = safeText(createdSnapshot?.text);
+          const isCreated =
+            createdTitle !== null &&
+            createdText !== null &&
+            createdText === after &&
+            typeof createdSnapshot?.enabled === "boolean";
           if (
             typeof row.id !== "string" ||
             !/^[0-9a-f-]{36}$/i.test(row.id) ||
@@ -60,7 +74,7 @@ export class NoteWidgetHistory {
             !Number.isFinite(Date.parse(row.at)) ||
             typeof row.widgetId !== "string" ||
             !/^[a-z0-9_-]{1,80}$/.test(row.widgetId) ||
-            before === null ||
+            (before === null && !isCreated) ||
             after === null
           )
             return [];
@@ -69,8 +83,17 @@ export class NoteWidgetHistory {
               id: row.id,
               at: new Date(row.at).toISOString(),
               widgetId: row.widgetId,
-              before,
+              before: before ?? "",
               after,
+              ...(isCreated
+                ? {
+                    createdSnapshot: {
+                      title: createdTitle,
+                      enabled: createdSnapshot.enabled as boolean,
+                      text: createdText,
+                    },
+                  }
+                : {}),
               ...(typeof row.revertedFrom === "string"
                 ? { revertedFrom: row.revertedFrom }
                 : {}),
@@ -164,12 +187,56 @@ export class NoteWidgetHistory {
     }
   }
 
+  recordCreated(widget: NoteWidget): void {
+    this.lastWarning = undefined;
+    const title = safeText(widget.title);
+    const text = safeText(widget.text);
+    if (title === null || text === null) {
+      this.lastWarning =
+        "De notitie is opgeslagen, maar tekst die op een geheim lijkt is niet in de geschiedenis gezet.";
+      return;
+    }
+    const revision: Revision = {
+      id: crypto.randomUUID(),
+      at: new Date().toISOString(),
+      widgetId: widget.id,
+      before: "",
+      after: text,
+      createdSnapshot: { title, enabled: widget.enabled, text },
+    };
+    try {
+      this.write([...this.read(), revision]);
+    } catch {
+      this.lastWarning =
+        "De notitie is opgeslagen, maar de wijzigingsgeschiedenis kon niet worden bijgewerkt.";
+      return;
+    }
+    try {
+      this.audit.record({
+        sessionId: "settings",
+        tool: "settings_change",
+        risk: "SAFE",
+        confirmation: "admin_ui",
+        arguments: {
+          what: "note_widget_created",
+          widgetId: widget.id,
+          revision: revision.id,
+        },
+        result: { ok: true },
+      });
+    } catch {
+      this.lastWarning =
+        "Notitiegeschiedenis opgeslagen, maar de auditmelding kon niet worden geschreven.";
+    }
+  }
+
   rollback(
     widgetId: string,
     id: string,
   ): {
     ok: true;
-    widget: NoteWidget;
+    widget?: NoteWidget;
+    removed?: true;
     historyWarning?: string;
   } {
     this.lastWarning = undefined;
@@ -185,6 +252,77 @@ export class NoteWidgetHistory {
       throw new ConflictException(
         "De notitie bestaat niet meer. Terugdraaien is afgebroken.",
       );
+    if (revision.createdSnapshot) {
+      const snapshot = revision.createdSnapshot;
+      if (
+        widget.title !== snapshot.title ||
+        widget.enabled !== snapshot.enabled ||
+        widget.text !== snapshot.text
+      )
+        throw new ConflictException(
+          "De notitie is daarna gewijzigd. Terugdraaien is afgebroken.",
+        );
+      this.audit.record({
+        sessionId: "settings",
+        tool: "settings_change",
+        risk: "CONFIRM",
+        confirmation: "admin_ui",
+        arguments: {
+          what: "note_widget_creation_rollback",
+          widgetId,
+          revision: id,
+        },
+        phase: "attempt",
+      });
+      this.settings.update((settings) => {
+        const current = settings.widgets.find((item) => item.id === widgetId);
+        if (
+          !current ||
+          current.type !== "note" ||
+          current.title !== snapshot.title ||
+          current.enabled !== snapshot.enabled ||
+          current.text !== snapshot.text
+        )
+          throw new ConflictException(
+            "De notitie is daarna gewijzigd. Terugdraaien is afgebroken.",
+          );
+        settings.widgets = settings.widgets.filter(
+          (item) => item.id !== widgetId,
+        );
+        if (settings.sidebar)
+          settings.sidebar.items = settings.sidebar.items.filter(
+            (item) => item.id !== `w:${widgetId}`,
+          );
+      });
+      try {
+        this.forget(widgetId);
+      } catch {
+        this.lastWarning =
+          "De notitie is verwijderd, maar de wijzigingsgeschiedenis kon niet worden gewist.";
+      }
+      try {
+        this.audit.record({
+          sessionId: "settings",
+          tool: "settings_change",
+          risk: "CONFIRM",
+          confirmation: "admin_ui",
+          arguments: {
+            what: "note_widget_creation_rollback",
+            widgetId,
+            revision: id,
+          },
+          result: { ok: true, warning: this.lastWarning },
+        });
+      } catch {
+        this.lastWarning =
+          "De notitie is verwijderd, maar de auditmelding kon niet worden geschreven.";
+      }
+      return {
+        ok: true,
+        removed: true,
+        ...(this.lastWarning ? { historyWarning: this.lastWarning } : {}),
+      };
+    }
     if (!isDeepStrictEqual(widget.text, revision.after))
       throw new ConflictException(
         "De notitie is daarna gewijzigd. Terugdraaien is afgebroken.",

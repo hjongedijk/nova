@@ -493,6 +493,7 @@ export type NoteWidgetRevision = {
   at: string;
   before: string;
   after: string;
+  createdSnapshot?: { title: string; enabled: boolean; text: string };
   revertedFrom?: string;
 };
 export const getNoteWidgetHistory = (id: string) =>
@@ -500,11 +501,12 @@ export const getNoteWidgetHistory = (id: string) =>
     `/widgets/${enc(id)}/history`,
   );
 export const rollbackNoteWidget = (id: string, revision: string) =>
-  write<{ ok: true; widget: Widget; historyWarning?: string }>(
-    "POST",
-    `/widgets/${enc(id)}/history/${enc(revision)}/rollback`,
-    {},
-  );
+  write<{
+    ok: true;
+    widget?: Widget;
+    removed?: true;
+    historyWarning?: string;
+  }>("POST", `/widgets/${enc(id)}/history/${enc(revision)}/rollback`, {});
 export const deleteWidget = (id: string) =>
   write<{ ok: true; historyWarning?: string }>("DELETE", `/widgets/${enc(id)}`);
 export const previewWidget = (widget: WidgetInput) =>

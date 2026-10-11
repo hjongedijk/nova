@@ -108,10 +108,16 @@
     }
     try {
       const result = await rollbackNoteWidget(widget.id, revision.id);
-      if (result.widget.type === "note") text = result.widget.text;
+      if (result.widget?.type === "note") text = result.widget.text;
       rollbackId = "";
-      await loadHistory();
-      await afterChange(result.historyWarning ?? "De notitie is teruggezet.");
+      if (result.removed) settings.editingWidget = null;
+      else await loadHistory();
+      await afterChange(
+        result.historyWarning ??
+          (result.removed
+            ? "De ongewijzigde, aangemaakte notitie is verwijderd."
+            : "De notitie is teruggezet."),
+      );
     } catch (error) {
       rollbackId = "";
       fail(error);
@@ -268,12 +274,21 @@
         {#each noteRevisions as revision (revision.id)}
           <article>
             <small>{new Date(revision.at).toLocaleString("nl-NL")}</small>
-            <p><strong>Van:</strong> {revision.before}</p>
-            <p><strong>Naar:</strong> {revision.after}</p>
+            {#if revision.createdSnapshot}
+              <p>
+                <strong>Aangemaakt:</strong>
+                {revision.createdSnapshot.title}
+              </p>
+            {:else}
+              <p><strong>Van:</strong> {revision.before}</p>
+              <p><strong>Naar:</strong> {revision.after}</p>
+            {/if}
             <Button onclick={() => rollbackNote(revision)}>
               {rollbackId === revision.id
                 ? "Nogmaals klikken om terug te zetten"
-                : "Terugzetten"}
+                : revision.createdSnapshot
+                  ? "Aangemaakte notitie verwijderen"
+                  : "Terugzetten"}
             </Button>
           </article>
         {/each}

@@ -52,6 +52,9 @@ beforeAll(async () => {
 afterAll(() => nova.app.close());
 beforeEach(() => {
   fs.rmSync(path.join(nova.store["file" as never] as string), { force: true });
+  fs.rmSync(nova.app.get(NovaConfig).dataFile("note-widget-history.json"), {
+    force: true,
+  });
   fs.rmSync(
     nova.app.get(NovaConfig).dataFile("instruction-skill-history.json"),
     { force: true },
@@ -308,9 +311,11 @@ describe("the settings API", () => {
       ).status,
     ).toBe(200);
     const history = await call("get", `/widgets/${widgetId}/history`);
-    expect(history.revisions).toMatchObject([
-      { before: "Eerste versie", after: "Tweede versie" },
-    ]);
+    expect(history.revisions[0]).toMatchObject({
+      before: "Eerste versie",
+      after: "Tweede versie",
+    });
+    expect(history.revisions).toHaveLength(2);
     const historyPath = path.join(
       path.dirname(nova.store["file" as never] as string),
       "note-widget-history.json",
@@ -345,7 +350,7 @@ describe("the settings API", () => {
     expect(recreatedId).not.toBe(widgetId);
     expect(
       (await call("get", `/widgets/${recreatedId}/history`)).revisions,
-    ).toEqual([]);
+    ).toMatchObject([{ createdSnapshot: { title: "Persoonlijke notitie" } }]);
     const secretUpdate = await call("put", `/widgets/${recreatedId}`, {
       type: "note",
       title: "Persoonlijke notitie",
@@ -373,6 +378,59 @@ describe("the settings API", () => {
     expect(
       JSON.stringify(await call("get", `/widgets/${recreatedId}/history`)),
     ).not.toContain("operator:private");
+  });
+
+  it("can undo creation only while the secret-screened note is unchanged", async () => {
+    const created = await call("post", "/widgets", {
+      type: "note",
+      title: "Testnotitie",
+      text: "Alleen lokale inhoud",
+    });
+    const widgetId = (created.widget as { id: string }).id;
+    const history = await call("get", `/widgets/${widgetId}/history`);
+    const creation = (history.revisions as { id: string }[])[0]!;
+    expect(history.revisions).toMatchObject([
+      {
+        before: "",
+        after: "Alleen lokale inhoud",
+        createdSnapshot: { title: "Testnotitie", enabled: true },
+      },
+    ]);
+    expect(JSON.stringify(nova.audits)).not.toContain("Alleen lokale inhoud");
+
+    await call("put", `/widgets/${widgetId}`, {
+      type: "note",
+      title: "Testnotitie",
+      text: "Aangepast na aanmaken",
+    });
+    expect(
+      (
+        await call(
+          "post",
+          `/widgets/${widgetId}/history/${creation.id}/rollback`,
+        )
+      ).status,
+    ).toBe(409);
+
+    const current = await call("post", "/widgets", {
+      type: "note",
+      title: "Andere testnotitie",
+      text: "Nog niet aangepast",
+    });
+    const currentId = (current.widget as { id: string }).id;
+    const currentHistory = await call("get", `/widgets/${currentId}/history`);
+    const currentCreation = (currentHistory.revisions as { id: string }[])[0]!;
+    expect(
+      (
+        await call(
+          "post",
+          `/widgets/${currentId}/history/${currentCreation.id}/rollback`,
+        )
+      ).removed,
+    ).toBe(true);
+    expect(nova.store.get().widgets.some((item) => item.id === currentId)).toBe(
+      false,
+    );
   });
 
   it("tracks only safe value-widget display fields and preserves current data source on rollback", async () => {
@@ -564,7 +622,14 @@ describe("the settings API", () => {
       expect(listed.status).toBe(200);
       expect(
         listed.body.available.map((entry: { id: string }) => entry.id).sort(),
-      ).toEqual(["arxiv", "caldav", "context7", "filesystem", "sequential-thinking"]);
+      ).toEqual([
+        "arxiv",
+        "caldav",
+        "context7",
+        "filesystem",
+        "imap",
+        "sequential-thinking",
+      ]);
       expect(JSON.stringify(listed.body)).not.toMatch(/"command"|"args"|"env"/);
 
       const preparePath = "/api/settings/mcp/servers/context7/prepare-catalog";

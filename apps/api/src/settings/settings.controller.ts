@@ -906,7 +906,11 @@ export class SettingsController {
   }
 
   @Post("widgets")
-  createWidget(@Body() body: unknown): { widget: Widget } {
+  createWidget(@Body() body: unknown): {
+    widget: Widget;
+    historyWarning?: string;
+  } {
+    this.noteWidgetHistory.lastWarning = undefined;
     let widget!: Widget;
     this.settings.update((settings) => {
       if (settings.widgets.length >= MAX_WIDGETS)
@@ -928,8 +932,14 @@ export class SettingsController {
         };
       settings.widgets.push(widget as never);
     });
+    if (widget.type === "note") this.noteWidgetHistory.recordCreated(widget);
     this.log("widget_created", { id: widget.id, type: widget.type });
-    return { widget };
+    return {
+      widget,
+      ...(this.noteWidgetHistory.lastWarning
+        ? { historyWarning: this.noteWidgetHistory.lastWarning }
+        : {}),
+    };
   }
 
   /** Try a data panel before saving it: shows what it would display. */
