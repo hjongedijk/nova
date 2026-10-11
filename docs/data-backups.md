@@ -2,6 +2,8 @@
 
 NOVA writes compressed local archives of its application data directory. A daily archive runs at 02:30 and a weekly archive runs on Sunday at 03:30, using `TZ` (default `Europe/Amsterdam`). If NOVA starts after a scheduled time and that period has no archive yet, it catches up once. Success and failure appear in the alert feed and are forwarded to the helper when it is connected.
 
+If creation fails, NOVA retries the slot twice more, five minutes apart. It reports a critical failure only after the third attempt; a later scheduled slot can try again. Archive verification checks both the gzip/tar structure and a test extraction in the automated suite.
+
 Production stores archives in `./nova-backups`, mounted at `/backups`; `NOVA_BACKUP_DIR` selects the destination. The default outside Compose is next to, not inside, `NOVA_DATA_DIR`. The backup directory is mode `0700`; each compressed archive is mode `0600`. NOVA keeps 14 daily and 8 weekly archives, removes older archives, and limits an archive to 1 GiB and the collection to 5 GiB. Create and own the directory as UID 1000 before starting Compose:
 
 ```sh

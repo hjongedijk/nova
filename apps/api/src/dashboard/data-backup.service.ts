@@ -14,12 +14,15 @@ import { NovaConfig } from "../core/config/nova-config.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
 
 const CHECK_EVERY_MS = 30_000;
+const RETRY_AFTER_MS = 5 * 60_000;
+const MAX_ATTEMPTS_PER_SLOT = 3;
 const DAILY_RETENTION = 14;
 const WEEKLY_RETENTION = 8;
 const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 5 * 1024 * 1024 * 1024;
 
 type Slot = { kind: "daily" | "weekly"; key: string; name: string };
+type SlotAttempt = { attempts: number; nextAttemptAt: number };
 
 function localParts(date: Date, timezone: string): Record<string, string> {
   return Object.fromEntries(
@@ -64,7 +67,7 @@ export class DataBackupService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DataBackupService.name);
   private timer?: NodeJS.Timeout;
   private running = false;
-  private readonly attempted = new Set<string>();
+  private readonly attempted = new Map<string, SlotAttempt>();
   private readonly backupDir: string;
 
   constructor(
@@ -95,11 +98,15 @@ export class DataBackupService implements OnModuleInit, OnModuleDestroy {
     const slots = dueBackupSlots(now, this.config.timezone);
     for (const slot of slots) {
       const token = `${slot.kind}:${slot.key}`;
-      if (this.attempted.has(token)) continue;
-      this.attempted.add(token);
+      const previous = this.attempted.get(token);
+      if (previous && now.getTime() < previous.nextAttemptAt) continue;
       this.running = true;
       try {
         const result = await this.create(slot);
+        this.attempted.set(token, {
+          attempts: previous?.attempts ?? 1,
+          nextAttemptAt: Number.POSITIVE_INFINITY,
+        });
         if (!result) continue;
         this.alerts.record({
           topic: "jarvis/alerts",
@@ -112,6 +119,18 @@ export class DataBackupService implements OnModuleInit, OnModuleDestroy {
           },
         });
       } catch {
+        const attempts = (previous?.attempts ?? 0) + 1;
+        this.attempted.set(token, {
+          attempts,
+          nextAttemptAt:
+            attempts >= MAX_ATTEMPTS_PER_SLOT
+              ? Number.POSITIVE_INFINITY
+              : now.getTime() + RETRY_AFTER_MS,
+        });
+        if (attempts < MAX_ATTEMPTS_PER_SLOT) {
+          this.logger.warn(`${slot.kind} data backup failed; retry scheduled`);
+          continue;
+        }
         this.logger.error(`${slot.kind} data backup failed`);
         this.alerts.record({
           topic: "jarvis/alerts",

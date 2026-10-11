@@ -34,7 +34,7 @@ function fixture() {
 
 describe("scheduled NOVA data backups", () => {
   it("creates and verifies daily and weekly private archives, then announces both", async () => {
-    const { dataDir, backupDir, alerts, service } = fixture();
+    const { root, dataDir, backupDir, alerts, service } = fixture();
     const now = new Date("2026-10-11T01:40:00.000Z");
     await service.checkSchedule(now);
 
@@ -52,6 +52,20 @@ describe("scheduled NOVA data backups", () => {
       expect(listing.status).toBe(0);
       expect(listing.stdout).toContain("./settings.json");
     }
+    const restoreDir = path.join(root, "restore");
+    fs.mkdirSync(restoreDir);
+    const restored = spawnSync(
+      "tar",
+      ["--extract", "--gzip", `--file=${path.join(backupDir, names[0]!)}`],
+      { cwd: restoreDir },
+    );
+    expect(restored.status).toBe(0);
+    expect(
+      fs.readFileSync(path.join(restoreDir, "settings.json"), "utf8"),
+    ).toBe('{"private":true}\n');
+    expect(
+      fs.statSync(path.join(restoreDir, "settings.json")).mode & 0o777,
+    ).toBe(0o600);
     expect(alerts.record).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(alerts.record.mock.calls)).toContain(
       "back-up gelukt",
@@ -70,7 +84,10 @@ describe("scheduled NOVA data backups", () => {
       } as NovaConfig,
       alerts as never,
     );
-    await bad.checkSchedule(new Date("2026-10-11T01:40:00.000Z"));
+    const first = new Date("2026-10-11T01:40:00.000Z");
+    await bad.checkSchedule(first);
+    await bad.checkSchedule(new Date(first.getTime() + 5 * 60_000));
+    await bad.checkSchedule(new Date(first.getTime() + 10 * 60_000));
     expect(alerts.record).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
@@ -82,11 +99,36 @@ describe("scheduled NOVA data backups", () => {
     );
   });
 
+  it("retries a failed daily slot once its source becomes available", async () => {
+    const { dataDir, backupDir, alerts, service } = fixture();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    const first = new Date("2026-10-12T01:40:00.000Z");
+    await service.checkSchedule(first);
+    expect(fs.readdirSync(backupDir)).toEqual([]);
+    expect(alerts.record).not.toHaveBeenCalled();
+
+    await fs.promises.mkdir(dataDir);
+    await fs.promises.writeFile(path.join(dataDir, "settings.json"), "ready");
+    await service.checkSchedule(new Date(first.getTime() + 4 * 60_000));
+    expect(fs.readdirSync(backupDir)).toEqual([]);
+
+    await service.checkSchedule(new Date(first.getTime() + 5 * 60_000));
+    expect(fs.readdirSync(backupDir)).toContain("daily-2026-10-12.tar.gz");
+    expect(alerts.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ severity: "info" }),
+      }),
+    );
+  });
+
   it("replaces a corrupt archive instead of treating it as a successful backup", async () => {
     const { backupDir, service } = fixture();
     fs.mkdirSync(backupDir, { recursive: true });
     fs.writeFileSync(path.join(backupDir, "daily-2026-10-11.tar.gz"), "broken");
-    await service.checkSchedule(new Date("2026-10-11T01:00:00.000Z"));
+    const first = new Date("2026-10-11T01:00:00.000Z");
+    await service.checkSchedule(first);
+    await service.checkSchedule(new Date(first.getTime() + 5 * 60_000));
+    await service.checkSchedule(new Date(first.getTime() + 10 * 60_000));
     const file = path.join(backupDir, "daily-2026-10-11.tar.gz");
     const check = spawnSync("tar", ["--list", "--gzip", `--file=${file}`]);
     expect(check.status).toBe(0);
@@ -123,7 +165,10 @@ describe("scheduled NOVA data backups", () => {
       { dataDir, backupDir: link, timezone: "Europe/Amsterdam" } as NovaConfig,
       alerts as never,
     );
-    await service.checkSchedule(new Date("2026-10-11T01:00:00.000Z"));
+    const first = new Date("2026-10-11T01:00:00.000Z");
+    await service.checkSchedule(first);
+    await service.checkSchedule(new Date(first.getTime() + 5 * 60_000));
+    await service.checkSchedule(new Date(first.getTime() + 10 * 60_000));
     expect(fs.statSync(dataDir).mode & 0o777).not.toBe(0o700);
     expect(fs.readdirSync(nested)).toEqual([]);
     expect(alerts.record).toHaveBeenCalledWith(
