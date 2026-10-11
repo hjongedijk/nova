@@ -158,10 +158,27 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
     this.running = true;
     this.lastAttemptAt = now.getTime();
     this.attempts.set(window.key, attempts + 1);
+    const startedAt = Date.now();
     try {
       const done = await this.createOverview(window, now);
+      this.audit.record({
+        tool: "proactive_weekly_overview",
+        risk: "READ_ONLY",
+        phase: done ? "completed" : "skipped",
+        durationMs: Date.now() - startedAt,
+        arguments: { week: window.key },
+        result: { ok: done },
+      });
       if (done) this.saveCompletedWeek(window.key);
     } catch {
+      this.audit.record({
+        tool: "proactive_weekly_overview",
+        risk: "READ_ONLY",
+        phase: "failed",
+        durationMs: Date.now() - startedAt,
+        arguments: { week: window.key },
+        result: { ok: false },
+      });
       this.logger.warn("Weekly overview unavailable; retry scheduled");
     } finally {
       this.running = false;

@@ -17,6 +17,7 @@ function fixture(enabled: boolean) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-weekly-"));
   directories.push(dir);
   const record = vi.fn();
+  const auditRecord = vi.fn();
   let receivedOptions: unknown;
   const call = vi.fn(async (messages: unknown, options: unknown) => {
     void messages;
@@ -71,6 +72,7 @@ function fixture(enabled: boolean) {
           result: { ok: true },
         },
       ],
+      record: auditRecord,
     } as never,
     {
       configured: true,
@@ -85,7 +87,14 @@ function fixture(enabled: boolean) {
     { call } as never,
     { record } as never,
   );
-  return { dir, record, call, options: () => receivedOptions, service };
+  return {
+    dir,
+    record,
+    auditRecord,
+    call,
+    options: () => receivedOptions,
+    service,
+  };
 }
 
 describe("opt-in weekly overview", () => {
@@ -124,6 +133,17 @@ describe("opt-in weekly overview", () => {
     expect(enabled.record.mock.calls[0]?.[0].payload.title).toBe(
       "Je weekoverzicht",
     );
+    expect(enabled.auditRecord).toHaveBeenCalledOnce();
+    expect(enabled.auditRecord.mock.calls[0]?.[0]).toMatchObject({
+      tool: "proactive_weekly_overview",
+      risk: "READ_ONLY",
+      phase: "completed",
+      arguments: { week: "2026-10-11" },
+      result: { ok: true },
+    });
+    const logged = JSON.stringify(enabled.auditRecord.mock.calls[0]?.[0]);
+    expect(logged).not.toContain("taken afgerond");
+    expect(logged).not.toContain("Afspraak");
     const progress = path.join(enabled.dir, "weekly-overview-progress.json");
     expect(JSON.parse(fs.readFileSync(progress, "utf8"))).toEqual({
       completedWeek: "2026-10-11",
