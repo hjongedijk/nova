@@ -64,6 +64,12 @@ describe("NOVA's conversational identity", () => {
     expect(SYSTEM_PROMPT).toContain(
       "Never say you reported, checked, fixed or escalated a problem unless a tool in this turn confirms it",
     );
+    expect(SYSTEM_PROMPT).toContain(
+      "A report is not proof that you diagnosed it or filed a ticket",
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      "suggest one safe first check or ask a focused question",
+    );
   });
 
   it("uses prior-conversation search hints only when the user refers back", () => {
@@ -175,6 +181,12 @@ describe("uploaded document handling", () => {
     );
     expect(SYSTEM_PROMPT).toContain(
       "normal fresh confirmation for documents_forget",
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      "If no attachment or file-search result is available, say you cannot access the file",
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      "Say nothing was found only after an actual search returned no matches",
     );
   });
 });
