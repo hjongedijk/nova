@@ -420,6 +420,18 @@ export interface PersonaPreferencesRollbackResult {
   auditWarning?: string;
 }
 
+export interface HouseholdProfileSwitchRevision {
+  id: string;
+  at: string;
+  beforeProfileId: string;
+  afterProfileId: string;
+  revertedFrom?: string;
+}
+export interface HouseholdProfileSwitchHistory {
+  revisions: HouseholdProfileSwitchRevision[];
+  truncated: boolean;
+}
+
 /** GET /settings/public: no PIN needed. */
 export interface PublicConfig {
   publicUrl: string;

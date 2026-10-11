@@ -16,6 +16,7 @@
   import QuickActionsEditor from "./QuickActionsEditor.svelte";
   import PersonaHistory from "./PersonaHistory.svelte";
   import PersonaPreferencesHistory from "./PersonaPreferencesHistory.svelte";
+  import HouseholdProfileHistory from "./HouseholdProfileHistory.svelte";
   import SoundSection from "./SoundSection.svelte";
   import { afterChange, fail, settings } from "./state.svelte.ts";
 
@@ -299,6 +300,9 @@
   </section>
   <PersonaHistory />
   <PersonaPreferencesHistory />
+  <HouseholdProfileHistory
+    onRestored={() => afterChange("Gezinsprofiel hersteld.")}
+  />
 {/if}
 {#if part === "all"}
   <h3>Snelle opdrachten op het beginscherm</h3>

@@ -96,6 +96,7 @@ import { WorkspaceCodeSource } from "./workspace-code.source.js";
 import { WorkspaceCodeController } from "./workspace-code.controller.js";
 import { WorkspaceGitMcp } from "./workspace-git-mcp.service.js";
 import { HomeAssistantAccessHistory } from "./home-assistant-access-history.service.js";
+import { HouseholdProfileHistory } from "./household-profile-history.service.js";
 
 /**
  * Skills, persona, quick actions, sidebar panels, backup: /api/settings and /api/widgets.
@@ -159,6 +160,7 @@ import { HomeAssistantAccessHistory } from "./home-assistant-access-history.serv
     SettingsBackupService,
     ManagedTargetsAccessHistory,
     HomeAssistantAccessHistory,
+    HouseholdProfileHistory,
     SettingsSource,
     NativeSkillModesService,
     NativeSkillRemoval,

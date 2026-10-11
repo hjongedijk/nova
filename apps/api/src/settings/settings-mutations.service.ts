@@ -13,6 +13,7 @@ import { PersonaHistoryService } from "./persona-history.service.js";
 import { InstructionSkillHistory } from "./instruction-skill-history.service.js";
 import { HelperPreferencesHistory } from "./helper-preferences-history.service.js";
 import { PersonaPreferencesHistoryService } from "./persona-preferences-history.service.js";
+import { HouseholdProfileHistory } from "./household-profile-history.service.js";
 import { normalizeHelperPreferences } from "./settings-validation.js";
 import {
   normalizeSkill,
@@ -38,6 +39,7 @@ export class SettingsMutationsService {
     private readonly skillHistory: InstructionSkillHistory,
     private readonly helperHistory: HelperPreferencesHistory,
     private readonly personaPreferencesHistory: PersonaPreferencesHistoryService,
+    private readonly householdProfileHistory: HouseholdProfileHistory,
   ) {}
 
   private log(
@@ -152,6 +154,10 @@ export class SettingsMutationsService {
       ...before,
       profile: active.personaProfile,
     });
+    this.householdProfileHistory.record(
+      beforeSettings.activeHouseholdProfileId,
+      activeId,
+    );
     this.log("household_profiles", {
       count: profiles.length,
       preferenceCount: active.communicationPreferences.length,

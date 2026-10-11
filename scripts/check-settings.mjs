@@ -31,6 +31,31 @@ const overview = {
     address: "je/jij",
     avoid: "menselijke ervaringen verzinnen",
   },
+  householdProfiles: [
+    {
+      id: "person-a",
+      label: "Profiel A",
+      personaProfile: {
+        name: "NOVA",
+        character: "warm en nieuwsgierig",
+        address: "je/jij",
+        avoid: "menselijke ervaringen verzinnen",
+      },
+      communicationPreferences: [],
+    },
+    {
+      id: "person-b",
+      label: "Profiel B",
+      personaProfile: {
+        name: "NOVA",
+        character: "warm en nieuwsgierig",
+        address: "u",
+        avoid: "menselijke ervaringen verzinnen",
+      },
+      communicationPreferences: [],
+    },
+  ],
+  activeHouseholdProfileId: "person-a",
   quickActions: [{ label: "Het weer", prompt: "Hoe is het weer?" }],
   quickActionsAreDefault: false,
   skills: [
@@ -349,6 +374,8 @@ try {
     let personaHistoryReads = 0;
     let personaPreferencesHistoryReads = 0;
     let personaPreferencesHistoryWrites = 0;
+    let householdProfileHistoryReads = 0;
+    let householdProfileHistoryWrites = 0;
     let helperPreferenceHistoryWrites = 0;
     let toolSwitchHistoryReads = 0;
     let toolSwitchHistoryWrites = 0;
@@ -3352,6 +3379,34 @@ try {
       } else if (endpoint === "/settings/persona/profile") {
         personaProfile = request.postDataJSON().profile;
         data = { ok: true, personaProfile };
+      } else if (endpoint === "/settings/household-profiles") {
+        overview.activeHouseholdProfileId =
+          request.postDataJSON().activeProfileId;
+        data = {
+          ok: true,
+          householdProfiles: request.postDataJSON().profiles,
+          activeHouseholdProfileId: overview.activeHouseholdProfileId,
+        };
+      } else if (endpoint === "/settings/household-profiles/history") {
+        householdProfileHistoryReads++;
+        data = {
+          revisions: [
+            {
+              id: "33333333-3333-4333-8333-333333333333",
+              at: "2026-10-10T12:00:00.000Z",
+              beforeProfileId: "person-a",
+              afterProfileId: "person-b",
+            },
+          ],
+          truncated: false,
+        };
+      } else if (
+        endpoint ===
+        "/settings/household-profiles/history/33333333-3333-4333-8333-333333333333/rollback"
+      ) {
+        householdProfileHistoryWrites++;
+        overview.activeHouseholdProfileId = "person-a";
+        data = { ok: true, activeHouseholdProfileId: "person-a" };
       } else if (endpoint === "/settings/persona/history") {
         personaHistoryReads++;
         data = {
@@ -6030,6 +6085,22 @@ try {
     assert.equal(personaPreferencesHistoryWrites, 1);
     assert.equal(personaStyle, "friendly");
     assert.equal(personaProfile.name, "NOVA");
+    const householdHistory = page.getByRole("region", {
+      name: "Geschiedenis actieve gezinsprofielen",
+    });
+    await householdHistory
+      .getByRole("button", { name: "Profielwissels laden" })
+      .click();
+    await householdHistory.getByText("Van Profiel A naar Profiel B").waitFor();
+    await householdHistory
+      .getByRole("button", { name: "Deze profielwissel terugdraaien" })
+      .click();
+    await householdHistory
+      .getByText("Actief gezinsprofiel hersteld.")
+      .waitFor();
+    assert.equal(householdProfileHistoryReads, 2);
+    assert.equal(householdProfileHistoryWrites, 1);
+    assert.equal(overview.activeHouseholdProfileId, "person-a");
     const personaHistory = page.getByRole("region", {
       name: "Eigen-regelsgeschiedenis",
     });

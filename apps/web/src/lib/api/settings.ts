@@ -127,6 +127,7 @@ import type {
   SettingsOverview,
   HomeAssistantAccessPolicy,
   HomeAssistantAccessHistory,
+  HouseholdProfileSwitchHistory,
   ManagedTargetsAccessPolicy,
   SidebarItem,
   ToolOverride,
@@ -404,6 +405,14 @@ export const saveHouseholdProfiles = (
     householdProfiles: HouseholdProfile[];
     activeHouseholdProfileId: string;
   }>("PUT", "/household-profiles", { profiles, activeProfileId });
+export const getHouseholdProfileHistory = () =>
+  read<HouseholdProfileSwitchHistory>("/household-profiles/history");
+export const rollbackHouseholdProfile = (id: string) =>
+  write<{ ok: true; activeHouseholdProfileId: string; auditWarning?: string }>(
+    "POST",
+    `/household-profiles/history/${enc(id)}/rollback`,
+    {},
+  );
 export const getPersonaPreferencesHistory = () =>
   read<PersonaPreferencesHistory>("/persona/preferences/history");
 export const rollbackPersonaPreferences = (id: string) =>

@@ -91,6 +91,7 @@ import { ManagedTargetsAccessStore } from "./managed-targets-access.store.js";
 import { ManagedTargetsAccessHistory } from "./managed-targets-access-history.service.js";
 import { HomeAssistantAccessHistory } from "./home-assistant-access-history.service.js";
 import { PersonaPreferencesHistoryService } from "./persona-preferences-history.service.js";
+import { HouseholdProfileHistory } from "./household-profile-history.service.js";
 
 const MAX_WIDGETS = 20;
 
@@ -139,6 +140,7 @@ export class SettingsController {
     private readonly managedTargets: ManagedTargetsAccessStore,
     private readonly managedTargetsHistory: ManagedTargetsAccessHistory,
     private readonly homeAccessHistory: HomeAssistantAccessHistory,
+    private readonly householdProfileHistory: HouseholdProfileHistory,
     @Optional()
     @Inject(WALLPAPER_PORT)
     private readonly wallpaper?: WallpaperPort,
@@ -513,6 +515,19 @@ export class SettingsController {
       body?.profiles,
       body?.activeProfileId,
     );
+  }
+
+  @Get("household-profiles/history")
+  householdProfileHistoryList() {
+    return this.householdProfileHistory.list();
+  }
+
+  @Post("household-profiles/history/:id/rollback")
+  @HttpCode(200)
+  rollbackHouseholdProfile(@Param("id") id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige profielwissel."]);
+    return this.householdProfileHistory.rollback(id);
   }
 
   @Get("persona/preferences/history")
