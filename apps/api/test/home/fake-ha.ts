@@ -59,6 +59,10 @@ export async function fakeHomeAssistant() {
     }),
     entity("lock.front", "locked", { friendly_name: "Voordeur" }),
     entity("script.evening", "off", { friendly_name: "Avond" }),
+    entity("scene.cozy", "scening", { friendly_name: "Gezellig" }),
+    entity("alarm_control_panel.house", "disarmed", {
+      friendly_name: "Huisalarm",
+    }),
     entity("media_player.living", "paused", {
       friendly_name: "Woonkamer Sonos",
       volume_level: 0.2,
@@ -86,15 +90,24 @@ export async function fakeHomeAssistant() {
         ? ["play_media"]
         : domain === "climate"
           ? ["set_temperature"]
-          : domain === "lock"
-            ? ["lock", "unlock"]
-            : ["turn_on", "turn_off", "toggle"];
+          : domain === "alarm_control_panel"
+            ? [
+                "alarm_arm_home",
+                "alarm_arm_away",
+                "alarm_arm_night",
+                "alarm_arm_vacation",
+                "alarm_disarm",
+              ]
+            : domain === "lock"
+              ? ["lock", "unlock"]
+              : ["turn_on", "turn_off", "toggle"];
   const services = () =>
     [
       "light",
       "switch",
       "fan",
       "climate",
+      "alarm_control_panel",
       "scene",
       "script",
       "lock",
@@ -135,6 +148,9 @@ export async function fakeHomeAssistant() {
     if (service === "unjoin") attributes.group_members = [item.entity_id];
     if (service === "unlock") item.state = "unlocked";
     if (service === "lock") item.state = "locked";
+    if (service === "alarm_disarm") item.state = "disarmed";
+    if (service.startsWith("alarm_arm_"))
+      item.state = service.replace("alarm_arm_", "armed_");
     if (body.brightness_pct !== undefined)
       attributes.brightness = (body.brightness_pct * 255) / 100;
     if (body.rgb_color) attributes.rgb_color = body.rgb_color;

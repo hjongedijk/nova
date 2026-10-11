@@ -23,5 +23,19 @@ describe("confirmation labels", () => {
     expect(confirmationLabel(action, "nl")).toContain(
       "Dit kan niet ongedaan worden gemaakt.",
     );
+    expect(
+      confirmationLabel(
+        {
+          ...action,
+          tool: "ha_call_service",
+          args: {
+            entity_id: "alarm_control_panel.house",
+            domain: "alarm_control_panel",
+            service: "alarm_disarm",
+          },
+        },
+        "en",
+      ),
+    ).toContain("alarm_control_panel.alarm_disarm");
   });
 });

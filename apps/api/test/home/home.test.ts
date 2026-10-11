@@ -84,7 +84,7 @@ describe("Home Assistant", () => {
   });
 
   it("loads the catalog over REST and WebSocket, resolves area and alias, refuses invented and ambiguous entities", () => {
-    expect(home.entities).toHaveLength(9);
+    expect(home.entities).toHaveLength(11);
     expect(home.resolve("Werklicht")).toMatchObject({
       entity: { entity_id: "light.office", area: "Kantoor" },
     });
@@ -97,7 +97,7 @@ describe("Home Assistant", () => {
       configured: true,
       online: true,
       stale: false,
-      entities: 9,
+      entities: 11,
       sonos: true,
       musicAssistant: true,
       error: null,
@@ -293,13 +293,27 @@ describe("Home Assistant", () => {
     }
   });
 
-  it("a small climate change and a quiet volume change run directly", async () => {
+  it("even small heating changes need fresh confirmation; quiet volume stays direct", async () => {
+    const before = fake.actions.length;
+    const heating = await run(
+      "ha_set_temperature",
+      { entity_id: "climate.office", temperature: 21 },
+      "small",
+    );
+    expect(heating.requiresConfirmation).toBe(true);
+    expect(heating.action?.risk).toBe("CONFIRM");
+    expect(fake.actions.length).toBe(before);
+    const heatingAction = confirmations.take(
+      "small",
+      heating.action!.confirmationId,
+    )!;
     expect(
       (
-        await run(
-          "ha_set_temperature",
-          { entity_id: "climate.office", temperature: 21 },
+        await tools.execute(
+          heatingAction.tool,
+          heatingAction.args,
           "small",
+          heatingAction,
         )
       ).verified,
     ).toBe(true);
@@ -312,6 +326,85 @@ describe("Home Assistant", () => {
         )
       ).verified,
     ).toBe(true);
+  });
+
+  it("finds an installed mood scene and only activates the exact scene after confirmation", async () => {
+    const search = await run(
+      "ha_search_entities",
+      { query: "gezellig", domain: "scene" },
+      "mood",
+    );
+    expect(JSON.stringify(search.result)).toContain("scene.cozy");
+    const before = fake.actions.length;
+    const missing = await run(
+      "ha_activate_scene",
+      { entity_id: "Scene of Gezellig" },
+      "mood",
+    );
+    expect(missing.ok).toBe(false);
+    expect(fake.actions.length).toBe(before);
+    const pending = await run(
+      "ha_activate_scene",
+      { entity_id: "Gezellig" },
+      "mood",
+    );
+    expect(pending.requiresConfirmation).toBe(true);
+    expect(fake.actions.length).toBe(before);
+    const action = confirmations.take("mood", pending.action!.confirmationId)!;
+    expect(
+      await tools.execute(action.tool, action.args, "mood", action),
+    ).toMatchObject({
+      ok: true,
+      accepted: true,
+      verified: null,
+      status: "accepted_unverified",
+    });
+    expect(fake.actions.at(-1)?.path).toBe("/api/services/scene/turn_on");
+  });
+
+  it("requires fresh confirmation for alarm arm and disarm actions", async () => {
+    for (const service of ["alarm_arm_home", "alarm_disarm"]) {
+      const before = fake.actions.length;
+      const pending = await run(
+        "ha_call_service",
+        {
+          entity_id: "alarm_control_panel.house",
+          domain: "alarm_control_panel",
+          service,
+        },
+        "alarm",
+      );
+      expect(pending.requiresConfirmation).toBe(true);
+      expect(pending.action?.risk).toBe(
+        service === "alarm_disarm" ? "DANGEROUS" : "CONFIRM",
+      );
+      expect(fake.actions.length).toBe(before);
+      const action = confirmations.take(
+        "alarm",
+        pending.action!.confirmationId,
+      )!;
+      expect(
+        await tools.execute(action.tool, action.args, "alarm", action),
+      ).toMatchObject({ ok: true, verified: true });
+    }
+  });
+
+  it("does not let generic service calls bypass heating confirmation", async () => {
+    const before = fake.actions.length;
+    const pending = await run(
+      "ha_call_service",
+      {
+        entity_id: "climate.office",
+        domain: "climate",
+        service: "set_temperature",
+        data: { temperature: 21 },
+      },
+      "heating-generic",
+    );
+    expect(pending.requiresConfirmation).toBe(true);
+    expect(pending.action?.risk).toBe("CONFIRM");
+    expect(fake.actions.length).toBe(before);
+    confirmations.cancel("heating-generic");
   });
 
   it("exact confirmation approves once; another session or id does nothing", async () => {

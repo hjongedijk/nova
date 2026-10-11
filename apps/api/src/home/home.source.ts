@@ -52,6 +52,13 @@ const ALLOWED_SERVICES: Record<string, Record<string, string[]>> = {
   switch: { turn_on: [], turn_off: [], toggle: [] },
   fan: { turn_on: [], turn_off: [], toggle: [] },
   climate: { set_temperature: ["temperature"] },
+  alarm_control_panel: {
+    alarm_arm_home: [],
+    alarm_arm_away: [],
+    alarm_arm_night: [],
+    alarm_arm_vacation: [],
+    alarm_disarm: [],
+  },
   scene: { turn_on: [] },
   script: { turn_on: [] },
   lock: { lock: [], unlock: [] },
@@ -161,6 +168,9 @@ export function verifyState(
   if (service === "select_source") return target.source === data.source;
   if (service === "lock") return state.state === "locked";
   if (service === "unlock") return state.state === "unlocked";
+  if (service === "alarm_disarm") return state.state === "disarmed";
+  if (service?.startsWith("alarm_arm_"))
+    return state.state === service.replace("alarm_arm_", "armed_");
   if (service === "open_cover") return state.state === "open";
   if (service === "close_cover") return state.state === "closed";
   return null;
@@ -215,7 +225,7 @@ export class HomeSource implements ToolSource {
       ),
       define(
         "ha_search_entities",
-        "Search actual Home Assistant entities by name, alias, domain or area. Use before selecting an unknown device.",
+        "Search actual Home Assistant entities by name, alias, domain or area. For a mood or ambience request such as making a room cozy, search installed scenes using the user's key phrase before selecting one. Use before selecting an unknown device.",
         { query: string, domain: string, area: string },
         "READ_ONLY",
         [],
@@ -231,7 +241,7 @@ export class HomeSource implements ToolSource {
       ),
       define(
         "ha_call_service",
-        "Call a backend-allowlisted installed Home Assistant service with structured data. Risk and confirmation are enforced by the backend.",
+        "Call a backend-allowlisted installed Home Assistant service with structured data. Supports alarm_control_panel arm/disarm actions; the backend requires fresh confirmation. Risk and confirmation are enforced by the backend.",
         {
           ...target,
           domain: string,
@@ -266,13 +276,13 @@ export class HomeSource implements ToolSource {
       ),
       define(
         "ha_set_temperature",
-        "Set climate temperature in Celsius. Large changes require confirmation.",
+        "Set climate temperature in Celsius. Every temperature change requires fresh confirmation.",
         { ...target, temperature: number(5, 35) },
         "SAFE",
       ),
       define(
         "ha_activate_scene",
-        "Activate an installed Home Assistant scene. Requires confirmation.",
+        "Activate only an exactly matched installed Home Assistant scene. Search scenes for the user's mood phrase first; never guess or claim to know a scene's effects. Requires fresh confirmation and is reported as accepted, not verified.",
         target,
         "CONFIRM",
       ),

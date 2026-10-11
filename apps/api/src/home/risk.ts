@@ -25,6 +25,8 @@ export function actionRisk(
   entity: RiskEntity = {},
 ): Risk {
   if (domain === "lock" && service === "unlock") return "DANGEROUS";
+  if (domain === "alarm_control_panel")
+    return service === "alarm_disarm" ? "DANGEROUS" : "CONFIRM";
   if (
     ALWAYS_CONFIRM_DOMAINS.includes(domain) ||
     service === "toggle" ||
@@ -40,6 +42,7 @@ export function actionRisk(
   )
     return "DANGEROUS";
   if (domain === "climate") {
+    if (service === "set_temperature") return "CONFIRM";
     const current = Number(entity.attributes?.temperature);
     if (typeof data.temperature !== "number") return "CONFIRM";
     if (

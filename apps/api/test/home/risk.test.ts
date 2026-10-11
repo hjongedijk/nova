@@ -4,6 +4,8 @@ import { actionRisk } from "../../src/home/risk.js";
 describe("actionRisk", () => {
   it("unlock is DANGEROUS, lock and the other sensitive domains need confirmation", () => {
     expect(actionRisk("lock", "unlock")).toBe("DANGEROUS");
+    expect(actionRisk("alarm_control_panel", "alarm_disarm")).toBe("DANGEROUS");
+    expect(actionRisk("alarm_control_panel", "alarm_arm_home")).toBe("CONFIRM");
     for (const [domain, service] of [
       ["lock", "lock"],
       ["cover", "open_cover"],
@@ -57,14 +59,14 @@ describe("actionRisk", () => {
     ).toBe("SAFE");
   });
 
-  it("climate: small plausible changes are SAFE, everything else needs confirmation", () => {
+  it("climate changes always need confirmation", () => {
     const entity = { attributes: { temperature: 20 } };
     expect(
       actionRisk("climate", "set_temperature", { temperature: 21 }, entity),
-    ).toBe("SAFE");
+    ).toBe("CONFIRM");
     expect(
       actionRisk("climate", "set_temperature", { temperature: 22 }, entity),
-    ).toBe("SAFE");
+    ).toBe("CONFIRM");
     expect(
       actionRisk("climate", "set_temperature", { temperature: 22.5 }, entity),
     ).toBe("CONFIRM");
@@ -91,7 +93,7 @@ describe("actionRisk", () => {
         { temperature: 26 },
         { attributes: { temperature: 25 } },
       ),
-    ).toBe("SAFE");
+    ).toBe("CONFIRM");
     expect(
       actionRisk(
         "climate",

@@ -91,7 +91,11 @@ export function confirmationLabel(
     set_temperature: "Temperatuur instellen",
     volume_set: "Volume instellen",
   };
-  return `${services[String(args?.service)] || action.tool.replaceAll("_", " ")}: ${args?.entity_id || args?.entity_ids?.join(", ") || args?.vmid || args?.id || ""}${changes ? "; " + changes : ""}. Bevestiging verloopt na 60 seconden.`;
+  const actionName =
+    action.tool === "ha_call_service"
+      ? `${args.domain}.${args.service}`
+      : services[String(args?.service)] || action.tool.replaceAll("_", " ");
+  return `${actionName}: ${args?.entity_id || args?.entity_ids?.join(", ") || args?.vmid || args?.id || ""}${changes ? "; " + changes : ""}. Bevestiging verloopt na 60 seconden.`;
 }
 
 function englishConfirmationLabel(
@@ -136,6 +140,10 @@ function englishConfirmationLabel(
     set_temperature: "Set temperature",
     volume_set: "Set volume",
   };
+  const actionName =
+    action.tool === "ha_call_service"
+      ? `${args.domain}.${args.service}`
+      : services[String(args?.service)] || action.tool.replaceAll("_", " ");
   const changes = [
     values.temperature !== undefined ? `${values.temperature} °C` : null,
     values.volume_level !== undefined
@@ -146,7 +154,7 @@ function englishConfirmationLabel(
   ]
     .filter(Boolean)
     .join("; ");
-  return `${services[String(args?.service)] || action.tool.replaceAll("_", " ")}: ${args?.entity_id || args?.entity_ids?.join(", ") || args?.vmid || args?.id || ""}${changes ? "; " + changes : ""}. ${expiry}`;
+  return `${actionName}: ${args?.entity_id || args?.entity_ids?.join(", ") || args?.vmid || args?.id || ""}${changes ? "; " + changes : ""}. ${expiry}`;
 }
 
 /** Cards still waiting for an answer, oldest first. */
