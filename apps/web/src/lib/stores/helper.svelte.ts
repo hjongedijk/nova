@@ -25,6 +25,7 @@ export const helper = $state({
     morning: { enabled: false, time: "08:00" },
     evening: { enabled: false, time: "22:00" },
     checkIn: { enabled: false, afterHours: 4 },
+    weeklyOverview: { enabled: false, time: "18:00" },
   } as NonNullable<HelperPreferences["rituals"]>,
   event: "greet" as OrbEvent,
   eventId: 0,
@@ -80,6 +81,19 @@ export function loadHelperPreferences(): void {
           helper.rituals.checkIn = {
             enabled: item.enabled,
             afterHours: Number(item.afterHours),
+          };
+      }
+      const weeklyOverview = rituals.weeklyOverview;
+      if (weeklyOverview && typeof weeklyOverview === "object") {
+        const item = weeklyOverview as Record<string, unknown>;
+        if (
+          typeof item.enabled === "boolean" &&
+          typeof item.time === "string" &&
+          /^([01]\d|2[0-3]):[0-5]\d$/.test(item.time)
+        )
+          helper.rituals.weeklyOverview = {
+            enabled: item.enabled,
+            time: item.time,
           };
       }
     }

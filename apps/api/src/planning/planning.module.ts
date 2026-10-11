@@ -12,6 +12,6 @@ import { CalDavService } from "./caldav.service.js";
 @Module({
   imports: [ProxmoxModule],
   providers: [JarvisStateStore, PlanningService, PlanningSource, CalDavService],
-  exports: [PlanningService, JarvisStateStore],
+  exports: [PlanningService, JarvisStateStore, CalDavService],
 })
 export class PlanningModule {}

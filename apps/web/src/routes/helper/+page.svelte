@@ -779,9 +779,23 @@
                 ><option value={6}>6 uur</option>
               </select>
             </label>
+            <label
+              ><input
+                type="checkbox"
+                bind:checked={helper.rituals.weeklyOverview.enabled}
+              /> Weekoverzicht op zondag</label
+            >
+            <label
+              >Om <input
+                aria-label="Weekoverzicht op zondag om"
+                type="time"
+                bind:value={helper.rituals.weeklyOverview.time}
+              /></label
+            >
             <p class="hint">
               Rituelen komen als gewone melding en volgen je meldingskeuze,
-              stille uren en aanwezigheid.
+              stille uren en aanwezigheid. Het weekoverzicht gebruikt alleen de
+              gratis gecontroleerde samenvattingsroute.
             </p>
           </fieldset>
           <details>

@@ -100,6 +100,7 @@ const blank = (): NovaSettings => ({
       morning: { enabled: false, time: "08:00" },
       evening: { enabled: false, time: "22:00" },
       checkIn: { enabled: false, afterHours: 4 },
+      weeklyOverview: { enabled: false, time: "18:00" },
     },
     cues: {
       enabled: true,

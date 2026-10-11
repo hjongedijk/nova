@@ -659,6 +659,7 @@ export interface HelperPreferences {
     morning: { enabled: boolean; time: string };
     evening: { enabled: boolean; time: string };
     checkIn: { enabled: boolean; afterHours: number };
+    weeklyOverview: { enabled: boolean; time: string };
   };
   cues: {
     enabled: boolean;

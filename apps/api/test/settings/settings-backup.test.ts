@@ -59,6 +59,7 @@ const helperPreferences: HelperPreferences = {
     morning: { enabled: false, time: "08:00" },
     evening: { enabled: false, time: "22:00" },
     checkIn: { enabled: false, afterHours: 4 },
+    weeklyOverview: { enabled: false, time: "18:00" },
   },
   wardrobe: { theme: "gold", seasonal: false, birthday: "10-10" },
   cues: {

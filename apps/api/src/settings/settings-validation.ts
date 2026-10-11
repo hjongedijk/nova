@@ -282,13 +282,24 @@ export function normalizeHelperPreferences(
   const morning = rituals?.morning as Record<string, unknown> | undefined;
   const evening = rituals?.evening as Record<string, unknown> | undefined;
   const checkIn = rituals?.checkIn as Record<string, unknown> | undefined;
+  const weeklyOverview = rituals?.weeklyOverview as
+    Record<string, unknown> | undefined;
   if (
     rituals !== undefined &&
     (!rituals || typeof rituals !== "object" || Array.isArray(rituals))
   )
     throw new ValidationError(["Ongeldige ritueelinstellingen."]);
   if (rituals) {
-    if (Object.keys(rituals).sort().join(",") !== "checkIn,evening,morning")
+    if (
+      Object.keys(rituals)
+        .filter((key) => key !== "weeklyOverview")
+        .sort()
+        .join(",") !== "checkIn,evening,morning" ||
+      (rituals.weeklyOverview !== undefined &&
+        (!weeklyOverview ||
+          typeof weeklyOverview !== "object" ||
+          Array.isArray(weeklyOverview)))
+    )
       throw new ValidationError(["Ongeldige ritueelinstellingen."]);
     for (const [item, field] of [
       [morning, "time"],
@@ -305,8 +316,15 @@ export function normalizeHelperPreferences(
       )
         throw new ValidationError(["Ongeldige ritueelinstellingen."]);
     }
+    if (weeklyOverview) {
+      if (
+        Object.keys(weeklyOverview).sort().join(",") !== "enabled,time" ||
+        typeof weeklyOverview.enabled !== "boolean"
+      )
+        throw new ValidationError(["Ongeldige ritueelinstellingen."]);
+    }
   }
-  for (const item of [morning, evening, checkIn])
+  for (const item of [morning, evening, checkIn, weeklyOverview])
     if (item && item.enabled !== undefined && typeof item.enabled !== "boolean")
       throw new ValidationError(["Ongeldige ritueelinstellingen."]);
   if (
@@ -399,6 +417,10 @@ export function normalizeHelperPreferences(
         enabled:
           typeof checkIn?.enabled === "boolean" ? checkIn.enabled : false,
         afterHours: ritualHours(checkIn?.afterHours),
+      },
+      weeklyOverview: {
+        enabled: weeklyOverview?.enabled === true,
+        time: ritualTime(weeklyOverview?.time, "18:00"),
       },
     },
     cues: {

@@ -2450,6 +2450,7 @@ describe("the helper overlay choice", () => {
         morning: { enabled: true, time: "07:30" },
         evening: { enabled: false, time: "22:00" },
         checkIn: { enabled: true, afterHours: 6 },
+        weeklyOverview: { enabled: false, time: "18:00" },
       },
       cues: {
         enabled: true,
@@ -2465,6 +2466,10 @@ describe("the helper overlay choice", () => {
     expect(await call("get", "/helper/preferences", undefined, {})).toEqual({
       status: 200,
       ...preferences,
+      rituals: {
+        ...preferences.rituals,
+        weeklyOverview: { enabled: false, time: "18:00" },
+      },
     });
     const invalid = [
       { ...preferences, shape: "unknown" },
