@@ -564,7 +564,7 @@ describe("the settings API", () => {
       expect(listed.status).toBe(200);
       expect(
         listed.body.available.map((entry: { id: string }) => entry.id).sort(),
-      ).toEqual(["arxiv", "context7", "filesystem", "sequential-thinking"]);
+      ).toEqual(["arxiv", "caldav", "context7", "filesystem", "sequential-thinking"]);
       expect(JSON.stringify(listed.body)).not.toMatch(/"command"|"args"|"env"/);
 
       const preparePath = "/api/settings/mcp/servers/context7/prepare-catalog";
