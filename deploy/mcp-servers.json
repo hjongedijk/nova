@@ -2,17 +2,51 @@
   "_comment": "MCP servers NOVA can use. Picked from github.com/punkpeye/awesome-mcp-servers. risk is the default for tools that do not declare readOnlyHint; CONFIRM means the user approves each call. Set enabled=false to switch a server off. env values may reference ${VARS} from .env; a server whose variables are unset stays offline.",
   "servers": {
     "sequential-thinking": {
+      "description": "Helpt NOVA een vraag stap voor stap te analyseren.",
+      "rights": "Levert alleen redeneerstappen; geen toegang tot je bestanden of accounts.",
+      "howToDisable": "Schakel deze server hier uit of zet enabled op false.",
       "command": "mcp-server-sequential-thinking",
       "risk": "READ_ONLY"
     },
     "context7": {
+      "description": "Zoekt actuele documentatie voor programmeerbibliotheken.",
+      "rights": "Leest publieke documentatie via internet.",
+      "howToDisable": "Schakel deze server hier uit of zet enabled op false.",
       "command": "context7-mcp",
       "risk": "READ_ONLY"
     },
     "filesystem": {
+      "description": "Geeft tools toegang tot de ingestelde werkruimte.",
+      "rights": "Kan bestanden in /data/workspace lezen en wijzigen na bevestiging.",
+      "howToDisable": "Schakel deze server hier uit of zet enabled op false.",
       "command": "mcp-server-filesystem",
       "args": ["/data/workspace"],
       "risk": "CONFIRM"
+    },
+    "arxiv": {
+      "description": "Zoekt wetenschappelijke artikelen en leest lokaal opgeslagen papers.",
+      "rights": "Zoekt openbare arXiv-metadata; downloads zijn lokaal in /data/arxiv.",
+      "howToDisable": "Schakel deze server hier uit of zet enabled op false.",
+      "command": "/opt/arxiv-mcp/bin/arxiv-mcp-server",
+      "args": ["--storage-path", "/data/arxiv"],
+      "risk": "CONFIRM",
+      "enabled": false,
+      "disabledTools": ["semantic_search", "reindex"],
+      "toolRisks": {
+        "search_papers": "READ_ONLY",
+        "get_abstract": "READ_ONLY",
+        "list_papers": "READ_ONLY",
+        "read_paper": "READ_ONLY",
+        "get_paper_outline": "READ_ONLY",
+        "read_paper_section": "READ_ONLY",
+        "search_paper_text": "READ_ONLY",
+        "get_paper_latex": "READ_ONLY",
+        "list_paper_latex_sections": "READ_ONLY",
+        "get_paper_latex_section": "READ_ONLY",
+        "citation_graph": "READ_ONLY",
+        "export_citations": "READ_ONLY",
+        "unwatch_topic": "DANGEROUS"
+      }
     }
   }
 }

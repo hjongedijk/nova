@@ -11,12 +11,20 @@ export const RISKS: readonly Risk[] = [
 
 /** One entry of `servers` in mcp-servers.json. */
 export interface McpServerSpec {
+  /** Safe settings-screen metadata; never used as an instruction to the model. */
+  description?: string;
+  rights?: string;
+  howToDisable?: string;
   command: string;
   args?: string[];
   /** Values may reference ${VARS}; a server whose variables are unset stays offline. */
   env?: Record<string, string>;
   /** Default risk for tools that do not declare readOnlyHint. Default CONFIRM. */
   risk?: string;
+  /** Reviewed risk overrides, keyed by the MCP server's original tool name. */
+  toolRisks?: Record<string, string>;
+  /** Remote tools reviewed as unavailable for this server. */
+  disabledTools?: string[];
   enabled?: boolean;
 }
 
