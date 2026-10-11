@@ -61,16 +61,16 @@ NOVA only talks to language models through [OmniRoute](https://github.com/diegos
 
 ## Memory
 
-| Variable                    | Default              | Meaning                                                                                                                               | Secret |
-| --------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| `NOVA_MEMORY_BACKEND`       | `qdrant`             | Long-term memory backend: `qdrant` or `omniroute` (OmniRoute's native keyword memory, no embeddings needed).                          | no     |
-| `QDRANT_URL`                | `http://qdrant:6333` | Qdrant address.                                                                                                                       | no     |
-| `QDRANT_COLLECTION`         | `jarvis_memory`      | Collection name. Use a new name when you change embedding model or dimensions.                                                        | no     |
-| `QDRANT_API_KEY`            | empty                | Qdrant API key, if you enabled one.                                                                                                   | yes    |
-| `EMBEDDING_GATEWAY_API_KEY` | empty                | Must be empty or match `OMNIROUTE_API_KEY`; a separate key is rejected until its provider and free-model policy can be verified.      | yes    |
-| `EMBEDDING_MODEL`           | empty                | Embedding model served by OmniRoute.                                                                                                  | no     |
-| `EMBEDDING_DIMENSIONS`      | `0`                  | Vector size of that model.                                                                                                            | no     |
-| `EMBEDDING_FREE_VERIFIED`   | `false`              | Set to `true` only when you verified that this embedding model is free for your account. Without it, Qdrant memory stays unavailable. | no     |
+| Variable                    | Default              | Meaning                                                                                                                                                  | Secret |
+| --------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `NOVA_MEMORY_BACKEND`       | `qdrant`             | Long-term memory backend: `qdrant` or `omniroute` (OmniRoute's native keyword memory, no embeddings needed).                                             | no     |
+| `QDRANT_URL`                | `http://qdrant:6333` | Qdrant address.                                                                                                                                          | no     |
+| `QDRANT_COLLECTION`         | `jarvis_memory`      | Semantic memory collection name. The document library gets its own derived collection. Use a new name when changing dimensions.                          | no     |
+| `QDRANT_API_KEY`            | empty                | Qdrant API key, if you enabled one.                                                                                                                      | yes    |
+| `EMBEDDING_GATEWAY_API_KEY` | empty                | Must be empty or match `OMNIROUTE_API_KEY`; a separate key is rejected until its provider and free-model policy can be verified.                         | yes    |
+| `EMBEDDING_MODEL`           | empty                | Embedding model served by OmniRoute.                                                                                                                     | no     |
+| `EMBEDDING_DIMENSIONS`      | `0`                  | Vector size of that model.                                                                                                                               | no     |
+| `EMBEDDING_FREE_VERIFIED`   | `false`              | Set to `true` only when you verified that this embedding model is free for your account. Without it, Qdrant memory and document search stay unavailable. | no     |
 
 Short-term conversation history (`memory.json`) always works and needs none of this.
 

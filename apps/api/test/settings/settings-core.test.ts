@@ -203,6 +203,7 @@ describe("abilities", () => {
     const groups = groupTools([
       { name: "timer_set", enabled: true },
       { name: "list_add", enabled: false },
+      { name: "documents_search", enabled: true },
       { name: "volledig_onbekend", enabled: true },
       { name: "skill_eigen", enabled: true },
     ]);
@@ -210,6 +211,9 @@ describe("abilities", () => {
     expect(planning?.state).toBe("partial");
     expect(planning?.total).toBe(2);
     expect(planning?.example).toBeTruthy();
+    expect(groups.find((group) => group.id === "documenten")?.tools).toEqual([
+      "documents_search",
+    ]);
     expect(groups.every((group) => group.total > 0)).toBe(true);
     expect(groups.find((group) => group.id === "overig")?.tools).toEqual([
       "volledig_onbekend",

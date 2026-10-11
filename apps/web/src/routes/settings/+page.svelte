@@ -27,6 +27,7 @@
   import QuickActionsEditor from "#components/settings/QuickActionsEditor.svelte";
   import ToolsList from "#components/settings/ToolsList.svelte";
   import AdminDialog from "#components/admin/AdminDialog.svelte";
+  import DocumentsLibrary from "#components/settings/DocumentsLibrary.svelte";
   import { stopMicTest } from "#components/settings/mic-test.ts";
   import {
     message,
@@ -213,6 +214,8 @@
               embedded
               initialView="memories"
             />
+            <DocumentsLibrary />
+          {:else if section === "documents"}<DocumentsLibrary />
           {:else if section === "safety"}<BehaviorTab part="approvals" />
           {:else if section === "system"}
             <UpdatesSection />

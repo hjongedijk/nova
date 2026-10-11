@@ -149,6 +149,35 @@ function readDocument(file: ChatAttachment): Promise<DocumentText> {
   });
 }
 
+export async function extractDocumentAttachments(
+  files: ChatAttachment[],
+): Promise<{ name: string; content: string; truncated: boolean }[]> {
+  return Promise.all(
+    files.map(async (file) => {
+      if (file.mimeType?.startsWith("image/"))
+        throw new ValidationError([
+          `${file.name}: afbeeldingen kunnen niet als document worden geïndexeerd.`,
+        ]);
+      const extracted =
+        file.encoding === "base64"
+          ? await readDocument(file)
+          : {
+              text: file.content.slice(0, 24000),
+              truncated: file.content.length > 24000,
+            };
+      if (!extracted.text.trim())
+        throw new ValidationError([
+          `${file.name}: geen leesbare tekst gevonden.`,
+        ]);
+      return {
+        name: sanitize(file.name),
+        content: sanitize(extracted.text),
+        truncated: extracted.truncated,
+      };
+    }),
+  );
+}
+
 /** Only bounded extracted text or validated image data reaches the model. */
 export async function attachmentMessage(
   files: ChatAttachment[],

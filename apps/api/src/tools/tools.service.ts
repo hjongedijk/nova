@@ -133,6 +133,11 @@ function auditArgs(
       queryCharacters:
         typeof args.query === "string" ? [...args.query].length : 0,
     };
+  if (name === "documents_search")
+    return {
+      queryCharacters:
+        typeof args.query === "string" ? [...args.query].length : 0,
+    };
   if (name === "node_red_flow")
     return {
       flow: args.flow,
@@ -175,6 +180,24 @@ export function noteAuditProjection(
     safeResult.count = payload.notes.length;
   if (!result.ok) safeResult.error = "Notes operation failed";
   return { arguments: auditArgs(name, args), result: safeResult };
+}
+
+export function documentAuditProjection(
+  name: string,
+  args: Record<string, unknown>,
+  result: ToolResult,
+): {
+  arguments: Record<string, unknown>;
+  result: Record<string, unknown>;
+} | null {
+  if (!name.startsWith("documents_")) return null;
+  const safe: Record<string, unknown> = { ok: result.ok };
+  const payload = result.result as
+    { results?: unknown[]; documents?: unknown[] } | undefined;
+  if (Array.isArray(payload?.results)) safe.count = payload.results.length;
+  if (Array.isArray(payload?.documents)) safe.count = payload.documents.length;
+  if (!result.ok) safe.error = "Document operation failed";
+  return { arguments: auditArgs(name, args), result: safe };
 }
 
 /**
@@ -338,12 +361,16 @@ export class ToolsService implements OnModuleInit {
       const privateMemory =
         name === "memory_remember" ? memoryAuditProjection(args, clean) : null;
       const privateNote = noteAuditProjection(name, args, clean);
+      const privateDocument = documentAuditProjection(name, args, clean);
       this.audit.record({
         sessionId,
         tool: name,
         arguments: codeTool(name)
           ? auditArgs(name, args)
-          : (privateMemory?.arguments ?? privateNote?.arguments ?? args),
+          : (privateMemory?.arguments ??
+            privateNote?.arguments ??
+            privateDocument?.arguments ??
+            args),
         risk,
         confirmation,
         result:
@@ -356,7 +383,10 @@ export class ToolsService implements OnModuleInit {
                   ? { status: clean.status }
                   : {}),
               }
-            : (privateMemory?.result ?? privateNote?.result ?? clean),
+            : (privateMemory?.result ??
+              privateNote?.result ??
+              privateDocument?.result ??
+              clean),
         verification: clean.verified ?? null,
         durationMs: Date.now() - started,
       });

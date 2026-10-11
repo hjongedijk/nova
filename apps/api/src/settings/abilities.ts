@@ -90,6 +90,14 @@ export const ABILITIES: AbilityDefinition[] = [
     match: /^memory_/,
   },
   {
+    id: "documenten",
+    name: "Documenten",
+    description:
+      "Zoek en beantwoord vragen over documenten die jij aan de bibliotheek hebt toegevoegd.",
+    example: "Wat staat er in mijn handleiding over de garantie?",
+    match: /^documents_/,
+  },
+  {
     id: "bestanden",
     name: "Bestanden en extensies",
     description:

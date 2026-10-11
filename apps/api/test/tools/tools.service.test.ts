@@ -17,6 +17,7 @@ import { ToolsModule } from "../../src/tools/tools.module.js";
 import {
   memoryAuditProjection,
   noteAuditProjection,
+  documentAuditProjection,
   ToolsService,
 } from "../../src/tools/tools.service.js";
 import {
@@ -534,5 +535,26 @@ describe("note audit projection", () => {
       { ok: true, result: { count: 1, notes: [{ excerpt: body }] } },
     );
     expect(JSON.stringify(search)).not.toContain("private family detail");
+  });
+});
+
+describe("document audit projection", () => {
+  it("keeps document queries, names, and excerpts out of action logs", () => {
+    const excerpt = "A private clause from the uploaded contract.";
+    const projected = documentAuditProjection(
+      "documents_search",
+      { query: "private contract clause" },
+      {
+        ok: true,
+        result: { results: [{ name: "contract.pdf", text: excerpt }] },
+      },
+    );
+    expect(projected).toEqual({
+      arguments: { queryCharacters: 23 },
+      result: { ok: true, count: 1 },
+    });
+    expect(JSON.stringify(projected)).not.toContain(excerpt);
+    expect(JSON.stringify(projected)).not.toContain("contract.pdf");
+    expect(JSON.stringify(projected)).not.toContain("private contract");
   });
 });

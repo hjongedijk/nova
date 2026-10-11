@@ -74,6 +74,12 @@ export const SECTIONS = [
     keywords: "onthouden vergeten persoonsgegevens",
   },
   {
+    id: "documents",
+    name: "Documentbibliotheek",
+    detail: "Upload privé documenten en doorzoek ze later in de chat.",
+    keywords: "documenten pdf docx upload bibliotheek qdrant bestanden",
+  },
+  {
     id: "safety",
     name: "Veiligheid",
     detail: "Bekijk en trek blijvende toestemmingen in.",

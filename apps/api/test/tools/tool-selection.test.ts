@@ -14,6 +14,8 @@ const tools = [
   makeTool("weather_forecast", "Get current weather and forecast."),
   makeTool("proxmox_guests", "List virtual machines on Proxmox."),
   makeTool("code_test", "Run a test in the isolated code workspace."),
+  makeTool("documents_search", "Search the user's uploaded private documents."),
+  makeTool("documents_list", "List documents in the private library."),
   ...Array.from({ length: 30 }, (_, index) =>
     makeTool(`unrelated_${index}`, `Manage unrelated integration ${index}.`),
   ),
@@ -51,5 +53,16 @@ describe("request tool selection", () => {
     expect(
       selectToolsForRequest(tools, "Vertel eens iets leuks", "conversation"),
     ).toEqual(tools);
+  });
+
+  it("selects document-library tools for questions about uploaded PDFs", () => {
+    const selected = selectToolsForRequest(
+      tools,
+      "Zoek in de documentbibliotheek mijn pdf over de warmtepomp",
+      "conversation",
+    );
+    expect(selected.map((tool) => tool.function.name)).toContain(
+      "documents_search",
+    );
   });
 });

@@ -113,6 +113,12 @@ export class SemanticMemoryService implements OnModuleInit, OnModuleDestroy {
     return this.qdrantBackend;
   }
 
+  /** Remote, verified-free embedder shared with the separate document collection. */
+  get documentEmbeddings(): RemoteEmbeddings | null {
+    const backend = this.qdrant;
+    return backend instanceof QdrantMemory ? backend.embeddings : null;
+  }
+
   private get omniroute(): SemanticBackend {
     return (this.omnirouteBackend ??= new OmniRouteMemory(this.management));
   }
