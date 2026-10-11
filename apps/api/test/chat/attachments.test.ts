@@ -30,6 +30,29 @@ describe("chat attachments", () => {
       .spyOn(app.get(OmniRouteClient), "configured", "get")
       .mockReturnValue(true);
     vi.spyOn(app.get(OmniRouteClient), "call").mockImplementation(model);
+    vi.spyOn(app.get(ToolsService), "execute").mockImplementation(
+      async (name) =>
+        name === "wikipedia"
+          ? {
+              ok: true,
+              result: {
+                title: "Fotosynthese",
+                summary: "Omzetting van licht in chemische energie.",
+                url: "https://nl.wikipedia.org/wiki/Fotosynthese",
+              },
+            }
+          : {
+              ok: true,
+              result: {
+                amount: 10,
+                from: "EUR",
+                to: "USD",
+                converted: 11.25,
+                date: "2026-10-12",
+                source: "European Central Bank",
+              },
+            },
+    );
     vi.spyOn(app.get(RoutingService), "assertFree").mockReturnValue(
       app.get(RoutingService).status(),
     );
@@ -87,6 +110,22 @@ describe("chat attachments", () => {
           })
           .expect(201);
         expect(conversion.text).toContain("6,213712 mijl.");
+        const currency = await request(app.getHttpServer())
+          .post(`/api/${endpoint}`)
+          .send({
+            sessionId: `local-currency-${endpoint}`,
+            message: "Convert 10 EUR to USD",
+          })
+          .expect(201);
+        expect(currency.text).toContain("10 EUR = 11.25 USD");
+        const definition = await request(app.getHttpServer())
+          .post(`/api/${endpoint}`)
+          .send({
+            sessionId: `local-definition-${endpoint}`,
+            message: "Definieer fotosynthese",
+          })
+          .expect(201);
+        expect(definition.text).toContain("Volgens Wikipedia: Fotosynthese.");
         expect(model).not.toHaveBeenCalled();
       } finally {
         configured.mockReturnValue(true);

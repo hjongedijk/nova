@@ -4,6 +4,14 @@ import {
   directConversion,
   directConversionReply,
 } from "../../src/chat/direct-conversion.js";
+import {
+  directDefinitionQuery,
+  directDefinitionReply,
+} from "../../src/chat/direct-definition.js";
+import {
+  directCurrencyQuery,
+  directCurrencyReply,
+} from "../../src/chat/direct-currency.js";
 import { OrchestratorService } from "../../src/chat/orchestrator.service.js";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import type { RoutingService } from "../../src/routing/routing.service.js";
@@ -63,6 +71,80 @@ describe("direct calculator requests", () => {
     expect(directConversionReply(result!, "en")).toBe("6.213712 mile.");
   });
 
+  it.each([
+    ["Wat betekent fotosynthese?", "fotosynthese", "nl"],
+    ["Zoek op Mount Everest", "Mount Everest", "nl"],
+    ["Define photosynthesis", "photosynthesis", "en"],
+    ["Look up photosynthesis", "photosynthesis", "en"],
+    ["What does gravity mean?", "gravity", "en"],
+  ])(
+    "recognizes explicit definition request %s",
+    (message, query, language) => {
+      expect(directDefinitionQuery(message)).toEqual({ query, language });
+    },
+  );
+
+  it.each([
+    "Wat gebeurt er vandaag?",
+    "Define https://example.com/private",
+    "What does user@example.com mean?",
+  ])(
+    "does not send an ordinary or private query to Wikipedia: %s",
+    (message) => {
+      expect(directDefinitionQuery(message)).toBeNull();
+    },
+  );
+
+  it("answers from a bounded Wikipedia summary and adds a source link only in text", () => {
+    const result = {
+      title: "Fotosynthese",
+      summary: "Fotosynthese is de omzetting van licht in chemische energie.",
+      url: "https://nl.wikipedia.org/wiki/Fotosynthese",
+    };
+    expect(directDefinitionReply(result, "nl")).toContain(
+      "Volgens Wikipedia: Fotosynthese.",
+    );
+    expect(directDefinitionReply(result, "nl")).toContain(
+      "[Fotosynthese](https://nl.wikipedia.org/wiki/Fotosynthese)",
+    );
+    expect(directDefinitionReply(result, "nl", true)).not.toContain("https://");
+  });
+
+  it.each([
+    ["Convert 10 EUR to USD", 10, "EUR", "USD", "en"],
+    ["Converteer 25,5 USD naar EUR", 25.5, "USD", "EUR", "nl"],
+  ])(
+    "recognizes explicit currency request %s",
+    (message, amount, from, to, language) => {
+      expect(directCurrencyQuery(message)).toEqual({
+        amount,
+        from,
+        to,
+        language,
+      });
+    },
+  );
+
+  it("does not guess currency words without three-letter codes", () => {
+    expect(directCurrencyQuery("Convert 10 pounds to euros")).toBeNull();
+  });
+
+  it("includes source and date in a localized currency result", () => {
+    expect(
+      directCurrencyReply(
+        {
+          amount: 10,
+          from: "EUR",
+          to: "USD",
+          converted: 11.25,
+          source: "European Central Bank",
+          date: "2026-10-12",
+        },
+        "en",
+      ),
+    ).toBe("10 EUR = 11.25 USD (European Central Bank (2026-10-12)).");
+  });
+
   function harness() {
     const client = {
       call: vi.fn().mockResolvedValue({
@@ -86,6 +168,31 @@ describe("direct calculator requests", () => {
     const tools = {
       list: vi.fn().mockReturnValue([]),
       forModel: vi.fn().mockReturnValue([]),
+      execute: vi.fn().mockImplementation((name: string) =>
+        Promise.resolve(
+          name === "wikipedia"
+            ? {
+                ok: true,
+                result: {
+                  title: "Photosynthesis",
+                  summary: "Plants convert light into chemical energy.",
+                  url: "https://en.wikipedia.org/wiki/Photosynthesis",
+                },
+              }
+            : {
+                ok: true,
+                result: {
+                  amount: 10,
+                  from: "EUR",
+                  to: "USD",
+                  rate: 1.125,
+                  converted: 11.25,
+                  date: "2026-10-12",
+                  source: "European Central Bank",
+                },
+              },
+        ),
+      ),
     } as unknown as ToolsService;
     const routing = {
       assertFree: vi.fn(),
@@ -100,7 +207,7 @@ describe("direct calculator requests", () => {
       confirmationHandler,
       context,
     );
-    return { service, client, confirmations, context, routing };
+    return { service, client, confirmations, context, routing, tools };
   }
 
   it("answers typed arithmetic locally without routing or building model context", async () => {
@@ -133,6 +240,56 @@ describe("direct calculator requests", () => {
       { event: "route", data: { role: "conversation" } },
       { event: "token", data: { text: "The answer is 21." } },
     ]);
+    expect(client.call).not.toHaveBeenCalled();
+  });
+
+  it("uses the read-only Wikipedia tool directly for explicit English definitions", async () => {
+    const { service, client, context, routing, tools } = harness();
+    const reply = await service.run({
+      sessionId: "direct-definition",
+      message: "Define photosynthesis",
+      responseLanguage: "en",
+    });
+    expect(reply.reply).toContain("According to Wikipedia: Photosynthesis.");
+    expect(reply.reply).toContain(
+      "[Photosynthesis](https://en.wikipedia.org/wiki/Photosynthesis)",
+    );
+    expect(reply.model).toBeNull();
+    expect(tools.execute).toHaveBeenCalledWith(
+      "wikipedia",
+      { query: "photosynthesis", language: "en" },
+      "direct-definition",
+    );
+    expect(client.call).not.toHaveBeenCalled();
+    expect(context.build).not.toHaveBeenCalled();
+    expect(routing.assertFree).not.toHaveBeenCalled();
+  });
+
+  it("uses the current exchange-rate tool directly without an LLM call", async () => {
+    const { service, client, tools, routing } = harness();
+    const reply = await service.run({
+      sessionId: "direct-currency",
+      message: "Convert 10 EUR to USD",
+    });
+    expect(reply.reply).toContain("10 EUR = 11.25 USD");
+    expect(reply.reply).toContain("European Central Bank (2026-10-12)");
+    expect(tools.execute).toHaveBeenCalledWith(
+      "currency_convert",
+      { amount: 10, from: "EUR", to: "USD" },
+      "direct-currency",
+    );
+    expect(client.call).not.toHaveBeenCalled();
+    expect(routing.assertFree).not.toHaveBeenCalled();
+  });
+
+  it("does not send secret-shaped terms to Wikipedia", async () => {
+    const { service, tools, client } = harness();
+    const reply = await service.run({
+      sessionId: "private-definition",
+      message: "Define password: hunter2",
+    });
+    expect(reply.reply).toContain("sensitive information");
+    expect(tools.execute).not.toHaveBeenCalled();
     expect(client.call).not.toHaveBeenCalled();
   });
 

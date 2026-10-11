@@ -1,6 +1,12 @@
 import { attachmentMessage } from "./attachments.js";
 import { directAnswer } from "./direct-answer.js";
+import {
+  directDefinitionQuery,
+  directDefinitionReply,
+} from "./direct-definition.js";
+import { directCurrencyQuery, directCurrencyReply } from "./direct-currency.js";
 import { Injectable } from "@nestjs/common";
+import { sanitize } from "../core/security/sanitize.js";
 import type {
   ChatAttachment,
   CommunicationPreference,
@@ -245,6 +251,53 @@ export class OrchestratorService {
       if (reply !== null) {
         this.confirmations.cancel(sessionId);
         const role = modelRole ?? "conversation";
+        if (stream) {
+          emit("route", { role });
+          emit("token", { text: reply });
+        }
+        return { reply, model: null, usage: null, role };
+      }
+      const currency = directCurrencyQuery(message, responseLanguage);
+      if (currency) {
+        this.confirmations.cancel(sessionId);
+        const role = modelRole ?? "conversation";
+        const result = await this.tools.execute(
+          "currency_convert",
+          { amount: currency.amount, from: currency.from, to: currency.to },
+          sessionId,
+        );
+        const currencyReply = directCurrencyReply(
+          result.ok ? result.result : null,
+          currency.language,
+        );
+        if (stream) {
+          emit("route", { role });
+          emit("token", { text: currencyReply });
+        }
+        return { reply: currencyReply, model: null, usage: null, role };
+      }
+      const definition = directDefinitionQuery(message, responseLanguage);
+      if (definition) {
+        this.confirmations.cancel(sessionId);
+        const role = modelRole ?? "conversation";
+        let reply: string;
+        if (sanitize(definition.query) !== definition.query) {
+          reply =
+            definition.language === "en"
+              ? "I can't send a definition request that contains sensitive information to a public source."
+              : "Ik stuur geen zoekopdracht met gevoelige gegevens naar een openbare bron.";
+        } else {
+          const result = await this.tools.execute(
+            "wikipedia",
+            { query: definition.query, language: definition.language },
+            sessionId,
+          );
+          reply = directDefinitionReply(
+            result.ok ? result.result : null,
+            definition.language,
+            input.inputMode === "voice",
+          );
+        }
         if (stream) {
           emit("route", { role });
           emit("token", { text: reply });
