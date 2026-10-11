@@ -265,6 +265,9 @@ export class OrchestratorService {
           "currency_convert",
           { amount: currency.amount, from: currency.from, to: currency.to },
           sessionId,
+          null,
+          false,
+          signal,
         );
         const currencyReply = directCurrencyReply(
           result.ok ? result.result : null,
@@ -291,6 +294,9 @@ export class OrchestratorService {
             "wikipedia",
             { query: definition.query, language: definition.language },
             sessionId,
+            null,
+            false,
+            signal,
           );
           reply = directDefinitionReply(
             result.ok ? result.result : null,
@@ -438,7 +444,15 @@ export class OrchestratorService {
         const name = call.function.name;
         const args = parseToolArguments(call.function.arguments);
         emit("tool_start", { name, step: completedSteps + 1 });
-        const result = await this.tools.execute(name, args, sessionId);
+        const result = await this.tools.execute(
+          name,
+          args,
+          sessionId,
+          null,
+          false,
+          signal,
+        );
+        if (signal?.aborted) throw new Error("Request cancelled");
         completedSteps++;
         emit("tool_result", {
           name,

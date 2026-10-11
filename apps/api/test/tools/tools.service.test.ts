@@ -36,6 +36,7 @@ let effectiveRisk: "CONFIRM" | "DANGEROUS" = "CONFIRM";
 let changedSchema = false;
 let approvalRevision = "initial-execution";
 const ran: { name: string; args: Record<string, unknown> }[] = [];
+let activeToolSignal: AbortSignal | null = null;
 
 @ToolSourceProvider()
 class FakeSource implements ToolSource {
@@ -69,6 +70,12 @@ class FakeSource implements ToolSource {
         risk: "READ_ONLY",
       },
       {
+        name: "fake_wait",
+        description: "Waits until cancelled",
+        parameters: schema(),
+        risk: "READ_ONLY",
+      },
+      {
         name: "fake_off",
         description: "Not configured",
         parameters: schema(),
@@ -89,8 +96,19 @@ class FakeSource implements ToolSource {
   async execute(
     name: string,
     args: Record<string, unknown>,
+    call: { signal: AbortSignal },
   ): Promise<ToolResult> {
     ran.push({ name, args });
+    if (name === "fake_wait") {
+      activeToolSignal = call.signal;
+      return new Promise((resolve) => {
+        call.signal.addEventListener(
+          "abort",
+          () => resolve({ ok: false, error: "cancelled" }),
+          { once: true },
+        );
+      });
+    }
     if (name === "fake_broken")
       return { nothing: true } as unknown as ToolResult;
     return { ok: true, result: { name, args } };
@@ -123,6 +141,7 @@ describe("ToolsService", () => {
     effectiveRisk = "CONFIRM";
     changedSchema = false;
     approvalRevision = "initial-execution";
+    activeToolSignal = null;
     settings.update((next) => {
       next.standingApprovals = [];
     });
@@ -138,6 +157,7 @@ describe("ToolsService", () => {
       "fake_read",
       "fake_restart",
       "fake_broken",
+      "fake_wait",
       "fake_off",
     ]);
     expect(tools.list().find((tool) => tool.name === "fake_off")?.enabled).toBe(
@@ -156,6 +176,22 @@ describe("ToolsService", () => {
     );
     expect(result.ok).toBe(true);
     expect(ran[0]?.args).toEqual({ vmid: 104 });
+  });
+
+  it("passes chat cancellation into an active tool", async () => {
+    const controller = new AbortController();
+    const pending = tools.execute(
+      "fake_wait",
+      {},
+      "stop-session",
+      null,
+      false,
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(activeToolSignal).not.toBeNull());
+    controller.abort();
+    expect((await pending).error).toBe("cancelled");
+    expect(activeToolSignal?.aborted).toBe(true);
   });
 
   it("refuses invalid arguments with a reason, without running anything", async () => {

@@ -370,6 +370,7 @@ export class ToolsService implements OnModuleInit {
     sessionId: string,
     approved: PendingConfirmation | null = null,
     always = false,
+    parentSignal?: AbortSignal,
   ): Promise<ToolResult> {
     const started = Date.now();
     let args: Record<string, unknown> = (rawArgs ?? {}) as Record<
@@ -482,9 +483,12 @@ export class ToolsService implements OnModuleInit {
     args = cleaned as Record<string, unknown>;
 
     try {
-      const signal = AbortSignal.timeout(
+      const timeout = AbortSignal.timeout(
         Math.min(tool.definition.timeoutMs, this.config.toolTimeoutMs),
       );
+      const signal = parentSignal
+        ? AbortSignal.any([parentSignal, timeout])
+        : timeout;
       const call = { sessionId, signal };
       let plan: ToolPlan = { args, risk };
       if (tool.source.prepare) {

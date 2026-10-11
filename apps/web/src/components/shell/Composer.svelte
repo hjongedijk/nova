@@ -5,6 +5,7 @@
   import { cards } from "#lib/chat/cards.svelte.ts";
   import { installReveal } from "#lib/modes/reveal.ts";
   import { ask, chat } from "#lib/stores/chat.svelte.ts";
+  import { cancelActiveAsk } from "#lib/chat/ask.ts";
   import {
     maybeHide,
     setChromeBusy,
@@ -13,6 +14,9 @@
   import { dialogs } from "#lib/stores/dialogs.svelte.ts";
   import { shell } from "#lib/stores/shell.svelte.ts";
   import { pressCore } from "#lib/voice/core.ts";
+  import { stopSpeaking } from "#lib/voice/speaker.ts";
+  import { stopListening } from "#lib/voice/recognition.ts";
+  import { cancelAwait } from "#lib/voice/wake.ts";
   import type { ModelRoleId } from "@nova/contracts";
   import {
     getConversationLanguage,
@@ -29,6 +33,13 @@
 
   function changeLanguage(value: "nl" | "en"): void {
     responseLanguage = setConversationLanguage(value);
+  }
+
+  function stopAll(): void {
+    stopSpeaking();
+    stopListening();
+    cancelAwait();
+    cancelActiveAsk();
   }
 
   function selectFiles(event: Event) {
@@ -175,6 +186,20 @@
       <path d="M12 19V5M5 12l7-7 7 7" />
     </svg>
   </button>
+  {#if chat.busy || chat.uiState === "speaking"}
+    <button
+      id="stopButton"
+      class="icon stop"
+      type="button"
+      aria-label={responseLanguage === "en" ? "Stop everything" : "Stop alles"}
+      title={responseLanguage === "en" ? "Stop everything" : "Stop alles"}
+      onclick={stopAll}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="6" y="6" width="12" height="12" rx="2" />
+      </svg>
+    </button>
+  {/if}
   {#if attachments.length || fileError || reading}
     <div class="attachments" aria-live="polite">
       {#each attachments as file, i (file)}
@@ -220,6 +245,9 @@
   }
   .language-select {
     max-width: 140px;
+  }
+  .stop {
+    color: #ff897f;
   }
   .attachments {
     flex-basis: 100%;
