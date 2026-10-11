@@ -1,11 +1,11 @@
 <#
 Run once in an elevated PowerShell on the Windows PC:
-  powershell -ExecutionPolicy Bypass -File .\install.ps1 -JarvisHost <nova-host-ip>
+  powershell -ExecutionPolicy Bypass -File .\install.ps1 -NovaHost <nova-host-ip>
 Creates agent.json (with a random token), opens the firewall for the NOVA host
 only, and registers a logon task so the agent runs in your desktop session.
 #>
 param(
-  [Parameter(Mandatory = $true)][string]$JarvisHost,
+  [Parameter(Mandatory = $true)][Alias('JarvisHost')][string]$NovaHost,
   [int]$Port = 8765
 )
 $ErrorActionPreference = 'Stop'
@@ -17,16 +17,17 @@ if (-not (Test-Path $configPath)) {
   $token = -join ($bytes | ForEach-Object { $_.ToString('x2') })
   $config = Get-Content -Raw (Join-Path $dir 'agent.example.json') | ConvertFrom-Json
   $config.token = $token
-  $config.allowedIps = @($JarvisHost)
+  $config.allowedIps = @($NovaHost)
   $config | ConvertTo-Json -Depth 6 | Set-Content -Path $configPath -Encoding UTF8
   # Only the current user and administrators may read the token.
   icacls $configPath /inheritance:r /grant:r "${env:USERNAME}:(R)" 'Administrators:(F)' | Out-Null
 }
 $token = (Get-Content -Raw $configPath | ConvertFrom-Json).token
 netsh http add urlacl url="http://+:$Port/" user="$env:USERDOMAIN\$env:USERNAME" | Out-Null
+Remove-NetFirewallRule -DisplayName 'NOVA Windows agent' -ErrorAction SilentlyContinue
 Remove-NetFirewallRule -DisplayName 'Jarvis agent' -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName 'Jarvis agent' -Direction Inbound -Protocol TCP -LocalPort $Port -RemoteAddress $JarvisHost -Action Allow | Out-Null
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$dir\jarvis-agent.ps1`" -Port $Port"
+New-NetFirewallRule -DisplayName 'NOVA Windows agent' -Direction Inbound -Protocol TCP -LocalPort $Port -RemoteAddress $NovaHost -Action Allow | Out-Null
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$dir\nova-agent.ps1`" -Port $Port"
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 Unregister-ScheduledTask -TaskName 'JarvisAgent' -Confirm:$false -ErrorAction SilentlyContinue

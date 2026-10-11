@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $failed = $false
 
-foreach ($file in 'jarvis-agent.ps1', 'install.ps1') {
+foreach ($file in 'nova-agent.ps1', 'jarvis-agent.ps1', 'install.ps1') {
   $errors = $null; $tokens = $null
   [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $root $file), [ref]$tokens, [ref]$errors)
   if ($errors.Count) {
@@ -13,7 +13,7 @@ foreach ($file in 'jarvis-agent.ps1', 'install.ps1') {
   } else { Write-Host "${file}: syntax ok" }
 }
 
-$text = Get-Content -Raw (Join-Path $root 'jarvis-agent.ps1')
+$text = Get-Content -Raw (Join-Path $root 'nova-agent.ps1')
 $start = $text.IndexOf("Add-Type @'") + "Add-Type @'".Length
 $end = $text.IndexOf("`n'@", $start)
 $code = $text.Substring($start, $end - $start)
@@ -41,6 +41,26 @@ if (-not $failed) {
     # Not Windows: the user32 calls cannot run here, compiling was the check.
     Write-Host 'NovaHelper: compiles (Win32 calls need Windows)'
   } catch { $failed = $true; Write-Host "NovaHelper: $($_.Exception.Message)" }
+  # Source-level placement invariants: native behavior needs a Windows desktop to validate live.
+  $setupMatch = [regex]::Match($code, '(?s)public\s+static\s+void\s+Setup\s*\(IntPtr\s+h\)\s*\{(.*?)\n  \}')
+  if (-not $setupMatch.Success -or
+      $setupMatch.Groups[1].Value -notmatch '(?s)GetWindowLong\(h,\s*-16\)\s*&\s*~\s*\(\s*0x00C00000\s*\|\s*0x00040000' -or
+      $setupMatch.Groups[1].Value -notmatch '(?s)SetWindowLong\(h,\s*-20,\s*\(\s*GetWindowLong\(h,\s*-20\)\s*\|\s*0x00000080\s*\)\s*&\s*~0x00040000') {
+    $failed = $true
+    Write-Host 'NovaHelper.Setup: must strip caption/sizing frame and set TOOLWINDOW while clearing APPWINDOW'
+  } else { Write-Host 'NovaHelper.Setup: caption, sizing frame and taskbar styles checked' }
+  $applyMatch = [regex]::Match($code, '(?s)static\s+void\s+Apply\s*\(IntPtr\s+h,.*?\)\s*\{(.*?)\n  \}')
+  if (-not $applyMatch.Success -or $applyMatch.Groups[1].Value -notmatch 'SetWindowPos\(h,\s*TOPMOST\s*,') {
+    $failed = $true
+    Write-Host 'NovaHelper.Apply: SetWindowPos must keep the helper TOPMOST'
+  } else { Write-Host 'NovaHelper.Apply: TOPMOST placement checked' }
+  foreach ($measurement in 'requested=', 'monitor=', 'work=', 'dpi=', 'scale=', 'caption=', 'sizingFrame=', 'toolWindow=', 'appWindow=', 'topmost=') {
+    if ($code -notmatch [regex]::Escape($measurement)) { $failed = $true; Write-Host "NovaHelper.Debug: missing $measurement measurement" }
+  }
+  $debugRoute = $text.IndexOf("'/v1/helper-debug'")
+  $debugAction = if ($debugRoute -ge 0) { $text.IndexOf('[NovaHelper]::Debug', $debugRoute) } else { -1 }
+  if ($debugRoute -lt 0 -or $debugAction -lt $debugRoute) { $failed = $true; Write-Host 'Helper debug endpoint: native measurements are not returned' }
+  else { Write-Host 'NovaHelper.Debug: placement, DPI and window styles exposed by /v1/helper-debug' }
   $same = { param($a, $b) (($a -join ',') -eq ($b -join ',')) }
   $l = [NovaHelper]::Layout(100, 0, 360, 44, 0, 0, 0, 0)
   if (-not (& $same $l @(100, 0, 360, 44))) { $failed = $true; Write-Host 'NovaHelper.Layout: rectangle differs' }
@@ -51,9 +71,17 @@ if (-not $failed) {
   else { Write-Host 'NovaHelper.Layout: rectangular visible bounds ok' }
   # The security flags and the chrome fallback are pure functions of the script: run them from its own source.
   $ast = [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)
+  $openHelper = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Open-Helper' }, $true) | Select-Object -First 1
+  $openHelperText = if ($openHelper) { $openHelper.Extent.Text } else { '' }
+  $screenCall = [regex]::Match($openHelperText, '(?m)\$screen\s*=\s*Get-HelperScreen\s+\$display\b')
+  $rectCall = [regex]::Match($openHelperText, '(?m)\$rect\s*=\s*Get-HelperRect\s+\$screen\s+\$view\b')
+  if (-not $openHelper -or -not $screenCall.Success -or -not $rectCall.Success -or $rectCall.Index -le $screenCall.Index) {
+    $failed = $true
+    Write-Host 'Open-Helper: must select Get-HelperScreen before Get-HelperRect using that screen'
+  } else { Write-Host 'Open-Helper: selected screen drives helper rectangle' }
   foreach ($fn in 'Get-EdgeSecurityArgs', 'Get-HelperChrome', 'Get-HelperGeometry', 'Get-ModeState', 'Save-ModeState', 'ConvertTo-HelperHotkeys', 'ConvertTo-HelperNotification', 'Send-HelperNotification', 'Get-PersistedHelperView') {
     $def = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $fn }, $true) | Select-Object -First 1
-    if (-not $def) { $failed = $true; Write-Host "jarvis-agent.ps1: function $fn is missing" } else { . ([scriptblock]::Create($def.Extent.Text)) }
+    if (-not $def) { $failed = $true; Write-Host "nova-agent.ps1: function $fn is missing" } else { . ([scriptblock]::Create($def.Extent.Text)) }
   }
   if (@(Get-EdgeSecurityArgs 'https://nova.example.nl').Count -ne 0) { $failed = $true; Write-Host 'Edge flags: https must not get the unsupported-flag switch' }
   elseif ((@(Get-EdgeSecurityArgs 'http://192.168.1.2:8080') -join ' ') -notmatch 'unsafely-treat-insecure-origin-as-secure=http://192.168.1.2:8080 --test-type') { $failed = $true; Write-Host 'Edge flags: http must get the switch with --test-type' }
@@ -161,9 +189,9 @@ if (-not $failed) {
   } finally { [System.IO.Directory]::Delete($storeDirectory, $true) }
 
   foreach ($route in "'/v1/mode'", "'/v1/helper/size'", "'/v1/status'", "'/v1/displays'") {
-    if (-not $text.Contains($route)) { $failed = $true; Write-Host "jarvis-agent.ps1: route $route is missing" }
+    if (-not $text.Contains($route)) { $failed = $true; Write-Host "nova-agent.ps1: route $route is missing" }
   }
-  if ($text -notmatch "\$agentVersion = '\d{4}-\d{2}-\d{2}\.\d+'") { $failed = $true; Write-Host 'jarvis-agent.ps1: agent version string not found' }
+  if ($text -notmatch "\$agentVersion = '\d{4}-\d{2}-\d{2}\.\d+'") { $failed = $true; Write-Host 'nova-agent.ps1: agent version string not found' }
   # Every mode the agent accepts must be one NOVA sends (contracts: HelperMode).
   # (Skipped when only the agent folder is mounted, as in the docker one-liner.)
   $contractsFile = Join-Path $root '../../packages/contracts/src/settings.ts'
@@ -221,5 +249,12 @@ public class FakeDevTools {
     $failed = $true
     Write-Host "NovaCdp test: $($_.Exception.Message)"
   }
+}
+$legacy = Get-Content -Raw (Join-Path $root 'jarvis-agent.ps1')
+$installer = Get-Content -Raw (Join-Path $root 'install.ps1')
+if ($legacy -notmatch "nova-agent\.ps1") { $failed = $true; Write-Host 'jarvis-agent.ps1: compatibility launcher target is missing' }
+if ($installer -notmatch "nova-agent\.ps1" -or $installer -notmatch "Alias\('JarvisHost'\)") {
+  $failed = $true
+  Write-Host 'install.ps1: new agent path or legacy host argument alias is missing'
 }
 if ($failed) { exit 1 }

@@ -1,6 +1,6 @@
 # Windows agent
 
-The Windows agent (`agents/windows/jarvis-agent.ps1`, agent version `2026-10-06.5`) is a small authenticated HTTP service written in PowerShell with embedded C#. It runs in your own desktop session on a Windows PC and lets NOVA:
+The Windows agent (`agents/windows/nova-agent.ps1`, agent version `2026-10-11.1`) is a small authenticated HTTP service written in PowerShell with embedded C#. It runs in your own desktop session on a Windows PC and lets NOVA:
 
 - open (and, with confirmation, close) programs from an allow-list, open `http(s)` URLs and lock the screen,
 - show NOVA as a **living wallpaper** behind the desktop icons, per display,
@@ -9,7 +9,7 @@ The Windows agent (`agents/windows/jarvis-agent.ps1`, agent version `2026-10-06.
 
 It is the only agent; there is no separate browser agent. The (Dutch) texts inside the agent and the NOVA interface are in Dutch.
 
-> The agent uses only what ships with Windows (PowerShell, Microsoft Edge, Win32 through embedded C#). It cannot be run or tested on Linux; see [What is unverified](#what-is-unverified).
+> The agent uses only what ships with Windows (PowerShell, Microsoft Edge, Win32 through embedded C#). It needs Windows for real desktop, window-manager, microphone and task-scheduler behavior; Linux CI runs PowerShell parsing and embedded C# checks only. See [What is unverified](#what-is-unverified).
 
 ## Install
 
@@ -17,10 +17,10 @@ It is the only agent; there is no separate browser agent. The (Dutch) texts insi
 2. Open an **elevated** PowerShell in that folder and run:
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File .\install.ps1 -JarvisHost <nova-host-ip>
+   powershell -ExecutionPolicy Bypass -File .\install.ps1 -NovaHost <nova-host-ip>
    ```
 
-   `<nova-host-ip>` is the IP address of the machine that runs NOVA, as the PC sees it. The parameter is still called `-JarvisHost` for historical reasons. An optional `-Port` (default `8765`) changes the agent port.
+   `<nova-host-ip>` is the IP address of the machine that runs NOVA, as the PC sees it. The old `-JarvisHost` parameter remains an alias for existing install instructions. An optional `-Port` (default `8765`) changes the agent port.
 
 3. The script prints two lines. Put them in the `.env` of your NOVA install and recreate the container (`docker compose up -d nova`):
 
@@ -33,12 +33,12 @@ What `install.ps1` does:
 
 - creates `agent.json` from `agent.example.json` with a random 64-character hex token and `allowedIps` set to the NOVA host (only when `agent.json` does not exist yet), and restricts read access to the file to you and Administrators,
 - registers a URL reservation for the port,
-- creates the firewall rule `Jarvis agent` that only allows the NOVA host to reach the port,
+- creates the firewall rule `NOVA Windows agent` that only allows the NOVA host to reach the port,
 - registers the scheduled task `JarvisAgent` (at logon, current user, limited rights, so it runs in your desktop session) and starts it.
 
-The names `Jarvis agent` and `JarvisAgent` are historical and are kept so that existing installs keep working.
+The task name `JarvisAgent` is retained for existing installs; the old firewall rule is removed during installation.
 
-The agent refuses to start if the token in `agent.json` is shorter than 24 characters. It restarts itself without a visible window; starting it again ends the older copy, so an update is: replace `jarvis-agent.ps1` (NOVA offers the current file at **Settings, More**, or at `/windows-agent/jarvis-agent.ps1`) and run the `JarvisAgent` task again.
+The agent refuses to start if the token in `agent.json` is shorter than 24 characters. It restarts itself without a visible window; starting it again ends the older copy, so an update is: replace the implementation in the existing `jarvis-agent.ps1` path using the compatibility download `/windows-agent/jarvis-agent.ps1`, then run the `JarvisAgent` task again. New installs use `nova-agent.ps1`; NOVA also serves it at `/windows-agent/nova-agent.ps1`. The installer updates the existing `JarvisAgent` task to point to the new filename.
 
 ## Security
 
@@ -95,7 +95,16 @@ The helper uses a dedicated Edge fullscreen kiosk window at `<NOVA>/helper`. NOV
 | Chat                                    | 640 × 340          |
 | Confirmation                            | 640 × 170          |
 
-Geometry converts CSS pixels using the target monitor's DPI, centers on that monitor (including negative desktop coordinates), and compensates invisible native borders. Small displays clamp the panel to available dimensions. Size transitions take 200 ms without overshoot; reduced motion applies the target directly. `/v1/helper-debug` reports actual/native extended bounds, expected visible bounds, measured browser chrome, DPI, display, view and hidden state. Measurements expose caption problems rather than hiding them behind a clipping region.
+Geometry converts CSS pixels using the target monitor's DPI, centers on that monitor (including negative desktop coordinates), and compensates invisible native borders. Small displays clamp the panel to available dimensions. Size transitions take 200 ms without overshoot; reduced motion applies the target directly. `/v1/helper-debug` reports requested and native window bounds, the DWM visible frame, measured browser chrome, DPI/scale, visibility, caption and sizing-frame flags, toolwindow/appwindow and topmost state, plus selected display/view. Measurements expose caption problems rather than hiding them behind a clipping region.
+
+On Windows, after opening the helper, capture the measurements without revealing the agent token:
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:WINDOWS_AGENT_TOKEN" }
+Invoke-RestMethod "$env:WINDOWS_AGENT_URL/v1/helper-debug" -Headers $headers | ConvertTo-Json -Depth 4
+```
+
+For the kiosk helper, check `visible=True`, `caption=False`, `sizingFrame=False`, `toolWindow=True`, `appWindow=False`, `topmost=True`, and compare `extended` against the selected display and `requested` bounds. Check `dpi`/`scale` on each monitor; repeat at 100%, 150% and 200% where available.
 
 After 12 seconds without typing, files, speech, a pending confirmation or open settings, autohide resizes the window to a 3 CSS-pixel strip at the monitor's top. It never moves into a monitor above it. Entering the strip restores the compact panel; activity/notifications restore content. Disable autohide with the gear. Actual Windows kiosk resizing and minimum strip height still need manual verification.
 
@@ -119,7 +128,7 @@ Agent endpoints (bearer token/source-address checks apply):
 - `POST /v1/helper/notify`: bounded `{event:{seq,severity,title,detail,at}}`; queues until the helper document loads.
 - `GET /v1/status`, `/v1/displays`: include helper view/display, paused state and shortcut warnings.
 
-The browser never receives the agent token. Appearance/sound settings use NOVA's guarded settings API; the helper has a masked PIN field. Output-device selection depends on browser sink support. Browser SpeechRecognition uses the system/default input device; choose its microphone in Windows, or test it in the helper. A speaking meter reports NOVA's audio level. Output device selection lasts for this session; voice volume remains device-local.
+The browser never receives the agent token. Appearance/sound settings use NOVA's guarded settings API; the helper has a masked PIN field. Output-device selection depends on browser sink support. On Chromium 135+, the helper can enumerate input devices after an explicit microphone-permission action and passes the selected live `MediaStreamTrack` to SpeechRecognition for both tap-to-talk and Hey NOVA. The stream stops when recognition ends; a missing or denied selected device does not silently fall back to another microphone. Other browsers continue to use their system/default microphone. The [Chrome 135 release notes](https://developer.chrome.com/release-notes/135#add_mediastreamtrack_support_to_the_web_speech_api) document MediaStreamTrack input to Web Speech. A speaking meter reports NOVA's audio level; output choice persists in this browser, while voice volume remains device-local.
 
 The original particle renderer supplies temporary heart/check/question/box/wave forms, idle dimming, pointer lean, hover and bounded repeated-click reactions. Fifteen synthesized cues have independent volume, per-cue switches, quiet hours and soft/playful/minimal themes. Audio starts only after a browser gesture, never overlaps speech/listening, and thinking phrases stop after 30 seconds. Orb/ring/mist, color themes and optional seasonal/birthday accents are configurable; birthday accents require an explicitly entered date.
 
