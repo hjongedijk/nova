@@ -18,6 +18,7 @@ describe("chat attachments", () => {
     usage: null,
     metadata: {},
   });
+  let configured: ReturnType<typeof vi.spyOn>;
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       imports: [AppModule],
@@ -25,9 +26,9 @@ describe("chat attachments", () => {
     app = module.createNestApplication<NestExpressApplication>();
     app.useBodyParser("json", { limit: "42mb" });
     app.setGlobalPrefix("api");
-    vi.spyOn(app.get(OmniRouteClient), "configured", "get").mockReturnValue(
-      true,
-    );
+    configured = vi
+      .spyOn(app.get(OmniRouteClient), "configured", "get")
+      .mockReturnValue(true);
     vi.spyOn(app.get(OmniRouteClient), "call").mockImplementation(model);
     vi.spyOn(app.get(RoutingService), "assertFree").mockReturnValue(
       app.get(RoutingService).status(),
@@ -61,6 +62,27 @@ describe("chat attachments", () => {
       expect(JSON.parse(attached.content.split("\n")[1])).toEqual([
         { name: "numbers.csv", content: "total\n42", truncated: false },
       ]);
+    },
+  );
+
+  it.each(["chat", "chat-stream"])(
+    "%s answers explicit arithmetic without a configured model",
+    async (endpoint) => {
+      configured.mockReturnValue(false);
+      model.mockClear();
+      try {
+        const response = await request(app.getHttpServer())
+          .post(`/api/${endpoint}`)
+          .send({
+            sessionId: `local-calculation-${endpoint}`,
+            message: "Bereken 17 * 23",
+          })
+          .expect(201);
+        expect(response.text).toContain("Het antwoord is 391.");
+        expect(model).not.toHaveBeenCalled();
+      } finally {
+        configured.mockReturnValue(true);
+      }
     },
   );
 
