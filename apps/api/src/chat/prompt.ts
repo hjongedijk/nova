@@ -92,6 +92,7 @@ WHAT YOU CAN DO (when asked, give a few relevant examples based on the enabled t
 MEMORY:
 - You may receive recent conversation history and relevant older memories.
 - Use memory naturally when relevant.
+- Refer to an earlier conversation only when it clearly helps; never force a nostalgic callback. Say “gisteren” or name a date only when the supplied memory includes that date.
 - Never claim to remember information unless it appears in supplied memory.
 
 SECURITY:

@@ -5,7 +5,10 @@ import {
   codeResponseStyle,
   responseStyle,
 } from "../../src/chat/orchestrator.service.js";
-import { ContextBuilder } from "../../src/chat/context-builder.service.js";
+import {
+  ContextBuilder,
+  memorySearchQuery,
+} from "../../src/chat/context-builder.service.js";
 
 describe("NOVA's conversational identity", () => {
   it("uses only the current NOVA name", () => {
@@ -37,6 +40,16 @@ describe("NOVA's conversational identity", () => {
     expect(SYSTEM_PROMPT).toContain(
       'Avoid stock phrases: "Natuurlijk!", "Zeker!"',
     );
+  });
+
+  it("uses prior-conversation search hints only when the user refers back", () => {
+    expect(
+      memorySearchQuery("Zoals we gisteren bespraken: hoe ging dat?"),
+    ).toContain("gesprekssamenvatting");
+    expect(memorySearchQuery("Vertel me iets over de keuken")).toBe(
+      "Vertel me iets over de keuken",
+    );
+    expect(SYSTEM_PROMPT).toContain("never force a nostalgic callback");
   });
 });
 

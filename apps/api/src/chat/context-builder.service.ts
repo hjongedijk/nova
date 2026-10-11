@@ -13,6 +13,16 @@ import type { CommunicationPreference, ModelRoleId } from "@nova/contracts";
 import { socialTimeContext } from "./social-time.js";
 import { sanitize } from "../core/security/sanitize.js";
 
+const PRIOR_CONVERSATION_REFERENCE =
+  /\b(gisteren|gister|eerder|vorige keer|vorige gesprek|zoals we bespraken|zoals besproken|wat hadden we|wat zei ik|last time|yesterday|earlier conversation|as we discussed|what did we decide)\b/i;
+
+/** Add a small recall hint only when the user asks about an earlier conversation. */
+export function memorySearchQuery(message: string): string {
+  return PRIOR_CONVERSATION_REFERENCE.test(message)
+    ? `${message} gesprekssamenvatting eerdere gesprekken besluiten voortgang`
+    : message;
+}
+
 /**
  * Everything the model reads before the user's question: who NOVA is, what it remembers, the user's own
  * rules and playbooks, the state of the session, and a recent slice of the conversation.
@@ -115,7 +125,7 @@ export class ContextBuilder {
         confirmation: "explicit_durable_request",
         result: memoryWrite,
       });
-    const memories = await this.semantic.search(message);
+    const memories = await this.semantic.search(memorySearchQuery(message));
     let entities: {
       entity_id: string;
       name: string | undefined;
