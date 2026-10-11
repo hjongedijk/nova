@@ -9,6 +9,7 @@ import { ConfirmationHandler } from "./confirmation-handler.service.js";
 import { ContextBuilder } from "./context-builder.service.js";
 import { OrchestratorService } from "./orchestrator.service.js";
 import { OutcomeService } from "./outcome.service.js";
+import { DailyMemorySummaryService } from "./daily-memory-summary.service.js";
 
 /**
  * Conversation: /api/chat, /api/chat-stream and /api/actions/confirm. It talks to the language model
@@ -29,6 +30,7 @@ import { OutcomeService } from "./outcome.service.js";
     ContextBuilder,
     ConfirmationHandler,
     OutcomeService,
+    DailyMemorySummaryService,
   ],
   exports: [OrchestratorService],
 })

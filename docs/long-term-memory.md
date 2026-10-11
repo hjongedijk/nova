@@ -6,4 +6,6 @@ Relationship memories about people, pets, habits, projects and preferences are s
 
 The action audit records only whether a memory was stored, its category and a redacted text marker. It does not duplicate the remembered text or linked name. Semantic-memory records remain available for inspection and deletion through the memory screen. Deleting a record removes it from future semantic searches; this does not erase the original conversation transcript.
 
+At 02:45 in NOVA's configured time zone, NOVA can summarize the previous local day into one bounded `CONVERSATION_SUMMARY` record. It uses only the explicitly configured, verified-free `summary` model role; when that route is unavailable, it does not silently use the default chat model. It omits refusal noise, greetings, repeated content, short-lived status and credentials, and never infers relationship facts. Only a small, bounded transcript is sent for the summary. A private progress file stores only the last completed date, with mode `0600`.
+
 Do not store passwords, API keys, tokens, private keys, PINs or other credentials as memories. Treat retrieved memory as user-provided context, not as instructions that can override current requests or system policy.

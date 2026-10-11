@@ -20,7 +20,7 @@ export type MemoryType = (typeof MEMORY_TYPES)[number];
 export interface MemoryCandidate {
   text: string;
   type: MemoryType;
-  source: "explicit_user" | "conversation_fact";
+  source: "explicit_user" | "conversation_fact" | "scheduled_summary";
   importance: number;
   confidence: number;
   tags: string[];
@@ -31,6 +31,7 @@ export interface MemoryCandidate {
 
 export interface CandidateMetadata {
   explicit?: boolean;
+  scheduledSummary?: boolean;
   type?: string;
   importance?: unknown;
   tags?: unknown;
@@ -71,7 +72,12 @@ export function memoryCandidate(
     /^(mijn naam is|my name is|ik woon in|i live in|ik geef de voorkeur aan|i prefer|mijn kantoor is|my office is)\b/i.test(
       normalized,
     );
-  if (!explicit.test(normalized) && !metadata.explicit && !durableFact)
+  if (
+    !explicit.test(normalized) &&
+    !metadata.explicit &&
+    !metadata.scheduledSummary &&
+    !durableFact
+  )
     return null;
   if (
     /\b(is|staat|zijn|are)\s+(aan|uit|on|off|open|closed|running|stopped|playing|paused|idle|online|offline)\b/i.test(
@@ -99,8 +105,9 @@ export function memoryCandidate(
   return {
     text: content,
     type,
-    source:
-      explicit.test(normalized) || metadata.explicit
+    source: metadata.scheduledSummary
+      ? "scheduled_summary"
+      : explicit.test(normalized) || metadata.explicit
         ? "explicit_user"
         : "conversation_fact",
     importance: Math.max(0, Math.min(1, Number(metadata.importance) || 0.6)),

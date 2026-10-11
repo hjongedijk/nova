@@ -161,6 +161,24 @@ describe("QdrantMemory", () => {
     ).toBeNull();
   });
 
+  it("labels nightly summaries as scheduled records and still rejects secrets", () => {
+    expect(
+      memoryCandidate("Gespreksnotitie 2026-10-10: werkplan besproken", {
+        scheduledSummary: true,
+        type: "CONVERSATION_SUMMARY",
+      }),
+    ).toMatchObject({
+      type: "CONVERSATION_SUMMARY",
+      source: "scheduled_summary",
+    });
+    expect(
+      memoryCandidate("Gespreksnotitie: api key abcdefghijklmnop", {
+        scheduledSummary: true,
+        type: "CONVERSATION_SUMMARY",
+      }),
+    ).toBeNull();
+  });
+
   it("writes, merges duplicates, searches, lists, deletes and archives", async () => {
     const stored = await memory.write(
       "Onthoud mijn volume voorkeur is 20 procent",
