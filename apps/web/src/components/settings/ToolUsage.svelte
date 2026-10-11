@@ -21,6 +21,14 @@
     value
       ? new Date(value).toLocaleString("nl-NL")
       : "geen geregistreerde aanroep";
+  const errorLabel: Record<string, string> = {
+    timeout: "time-out",
+    authorization: "toegang geweigerd",
+    not_found: "niet gevonden",
+    invalid_request: "ongeldige invoer",
+    unavailable: "dienst niet beschikbaar",
+    other: "overige fout",
+  };
   async function load() {
     busy = true;
     error = "";
@@ -55,6 +63,27 @@
       wijziging op een apparaat. Voorbereiding, toestemmingsvragen en
       startmeldingen tellen niet mee.
     </p>
+    <h3>Recente acties</h3>
+    <p>
+      De laatste {report.activityLimit} afgeronde acties. NOVA toont geen argumenten,
+      sessiegegevens of ruwe foutmeldingen.
+    </p>
+    <ol class="activity">
+      {#each report.recentActivity as activity, index (index)}
+        <li>
+          <time datetime={activity.at}>{stamp(activity.at)}</time>
+          <strong>{activity.tool}</strong>
+          <span>{activity.source} · {activity.context}</span>
+          <span class:failed={!activity.ok}>
+            {activity.ok
+              ? "OK-resultaat"
+              : `Fout: ${errorLabel[activity.errorType || "other"] || "overige fout"}`}
+          </span>
+        </li>
+      {:else}
+        <li>Geen acties in de bewaarde periode.</li>
+      {/each}
+    </ol>
     {#if report.toolsTruncated}<p role="status">
         De lijst is begrensd tot 500 gereedschappen.
       </p>{/if}
@@ -100,6 +129,21 @@
   ul {
     list-style: none;
     padding: 0;
+  }
+  .activity {
+    padding-inline-start: 1.5rem;
+  }
+  .activity li {
+    display: grid;
+    gap: 0.25rem;
+    padding-block: 0.75rem;
+  }
+  .activity time,
+  .activity span {
+    color: var(--muted, #a5a5a5);
+  }
+  .activity .failed {
+    color: var(--danger, #ff8a4c);
   }
   li {
     border-block-end: 1px solid var(--border, #555);

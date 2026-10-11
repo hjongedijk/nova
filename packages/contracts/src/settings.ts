@@ -1058,9 +1058,24 @@ export interface ToolUsageReport {
   scannedEntries: number;
   entryLimit: 500;
   logByteLimit: 2000000;
+  activityLimit: 50;
   oldestAt: string | null;
   latestAt: string | null;
   toolsTruncated: boolean;
+  recentActivity: {
+    at: string;
+    tool: string;
+    source: string;
+    context: "chat" | "settings" | "background" | "unknown";
+    ok: boolean;
+    errorType?:
+      | "timeout"
+      | "authorization"
+      | "not_found"
+      | "invalid_request"
+      | "unavailable"
+      | "other";
+  }[];
   tools: {
     name: string;
     source: string;

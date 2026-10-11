@@ -61,9 +61,27 @@ describe("private bounded tool usage", () => {
       scannedEntries: 4,
       entryLimit: 500,
       logByteLimit: 2_000_000,
+      activityLimit: 50,
       oldestAt: first,
       latestAt: latest,
       toolsTruncated: false,
+      recentActivity: [
+        {
+          at: first,
+          tool: "echo",
+          source: "fixture",
+          context: "chat",
+          ok: true,
+        },
+        {
+          at: latest,
+          tool: "echo",
+          source: "fixture",
+          context: "chat",
+          ok: false,
+          errorType: "other",
+        },
+      ],
       tools: [
         {
           name: "echo",
@@ -126,7 +144,7 @@ describe("private bounded tool usage", () => {
     });
     expect(JSON.stringify(report)).not.toContain("private");
   });
-  it("uses valid timestamps from all scanned entries for the bounded interval, even deleted tools", () => {
+  it("keeps bounded activity for deleted tools without adding them to current totals", () => {
     const report = fixture(
       [tool()],
       [
@@ -141,6 +159,36 @@ describe("private bounded tool usage", () => {
       latestAt: latest,
     });
     expect(report.tools[0]!.attempts).toBe(1);
+    expect(report.recentActivity[0]).toMatchObject({
+      tool: "deleted",
+      source: "removed or unavailable",
+      ok: true,
+    });
+  });
+  it("shows safe failure categories in recent activity, never raw errors or arguments", () => {
+    const report = fixture(
+      [tool()],
+      [
+        row({
+          result: {
+            ok: false,
+            error: "ETIMEDOUT for private@example.test using private-token",
+          },
+        }),
+      ],
+    ).controller.report();
+    expect(report.recentActivity).toEqual([
+      {
+        at: first,
+        tool: "echo",
+        source: "fixture",
+        context: "chat",
+        ok: false,
+        errorType: "timeout",
+      },
+    ]);
+    expect(JSON.stringify(report)).not.toContain("private@");
+    expect(JSON.stringify(report)).not.toContain("private-token");
   });
   it.each([
     undefined,
@@ -310,6 +358,14 @@ describe("tool usage API guard", () => {
         scannedEntries: 1,
         entryLimit: 500,
         logByteLimit: 2_000_000,
+        activityLimit: 50,
+        recentActivity: [
+          {
+            tool: "echo",
+            source: expect.any(String),
+            ok: true,
+          },
+        ],
       });
       expect(
         report.body.tools.find(

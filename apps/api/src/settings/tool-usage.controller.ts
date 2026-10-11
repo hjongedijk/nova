@@ -11,6 +11,7 @@ import { ToolsService } from "../tools/tools.service.js";
 import { SettingsGuard } from "./settings.guard.js";
 
 const ENTRY_LIMIT = 500;
+const ACTIVITY_LIMIT = 50;
 const LOG_BYTE_LIMIT = 2_000_000;
 const RISKS: Risk[] = ["READ_ONLY", "SAFE", "CONFIRM", "DANGEROUS"];
 const object = (value: unknown): Record<string, unknown> =>
@@ -38,6 +39,28 @@ function context(
   return value === "settings" || value.startsWith("settings:")
     ? "settings"
     : "chat";
+}
+function errorType(
+  value: unknown,
+):
+  | "timeout"
+  | "authorization"
+  | "not_found"
+  | "invalid_request"
+  | "unavailable"
+  | "other" {
+  const message = typeof value === "string" ? value.toLowerCase() : "";
+  if (/timeout|timed out|etimedout/.test(message)) return "timeout";
+  if (/unauthori[sz]ed|forbidden|\b401\b|\b403\b/.test(message))
+    return "authorization";
+  if (/\b404\b|not found/.test(message)) return "not_found";
+  if (/invalid|required|validation|unsupported/.test(message))
+    return "invalid_request";
+  if (
+    /unavailable|not configured|econnrefused|network|fetch failed/.test(message)
+  )
+    return "unavailable";
+  return "other";
 }
 
 /** Bounded private usage counts. Successful results do not imply verified physical effects. */
@@ -87,17 +110,23 @@ export class ToolUsageController {
       }
       let oldestAt: string | null = null;
       let latestAt: string | null = null;
+      const recentActivity: ToolUsageReport["recentActivity"] = [];
       for (const raw of entries) {
         const entry = object(raw);
         const at = timestamp(entry.timestamp);
         if (!at) continue;
         if (oldestAt === null || at < oldestAt) oldestAt = at;
         if (latestAt === null || at > latestAt) latestAt = at;
-        const tool =
-          typeof entry.tool === "string" ? tools.get(entry.tool) : undefined;
+        const toolName =
+          typeof entry.tool === "string" &&
+          /^[A-Za-z0-9_-]{1,64}$/.test(entry.tool) &&
+          sanitize(entry.tool) === entry.tool
+            ? entry.tool
+            : undefined;
+        const tool = toolName ? tools.get(toolName) : undefined;
         const result = object(entry.result);
         if (
-          !tool ||
+          !toolName ||
           entry.phase !== undefined ||
           typeof result.ok !== "boolean" ||
           result.requiresConfirmation === true ||
@@ -116,10 +145,22 @@ export class ToolUsageController {
           ].includes(String(entry.confirmation))
         )
           continue;
+        const callContext = context(entry.sessionId);
+        const ok = result.ok;
+        if (recentActivity.length < ACTIVITY_LIMIT)
+          recentActivity.push({
+            at,
+            tool: toolName,
+            source: tool ? tool.source : "removed or unavailable",
+            context: callContext,
+            ok,
+            ...(!ok ? { errorType: errorType(result.error) } : {}),
+          });
+        if (!tool) continue;
         tool.attempts++;
-        if (result.ok) tool.okResults++;
+        if (ok) tool.okResults++;
         else tool.failedResults++;
-        tool.contexts[context(entry.sessionId)]++;
+        tool.contexts[callContext]++;
         if (tool.lastAt === null || at > tool.lastAt) tool.lastAt = at;
         durations.set(tool.name, durations.get(tool.name)! + entry.durationMs);
       }
@@ -130,9 +171,11 @@ export class ToolUsageController {
         scannedEntries: entries.length,
         entryLimit: ENTRY_LIMIT,
         logByteLimit: LOG_BYTE_LIMIT,
+        activityLimit: ACTIVITY_LIMIT,
         oldestAt,
         latestAt,
         toolsTruncated: registry.length > 500,
+        recentActivity,
         tools: [...tools.values()],
       };
     } catch {
