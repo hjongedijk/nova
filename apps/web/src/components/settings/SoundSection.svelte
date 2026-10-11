@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { IS_IOS } from "#lib/stores/device.ts";
   import { speak } from "#lib/voice/speaker.ts";
   import { applyVolume, outputVolume, playback } from "#lib/voice/audio.ts";
@@ -37,6 +38,15 @@
   let pronunciationTerm = $state("");
   let pronunciationSay = $state("");
   let pronunciationNote = $state("");
+  let piperVoiceAvailable = $state(false);
+  onMount(() => {
+    fetch("/api/tts/health")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((health: { piperAvailable?: boolean } | null) => {
+        piperVoiceAvailable = health?.piperAvailable === true;
+      })
+      .catch(() => {});
+  });
   const voiceExamples: Record<string, string> = {
     "de-DE": "Ich bin da. Womit möchtest du anfangen?",
     "en-US": "I'm here. What would you like to tackle first?",
@@ -181,6 +191,11 @@
           {/each}
         </optgroup>
       {/each}
+      {#if piperVoiceAvailable}
+        <optgroup label="Lokale stemmen">
+          <option value="jarvis-en-GB-piper">Engels (lokale Piper-stem)</option>
+        </optgroup>
+      {/if}
     </select>
     <p class="help">
       Deze keuze geldt voor de helper, wallpaper en PWA in deze browser.

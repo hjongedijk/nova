@@ -1,7 +1,7 @@
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ApiErrorFilter } from "../../src/core/errors/validation.error.js";
 import { TtsController } from "../../src/tts/tts.controller.js";
 import { TtsService } from "../../src/tts/tts.service.js";
@@ -128,5 +128,39 @@ describe("POST /api/tts", () => {
         "ja-JP-NanamiNeural",
       ]),
     });
+  });
+
+  it("routes the optional personal voice to local Piper and returns WAV", async () => {
+    vi.stubEnv("NOVA_PIPER_TTS_URL", "http://127.0.0.1:5000/synthesize");
+    const localFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(Buffer.from("RIFF0000WAVE"), {
+        headers: { "content-type": "audio/wav", "content-length": "12" },
+      }),
+    );
+    try {
+      const result = await request(app.getHttpServer())
+        .post("/api/tts")
+        .send({ text: "Personal voice test", voice: "jarvis-en-GB-piper" })
+        .buffer(true)
+        .parse((res, done) => {
+          const parts: Buffer[] = [];
+          res.on("data", (part: Buffer) => parts.push(part));
+          res.on("end", () => done(null, Buffer.concat(parts)));
+        })
+        .expect(200);
+      expect(result.headers["content-type"]).toBe("audio/wav");
+      expect(result.body.toString()).toBe("RIFF0000WAVE");
+      expect(
+        JSON.parse(String(localFetch.mock.calls[0]?.[1]?.body)),
+      ).toMatchObject({
+        text: "Personal voice test",
+      });
+      expect(
+        (await request(app.getHttpServer()).get("/api/tts/health")).body.voices,
+      ).toContain("jarvis-en-GB-piper");
+    } finally {
+      localFetch.mockRestore();
+      vi.unstubAllEnvs();
+    }
   });
 });

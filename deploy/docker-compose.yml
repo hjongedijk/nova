@@ -18,6 +18,7 @@ services:
       HTTPS_PORT: 8443
       NOVA_DATA_DIR: /data
       NOVA_BACKUP_DIR: /backups
+      NOVA_PIPER_TTS_URL: ${NOVA_PIPER_TTS_URL:-}
       # This service has restart: unless-stopped, so NOVA may safely request a graceful restart.
       NOVA_RESTART_ENABLED: "true"
       NOVA_STACK_CONTROL_URL: http://stack-control:8090
@@ -55,6 +56,50 @@ services:
       qdrant:
         condition: service_started
     networks: [nova, stack-control]
+
+  # Optional local voice runtime. No host port: only NOVA can reach it on the stack network.
+  piper:
+    profiles: [personal-voice]
+    build: ./piper
+    container_name: nova-piper
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 2g
+    cpus: 2
+    environment:
+      HOME: /tmp
+    volumes:
+      - ./nova-data/piper-voices:/voices:ro
+    command:
+      [
+        "python3",
+        "-m",
+        "piper.http_server",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "5000",
+        "--data-dir",
+        "/voices",
+        "-m",
+        "en_GB-jarvis-medium",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/voices', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [nova]
 
   # The only component with Docker socket access. It exposes fixed, token-protected
   # status/restart and project-sandbox routes on a private network shared only with NOVA.

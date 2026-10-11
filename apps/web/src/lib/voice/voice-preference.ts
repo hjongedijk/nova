@@ -22,6 +22,7 @@ export const TTS_VOICES = [
   { id: "nl-NL-FennaNeural", label: "Fenna (Nederlands)" },
   { id: "nl-NL-ColetteNeural", label: "Colette (Nederlands)" },
   { id: "nl-BE-DenaNeural", label: "Dena (Vlaams)" },
+  { id: "jarvis-en-GB-piper", label: "Engels (lokale Piper-stem)" },
 ] as const;
 export type TtsVoiceId = (typeof TTS_VOICES)[number]["id"];
 const DEFAULT_VOICE: TtsVoiceId = "nl-NL-FennaNeural";
@@ -46,6 +47,7 @@ export function saveTtsVoice(voice: string): TtsVoiceId {
 
 /** Locale used by browser speech recognition; keep listening in the chosen voice language. */
 export function ttsLocale(): string {
+  if (ttsVoice() === "jarvis-en-GB-piper") return "en-GB";
   return ttsVoice().split("-").slice(0, 2).join("-");
 }
 

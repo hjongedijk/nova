@@ -27,12 +27,12 @@ export class TtsController {
     },
     @Res() response: Response,
   ): Promise<void> {
-    const { audio, cached } = await this.tts.speak(
+    const { audio, cached, contentType } = await this.tts.speak(
       body?.text,
       body?.voice,
       body?.prosody,
     );
-    response.setHeader("Content-Type", "audio/mpeg");
+    response.setHeader("Content-Type", contentType);
     response.setHeader("Content-Length", String(audio.length));
     if (cached) response.setHeader("X-TTS-Cache", "hit");
     response.end(audio);
