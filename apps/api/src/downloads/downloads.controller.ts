@@ -28,11 +28,22 @@ export class DownloadsController {
     fs.createReadStream(file).pipe(response);
   }
 
-  @Get("windows-agent/jarvis-agent.ps1")
-  agent(@Res() response: Response): void {
+  @Get("windows-agent/nova-agent.ps1")
+  novaAgent(@Res() response: Response): void {
     this.send(
       response,
-      path.join(this.config.agentsDir, "windows", "jarvis-agent.ps1"),
+      path.join(this.config.agentsDir, "windows", "nova-agent.ps1"),
+      "nova-agent.ps1",
+      "application/octet-stream",
+    );
+  }
+
+  /** Existing installations keep their scheduled-task path; deliver the new implementation under it. */
+  @Get("windows-agent/jarvis-agent.ps1")
+  legacyAgent(@Res() response: Response): void {
+    this.send(
+      response,
+      path.join(this.config.agentsDir, "windows", "nova-agent.ps1"),
       "jarvis-agent.ps1",
       "application/octet-stream",
     );
