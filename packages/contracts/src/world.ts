@@ -107,6 +107,7 @@ export interface NewsItem {
   summary: string;
   link: string;
   published: string;
+  source?: string;
 }
 
 export interface NewsHeadlines {

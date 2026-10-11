@@ -25,7 +25,7 @@ import {
   type HomeLocation,
 } from "./home.js";
 import { convertCurrency, markets } from "./markets.js";
-import { newsHeadlines } from "./news.js";
+import { newsHeadlines, parseNewsFeeds } from "./news.js";
 import { forecast } from "./weather.js";
 import { webRead, webSearch, wikipedia } from "./web.js";
 import { WORLD_HTTP, type HomeSource, type WorldHttp } from "./world.types.js";
@@ -240,6 +240,7 @@ export class WorldService {
           topic,
           (args.count as number | undefined) ?? 4,
           signal,
+          parseNewsFeeds(this.config.newsFeeds || ""),
         );
         if (!result)
           return { ok: false, error: "Geen nieuwsberichten gevonden." };

@@ -18,6 +18,8 @@ import {
 import { ProxmoxService } from "../proxmox/proxmox.service.js";
 import { HomeAssistantService } from "../home/home-assistant.service.js";
 import { parseTargets, probe } from "./probe.js";
+import tls from "node:tls";
+import net from "node:net";
 
 interface Raise {
   key: string;
@@ -46,6 +48,125 @@ export function trackerChanges(
     added: Object.entries(current).filter(([id]) => !(id in previous)),
     removed: Object.entries(previous).filter(([id]) => !(id in current)),
   };
+}
+
+type PowerSensor = { id: string; name: string; watts: number };
+type PowerSample = { at: number; watts: number };
+type PowerHistory = { samples: PowerSample[]; alertedAt?: number };
+export function certificateDaysRemaining(
+  validTo: string,
+  now = Date.now(),
+): number | null {
+  const expiry = Date.parse(validTo);
+  return Number.isFinite(expiry)
+    ? Math.ceil((expiry - now) / 86_400_000)
+    : null;
+}
+
+export function certificateExpiry(
+  urlText: string,
+  timeoutMs = 5000,
+): Promise<string | null> {
+  let target: URL;
+  try {
+    target = new URL(urlText);
+    if (target.protocol !== "https:" || target.username || target.password)
+      return Promise.resolve(null);
+  } catch {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(value);
+    };
+    const socket = tls.connect({
+      host: target.hostname,
+      port: Number(target.port || 443),
+      ...(net.isIP(target.hostname) ? {} : { servername: target.hostname }),
+      rejectUnauthorized: false,
+      timeout: timeoutMs,
+    });
+    socket.once("secureConnect", () => {
+      const validTo = socket.getPeerCertificate().valid_to;
+      finish(typeof validTo === "string" ? validTo : null);
+    });
+    socket.once("timeout", () => finish(null));
+    socket.once("error", () => finish(null));
+  });
+}
+export function powerSensors(entities: HaEntity[]): PowerSensor[] {
+  return entities
+    .filter(
+      (entity) =>
+        entity.domain === "sensor" &&
+        entity.attributes?.device_class === "power",
+    )
+    .flatMap((entity) => {
+      const value = Number(entity.state);
+      const unit = String(entity.attributes?.unit_of_measurement ?? "")
+        .trim()
+        .toLowerCase();
+      const factor =
+        unit === "w" ? 1 : unit === "kw" ? 1000 : unit === "mw" ? 0.001 : 0;
+      if (!Number.isFinite(value) || value < 0 || !factor) return [];
+      return [
+        {
+          id: entity.entity_id,
+          name: String(entity.friendly_name || entity.entity_id).slice(0, 80),
+          watts: value * factor,
+        },
+      ];
+    })
+    .slice(0, 100);
+}
+
+export function highPowerEvents(
+  sensors: PowerSensor[],
+  history: Record<string, PowerHistory>,
+  now: number,
+): {
+  events: { id: string; name: string; watts: number; average: number }[];
+  next: Record<string, PowerHistory>;
+} {
+  const next: Record<string, PowerHistory> = {};
+  const events: { id: string; name: string; watts: number; average: number }[] =
+    [];
+  for (const sensor of sensors) {
+    const previous = history[sensor.id] ?? { samples: [] };
+    const samples = previous.samples.filter(
+      (sample) => now - sample.at <= 30 * 60_000,
+    );
+    const average = samples.length
+      ? samples.reduce((sum, sample) => sum + sample.watts, 0) / samples.length
+      : 0;
+    const last = samples.at(-1);
+    if (!last || now - last.at >= 5 * 60_000)
+      samples.push({ at: now, watts: sensor.watts });
+    const alerting =
+      samples.length >= 6 &&
+      sensor.watts >= 1500 &&
+      average > 0 &&
+      sensor.watts >= average * 2.5;
+    const cooldown =
+      !previous.alertedAt || now - previous.alertedAt >= 60 * 60_000;
+    const alertedAt = alerting && cooldown ? now : previous.alertedAt;
+    if (alerting && cooldown)
+      events.push({
+        id: sensor.id,
+        name: sensor.name,
+        watts: sensor.watts,
+        average,
+      });
+    next[sensor.id] = {
+      samples: samples.slice(-7),
+      ...(alertedAt ? { alertedAt } : {}),
+    };
+  }
+  return { events, next };
 }
 
 /** Reachability checks and the watchdog that raises (and closes) alerts. */
@@ -230,7 +351,8 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     }
     if (this.home?.configured) {
       try {
-        const next = trackerInventory(await this.home.sync());
+        const entities = await this.home.sync();
+        const next = trackerInventory(entities);
         const previous = state.watch.devices;
         if (previous) {
           const changes = trackerChanges(previous, next);
@@ -250,8 +372,47 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
             });
         }
         state.watch.devices = next;
+        const energy = highPowerEvents(
+          powerSensors(entities),
+          state.watch.energy ?? {},
+          Date.now(),
+        );
+        state.watch.energy = energy.next;
+        for (const event of energy.events)
+          this.raise({
+            key: `high-power-${event.id}`,
+            severity: "warning",
+            title: `Hoog stroomverbruik: ${event.name}`,
+            detail: `${Math.round(event.watts)} W; gemiddeld ${Math.round(event.average)} W in de meetperiode.`,
+          });
       } catch {
         // A failed Home Assistant sync must not look like mass device removal.
+      }
+    }
+    if (this.config.publicUrl) {
+      const expiry = await certificateExpiry(this.config.publicUrl);
+      if (expiry) {
+        const oldExpiry = state.watch.certExpiresAt ?? null;
+        if (expiry !== oldExpiry) {
+          state.watch.certExpiresAt = expiry;
+          if (oldExpiry) this.resolve("nova-certificate");
+        }
+        const days = certificateDaysRemaining(expiry);
+        if (days !== null && days <= 30) {
+          if (!state.active["nova-certificate"])
+            this.raise({
+              key: "nova-certificate",
+              severity: days <= 7 ? "critical" : "warning",
+              title:
+                days < 0
+                  ? "TLS-certificaat is verlopen"
+                  : `TLS-certificaat verloopt over ${days} dagen`,
+              detail:
+                "Controleer de certificaatvernieuwing van NOVA's HTTPS-adres.",
+            });
+        } else {
+          this.resolve("nova-certificate");
+        }
       }
     }
     this.store.save();

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { parseTargets } from "../../src/checks/probe.js";
 import {
+  certificateDaysRemaining,
+  highPowerEvents,
+  powerSensors,
   trackerChanges,
   trackerInventory,
 } from "../../src/checks/checks.service.js";
@@ -59,5 +62,64 @@ describe("Home Assistant device tracker inventory", () => {
       added: [["device_tracker.new", "Nieuw"]],
       removed: [["device_tracker.old", "Oud"]],
     });
+  });
+});
+
+describe("Home Assistant power monitoring", () => {
+  it("reads only power sensors in known units and waits for a stable baseline", () => {
+    const sensors = powerSensors([
+      {
+        entity_id: "sensor.meter_power",
+        domain: "sensor",
+        friendly_name: "Slimme meter",
+        state: "2",
+        attributes: { device_class: "power", unit_of_measurement: "kW" },
+      },
+      {
+        entity_id: "sensor.daily_energy",
+        domain: "sensor",
+        state: "9",
+        attributes: { device_class: "energy", unit_of_measurement: "kWh" },
+      },
+    ] as never);
+    expect(sensors).toEqual([
+      { id: "sensor.meter_power", name: "Slimme meter", watts: 2000 },
+    ]);
+    const now = 100 * 60_000;
+    const baseline = Object.fromEntries(
+      Array.from({ length: 5 }, (_, index) => [
+        index,
+        { at: now - (25 - index * 5) * 60_000, watts: 500 },
+      ]),
+    );
+    const result = highPowerEvents(
+      [{ id: "sensor.meter_power", name: "Slimme meter", watts: 2000 }],
+      { "sensor.meter_power": { samples: Object.values(baseline) } },
+      now,
+    );
+    expect(result.events).toEqual([
+      {
+        id: "sensor.meter_power",
+        name: "Slimme meter",
+        watts: 2000,
+        average: 500,
+      },
+    ]);
+    expect(
+      highPowerEvents(
+        [{ id: "sensor.meter_power", name: "Slimme meter", watts: 2000 }],
+        result.next,
+        now + 5 * 60_000,
+      ).events,
+    ).toEqual([]);
+  });
+});
+
+describe("TLS certificate expiry", () => {
+  it("calculates days remaining and rejects invalid certificate dates", () => {
+    const now = Date.parse("2026-10-11T00:00:00Z");
+    expect(certificateDaysRemaining("Oct 21 00:00:00 2026 GMT", now)).toBe(10);
+    expect(certificateDaysRemaining("Oct 10 00:00:00 2026 GMT", now)).toBe(-1);
+    expect(certificateDaysRemaining("invalid", now)).toBeNull();
   });
 });

@@ -127,6 +127,14 @@ export class NovaConfig {
     username: text("CALDAV_USERNAME"),
     password: text("CALDAV_PASSWORD"),
   };
+  /** Optional private ntfy topic; push delivery is disabled unless all three values exist. */
+  readonly ntfy = {
+    url: text("NTFY_URL"),
+    topic: text("NTFY_TOPIC"),
+    token: text("NTFY_TOKEN"),
+  };
+  /** Optional JSON array of named public RSS feeds; URLs are rechecked by the public fetch guard. */
+  readonly newsFeeds = text("NOVA_NEWS_FEEDS");
   readonly windowsAgent = {
     url: url("WINDOWS_AGENT_URL", ""),
     token: text("WINDOWS_AGENT_TOKEN"),

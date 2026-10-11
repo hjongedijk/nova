@@ -83,7 +83,7 @@ export function worldDefinitions(): ToolDefinition[] {
     {
       name: "news_headlines",
       description:
-        "Latest news headlines from NOS. topic is one of algemeen (default), binnenland, buitenland, politiek, economie, tech, cultuur, opmerkelijk, sport. count is 1 to 10 (default 5).",
+        "Latest headlines from the owner's configured public RSS feeds, or NOS when none are configured. With configured feeds, read all listed sources; topic only selects a NOS category when no custom feeds exist. Summarize only returned items, mention their source, and speak as a short story when the user asks to hear the news. topic is one of algemeen (default), binnenland, buitenland, politiek, economie, tech, cultuur, opmerkelijk, sport. count is 1 to 10 (default 4).",
       parameters: schema(
         {
           topic: { type: "string", enum: Object.keys(NEWS_FEEDS) },
