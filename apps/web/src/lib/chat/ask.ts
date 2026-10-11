@@ -22,13 +22,17 @@ import { readCommunicationPreferences } from "./communication-preferences.ts";
 
 // A few words about what NOVA is doing, so a long task never looks stuck.
 const TOOL_HINTS: [RegExp, string][] = [
-  [/^browser_/, "Op je pc aan het browsen…"],
-  [/^windows_/, "Je pc aansturen…"],
+  [/^(web_search|web_read|wikipedia|news_headlines)/, "Informatie opzoeken…"],
+  [/^browser_/, "De browser bedienen…"],
+  [/^windows_/, "Je pc bedienen…"],
   [/^proxmox_/, "Proxmox controleren…"],
   [/^(weather|air|moon|iss)_/, "Opzoeken…"],
-  [/^(web|wikipedia|news|market|currency)/, "Op het web zoeken…"],
-  [/^(timer|list)_/, "Plannen…"],
-  [/^(ha_|home_|media_|sonos_|music_)/, "Het huis raadplegen…"],
+  [/^(market|currency)/, "Marktgegevens controleren…"],
+  [/^calendar_/, "Je agenda controleren…"],
+  [/^(documents_|notes_)/, "Je documenten doorzoeken…"],
+  [/^(timer|list)_/, "Je planning bijwerken…"],
+  [/^termix_/, "Je server controleren…"],
+  [/^(ha_|home_|media_|sonos_|music_)/, "Je huis klaarmaken…"],
   [/^(network|alerts|daily)_/, "Controleren…"],
 ];
 const toolHint = (name: unknown): string =>
@@ -152,11 +156,20 @@ export async function ask(
       if (event === "tool_start") {
         clearInterjection();
         setState("executing");
-        chat.hint = toolHint(data?.name);
+        const stepValue = data?.step;
+        const step =
+          typeof stepValue === "number" && Number.isSafeInteger(stepValue)
+            ? stepValue
+            : 0;
+        chat.hint = `${step > 1 ? `Stap ${step} · ` : ""}${toolHint(data?.name)}`;
         chat.activeTool = String(data?.name ?? "");
         if (inputMode === "voice")
           interjectionTimer = setTimeout(() => {
-            const line = nextToolInterjection(previousToolInterjection);
+            const line = nextToolInterjection(
+              previousToolInterjection,
+              String(data?.name ?? ""),
+              step,
+            );
             previousToolInterjection = line;
             speaker.feed(line);
             interjectionTimer = null;

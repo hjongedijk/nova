@@ -11,4 +11,13 @@ describe("tool waiting phrases", () => {
     expect(third).not.toBe(second);
     expect(new Set([first, second, third]).size).toBe(3);
   });
+
+  it("speaks about the current work and marks later steps conversationally", () => {
+    expect(nextToolInterjection("", "ha_scene", 1, () => 0)).toContain(
+      "apparaten",
+    );
+    expect(nextToolInterjection("", "calendar_events", 2, () => 0)).toBe(
+      "Vervolgens: Ik kijk eerst in je agenda.",
+    );
+  });
 });

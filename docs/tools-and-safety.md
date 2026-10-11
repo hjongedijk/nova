@@ -62,6 +62,10 @@ Examples of how risk is decided:
 
 The helper pill and the Windows wallpaper use the same confirmations.
 
+### Multi-step requests
+
+For requests such as preparing a film night, NOVA can call several enabled tools in sequence and use each result to decide the next step. The chat shows a short, numbered activity hint and voice gives a brief explanation of the current work. This is a sequence of ordinary tool calls, not an atomic transaction: each call keeps its own risk check, and a call that needs confirmation pauses the sequence until the user responds. NOVA reports what was actually checked or accepted; an accepted action is not described as verified unless the integration confirms it.
+
 ## What happens to every call
 
 In order, for each tool call:

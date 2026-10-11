@@ -279,6 +279,7 @@ export class OrchestratorService {
       requiresLiveData(message, !!input.attachments?.length);
     const rounds = this.config.maxToolRounds;
     let emptyRetried = false;
+    let completedSteps = 0;
 
     for (let round = 0; round < rounds; round++) {
       if (signal?.aborted) throw new Error("Request cancelled");
@@ -352,8 +353,9 @@ export class OrchestratorService {
           throw new Error("Malformed tool call");
         const name = call.function.name;
         const args = parseToolArguments(call.function.arguments);
-        emit("tool_start", { name });
+        emit("tool_start", { name, step: completedSteps + 1 });
         const result = await this.tools.execute(name, args, sessionId);
+        completedSteps++;
         emit("tool_result", {
           name,
           ok: result.ok,
