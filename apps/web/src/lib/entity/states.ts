@@ -16,20 +16,13 @@ export interface Look {
   hud: number;
 }
 
+/** Labels used by the reply UI; the production orb does not tint itself by mood. */
 export const MOOD_LABELS: Record<AssistantMood, string> = {
   happy: "Blij",
   thoughtful: "Nadenkend",
   concerned: "Bezorgd",
   enthusiastic: "Enthousiast",
   neutral: "Rustig",
-};
-
-export const MOOD_LOOKS: Record<AssistantMood, Partial<Look>> = {
-  happy: { h: 45, s: 88, l: 73, glow: 0.58 },
-  thoughtful: { h: 265, s: 58, l: 70, glow: 0.58 },
-  concerned: { h: 30, s: 52, l: 65, glow: 0.44 },
-  enthusiastic: { h: 330, s: 82, l: 76, glow: 0.78, wave: 0.16 },
-  neutral: {},
 };
 
 export const STATES: Record<UiState, Look> = {

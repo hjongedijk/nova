@@ -12,7 +12,6 @@
     startEntity({
       canvas,
       state: () => chat.uiState,
-      mood: () => chat.mood,
       // An open confirmation card or an open warning turns the sphere red and makes it beat.
       intensity: () => chat.confirmations.length + attentionCount(),
       core: () => core,
