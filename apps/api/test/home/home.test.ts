@@ -491,6 +491,20 @@ describe("Home Assistant", () => {
     );
     expect(result.verified).toBe(true);
     expect(fake.actions.at(-1)?.path).toMatch(/music_assistant/);
+    result = await run(
+      "music_play",
+      {
+        entity_id: "media_player.office",
+        media_id: "rustige jazz",
+        media_type: "radio",
+      },
+      "music",
+    );
+    expect(result.verified).toBe(true);
+    expect(fake.actions.at(-1)?.body).toMatchObject({
+      media_id: "rustige jazz",
+      media_type: "radio",
+    });
     fake.hideMusicAssistant(true);
     await home.sync(true);
     expect(
