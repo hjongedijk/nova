@@ -30,18 +30,72 @@ import { forecast } from "./weather.js";
 import { webRead, webSearch, wikipedia } from "./web.js";
 import { WORLD_HTTP, type HomeSource, type WorldHttp } from "./world.types.js";
 
+const MAX_FIXED_JSON_BYTES = 1_500_000;
+const FIXED_JSON_HOSTS = new Set([
+  "air-quality-api.open-meteo.com",
+  "api.coingecko.com",
+  "api.frankfurter.dev",
+  "api.open-meteo.com",
+  "api.wheretheiss.at",
+  "de.wikipedia.org",
+  "en.wikipedia.org",
+  "fr.wikipedia.org",
+  "geocoding-api.open-meteo.com",
+  "nl.wikipedia.org",
+]);
+
+function assertFixedJsonUrl(value: string): void {
+  const url = new URL(value);
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    (url.port && url.port !== "443") ||
+    !FIXED_JSON_HOSTS.has(url.hostname.toLowerCase())
+  )
+    throw new Error("Blocked: JSON service URL is not in the fixed allowlist");
+}
+
+async function jsonWithLimit<T>(response: Response): Promise<T> {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_FIXED_JSON_BYTES)
+    throw new Error("Response too large");
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const body = await response.text();
+    if (Buffer.byteLength(body) > MAX_FIXED_JSON_BYTES)
+      throw new Error("Response too large");
+    return JSON.parse(body) as T;
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_FIXED_JSON_BYTES) {
+      await reader.cancel().catch(() => {});
+      throw new Error("Response too large");
+    }
+    chunks.push(value);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
+}
+
 /** The real network: fixed APIs through fetch, anything model-controlled through the net guard. */
 export const defaultWorldHttp: WorldHttp = {
   async getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+    assertFixedJsonUrl(url);
     const response = await fetch(url, {
       signal: signal ?? AbortSignal.timeout(10000),
+      redirect: "error",
       headers: {
         accept: "application/json",
         "user-agent": "NOVA/1.0 (private assistant)",
       },
     });
     if (!response.ok) throw new Error(`Request failed (${response.status})`);
-    return (await response.json()) as T;
+    return jsonWithLimit<T>(response);
   },
   async getPage(
     url: string,

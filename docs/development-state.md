@@ -469,3 +469,5 @@ L2.4-kandidaatbeoordeling aangescherpt: `@ni-c/imap-mcp` schrijft onder `list_ne
 2026-10-11 — E19: de vraag “wat kun je?” krijgt nu een korte, gelokaliseerde capability-samenvatting uit de op dat moment ingeschakelde toolcatalogus. Uitgeschakelde integraties worden weggelaten; het normale chatantwoord wordt ook gesproken via de bestaande TTS-route. Prompttest dekt dynamische NL/EN-groepen en geen gekoppelde tools.
 
 2026-10-11 — E20-audit: eigen instructie- en webhookskills kunnen al via Instellingen worden gemaakt, getest en beheerd met vaste risicocategorieën en netwerk-/geheimcontroles (`docs/tools-and-safety.md`). Een pluginmanifestmap met installatieworkflow bestaat niet; willekeurige uitvoerbare plugins blijven geblokkeerd. Skilltests: 21 geslaagd. E20 blijft deels open.
+
+2026-10-12 — F1: checklist voor nieuwe tools getoetst aan gedeelde uitvoering en netwerkgrenzen. IP-ranges en mixed DNS-antwoorden hebben regressietests; vaste JSON-API's gebruiken HTTPS-hostallowlist, weigeren redirects en begrenzen responses op 1,5 MB. 67 gerichte netwerk-/wereldtests, API-typecheck en lint slagen. Per nieuwe tool blijft een apart ingevuld reviewrecord vereist.

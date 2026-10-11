@@ -4,7 +4,15 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { Test } from "@nestjs/testing";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import { CoreModule } from "../../src/core/core.module.js";
 import {
@@ -27,6 +35,7 @@ import {
   uvLabel,
   WorldModule,
   WorldService,
+  defaultWorldHttp,
   WorldSource,
   WORLD_TOOL_NAMES,
   type HomeSource,
@@ -516,6 +525,45 @@ describe("with a local web server", () => {
     };
     expect(out.items[0]?.summary.length).toBeLessThanOrEqual(182);
     expect(out.hint).toMatch(/geen opsomming/i);
+  });
+});
+
+describe("fixed public JSON services", () => {
+  it("bounds response bodies before parsing JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    try {
+      await expect(
+        defaultWorldHttp.getJson("https://nl.wikipedia.org/api"),
+      ).resolves.toEqual({
+        ok: true,
+      });
+      expect(fetch).toHaveBeenCalledWith(
+        "https://nl.wikipedia.org/api",
+        expect.objectContaining({ redirect: "error" }),
+      );
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(new Response("x".repeat(1_500_001))),
+      );
+      await expect(
+        defaultWorldHttp.getJson("https://nl.wikipedia.org/api"),
+      ).rejects.toThrow("Response too large");
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(
+        defaultWorldHttp.getJson("https://127.0.0.1/private"),
+      ).rejects.toThrow("fixed allowlist");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
