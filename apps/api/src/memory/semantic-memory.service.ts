@@ -12,6 +12,7 @@ import type {
 } from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
+import { RoutingService } from "../routing/routing.service.js";
 import { messageOf, type SemanticBackend } from "./semantic/backend.js";
 import type { CandidateMetadata } from "./semantic/candidate.js";
 import { OmniRouteMemory } from "./semantic/omniroute.backend.js";
@@ -50,7 +51,7 @@ class UnavailableMemory implements SemanticBackend {
 }
 
 /**
- * NOVA's long-term memory. Picks the backend from JARVIS_MEMORY_BACKEND (Qdrant with remote free
+ * NOVA's long-term memory. Picks the backend from NOVA_MEMORY_BACKEND (Qdrant with remote free
  * embeddings, or OmniRoute's native memory) and degrades like the prototype when it is not
  * configured: searches are empty, writes say why not, health reports it. Never crashes start-up.
  */
@@ -64,6 +65,7 @@ export class SemanticMemoryService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
+    private readonly routing: RoutingService,
   ) {}
 
   /** For tests: replace one or both backends. */
@@ -82,6 +84,9 @@ export class SemanticMemoryService implements OnModuleInit, OnModuleDestroy {
         this.qdrantBackend = new QdrantMemory({
           url: this.config.qdrantUrl,
           collection: this.config.qdrantCollection,
+          activeCollectionPath: this.config.dataFile(
+            "qdrant-active-collection.json",
+          ),
           apiKey: this.config.qdrantApiKey || undefined,
           embeddings: new RemoteEmbeddings({
             url: this.config.omniUrl,
@@ -89,6 +94,16 @@ export class SemanticMemoryService implements OnModuleInit, OnModuleDestroy {
             model: this.config.embeddingModel,
             dimensions: this.config.embeddingDimensions,
             freeVerified: this.config.embeddingFreeVerified,
+            assertFreeModel: (model) => {
+              this.routing.assertFreeModel(model);
+              if (
+                this.config.embeddingKey &&
+                this.config.embeddingKey !== this.config.omniKey
+              )
+                throw new Error(
+                  "Embedding requests must use the verified OmniRoute key",
+                );
+            },
           }),
         });
       } catch (error) {
@@ -141,6 +156,38 @@ export class SemanticMemoryService implements OnModuleInit, OnModuleDestroy {
 
   maintain(): Promise<Record<string, unknown>> {
     return this.backend.maintain();
+  }
+
+  reindexQdrant() {
+    const backend = this.qdrant;
+    return backend instanceof QdrantMemory
+      ? backend.reindex()
+      : Promise.resolve({
+          ok: false,
+          error: "The configured memory backend cannot be reindexed",
+        });
+  }
+
+  qdrantIndexHistory() {
+    const backend = this.qdrant;
+    return backend instanceof QdrantMemory
+      ? backend.indexHistory().map(({ id, at, points, after }) => ({
+          id,
+          at,
+          points,
+          current: after === backend.collection,
+        }))
+      : [];
+  }
+
+  rollbackQdrantIndex(revisionId: string) {
+    const backend = this.qdrant;
+    return backend instanceof QdrantMemory
+      ? backend.rollbackIndex(revisionId)
+      : Promise.resolve({
+          ok: false,
+          error: "The configured memory backend cannot restore an index",
+        });
   }
 
   /** Health of the selected backend (the dashboard's "longTermMemory"). */

@@ -1,4 +1,8 @@
-import type { ChatAttachment } from "@nova/contracts";
+import type {
+  ChatAttachment,
+  CommunicationPreference,
+  ModelRoleId,
+} from "@nova/contracts";
 import { checkAttachments } from "./attachments.js";
 import { Body, ConflictException, Controller, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
@@ -18,6 +22,7 @@ interface ChatBody {
   message?: unknown;
   sessionId?: unknown;
   confirmationId?: unknown;
+  modelRole?: unknown;
   confirmedTools?: unknown;
   [key: string]: unknown;
 }
@@ -32,7 +37,10 @@ function check(body: ChatBody): {
   message: string;
   attachments: ChatAttachment[];
   inputMode: "text" | "voice";
+  quietHours: boolean;
+  communicationPreferences: CommunicationPreference[];
   confirmationId?: string;
+  modelRole?: Exclude<ModelRoleId, "embedding">;
 } {
   if (FORBIDDEN_OVERRIDES.some((key) => body?.[key] !== undefined))
     throw new ValidationError([
@@ -51,6 +59,14 @@ function check(body: ChatBody): {
     body.inputMode !== "voice"
   )
     throw new ValidationError(["Invalid input mode"]);
+  if (body.quietHours !== undefined && typeof body.quietHours !== "boolean")
+    throw new ValidationError(["Invalid quiet-hours state"]);
+  const roles = ["conversation", "code", "planning", "summary", "vision"];
+  if (
+    body.modelRole !== undefined &&
+    (typeof body.modelRole !== "string" || !roles.includes(body.modelRole))
+  )
+    throw new ValidationError(["Invalid model role"]);
   const sessionId = normalizeSessionId(body.sessionId);
   if (
     body.confirmationId !== undefined &&
@@ -62,12 +78,36 @@ function check(body: ChatBody): {
     throw new ValidationError([
       "Use session confirmation; confirmedTools is unsupported",
     ]);
+  const allowedPreferences = [
+    "concise",
+    "fewer_jokes",
+    "more_detail",
+    "warmer",
+  ] as const;
+  if (
+    body.communicationPreferences !== undefined &&
+    (!Array.isArray(body.communicationPreferences) ||
+      body.communicationPreferences.length > allowedPreferences.length ||
+      body.communicationPreferences.some(
+        (preference) =>
+          typeof preference !== "string" ||
+          !allowedPreferences.includes(
+            preference as (typeof allowedPreferences)[number],
+          ),
+      ))
+  )
+    throw new ValidationError(["Invalid communication preferences"]);
   return {
     sessionId,
     attachments: checkAttachments(body.attachments),
     inputMode: body.inputMode === "voice" ? "voice" : "text",
-    message: body.message.trim(),
+    quietHours: body.quietHours === true,
+    communicationPreferences: Array.isArray(body.communicationPreferences)
+      ? (body.communicationPreferences as CommunicationPreference[])
+      : [],
+    message: sanitize(body.message.trim()),
     confirmationId: body.confirmationId as string | undefined,
+    modelRole: body.modelRole as Exclude<ModelRoleId, "embedding"> | undefined,
   };
 }
 
@@ -98,8 +138,16 @@ export class ChatController {
   /** POST /api/chat: one question, one complete answer. */
   @Post("chat")
   async chat(@Body() body: ChatBody): Promise<Record<string, unknown>> {
-    const { sessionId, message, confirmationId, attachments, inputMode } =
-      check(body);
+    const {
+      sessionId,
+      message,
+      confirmationId,
+      attachments,
+      inputMode,
+      quietHours,
+      communicationPreferences,
+      modelRole,
+    } = check(body);
     if (!this.client.configured)
       throw new ConflictException("OmniRoute is not configured");
     if (active.has(sessionId))
@@ -114,6 +162,9 @@ export class ChatController {
         message,
         attachments,
         inputMode,
+        quietHours,
+        communicationPreferences,
+        modelRole,
         confirmationId,
       });
       this.remember(sessionId, message, result, started);
@@ -133,8 +184,16 @@ export class ChatController {
     @Body() body: ChatBody,
     @Res() response: Response,
   ): Promise<void> {
-    const { sessionId, message, confirmationId, attachments, inputMode } =
-      check(body);
+    const {
+      sessionId,
+      message,
+      confirmationId,
+      attachments,
+      inputMode,
+      quietHours,
+      communicationPreferences,
+      modelRole,
+    } = check(body);
     if (!this.client.configured) {
       response.status(503).json({ error: "OmniRoute is not configured" });
       return;
@@ -173,6 +232,9 @@ export class ChatController {
         message,
         attachments,
         inputMode,
+        quietHours,
+        communicationPreferences,
+        modelRole,
         confirmationId,
         stream: true,
         emit,

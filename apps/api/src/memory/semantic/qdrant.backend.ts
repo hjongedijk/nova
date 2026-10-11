@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type {
   MemoryHealth,
   MemoryListResponse,
@@ -7,6 +9,7 @@ import type {
 } from "@nova/contracts";
 import { messageOf, validMemoryId, type SemanticBackend } from "./backend.js";
 import { memoryCandidate, type CandidateMetadata } from "./candidate.js";
+import { sanitize } from "../../core/security/sanitize.js";
 
 type Fetcher = typeof fetch;
 
@@ -18,6 +21,7 @@ export interface EmbeddingOptions {
   model: string;
   dimensions: number;
   freeVerified: boolean;
+  assertFreeModel(model: string): void;
 }
 
 /**
@@ -45,7 +49,9 @@ export class RemoteEmbeddings {
   async embed(text: string): Promise<number[]> {
     if (!this.configured)
       throw new Error("No verified free remote embedding provider configured");
-    const key = crypto.createHash("sha256").update(text).digest("hex");
+    this.options.assertFreeModel(this.model);
+    const safeText = sanitize(text);
+    const key = crypto.createHash("sha256").update(safeText).digest("hex");
     const cached = this.cache.get(key);
     if (cached) return cached;
     const response = await this.fetcher(
@@ -56,7 +62,7 @@ export class RemoteEmbeddings {
           authorization: `Bearer ${this.options.key}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ model: this.model, input: text }),
+        body: JSON.stringify({ model: this.model, input: safeText }),
         signal: AbortSignal.timeout(15_000),
       },
     );
@@ -98,7 +104,19 @@ export interface QdrantOptions {
   collection: string;
   apiKey?: string;
   fetcher?: Fetcher;
+  /** Local pointer switches only after a fully verified replacement collection is durable. */
+  activeCollectionPath?: string;
   embeddings: RemoteEmbeddings;
+}
+
+export interface QdrantIndexRevision {
+  id: string;
+  at: string;
+  before: string;
+  after: string;
+  points: number;
+  embeddingModel: string;
+  dimensions: number;
 }
 
 const normalized = (value: string) =>
@@ -108,16 +126,25 @@ const normalized = (value: string) =>
 export class QdrantMemory implements SemanticBackend {
   private readonly url: string;
   private readonly fetcher: Fetcher;
-  readonly collection: string;
+  readonly sourceCollection: string;
+  private activeCollectionName: string;
+  private indexRevisions: QdrantIndexRevision[] = [];
+  private readonly activeCollectionPath?: string;
   readonly embeddings: RemoteEmbeddings;
   private initialized = false;
+  private reindexing = false;
+  private activeMutations = 0;
   lastError: string | null = null;
 
   constructor(private readonly options: QdrantOptions) {
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(options.collection))
       throw new Error("Invalid memory collection");
     this.url = options.url.replace(/\/$/, "");
-    this.collection = options.collection;
+    this.sourceCollection = options.collection;
+    this.activeCollectionPath = options.activeCollectionPath;
+    const pointer = this.readActiveCollection(options);
+    this.activeCollectionName = pointer.active;
+    this.indexRevisions = pointer.revisions;
     this.fetcher = options.fetcher ?? ((...args) => fetch(...args));
     this.embeddings = options.embeddings;
   }
@@ -127,7 +154,125 @@ export class QdrantMemory implements SemanticBackend {
   }
 
   private get base(): string {
-    return `/collections/${this.collection}`;
+    return `/collections/${this.activeCollectionName}`;
+  }
+
+  get collection(): string {
+    return this.activeCollectionName;
+  }
+
+  private reindexedPrefix(): string {
+    return `nova_mem_${crypto.createHash("sha256").update(this.sourceCollection).digest("hex").slice(0, 8)}_`;
+  }
+
+  private validCollectionName(name: unknown): name is string {
+    if (name === this.sourceCollection) return true;
+    return (
+      typeof name === "string" &&
+      new RegExp(`^${this.reindexedPrefix()}[0-9a-f]{32}$`).test(name)
+    );
+  }
+
+  private readActiveCollection(options: QdrantOptions): {
+    active: string;
+    revisions: QdrantIndexRevision[];
+  } {
+    if (
+      !options.activeCollectionPath ||
+      !fs.existsSync(options.activeCollectionPath)
+    )
+      return { active: options.collection, revisions: [] };
+    const value: unknown = JSON.parse(
+      fs.readFileSync(options.activeCollectionPath, "utf8"),
+    );
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error("Invalid Qdrant active collection pointer");
+    const row = value as Record<string, unknown>;
+    if (
+      (row.version !== 1 && row.version !== 2) ||
+      row.sourceCollection !== options.collection ||
+      !this.validCollectionName(row.activeCollection)
+    )
+      throw new Error("Invalid Qdrant active collection pointer");
+    const revisions = row.version === 2 ? row.revisions : [];
+    if (!Array.isArray(revisions) || revisions.length > 20)
+      throw new Error("Invalid Qdrant index history");
+    const validRevisions = revisions.map((entry: unknown) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry))
+        throw new Error("Invalid Qdrant index history");
+      const revision = entry as Record<string, unknown>;
+      if (
+        typeof revision.id !== "string" ||
+        !/^[0-9a-f-]{36}$/i.test(revision.id) ||
+        typeof revision.at !== "string" ||
+        !Number.isFinite(Date.parse(revision.at)) ||
+        !this.validCollectionName(revision.before) ||
+        !this.validCollectionName(revision.after) ||
+        !Number.isSafeInteger(revision.points) ||
+        (revision.points as number) < 0 ||
+        typeof revision.embeddingModel !== "string" ||
+        !Number.isSafeInteger(revision.dimensions) ||
+        (revision.dimensions as number) < 1
+      )
+        throw new Error("Invalid Qdrant index history");
+      return revision as unknown as QdrantIndexRevision;
+    });
+    return { active: row.activeCollection, revisions: validRevisions };
+  }
+
+  private persistActiveCollection(
+    name: string,
+    revisions: QdrantIndexRevision[],
+  ): void {
+    if (!this.activeCollectionPath) return;
+    fs.mkdirSync(path.dirname(this.activeCollectionPath), { recursive: true });
+    const temporary = `${this.activeCollectionPath}.${process.pid}.tmp`;
+    try {
+      const fd = fs.openSync(temporary, "w", 0o600);
+      try {
+        fs.writeFileSync(
+          fd,
+          JSON.stringify({
+            version: 2,
+            sourceCollection: this.sourceCollection,
+            activeCollection: name,
+            revisions: revisions.slice(-20),
+          }),
+        );
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.chmodSync(temporary, 0o600);
+      fs.renameSync(temporary, this.activeCollectionPath);
+      this.activeCollectionName = name;
+      this.indexRevisions = revisions.slice(-20);
+      const directory = fs.openSync(
+        path.dirname(this.activeCollectionPath),
+        "r",
+      );
+      try {
+        fs.fsyncSync(directory);
+      } finally {
+        fs.closeSync(directory);
+      }
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
+  }
+
+  private beginMutation(): boolean {
+    if (this.reindexing) return false;
+    this.activeMutations++;
+    return true;
+  }
+
+  private endMutation(): void {
+    this.activeMutations = Math.max(0, this.activeMutations - 1);
+  }
+
+  indexHistory(): QdrantIndexRevision[] {
+    return this.indexRevisions.map((revision) => ({ ...revision })).reverse();
   }
 
   private async request<T = any>( // eslint-disable-line @typescript-eslint/no-explicit-any -- Qdrant replies are untyped JSON
@@ -168,6 +313,10 @@ export class QdrantMemory implements SemanticBackend {
         );
     } catch (error) {
       if (!(error instanceof QdrantError) || error.status !== 404) throw error;
+      if (this.activeCollectionName !== this.sourceCollection)
+        throw new Error("The active Qdrant memory index is missing", {
+          cause: error,
+        });
       await this.request(this.base, "PUT", {
         vectors: { size: this.embeddings.dimensions, distance: "Cosine" },
       });
@@ -226,18 +375,23 @@ export class QdrantMemory implements SemanticBackend {
           } as MemoryRecord;
         })
         .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-      if (markAccess)
-        await Promise.all(
-          matches.map((item) =>
-            this.request(`${this.base}/points/payload?wait=true`, "POST", {
-              points: [item.id],
-              payload: {
-                access_count: (item.access_count ?? 0) + 1,
-                last_accessed_at: new Date().toISOString(),
-              },
-            }),
-          ),
-        );
+      if (markAccess && this.beginMutation()) {
+        try {
+          await Promise.all(
+            matches.map((item) =>
+              this.request(`${this.base}/points/payload?wait=true`, "POST", {
+                points: [item.id],
+                payload: {
+                  access_count: (item.access_count ?? 0) + 1,
+                  last_accessed_at: new Date().toISOString(),
+                },
+              }),
+            ),
+          );
+        } finally {
+          this.endMutation();
+        }
+      }
       this.lastError = null;
       return matches;
     } catch (error) {
@@ -256,6 +410,8 @@ export class QdrantMemory implements SemanticBackend {
         ok: false,
         error: "Memory rejected: not durable or contains secrets",
       };
+    if (!this.beginMutation())
+      return { ok: false, error: "Memory index is rebuilding; retry shortly" };
     try {
       await this.init();
       const vector = await this.embeddings.embed(candidate.text);
@@ -292,6 +448,8 @@ export class QdrantMemory implements SemanticBackend {
     } catch (error) {
       this.lastError = messageOf(error);
       return { ok: false, error: this.lastError };
+    } finally {
+      this.endMutation();
     }
   }
 
@@ -320,44 +478,296 @@ export class QdrantMemory implements SemanticBackend {
 
   async remove(id: string): Promise<{ ok: true }> {
     if (!validMemoryId(id)) throw new Error("Invalid memory ID");
-    await this.request(`${this.base}/points/delete?wait=true`, "POST", {
-      points: [id],
-    });
-    return { ok: true };
+    if (!this.beginMutation())
+      throw new Error("Memory index is rebuilding; retry shortly");
+    try {
+      await this.request(`${this.base}/points/delete?wait=true`, "POST", {
+        points: [id],
+      });
+      return { ok: true };
+    } finally {
+      this.endMutation();
+    }
   }
 
   /** Archives memories of low importance that have not been used for 90 days. */
-  async maintain(): Promise<{
-    ok: true;
-    scanned: number;
-    archived: number;
-    more: boolean;
+  async maintain(): Promise<Record<string, unknown>> {
+    if (!this.beginMutation())
+      return { ok: false, error: "Memory index is rebuilding; retry shortly" };
+    try {
+      await this.init();
+      let offset: unknown;
+      let archived = 0;
+      let scanned = 0;
+      do {
+        const page = await this.list(100, offset);
+        offset = page.next;
+        for (const item of page.memories) {
+          scanned++;
+          if (
+            !item.archived &&
+            (item.importance ?? 1) < 0.4 &&
+            Date.now() -
+              Date.parse(item.last_accessed_at ?? item.updated_at ?? "") >
+              90 * 86_400_000
+          ) {
+            await this.request(
+              `${this.base}/points/payload?wait=true`,
+              "POST",
+              {
+                points: [item.id],
+                payload: {
+                  archived: true,
+                  archived_at: new Date().toISOString(),
+                },
+              },
+            );
+            archived++;
+          }
+        }
+      } while (offset && scanned < 10_000);
+      return { ok: true, scanned, archived, more: Boolean(offset) };
+    } finally {
+      this.endMutation();
+    }
+  }
+
+  /** Build and verify a replacement off-path; switch only through a durable local pointer. */
+  async reindex(): Promise<{
+    ok: boolean;
+    points?: number;
+    collection?: string;
+    warning?: string;
+    error?: string;
   }> {
-    await this.init();
-    let offset: unknown;
-    let archived = 0;
-    let scanned = 0;
-    do {
-      const page = await this.list(100, offset);
-      offset = page.next;
-      for (const item of page.memories) {
-        scanned++;
-        if (
-          !item.archived &&
-          (item.importance ?? 1) < 0.4 &&
-          Date.now() -
-            Date.parse(item.last_accessed_at ?? item.updated_at ?? "") >
-            90 * 86_400_000
-        ) {
-          await this.request(`${this.base}/points/payload?wait=true`, "POST", {
-            points: [item.id],
-            payload: { archived: true, archived_at: new Date().toISOString() },
+    if (!this.activeCollectionPath)
+      return { ok: false, error: "Durable index switching is unavailable" };
+    if (!this.embeddings.configured)
+      return {
+        ok: false,
+        error: "Verified free embeddings are not configured",
+      };
+    if (this.reindexing || this.activeMutations > 0)
+      return { ok: false, error: "Memory is busy; retry the reindex shortly" };
+    this.reindexing = true;
+    const source = this.activeCollectionName;
+    const prefix = this.reindexedPrefix();
+    const target = `${prefix}${crypto.randomUUID().replaceAll("-", "")}`;
+    let targetCreated = false;
+    let switched = false;
+    let points = 0;
+    try {
+      await this.init();
+      await this.request(`/collections/${target}`, "PUT", {
+        vectors: { size: this.embeddings.dimensions, distance: "Cosine" },
+      });
+      targetCreated = true;
+      for (const field of [
+        "type",
+        "archived",
+        "related_entity",
+        "embedding_model",
+      ])
+        await this.request(`/collections/${target}/index?wait=true`, "PUT", {
+          field_name: field,
+          field_schema: field === "archived" ? "bool" : "keyword",
+        });
+
+      let offset: unknown;
+      do {
+        const page = await this.request<{
+          result?: { points?: unknown; next_page_offset?: unknown };
+        }>(`/collections/${source}/points/scroll`, "POST", {
+          limit: 100,
+          with_payload: true,
+          with_vector: false,
+          ...(offset === undefined || offset === null ? {} : { offset }),
+        });
+        const rows = page.result?.points;
+        if (!Array.isArray(rows))
+          throw new Error("Qdrant returned an invalid scroll page");
+        const batch = [];
+        for (const row of rows) {
+          if (
+            !row ||
+            typeof row !== "object" ||
+            !("id" in row) ||
+            !("payload" in row) ||
+            !row.payload ||
+            typeof row.payload !== "object" ||
+            typeof (row.payload as Record<string, unknown>).text !== "string"
+          )
+            throw new Error("A memory record cannot be safely re-embedded");
+          if (points >= 10_000)
+            throw new Error("Memory index exceeds the 10,000 point safety cap");
+          const payload = row.payload as Record<string, unknown>;
+          const vector = await this.embeddings.embed(payload.text as string);
+          batch.push({
+            id: row.id,
+            vector,
+            payload: { ...payload, embedding_model: this.embeddings.model },
           });
-          archived++;
+          points++;
+        }
+        if (batch.length)
+          await this.request(`/collections/${target}/points?wait=true`, "PUT", {
+            points: batch,
+          });
+        offset = page.result?.next_page_offset;
+        if (offset !== undefined && offset !== null && points >= 10_000)
+          throw new Error("Memory index exceeds the 10,000 point safety cap");
+      } while (offset !== undefined && offset !== null);
+
+      const info = await this.request<{
+        result?: {
+          points_count?: unknown;
+          config?: {
+            params?: { vectors?: { size?: unknown; distance?: unknown } };
+          };
+        };
+      }>(`/collections/${target}`);
+      if (
+        info.result?.points_count !== points ||
+        info.result.config?.params?.vectors?.size !==
+          this.embeddings.dimensions ||
+        info.result.config?.params?.vectors?.distance !== "Cosine"
+      )
+        throw new Error("Replacement memory index did not verify");
+
+      const revision: QdrantIndexRevision = {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        before: source,
+        after: target,
+        points,
+        embeddingModel: this.embeddings.model,
+        dimensions: this.embeddings.dimensions,
+      };
+      this.persistActiveCollection(target, [...this.indexRevisions, revision]);
+      this.initialized = true;
+      this.lastError = null;
+      switched = true;
+      return { ok: true, points, collection: target };
+    } catch (error) {
+      const detail = messageOf(error);
+      const safeErrors = [
+        "Memory index exceeds the 10,000 point safety cap",
+        "A memory record cannot be safely re-embedded",
+        "Qdrant returned an invalid scroll page",
+        "Replacement memory index did not verify",
+        "The active Qdrant memory index is missing",
+      ];
+      this.lastError =
+        safeErrors.find((message) => detail.includes(message)) ??
+        (/^Qdrant unavailable \([1-5][0-9]{2}\)$/.test(detail)
+          ? detail
+          : "Qdrant memory reindex failed; the active index was preserved");
+      if (this.activeCollectionName === target) {
+        this.initialized = true;
+        return {
+          ok: true,
+          points,
+          collection: target,
+          warning: "Index switched; directory durability check needs attention",
+        };
+      }
+      if (targetCreated && !switched) {
+        try {
+          await this.request(`/collections/${target}`, "DELETE");
+        } catch {
+          // An unreachable Qdrant may leave an unused collection; the active pointer is unchanged.
         }
       }
-    } while (offset && scanned < 10_000);
-    return { ok: true, scanned, archived, more: Boolean(offset) };
+      return { ok: false, error: this.lastError };
+    } finally {
+      this.reindexing = false;
+    }
+  }
+
+  async rollbackIndex(revisionId: string): Promise<{
+    ok: boolean;
+    collection?: string;
+    warning?: string;
+    error?: string;
+  }> {
+    if (!/^[0-9a-f-]{36}$/i.test(revisionId))
+      return { ok: false, error: "Ongeldige indexwijziging." };
+    const revision = this.indexRevisions.find((item) => item.id === revisionId);
+    if (!revision)
+      return { ok: false, error: "Deze indexwijziging is niet beschikbaar." };
+    if (revision.after !== this.activeCollectionName)
+      return {
+        ok: false,
+        error:
+          "De actieve index is daarna gewijzigd; terugzetten is afgebroken.",
+      };
+    if (
+      revision.embeddingModel !== this.embeddings.model ||
+      revision.dimensions !== this.embeddings.dimensions
+    )
+      return {
+        ok: false,
+        error:
+          "De embeddinginstelling is gewijzigd; terugzetten is afgebroken.",
+      };
+    if (this.reindexing || this.activeMutations > 0)
+      return {
+        ok: false,
+        error: "Geheugen is bezig; probeer het later opnieuw.",
+      };
+    this.reindexing = true;
+    try {
+      const info = await this.request<{
+        result?: {
+          points_count?: unknown;
+          config?: {
+            params?: { vectors?: { size?: unknown; distance?: unknown } };
+          };
+        };
+      }>(`/collections/${revision.before}`);
+      if (
+        info.result?.points_count !== revision.points ||
+        info.result.config?.params?.vectors?.size !==
+          this.embeddings.dimensions ||
+        info.result.config?.params?.vectors?.distance !== "Cosine"
+      )
+        return {
+          ok: false,
+          error:
+            "De vorige index kon niet worden gecontroleerd; niets gewijzigd.",
+        };
+      const rollback: QdrantIndexRevision = {
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        before: this.activeCollectionName,
+        after: revision.before,
+        points: revision.points,
+        embeddingModel: this.embeddings.model,
+        dimensions: this.embeddings.dimensions,
+      };
+      this.persistActiveCollection(revision.before, [
+        ...this.indexRevisions,
+        rollback,
+      ]);
+      this.initialized = true;
+      this.lastError = null;
+      return { ok: true, collection: revision.before };
+    } catch {
+      if (this.activeCollectionName === revision.before) {
+        this.initialized = true;
+        return {
+          ok: true,
+          collection: revision.before,
+          warning: "Index restored; directory durability check needs attention",
+        };
+      }
+      return {
+        ok: false,
+        error: "Indexherstel is mislukt; de actieve index bleef behouden.",
+      };
+    } finally {
+      this.reindexing = false;
+    }
   }
 
   async health(): Promise<MemoryHealth> {

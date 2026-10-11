@@ -2,7 +2,14 @@ import { Injectable, Optional } from "@nestjs/common";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { ModelMetricsService } from "../routing/model-metrics.service.js";
+import { sanitize } from "../core/security/sanitize.js";
 import type { ModelTool } from "../tools/tools.service.js";
+import type { ModelRoleId } from "@nova/contracts";
+import {
+  extractAssistantMood,
+  stripPrivateMoodMarkers,
+  type AssistantMood,
+} from "./assistant-mood.js";
 
 export interface ModelToolCall {
   id: string;
@@ -44,6 +51,7 @@ export interface ModelAnswer {
   model: string | null;
   usage: Record<string, unknown> | null;
   metadata: GatewayMetadata;
+  mood?: AssistantMood;
 }
 
 export interface CallOptions {
@@ -56,6 +64,9 @@ export interface CallOptions {
   /** A pure text answer is wanted: no tools are offered. */
   tools?: ModelTool[];
   maxTokens?: number;
+  /** Set only by the internal role router; validated against both role settings and free policy. */
+  roleModel?: { role: ModelRoleId; modelId: string };
+  includeMood?: boolean;
 }
 
 /**
@@ -108,11 +119,24 @@ export class OmniRouteClient {
       sessionId,
       toolChoice = "auto",
       tools = [],
+      includeMood = false,
     } = options;
     const started = Date.now();
+    const roleModels = options.roleModel
+      ? this.routing.roleModels(options.roleModel.role)
+      : [];
+    const model = options.roleModel
+      ? this.routing.assertRoleModel(
+          options.roleModel.role,
+          options.roleModel.modelId,
+        )
+      : this.config.omniModel;
+    const attempts = options.roleModel
+      ? [model, ...roleModels.filter((candidate) => candidate !== model)]
+      : [model];
     const body: Record<string, unknown> = {
-      model: this.config.omniModel,
-      messages,
+      model,
+      messages: sanitize(messages),
       temperature: 0.7,
       max_tokens: options.maxTokens ?? 1800,
       reasoning_effort: "none",
@@ -123,24 +147,56 @@ export class OmniRouteClient {
       body.tool_choice = toolChoice;
     }
     this.routing.assertFree();
-    const response = await fetch(`${this.config.omniUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.config.omniKey}`,
-        "x-omniroute-no-memory": "true",
-        "x-omniroute-compression":
-          this.config.omniCompression === "lite" ? "lite" : "off",
-        ...(sessionId
-          ? { "x-omniroute-session-id": sessionId, "x-session-id": sessionId }
-          : {}),
-        ...(tools.length ? { "x-omniroute-no-cache": "true" } : {}),
-      },
-      body: JSON.stringify(body),
-      signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(60_000)])
-        : AbortSignal.timeout(60_000),
-    });
+    let response: Response | undefined;
+    let lastFailure: unknown;
+    for (const candidate of attempts) {
+      if (options.roleModel)
+        body.model = this.routing.assertRoleModel(
+          options.roleModel.role,
+          candidate,
+        );
+      try {
+        response = await fetch(`${this.config.omniUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${this.config.omniKey}`,
+            "x-omniroute-no-memory": "true",
+            "x-omniroute-compression":
+              this.config.omniCompression === "lite" ? "lite" : "off",
+            ...(sessionId
+              ? {
+                  "x-omniroute-session-id": sessionId,
+                  "x-session-id": sessionId,
+                }
+              : {}),
+            ...(tools.length ? { "x-omniroute-no-cache": "true" } : {}),
+          },
+          body: JSON.stringify(body),
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(60_000)])
+            : AbortSignal.timeout(60_000),
+        });
+      } catch (error) {
+        lastFailure = error;
+        if (
+          !options.roleModel ||
+          signal?.aborted ||
+          candidate === attempts.at(-1)
+        )
+          throw error;
+        continue;
+      }
+      if (
+        response.ok ||
+        !options.roleModel ||
+        ![429, 500, 502, 503, 504].includes(response.status) ||
+        candidate === attempts.at(-1)
+      )
+        break;
+      lastFailure = new Error(`OmniRoute request failed (${response.status})`);
+    }
+    if (!response) throw lastFailure ?? new Error("OmniRoute request failed");
     if (
       !response.ok &&
       [400, 415, 422].includes(response.status) &&
@@ -168,11 +224,15 @@ export class OmniRouteClient {
       };
       const message = data.choices?.[0]?.message;
       if (!message) throw new Error("OmniRoute returned no assistant message");
+      const parsed = includeMood
+        ? extractAssistantMood(String(message.content ?? ""))
+        : undefined;
       this.recordResponse(data.model, data.provider, started);
       return {
-        assistant: message,
+        assistant: parsed ? { ...message, content: parsed.content } : message,
         model: data.model ?? null,
         usage: data.usage ?? null,
+        ...(parsed ? { mood: parsed.mood } : {}),
         metadata: {
           ...gateway,
           model: data.model ?? null,
@@ -182,7 +242,7 @@ export class OmniRouteClient {
         },
       };
     }
-    return this.readStream(response, gateway, started, emit);
+    return this.readStream(response, gateway, started, emit, includeMood);
   }
 
   private async readStream(
@@ -190,11 +250,16 @@ export class OmniRouteClient {
     gateway: GatewayMetadata,
     started: number,
     emit: NonNullable<CallOptions["emit"]>,
+    includeMood: boolean,
   ): Promise<ModelAnswer> {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let content = "";
+    let pendingMoodText = "";
+    let mood: AssistantMood = "neutral";
+    const moodPrefix = "<!--NOVA_MOOD:";
+    let moodEmitted = false;
     let model: string | null = null;
     let usage: Record<string, unknown> | null = null;
     let provider: string | null = null;
@@ -241,7 +306,36 @@ export class OmniRouteClient {
       const delta = data.choices?.[0]?.delta ?? {};
       if (typeof delta.content === "string") {
         content += delta.content;
-        emit("token", { text: delta.content });
+        if (!includeMood) emit("token", { text: delta.content });
+        else {
+          pendingMoodText += delta.content;
+          const markerAt = pendingMoodText.indexOf(moodPrefix);
+          if (markerAt >= 0) {
+            if (markerAt > 0)
+              emit("token", { text: pendingMoodText.slice(0, markerAt) });
+            pendingMoodText = pendingMoodText.slice(markerAt);
+            if (pendingMoodText.includes("-->")) {
+              if (content.startsWith(moodPrefix)) {
+                const parsedMood = extractAssistantMood(pendingMoodText);
+                if (parsedMood.matched) {
+                  mood = parsedMood.mood;
+                  moodEmitted = true;
+                  emit("mood", { mood });
+                  pendingMoodText = parsedMood.content;
+                  if (pendingMoodText) emit("token", { text: pendingMoodText });
+                  pendingMoodText = "";
+                } else {
+                  emit("token", { text: parsedMood.content });
+                  pendingMoodText = "";
+                }
+              }
+            }
+          } else if (pendingMoodText.length >= moodPrefix.length) {
+            const safeLength = pendingMoodText.length - moodPrefix.length + 1;
+            emit("token", { text: pendingMoodText.slice(0, safeLength) });
+            pendingMoodText = pendingMoodText.slice(safeLength);
+          }
+        }
       }
       for (const fragment of delta.tool_calls ?? []) {
         const index = fragment.index ?? 0;
@@ -280,6 +374,16 @@ export class OmniRouteClient {
       if (buffer.trim()) consume(buffer.trim());
       if (!finished)
         throw new Error("OmniRoute stream ended before completion");
+      if (includeMood) {
+        const parsed = extractAssistantMood(content);
+        mood = parsed.mood;
+        if (parsed.matched && !moodEmitted) emit("mood", { mood });
+        const pending = parsed.matched
+          ? ""
+          : stripPrivateMoodMarkers(pendingMoodText);
+        if (pending) emit("token", { text: pending });
+        content = parsed.content;
+      }
       this.recordResponse(model, provider, started);
       return {
         assistant: {
@@ -289,6 +393,7 @@ export class OmniRouteClient {
         },
         model,
         usage,
+        ...(includeMood ? { mood } : {}),
         metadata: {
           ...gateway,
           model,

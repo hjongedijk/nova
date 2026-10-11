@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { MemorySource } from "../../src/memory/memory.source.js";
@@ -9,6 +12,7 @@ import {
   RemoteEmbeddings,
 } from "../../src/memory/semantic/qdrant.backend.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
+import { RoutingService } from "../../src/routing/routing.service.js";
 import type { ToolSource } from "../../src/tools/tool.types.js";
 import { listen } from "../integrations/helpers.js";
 
@@ -103,6 +107,7 @@ describe("QdrantMemory", () => {
       model: "free-embed",
       dimensions: 3,
       freeVerified: true,
+      assertFreeModel: () => {},
     });
     memory = new QdrantMemory({
       url: fixture.server.url,
@@ -181,11 +186,193 @@ describe("QdrantMemory", () => {
     expect(health).toMatchObject({ online: true, ready: true });
   });
 
+  it("rechecks the verified free model before every embedding request", async () => {
+    let sent = false;
+    const blocked = new RemoteEmbeddings({
+      url: "https://omniroute.example/v1",
+      key: "fixture-key",
+      model: "provider/free-embed",
+      dimensions: 3,
+      freeVerified: true,
+      assertFreeModel: () => {
+        throw new Error("route policy changed");
+      },
+      fetcher: async () => {
+        sent = true;
+        return new Response("{}", { status: 200 });
+      },
+    });
+    await expect(blocked.embed("private text")).rejects.toThrow(
+      "route policy changed",
+    );
+    expect(sent).toBe(false);
+  });
+
+  it("redacts credential-shaped text before sending it for embeddings", async () => {
+    let sent = "";
+    const embeddings = new RemoteEmbeddings({
+      url: "https://omniroute.example/v1",
+      key: "fixture-key",
+      model: "provider/free-embed",
+      dimensions: 3,
+      freeVerified: true,
+      assertFreeModel: () => {},
+      fetcher: async (_url, init) => {
+        sent = String(JSON.parse(String(init?.body)).input);
+        return new Response(
+          JSON.stringify({ data: [{ embedding: [1, 0, 0] }] }),
+          { status: 200 },
+        );
+      },
+    });
+    await embeddings.embed("password: do-not-send-embedding-secret");
+    expect(sent).toBe("password: [redacted]");
+    expect(sent).not.toContain("do-not-send-embedding-secret");
+  });
+
   it("rejects embeddings with the wrong dimensions", async () => {
     embeddings.dimensions = 5;
     const result = await memory.write("Remember my office is upstairs");
     expect(result).toMatchObject({ ok: false });
     expect(result.error).toMatch(/dimensions/);
+  });
+
+  it("reindexes off-path, verifies the new collection, and durably switches on success", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const collections = new Map<string, Map<string, Point>>([
+      [
+        "legacy_memory",
+        new Map([
+          [
+            id,
+            {
+              id,
+              vector: [1, 0, 0],
+              payload: {
+                id,
+                text: "Remember my office is upstairs",
+                type: "FACT",
+                importance: 0.8,
+                archived: false,
+                embedding_model: "old-model",
+              },
+            },
+          ],
+        ]),
+      ],
+    ]);
+    let failEmbeddings = true;
+    const server = await listen((seen, send) => {
+      const pathname = (seen.url ?? "").split("?")[0]!;
+      if (pathname === "/v1/embeddings" && failEmbeddings) return send(503, {});
+      if (pathname === "/v1/embeddings")
+        return send(200, { data: [{ embedding: [0, 1, 0] }] });
+      const [, , collectionName, ...tail] = pathname.split("/");
+      const points = collections.get(collectionName!);
+      if (tail.length === 0) {
+        if (seen.method === "DELETE") {
+          collections.delete(collectionName!);
+          return send(200, { result: true });
+        }
+        if (seen.method === "PUT") {
+          collections.set(collectionName!, new Map());
+          return send(200, { result: true });
+        }
+        return send(
+          points ? 200 : 404,
+          points
+            ? {
+                result: {
+                  points_count: points.size,
+                  config: {
+                    params: { vectors: { size: 3, distance: "Cosine" } },
+                  },
+                },
+              }
+            : { status: { error: "not found" } },
+        );
+      }
+      if (tail[0] === "index") return send(200, { result: true });
+      if (tail[0] === "points" && tail[1] === "scroll")
+        return send(200, {
+          result: {
+            points: [...(points?.values() ?? [])].map(({ id, payload }) => ({
+              id,
+              payload,
+            })),
+            next_page_offset: null,
+          },
+        });
+      if (tail[0] === "points" && tail[1]?.startsWith("?"))
+        return send(200, { result: true });
+      if (tail[0] === "points" && seen.method === "PUT") {
+        const target = points ?? new Map<string, Point>();
+        for (const point of JSON.parse(seen.body).points)
+          target.set(point.id, point);
+        collections.set(collectionName!, target);
+        return send(200, { result: true });
+      }
+      return send(200, { result: true });
+    });
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nova-qdrant-reindex-"),
+    );
+    const pointer = path.join(directory, "active.json");
+    const options = {
+      url: server.url,
+      collection: "legacy_memory",
+      activeCollectionPath: pointer,
+      embeddings: new RemoteEmbeddings({
+        url: `${server.url}/v1`,
+        key: "fixture-key",
+        model: "free-embed-v2",
+        dimensions: 3,
+        freeVerified: true,
+        assertFreeModel: () => {},
+      }),
+    };
+    try {
+      const first = new QdrantMemory(options);
+      const failed = await first.reindex();
+      expect(failed).toMatchObject({ ok: false });
+      expect(first.collection).toBe("legacy_memory");
+      expect(fs.existsSync(pointer)).toBe(false);
+      expect(collections.size).toBe(1);
+
+      failEmbeddings = false;
+      const result = await first.reindex();
+      expect(result).toMatchObject({ ok: true, points: 1 });
+      expect(result.collection).not.toBe("legacy_memory");
+      expect(fs.statSync(pointer).mode & 0o777).toBe(0o600);
+      expect(collections.get(result.collection!)?.get(id)).toMatchObject({
+        vector: [0, 1, 0],
+        payload: { id, embedding_model: "free-embed-v2" },
+      });
+      const restored = new QdrantMemory(options);
+      expect(restored.collection).toBe(result.collection);
+      expect((await restored.list()).memories).toHaveLength(1);
+      expect(collections.has("legacy_memory")).toBe(true);
+      const revision = restored.indexHistory()[0]!;
+      expect(revision).toMatchObject({
+        before: "legacy_memory",
+        after: result.collection,
+      });
+      expect(await restored.rollbackIndex(revision.id)).toMatchObject({
+        ok: true,
+        collection: "legacy_memory",
+      });
+      expect(await restored.rollbackIndex(revision.id)).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("daarna gewijzigd"),
+      });
+      const recovered = new QdrantMemory(options);
+      expect(recovered.collection).toBe("legacy_memory");
+      expect((await recovered.list()).memories).toHaveLength(1);
+      expect(recovered.indexHistory()).toHaveLength(2);
+    } finally {
+      server.close();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 
@@ -320,6 +507,7 @@ describe("SemanticMemoryService and MemorySource", () => {
     const service = new SemanticMemoryService(
       new NovaConfig(),
       new OmniRouteManagement(new NovaConfig()),
+      new RoutingService(new NovaConfig()),
     );
     expect(service.configured).toBe(false);
     expect(await service.search("volume")).toEqual([]);
@@ -343,6 +531,7 @@ describe("SemanticMemoryService and MemorySource", () => {
     const service = new SemanticMemoryService(
       new NovaConfig(),
       new OmniRouteManagement(new NovaConfig()),
+      new RoutingService(new NovaConfig()),
     );
     expect(service.configured).toBe(false);
     expect((await service.health()).error).toBe("Invalid memory collection");
@@ -356,7 +545,11 @@ describe("SemanticMemoryService and MemorySource", () => {
       scope: "jarvis-owner",
       fetcher: async () => new Response("{}", { status: 500 }),
     });
-    const service = new SemanticMemoryService(new NovaConfig(), management);
+    const service = new SemanticMemoryService(
+      new NovaConfig(),
+      management,
+      new RoutingService(new NovaConfig()),
+    );
     expect(service.backend).toBeInstanceOf(OmniRouteMemory);
     const source: ToolSource = new MemorySource(service);
     expect(

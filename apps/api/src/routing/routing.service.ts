@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import fs from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { NovaConfig } from "../core/config/nova-config.js";
+import type { ModelRoleId } from "@nova/contracts";
 import {
   connectionFingerprint,
   type CredentialConnection,
@@ -308,5 +309,91 @@ export class RoutingService {
           : "Free-only routing verification failed; inference blocked",
       );
     return status;
+  }
+
+  /** Explicit-model callers must still select from today's verified-free model set. */
+  assertFreeModel(modelId: string): string {
+    const status = this.assertFree();
+    if (!status.enabledModels?.includes(modelId))
+      throw new FreeRoutingBlockedError(
+        "Selected model is outside the verified free route",
+      );
+    return modelId;
+  }
+
+  /** A role-selected model must remain both globally verified-free and explicitly approved for that role. */
+  assertRoleModel(role: ModelRoleId, modelId: string): string {
+    this.assertFreeModel(modelId);
+    try {
+      const settings = JSON.parse(
+        fs.readFileSync(this.config.dataFile("settings.json"), "utf8"),
+      ) as {
+        modelRoles?: Record<
+          string,
+          { preferred?: unknown; fallback?: unknown }
+        >;
+      };
+      const preference = settings.modelRoles?.[role];
+      if (
+        !preference ||
+        ((!Array.isArray(preference.preferred) ||
+          !preference.preferred.includes(modelId)) &&
+          preference.fallback !== modelId)
+      )
+        throw new Error("Model is not configured for this role");
+      return modelId;
+    } catch {
+      throw new FreeRoutingBlockedError(
+        "No verified free model is configured for this role",
+      );
+    }
+  }
+
+  preferredModelForRole(role: ModelRoleId): string | undefined {
+    return this.roleModels(role)[0];
+  }
+
+  /** Ordered, currently verified free choices; callers still revalidate each before sending. */
+  roleModels(role: ModelRoleId): string[] {
+    const status = this.assertFree();
+    try {
+      const settings = JSON.parse(
+        fs.readFileSync(this.config.dataFile("settings.json"), "utf8"),
+      ) as {
+        modelRoles?: Record<
+          string,
+          { preferred?: unknown; fallback?: unknown }
+        >;
+      };
+      const preference = settings.modelRoles?.[role];
+      if (!preference) return [];
+      const requested = [
+        ...(Array.isArray(preference.preferred) ? preference.preferred : []),
+        ...(typeof preference.fallback === "string"
+          ? [preference.fallback]
+          : []),
+      ];
+      if (!requested.length) return [];
+      const models = [...new Set(requested)].filter(
+        (item): item is string =>
+          typeof item === "string" &&
+          status.enabledModels?.includes(item) === true,
+      );
+      if (requested.length && !models.length)
+        throw new FreeRoutingBlockedError(
+          "No configured model for this role remains in the verified free route",
+        );
+      return models.filter((model) => {
+        try {
+          this.assertRoleModel(role, model);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    } catch (error) {
+      if (error instanceof FreeRoutingBlockedError) throw error;
+      return [];
+    }
   }
 }

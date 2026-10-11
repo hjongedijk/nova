@@ -29,6 +29,23 @@ describe("RoutingService", () => {
     expect(routing.providerInventory()).toEqual([]);
   });
 
+  it("allows explicit models only while listed in the verified free route", () => {
+    const routing = new RoutingService(new NovaConfig());
+    vi.spyOn(routing, "assertFree").mockReturnValue({
+      freeOnly: true,
+      ready: true,
+      policyVerified: true,
+      status: "OK",
+      enabledModels: ["provider/free-embed"],
+    });
+    expect(routing.assertFreeModel("provider/free-embed")).toBe(
+      "provider/free-embed",
+    );
+    expect(() => routing.assertFreeModel("provider/paid-model")).toThrow(
+      FreeRoutingBlockedError,
+    );
+  });
+
   it("blocks a persisted gateway redirect before policy lookup and the test bypass", () => {
     const directory = fs.mkdtempSync(
       path.join(os.tmpdir(), "nova-gateway-test-"),
@@ -214,6 +231,33 @@ describe("RoutingService verified SQLite policy", () => {
     });
     expect(JSON.stringify(routing.status())).not.toContain(
       "fixture-private-key",
+    );
+  });
+
+  it("only permits role-selected models that remain in the verified free policy and saved role list", () => {
+    writePolicy(boundPolicy());
+    fs.writeFileSync(
+      path.join(directory, "settings.json"),
+      JSON.stringify({
+        modelRoles: {
+          conversation: { preferred: [model], fallback: null },
+        },
+      }),
+    );
+    expect(routing.assertRoleModel("conversation", model)).toBe(model);
+    expect(() => routing.assertRoleModel("code", model)).toThrow(
+      FreeRoutingBlockedError,
+    );
+    expect(() => routing.assertRoleModel("conversation", "paid/model")).toThrow(
+      FreeRoutingBlockedError,
+    );
+    const changed = boundPolicy();
+    const candidate = changed.catalog[0];
+    if (!candidate) throw new Error("Missing model fixture");
+    Object.assign(candidate, { paid: true });
+    writePolicy(changed);
+    expect(() => routing.assertRoleModel("conversation", model)).toThrow(
+      FreeRoutingBlockedError,
     );
   });
 

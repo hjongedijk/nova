@@ -27,8 +27,11 @@ export function sanitize<T>(value: T): T {
         "[redacted]",
       )
       .replace(
-        /((?:password|wachtwoord|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|secret)\s*(?:[:=]|is)\s*)[^\s,;]+/gi,
-        "$1[redacted]",
+        /((?:["']?(?:password|passwd|pwd|passphrase|wachtwoord|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|client[ _-]?secret|private[ _-]?key|secret|credential)["']?)\s*(?:[:=]|\bis\b)\s*)(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/gi,
+        (match: string, prefix: string) => {
+          const value = match.slice(prefix.length);
+          return `${prefix}${value.startsWith('"') ? '"[redacted]"' : value.startsWith("'") ? "'[redacted]'" : "[redacted]"}`;
+        },
       ) as T;
   }
   if (Array.isArray(value)) return value.map((item) => sanitize(item)) as T;
