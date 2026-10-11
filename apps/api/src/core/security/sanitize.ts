@@ -1,13 +1,12 @@
 /*
  * Keeps secrets out of everything NOVA stores, logs or hands to the model: the values of
- * every *KEY/*SECRET/*TOKEN/*PASSWORD variable, bearer tokens, API keys and JWTs, and object
+ * every *KEY/*SECRET/*TOKEN/*PASSWORD/*PIN variable, bearer tokens, API keys and JWTs, and object
  * fields with sensitive names. Token-usage counters are the one exception to the name rule.
  */
 const secrets = () =>
   Object.entries(process.env)
     .filter(
-      ([key, value]) =>
-        /KEY|SECRET|TOKEN|PASSWORD/i.test(key) && value && value.length >= 4,
+      ([key, value]) => /KEY|SECRET|TOKEN|PASSWORD|PIN/i.test(key) && value,
     )
     .map(([, value]) => value as string);
 

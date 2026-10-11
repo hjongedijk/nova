@@ -29,4 +29,11 @@ describe("sanitize prompt and persistence secrets", () => {
       prompt: "the value is [redacted]",
     });
   });
+
+  it("redacts short configured credentials such as a short PIN", () => {
+    process.env.NOVA_ADMIN_PIN = "123";
+    expect(sanitize("configured PIN 123 used for a private action.")).toBe(
+      "configured PIN [redacted] used for a private action.",
+    );
+  });
 });
