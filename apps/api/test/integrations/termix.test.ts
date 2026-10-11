@@ -93,4 +93,31 @@ describe("TermixService", () => {
       ).ok,
     ).toBe(false);
   });
+
+  it("hides and refuses hosts outside the saved allowlist", async () => {
+    const targetAccess = {
+      allows: () => false,
+    };
+    const gated = new TermixService(
+      fakeConfig({ termix: { url: fake.url, apiKey: "tmx_key" } }),
+      targetAccess as never,
+    );
+    expect(await gated.execute("termix_hosts", {}, call())).toMatchObject({
+      ok: true,
+      result: [],
+    });
+    const snippetsBefore = fake.requests.filter(
+      (item) => item.url === "/plugin-api/snippets",
+    ).length;
+    expect(
+      await gated.execute(
+        "termix_run_command",
+        { host: "nas100", command: "hostname" },
+        call(),
+      ),
+    ).toMatchObject({ ok: false, error: "Unknown Termix host" });
+    expect(
+      fake.requests.filter((item) => item.url === "/plugin-api/snippets"),
+    ).toHaveLength(snippetsBefore);
+  });
 });

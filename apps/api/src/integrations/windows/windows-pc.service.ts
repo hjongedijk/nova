@@ -4,6 +4,7 @@ import type {
   WallpaperDisplay,
   WallpaperMode,
   WindowsAgentStatus,
+  WindowsHelperDebugStatus,
 } from "@nova/contracts";
 import { NovaConfig } from "../../core/config/nova-config.js";
 import { requestJson } from "../../core/http/http-json.js";
@@ -26,6 +27,7 @@ export type AgentOutcome<T = Record<string, unknown>> =
 
 const ROUTES: Record<string, ["GET" | "POST", string]> = {
   windows_status: ["GET", "/v1/status"],
+  windows_helper_debug: ["GET", "/v1/helper-debug"],
   windows_open_app: ["POST", "/v1/open-app"],
   windows_open_url: ["POST", "/v1/open-url"],
   windows_close_app: ["POST", "/v1/close-app"],
@@ -38,6 +40,13 @@ const ROUTES: Record<string, ["GET" | "POST", string]> = {
   windows_helper_notify: ["POST", "/v1/helper/notify"],
   windows_helper_size: ["POST", "/v1/helper/size"],
 };
+
+const coordinate = "-?\\d{1,6}";
+const rect = `(?:${coordinate},${coordinate},${coordinate},${coordinate}|n/a)`;
+const fourPixels = "\\d{1,5},\\d{1,5},\\d{1,5},\\d{1,5}";
+const helperDebugPattern = new RegExp(
+  `^window=${rect} extended=${rect} monitor=${rect} work=${rect} shape=rectangle frame=${fourPixels} chrome=\\d{1,5},\\d{1,5} requested=${coordinate},${coordinate},\\d{1,5}x\\d{1,5} dpi=\\d{1,5} scale=\\d{1,3}(?:\\.\\d{1,4})? visible=(?:True|False) caption=(?:True|False) sizingFrame=(?:True|False) toolWindow=(?:True|False) appWindow=(?:True|False) topmost=(?:True|False)$`,
+);
 
 /** The displays plus what the agent runs (wallpaper, helper or both). */
 export interface DesktopState {
@@ -53,7 +62,7 @@ interface AgentBody {
 }
 
 /**
- * Talks to the Windows agent in integrations/windows-agent. The agent owns the allow-list of
+ * Talks to the Windows agent in agents/windows. The agent owns the allow-list of
  * programs; NOVA only ever sends an app name or an http(s) URL.
  */
 @Injectable()
@@ -131,6 +140,66 @@ export class WindowsPcService {
         ...unavailable,
         error:
           "De Windows-agent antwoordt nu niet. Controleer of de pc aanstaat.",
+      };
+    }
+  }
+
+  /** Return bounded, non-secret measurements for the currently open helper window. */
+  async helperDebug(): Promise<WindowsHelperDebugStatus> {
+    const unavailable: WindowsHelperDebugStatus = {
+      available: false,
+      helper: null,
+      view: null,
+      display: null,
+      checkedAt: null,
+    };
+    if (!this.configured)
+      return { ...unavailable, error: "Er is geen Windows-agent ingesteld." };
+    try {
+      const outcome = await this.call(
+        "windows_helper_debug",
+        {},
+        AbortSignal.timeout(6000),
+      );
+      if (!outcome.ok)
+        return {
+          ...unavailable,
+          error: "De meting van de Windows-helper is niet beschikbaar.",
+        };
+      const helper = outcome.result.helper;
+      if (
+        typeof helper !== "string" ||
+        helper.length > 1000 ||
+        !helperDebugPattern.test(helper)
+      )
+        return {
+          ...unavailable,
+          error:
+            "De Windows-agent gaf geen geldige helpermeting terug. Werk de agent bij.",
+        };
+      const display = outcome.result.display;
+      return {
+        available: true,
+        helper,
+        view:
+          typeof outcome.result.view === "string" &&
+          /^[a-z]{1,24}$/.test(outcome.result.view)
+            ? outcome.result.view
+            : null,
+        display:
+          typeof display === "number" &&
+          Number.isInteger(display) &&
+          display >= 0 &&
+          display <= 8
+            ? display
+            : null,
+        checkedAt: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        ...unavailable,
+        error:
+          "De Windows-agent antwoordt nu niet. Controleer of de pc aanstaat en de helper open is.",
       };
     }
   }

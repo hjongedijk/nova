@@ -66,6 +66,7 @@ export async function fakeHomeAssistant() {
     entity("tts.fixture", "unknown", { friendly_name: "Test TTS" }),
     entity("switch.server_rack", "on", { friendly_name: "Server rek" }),
   ];
+  const initialEntities = structuredClone(entities);
   const serviceNames = (domain: string): string[] =>
     domain === "media_player"
       ? [
@@ -245,6 +246,18 @@ export async function fakeHomeAssistant() {
     setVerificationFailure: (value: boolean) => (verifyFailure = value),
     setOffline: (value: boolean) => (offline = value),
     hideMusicAssistant: (value: boolean) => (hideMusic = value),
+    reset: () => {
+      for (const [index, item] of entities.entries()) {
+        const initial = initialEntities[index]!;
+        item.state = initial.state;
+        item.attributes = structuredClone(initial.attributes);
+        item.last_updated = initial.last_updated;
+      }
+      actions.length = 0;
+      verifyFailure = false;
+      offline = false;
+      hideMusic = false;
+    },
     close: async () => {
       for (const socket of wss.clients) socket.terminate();
       await new Promise((resolve) => wss.close(() => server.close(resolve)));

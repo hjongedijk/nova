@@ -1,5 +1,7 @@
 import { NovaConfig } from "../../core/config/nova-config.js";
+import { Optional } from "@nestjs/common";
 import { requestJson } from "../../core/http/http-json.js";
+import { ManagedTargetsAccessStore } from "../../settings/managed-targets-access.store.js";
 import {
   schema,
   ToolSourceProvider,
@@ -22,7 +24,10 @@ interface PangolinBody {
 @ToolSourceProvider()
 export class PangolinService implements ToolSource {
   readonly source = "pangolin";
-  constructor(private readonly config: NovaConfig) {}
+  constructor(
+    private readonly config: NovaConfig,
+    @Optional() private readonly targetAccess?: ManagedTargetsAccessStore,
+  ) {}
 
   private get settings() {
     return this.config.pangolin;
@@ -84,6 +89,49 @@ export class PangolinService implements ToolSource {
     });
   }
 
+  /** Raw configured-organization target inventory for the guarded Settings editor. */
+  async listTargets(
+    name: "pangolin_sites" | "pangolin_resources",
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const orgId = this.settings.orgId;
+    if (!orgId) throw new Error("Pangolin organization is not configured");
+    const response = await this.get(
+      `/org/${encodeURIComponent(orgId)}/${name === "pangolin_sites" ? "sites" : "resources"}`,
+      signal,
+    );
+    if (response.status !== 200)
+      throw new Error(`Pangolin error (${response.status})`);
+    return response.data?.data ?? response.data;
+  }
+
+  private filteredTargets(
+    value: unknown,
+    key: "pangolinSiteIds" | "pangolinResourceIds",
+  ) {
+    if (this.targetAccess?.get().mode !== "allowlist") return value;
+    const property = key === "pangolinSiteIds" ? "sites" : "resources";
+    const rows = Array.isArray(value)
+      ? value
+      : value &&
+          typeof value === "object" &&
+          Array.isArray((value as Record<string, unknown>)[property])
+        ? ((value as Record<string, unknown>)[property] as unknown[])
+        : null;
+    if (!rows) return value;
+    const allowed = rows.filter((item) => {
+      if (!item || typeof item !== "object") return false;
+      const id = (item as Record<string, unknown>).id;
+      return (
+        id !== undefined &&
+        (this.targetAccess?.allows(key, String(id)) ?? false)
+      );
+    });
+    return Array.isArray(value)
+      ? allowed
+      : { ...(value as Record<string, unknown>), [property]: allowed };
+  }
+
   async execute(
     name: string,
     args: Record<string, unknown>,
@@ -94,6 +142,38 @@ export class PangolinService implements ToolSource {
     )
       return { ok: false, error: "Unknown Pangolin tool" };
     const orgId = (args.orgId as string | undefined) || this.settings.orgId;
+    if (
+      this.targetAccess?.get().mode === "allowlist" &&
+      orgId !== this.settings.orgId
+    )
+      return {
+        ok: false,
+        error: "Pangolin organization is not available to NOVA",
+      };
+    if (
+      name === "pangolin_orgs" &&
+      this.targetAccess?.get().mode === "allowlist"
+    )
+      return { ok: true, result: [] };
+    if (name === "pangolin_sites" || name === "pangolin_resources") {
+      try {
+        const key =
+          name === "pangolin_sites" ? "pangolinSiteIds" : "pangolinResourceIds";
+        return {
+          ok: true,
+          result: this.filteredTargets(
+            await this.listTargets(name, call?.signal),
+            key,
+          ),
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error:
+            error instanceof Error ? error.message : "Pangolin request failed",
+        };
+      }
+    }
     const path =
       name === "pangolin_orgs"
         ? "/orgs"

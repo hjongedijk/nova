@@ -35,6 +35,9 @@ export interface JarvisState {
     guests: Record<string, string> | null;
     down: Record<string, number>;
     devices?: Record<string, string> | null;
+    containers?: Record<string, { state: string; startedAt: string | null }>;
+    releaseCheckAt?: number;
+    latestRelease?: string | null;
     energy?: Record<
       string,
       { samples: { at: number; watts: number }[]; alertedAt?: number }

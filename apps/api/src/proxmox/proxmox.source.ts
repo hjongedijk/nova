@@ -124,6 +124,8 @@ export class ProxmoxSource implements ToolSource {
       !/^[a-zA-Z0-9_-]+$/.test(target.node ?? "")
     )
       return { ok: false, error: "Guest not found" };
+    if (!this.proxmox.allowsGuest(target.node ?? "", id))
+      return { ok: false, error: "Guest not available to NOVA" };
     const prefix = `/nodes/${encodeURIComponent(target.node ?? "")}/${target.type}/${id}/status/`;
     if (name === "proxmox_guest_status")
       return {

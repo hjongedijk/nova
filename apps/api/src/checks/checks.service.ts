@@ -8,6 +8,7 @@ import type {
   AlertInfo,
   HaEntity,
   ServiceCheckResult,
+  StackServiceStatus,
 } from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
 import {
@@ -17,6 +18,8 @@ import {
 } from "../planning/jarvis-state.store.js";
 import { ProxmoxService } from "../proxmox/proxmox.service.js";
 import { HomeAssistantService } from "../home/home-assistant.service.js";
+import { StackControlService } from "../settings/stack-control.service.js";
+import { UpdatesService } from "../settings/updates.service.js";
 import { parseTargets, probe } from "./probe.js";
 import tls from "node:tls";
 import net from "node:net";
@@ -48,6 +51,34 @@ export function trackerChanges(
     added: Object.entries(current).filter(([id]) => !(id in previous)),
     removed: Object.entries(previous).filter(([id]) => !(id in current)),
   };
+}
+
+type ContainerSnapshot = { state: string; startedAt: string | null };
+type ContainerChange = {
+  kind: "stopped" | "recovered" | "restarted";
+  service: StackServiceStatus;
+};
+export function containerChanges(
+  previous: Record<string, ContainerSnapshot>,
+  current: StackServiceStatus[],
+) {
+  return current.flatMap<ContainerChange>((service) => {
+    const was = previous[service.id];
+    if (!was) return [];
+    if (was.state === "running" && service.state !== "running")
+      return [{ kind: "stopped" as const, service }];
+    if (was.state !== "running" && service.state === "running")
+      return [{ kind: "recovered" as const, service }];
+    if (
+      was.state === "running" &&
+      service.state === "running" &&
+      was.startedAt &&
+      service.startedAt &&
+      was.startedAt !== service.startedAt
+    )
+      return [{ kind: "restarted" as const, service }];
+    return [];
+  });
 }
 
 type PowerSensor = { id: string; name: string; watts: number };
@@ -180,6 +211,8 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     private readonly store: JarvisStateStore,
     private readonly proxmox: ProxmoxService,
     @Optional() private readonly home?: HomeAssistantService,
+    @Optional() private readonly stack?: StackControlService,
+    @Optional() private readonly updates?: UpdatesService,
   ) {}
 
   onModuleInit(): void {
@@ -387,6 +420,75 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
           });
       } catch {
         // A failed Home Assistant sync must not look like mass device removal.
+      }
+    }
+    if (this.stack && this.config.stackControlToken) {
+      const status = await this.stack.status();
+      if (status.available) {
+        const previous = state.watch.containers;
+        if (previous) {
+          for (const { kind, service } of containerChanges(
+            previous,
+            status.services,
+          )) {
+            const key = `container-${service.id}`;
+            if (kind === "stopped") {
+              this.raise({
+                key,
+                severity: "critical",
+                title: `${service.label} container is gestopt`,
+                detail: `Containerstatus: ${service.state}.`,
+              });
+            } else if (kind === "recovered") {
+              this.resolve(key);
+              this.raise({
+                key,
+                severity: "info",
+                title: `${service.label} container draait weer`,
+              });
+            } else {
+              this.raise({
+                key,
+                severity: "info",
+                title: `${service.label} container is herstart`,
+                detail: "De starttijd is veranderd sinds de vorige controle.",
+              });
+            }
+          }
+        }
+        state.watch.containers = Object.fromEntries(
+          status.services.map((service) => [
+            service.id,
+            { state: service.state, startedAt: service.startedAt ?? null },
+          ]),
+        );
+      }
+    }
+    if (
+      this.updates &&
+      Date.now() - (state.watch.releaseCheckAt ?? 0) >= 6 * 60 * 60 * 1000
+    ) {
+      state.watch.releaseCheckAt = Date.now();
+      try {
+        const report = await this.updates.check();
+        const version = report.latest?.version;
+        if (
+          report.updateAvailable &&
+          version &&
+          state.watch.latestRelease !== version
+        ) {
+          state.watch.latestRelease = version;
+          this.raise({
+            key: "nova-update",
+            severity: "info",
+            title: `NOVA ${version} is beschikbaar`,
+            detail: "Bekijk de release in Systeem om de wijzigingen te lezen.",
+          });
+        } else if (!report.updateAvailable) {
+          state.watch.latestRelease = null;
+        }
+      } catch {
+        // Release metadata is optional; a failed check is not an outage alert.
       }
     }
     if (this.config.publicUrl) {

@@ -6,7 +6,7 @@ import type { ServiceCheckResult } from "@nova/contracts";
 
 type Probe = Omit<ServiceCheckResult, "name">;
 
-/** The services to watch: JARVIS_CHECK_TARGETS ("name=url,...") or NOVA's own stack. */
+/** The services to watch: NOVA_CHECK_TARGETS (legacy JARVIS_CHECK_TARGETS; "name=url,...") or NOVA's own stack. */
 export function parseTargets(
   raw: string,
   proxmoxUrl = "",
@@ -29,12 +29,11 @@ export function parseTargets(
     return targets;
   }
   Object.assign(targets, {
-    "jarvis-api": "http://jarvis-api:3000/health",
+    nova: "http://nova:8080/api/health",
     omniroute: "http://omniroute:20128/",
     mqtt: "tcp://mqtt:1883",
-    spraak: "http://jarvis-tts:8000/health",
+    "node-red": "http://node-red:1880/",
     qdrant: "http://qdrant:6333/",
-    "home-assistant": "http://host.docker.internal:8123/",
   });
   if (proxmoxUrl) targets.proxmox = proxmoxUrl;
   return targets;

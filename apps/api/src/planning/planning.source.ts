@@ -13,7 +13,7 @@ import { localTime } from "../proxmox/system-time.js";
 import { JarvisStateStore } from "./jarvis-state.store.js";
 import { describeTimer, PlanningService } from "./planning.service.js";
 import { CalDavService } from "./caldav.service.js";
-import type { AuditEntry, AuditService } from "../core/audit/audit.service.js";
+import { AuditService, type AuditEntry } from "../core/audit/audit.service.js";
 import { calendarDateKey, eventsTomorrow } from "./calendar-day.js";
 
 const str = (min: number, max: number) => ({

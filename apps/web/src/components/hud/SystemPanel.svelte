@@ -1,7 +1,13 @@
 <script lang="ts">
   import { dashboard } from "#lib/stores/dashboard.svelte.ts";
 
-  type Row = { name: string; text: string; cls: "ok" | "bad" | "" };
+  type Row = {
+    name: string;
+    text: string;
+    cls: "ok" | "bad" | "";
+    detail?: string;
+    href?: string;
+  };
 
   // The browser's own speech recognition ("Gehoor").
   const hearing =
@@ -30,11 +36,31 @@
       typeof data?.tools === "number"
         ? data.tools
         : (data?.tools?.available ?? data?.toolCount);
+    const nodeRed = data?.services?.nodeRed;
     return [
       failed
         ? { name: "API", text: "fout", cls: "bad" }
         : row("API", data?.ok, "online", "fout"),
       row("MQTT", data?.mqtt),
+      failed
+        ? { name: "Node-RED", text: "onbekend", cls: "bad" }
+        : !data
+          ? { name: "Node-RED", text: "…", cls: "" }
+          : {
+              name: "Node-RED",
+              text: nodeRed?.online
+                ? `${nodeRed.flowCount ?? "?"} flows · foutlog ${nodeRed.lastErrorAvailable ? "beschikbaar" : "n.v.t."}`
+                : "offline",
+              cls: nodeRed?.online ? "ok" : "bad",
+              detail: nodeRed?.lastErrorAvailable
+                ? (nodeRed.lastError ?? "Geen recente fout")
+                : "Node-RED biedt geen API met de laatste runtimefout.",
+              ...(nodeRed?.lastErrorFlowId
+                ? {
+                    href: `/settings?section=connections&nodeRedFlow=${encodeURIComponent(nodeRed.lastErrorFlowId)}`,
+                  }
+                : {}),
+            },
       row("Stem", data?.tts),
       {
         name: "Gehoor",
@@ -72,7 +98,21 @@
   <h2>Systeem <em>{count}</em></h2>
   <ul>
     {#each rows as row (row.name)}
-      <li><i></i><span>{row.name}</span><b class={row.cls}>{row.text}</b></li>
+      <li>
+        <i></i><span>{row.name}</span>{#if row.href}<a
+            class={row.cls}
+            href={row.href}
+            title={row.detail}
+            aria-label={row.detail
+              ? `${row.text}. ${row.detail}. Open de flow`
+              : row.text}>{row.text}</a
+          >{:else}<b
+            class={row.cls}
+            title={row.detail}
+            aria-label={row.detail ? `${row.text}. ${row.detail}` : row.text}
+            >{row.text}</b
+          >{/if}
+      </li>
     {/each}
   </ul>
 </section>

@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import type {
   ProxmoxGuestInfo,
   ProxmoxNodeInfo,
@@ -6,6 +6,7 @@ import type {
   ProxmoxStorageInfo,
 } from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { ManagedTargetsAccessStore } from "../settings/managed-targets-access.store.js";
 import { requestJson } from "../core/http/http-json.js";
 import { MqttService } from "../core/mqtt/mqtt.service.js";
 import { StateService } from "../core/state/state.service.js";
@@ -66,11 +67,16 @@ export class ProxmoxService {
     private readonly config: NovaConfig,
     private readonly state: StateService,
     private readonly mqtt: MqttService,
+    @Optional() private readonly targetAccess?: ManagedTargetsAccessStore,
   ) {}
 
   get configured(): boolean {
     const p = this.config.proxmox;
     return !!(p.url && p.tokenId && p.tokenSecret);
+  }
+
+  allowsGuest(node: string, vmid: number | string): boolean {
+    return this.targetAccess?.allowsProxmoxGuest(node, vmid) ?? true;
   }
 
   /** Raw call; the answer is Proxmox's `data` field. Errors carry no details on purpose. */
@@ -140,6 +146,8 @@ export class ProxmoxService {
   }
 
   tasks(signal?: AbortSignal) {
+    if (this.targetAccess?.get().mode === "allowlist")
+      return Promise.resolve([] as unknown[]);
     return this.track(async () =>
       (await this.request<unknown[]>("/cluster/tasks", "GET", signal)).slice(
         0,
@@ -152,8 +160,13 @@ export class ProxmoxService {
   status(signal?: AbortSignal): Promise<ProxmoxStatusInfo> {
     return this.track(
       async () => {
-        const nodes: ProxmoxNodeInfo[] = (await this.rawNodes(signal)).map(
-          (n) => ({
+        const nodes: ProxmoxNodeInfo[] = (await this.rawNodes(signal))
+          .filter(
+            (item) =>
+              this.targetAccess?.allows("proxmoxNodeIds", item.node ?? "") ??
+              true,
+          )
+          .map((n) => ({
             node: n.node ?? "",
             status: n.status ?? "",
             cpu: {
@@ -168,8 +181,7 @@ export class ProxmoxService {
                 : 0,
             },
             uptimeSeconds: n.uptime || 0,
-          }),
-        );
+          }));
         return {
           nodes,
           totalNodes: nodes.length,
@@ -184,7 +196,16 @@ export class ProxmoxService {
   /** All guests in the tool format (with label, cpuUsagePercent, ...). */
   guestViews(signal?: AbortSignal): Promise<GuestView[]> {
     return this.track(
-      async () => (await this.resources("vm", signal)).map(guestView),
+      async () =>
+        (await this.resources("vm", signal))
+          .filter(
+            (item) =>
+              this.targetAccess?.allowsProxmoxGuest(
+                item.node ?? "",
+                item.vmid ?? "",
+              ) ?? true,
+          )
+          .map(guestView),
       (guests) => ({
         guestsRunning: guests.filter((g) => g.status === "running").length,
       }),
@@ -209,7 +230,12 @@ export class ProxmoxService {
 
   /** Raw storage resources (what proxmox_storage answers). */
   rawStorage(signal?: AbortSignal): Promise<PveResource[]> {
-    return this.track(() => this.resources("storage", signal));
+    return this.track(async () =>
+      (await this.resources("storage", signal)).filter(
+        (item) =>
+          this.targetAccess?.allows("proxmoxNodeIds", item.node ?? "") ?? true,
+      ),
+    );
   }
 
   /** Storage with a known size for the dashboard, biggest first. */

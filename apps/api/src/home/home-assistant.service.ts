@@ -6,6 +6,8 @@ import {
 } from "@nestjs/common";
 import type { HaEntity, HomeHealth } from "@nova/contracts";
 import WebSocket from "ws";
+import fs from "node:fs";
+import path from "node:path";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
 
@@ -39,6 +41,12 @@ export interface HaDevice {
 export interface HaArea {
   area_id: string;
   name: string;
+}
+export interface HaAccessPolicy {
+  mode: "all" | "allowlist";
+  areaIds: string[];
+  deviceIds: string[];
+  entityIds: string[];
 }
 interface HaRegistryEntry {
   entity_id: string;
@@ -83,6 +91,7 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger("HOME");
   private readonly url: string;
   private readonly token: string;
+  private readonly accessFile: string;
   private timer: NodeJS.Timeout | undefined;
   private refreshing: Promise<HaEntity[]> | null = null;
 
@@ -92,10 +101,128 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
   services: HaServiceInfo[] = [];
   syncedAt: string | null = null;
   error: string | null = null;
+  private policy: HaAccessPolicy = {
+    mode: "all",
+    areaIds: [],
+    deviceIds: [],
+    entityIds: [],
+  };
 
   constructor(config: NovaConfig) {
     this.url = (config.homeAssistant.url || "").replace(/\/$/, "");
     this.token = config.homeAssistant.token || "";
+    this.accessFile = path.join(config.dataDir, "home-assistant-access.json");
+    if (fs.existsSync(this.accessFile)) {
+      try {
+        const saved = JSON.parse(fs.readFileSync(this.accessFile, "utf8")) as
+          HaAccessPolicy | undefined;
+        if (
+          (saved?.mode === "all" || saved?.mode === "allowlist") &&
+          Array.isArray(saved.areaIds) &&
+          Array.isArray(saved.deviceIds) &&
+          Array.isArray(saved.entityIds)
+        )
+          this.policy = saved;
+        else
+          this.policy = {
+            mode: "allowlist",
+            areaIds: [],
+            deviceIds: [],
+            entityIds: [],
+          };
+      } catch {
+        // Corrupt policy must never silently restore access to every device.
+        this.policy = {
+          mode: "allowlist",
+          areaIds: [],
+          deviceIds: [],
+          entityIds: [],
+        };
+      }
+    }
+  }
+
+  accessPolicy(): HaAccessPolicy {
+    return structuredClone(this.policy);
+  }
+
+  setAccessPolicy(value: unknown): HaAccessPolicy {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error("Ongeldige Home Assistant-toegang.");
+    const input = value as Record<string, unknown>;
+    const keys = ["mode", "areaIds", "deviceIds", "entityIds"];
+    if (
+      Object.keys(input).some((key) => !keys.includes(key)) ||
+      !["all", "allowlist"].includes(String(input.mode))
+    )
+      throw new Error("Ongeldige Home Assistant-toegang.");
+    const list = (key: string, maximum: number, known: Set<string>) => {
+      const items = input[key];
+      if (
+        !Array.isArray(items) ||
+        items.length > maximum ||
+        items.some((item) => typeof item !== "string" || !known.has(item)) ||
+        new Set(items).size !== items.length
+      )
+        throw new Error("Kies alleen apparaten uit het actuele overzicht.");
+      return [...items] as string[];
+    };
+    const next: HaAccessPolicy = {
+      mode: input.mode as HaAccessPolicy["mode"],
+      areaIds: list(
+        "areaIds",
+        100,
+        new Set(this.areas.map((item) => item.area_id)),
+      ),
+      deviceIds: list(
+        "deviceIds",
+        500,
+        new Set(this.devices.map((item) => item.id)),
+      ),
+      entityIds: list(
+        "entityIds",
+        1000,
+        new Set(this.entities.map((item) => item.entity_id)),
+      ),
+    };
+    fs.mkdirSync(path.dirname(this.accessFile), { recursive: true });
+    const temporary = `${this.accessFile}.${process.pid}.tmp`;
+    try {
+      fs.writeFileSync(temporary, JSON.stringify(next), { mode: 0o600 });
+      fs.chmodSync(temporary, 0o600);
+      const fd = fs.openSync(temporary, "r");
+      try {
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.renameSync(temporary, this.accessFile);
+      const directory = fs.openSync(path.dirname(this.accessFile), "r");
+      try {
+        fs.fsyncSync(directory);
+      } finally {
+        fs.closeSync(directory);
+      }
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
+    this.policy = next;
+    return this.accessPolicy();
+  }
+
+  isAllowed(entity: HaEntity): boolean {
+    if (this.policy.mode === "all") return true;
+    return (
+      this.policy.entityIds.includes(entity.entity_id) ||
+      Boolean(entity.area_id && this.policy.areaIds.includes(entity.area_id)) ||
+      Boolean(
+        entity.device_id && this.policy.deviceIds.includes(entity.device_id),
+      )
+    );
+  }
+
+  visibleEntities(): HaEntity[] {
+    return this.entities.filter((entity) => this.isAllowed(entity));
   }
 
   get configured(): boolean {
@@ -272,7 +399,7 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
 
   search(query = "", domain?: string, area?: string): HaEntity[] {
     const words = fold(query).split(/\s+/).filter(Boolean);
-    return this.entities
+    return this.visibleEntities()
       .filter(
         (entity) =>
           (!domain || entity.domain === domain) &&
@@ -303,7 +430,7 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
         domain === "media_player"
           ? [context.activeMediaTarget].filter(Boolean)
           : (context.activeEntities ?? []);
-      const found = this.entities.filter(
+      const found = this.visibleEntities().filter(
         (item) =>
           ids.includes(item.entity_id) && (!domain || item.domain === domain),
       );
@@ -311,7 +438,8 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
         ? { entity: found[0]! }
         : { error: "No unique recent target. Ask which device." };
     }
-    const exact = this.entities.filter(
+    const visible = this.visibleEntities();
+    const exact = visible.filter(
       (item) =>
         (!domain || item.domain === domain) &&
         [item.entity_id, item.friendly_name, ...item.aliases].some(
@@ -325,7 +453,7 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
     const guessed = domain || /^([a-z_]+)\./.exec(String(reference))?.[1];
     const available = candidates.length
       ? []
-      : this.entities
+      : visible
           .filter((item) => !guessed || item.domain === guessed)
           .slice(0, 12)
           .map((item) => item.friendly_name || item.entity_id);
@@ -363,6 +491,18 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
     data: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    const targets = [data.entity_id, data.entity_ids, data.group_members]
+      .flatMap((value) => (Array.isArray(value) ? value : [value]))
+      .filter((value): value is string => typeof value === "string");
+    if (
+      targets.some(
+        (id) =>
+          !this.visibleEntities().some((entity) => entity.entity_id === id),
+      )
+    )
+      throw new Error(
+        "Dit Home Assistant-apparaat is niet toegestaan in NOVA.",
+      );
     if (!this.hasService(domain, service))
       throw new Error("Service is not installed in Home Assistant");
     return this.request(
@@ -373,7 +513,11 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  state(entityId: string, signal?: AbortSignal): Promise<HaState> {
+  async state(entityId: string, signal?: AbortSignal): Promise<HaState> {
+    if (!this.visibleEntities().some((entity) => entity.entity_id === entityId))
+      throw new Error(
+        "Dit Home Assistant-apparaat is niet toegestaan in NOVA.",
+      );
     return this.request<HaState>(
       `/api/states/${encodeURIComponent(entityId)}`,
       "GET",
@@ -384,15 +528,20 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
 
   health(): HomeHealth {
     const age = this.syncedAt ? Date.now() - Date.parse(this.syncedAt) : null;
+    const visible = this.visibleEntities();
+    const visibleDevices = new Set(
+      visible.map((entity) => entity.device_id).filter(Boolean),
+    );
     return {
       configured: this.configured,
       online: Boolean(age !== null && !this.error && age < ONLINE_MS),
       stale: age === null || age >= ONLINE_MS,
       syncedAt: this.syncedAt,
-      entities: this.entities.length,
-      sonos:
-        this.services.some((item) => item.domain === "sonos") ||
-        this.devices.some((item) => /sonos/i.test(item.manufacturer || "")),
+      entities: this.visibleEntities().length,
+      sonos: this.devices.some(
+        (item) =>
+          visibleDevices.has(item.id) && /sonos/i.test(item.manufacturer || ""),
+      ),
       musicAssistant: this.services.some(
         (item) => item.domain === "music_assistant",
       ),

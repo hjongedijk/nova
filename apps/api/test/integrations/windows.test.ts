@@ -258,6 +258,53 @@ describe("WindowsPcService private settings status", () => {
   });
 });
 
+describe("WindowsPcService helper window measurements", () => {
+  it("reads only the fixed authenticated debug endpoint and bounds its output", async () => {
+    const debug =
+      "window=0,0,640,340 extended=0,0,640,340 monitor=-1920,0,0,1080 work=-1920,0,0,1040 shape=rectangle frame=0,0,0,0 chrome=0,0 requested=0,0,640x340 dpi=144 scale=1.5 visible=True caption=False sizingFrame=False toolWindow=True appWindow=False topmost=True";
+    const { fake, pc } = await agent("agent-token", (_seen, send) =>
+      send(200, {
+        ok: true,
+        helper: debug,
+        view: "chat",
+        display: 2,
+        hostname: "private-host",
+        token: "private-secret",
+      }),
+    );
+    expect(await pc.helperDebug()).toMatchObject({
+      available: true,
+      helper: debug,
+      view: "chat",
+      display: 2,
+    });
+    expect(fake.requests).toHaveLength(1);
+    expect(fake.requests[0]).toMatchObject({
+      method: "GET",
+      url: "/v1/helper-debug",
+      headers: { authorization: "Bearer agent-token" },
+    });
+    expect(JSON.stringify(await pc.helperDebug())).not.toContain("private");
+  });
+
+  it.each([
+    "window=<script>",
+    "window=0,0,640,340 token=private-secret",
+    "x".repeat(1001),
+    undefined,
+  ])("rejects invalid or unbounded debug output (%s)", async (helper) => {
+    const { pc } = await agent("agent-token", (_seen, send) =>
+      send(200, { ok: true, helper }),
+    );
+    expect(await pc.helperDebug()).toMatchObject({
+      available: false,
+      helper: null,
+      error:
+        "De Windows-agent gaf geen geldige helpermeting terug. Werk de agent bij.",
+    });
+  });
+});
+
 describe("WindowsPcService displays and wallpaper", () => {
   const displays = [
     {

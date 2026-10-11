@@ -6,7 +6,14 @@ let fake: Awaited<ReturnType<typeof listen>>;
 beforeAll(async () => {
   fake = await listen((seen, send) =>
     seen.url === "/org/home/sites"
-      ? send(200, { data: { sites: [{ name: "vps", online: true }] } })
+      ? send(200, {
+          data: {
+            sites: [
+              { id: "site-1", name: "vps", online: true },
+              { id: "site-2", name: "hidden", online: false },
+            ],
+          },
+        })
       : send(404, {}),
   );
 });
@@ -26,7 +33,12 @@ it("sends the API key and Host override", async () => {
   );
   expect(await pangolin.execute("pangolin_sites", {}, call())).toEqual({
     ok: true,
-    result: { sites: [{ name: "vps", online: true }] },
+    result: {
+      sites: [
+        { id: "site-1", name: "vps", online: true },
+        { id: "site-2", name: "hidden", online: false },
+      ],
+    },
   });
   const seen = fake.requests.find((item) => item.url === "/org/home/sites")!;
   expect(seen.headers.authorization).toBe("Bearer pk");
@@ -41,4 +53,32 @@ it("sends the API key and Host override", async () => {
   expect(
     new PangolinService(fakeConfig({ pangolin: {} })).definitions()[0]?.enabled,
   ).toBe(false);
+});
+
+it("filters Pangolin targets by allowlist and rejects another organization", async () => {
+  const targetAccess = {
+    get: () => ({ mode: "allowlist" }),
+    allows: (_key: string, id: string) => id === "site-1",
+  };
+  const pangolin = new PangolinService(
+    fakeConfig({
+      pangolin: {
+        url: fake.url,
+        apiKey: "pk",
+        orgId: "home",
+        insecureTls: false,
+      },
+    }),
+    targetAccess as never,
+  );
+  expect(await pangolin.execute("pangolin_sites", {}, call())).toEqual({
+    ok: true,
+    result: { sites: [{ id: "site-1", name: "vps", online: true }] },
+  });
+  expect(
+    await pangolin.execute("pangolin_sites", { orgId: "other" }, call()),
+  ).toMatchObject({ ok: false });
+  expect(fake.requests.some((item) => item.url?.includes("/org/other/"))).toBe(
+    false,
+  );
 });

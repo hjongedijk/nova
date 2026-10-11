@@ -648,7 +648,8 @@ export class HomeSource implements ToolSource {
     call.signal.throwIfAborted();
     const plan = (call.plan?.data ?? {}) as Prepared;
     if (name === "home_status") {
-      const entities = await this.home.sync();
+      await this.home.sync();
+      const entities = this.home.visibleEntities();
       return { ok: true, result: this.summary.describe(entities) };
     }
     if (name === "ha_search_entities")
@@ -664,9 +665,17 @@ export class HomeSource implements ToolSource {
       return {
         ok: true,
         result: {
-          entities: this.home.entities,
-          areas: this.home.areas,
-          devices: this.home.devices,
+          entities: this.home.visibleEntities(),
+          areas: this.home.areas.filter((area) =>
+            this.home
+              .visibleEntities()
+              .some((entity) => entity.area_id === area.area_id),
+          ),
+          devices: this.home.devices.filter((device) =>
+            this.home
+              .visibleEntities()
+              .some((entity) => entity.device_id === device.id),
+          ),
           syncedAt: this.home.syncedAt,
         },
       };

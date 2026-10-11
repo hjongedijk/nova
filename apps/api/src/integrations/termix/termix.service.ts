@@ -9,6 +9,8 @@ import {
   type ToolSource,
 } from "../../tools/tool.types.js";
 import { runDirectSsh, type SshLogin } from "./direct-ssh.js";
+import { ManagedTargetsAccessStore } from "../../settings/managed-targets-access.store.js";
+import { Optional } from "@nestjs/common";
 
 interface TermixHost {
   id: number | string;
@@ -45,7 +47,10 @@ const clip = (value: unknown) =>
 @ToolSourceProvider()
 export class TermixService implements ToolSource {
   readonly source = "termix";
-  constructor(private readonly config: NovaConfig) {}
+  constructor(
+    private readonly config: NovaConfig,
+    @Optional() private readonly targetAccess?: ManagedTargetsAccessStore,
+  ) {}
 
   private get url() {
     return this.config.termix.url;
@@ -114,6 +119,14 @@ export class TermixService implements ToolSource {
     });
   }
 
+  /** Raw, bounded host inventory for the guarded Settings allowlist editor. */
+  async listHosts(signal?: AbortSignal): Promise<TermixHost[]> {
+    const response = await this.get<TermixHost[]>("/host/db/host", signal);
+    if (response.status !== 200 || !Array.isArray(response.data))
+      throw new Error(`Termix host list unavailable (${response.status})`);
+    return response.data.slice(0, 200);
+  }
+
   async execute(
     name: string,
     args: Record<string, unknown>,
@@ -136,23 +149,35 @@ export class TermixService implements ToolSource {
       };
     }
     if (name === "termix_hosts") {
-      const response = await this.get<TermixHost[]>("/host/db/host", signal);
-      if (response.status !== 200 || !Array.isArray(response.data))
+      let hosts: TermixHost[];
+      try {
+        hosts = await this.listHosts(signal);
+      } catch (error) {
         return {
           ok: false,
-          error: `Termix host list unavailable (${response.status})`,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Termix host list unavailable",
         };
+      }
       return {
         ok: true,
-        result: response.data.slice(0, 200).map((host) => ({
-          id: host.id,
-          name: host.name,
-          ip: host.ip,
-          port: host.port,
-          username: host.username,
-          folder: host.folder,
-          tags: host.tags,
-        })),
+        result: hosts
+          .filter(
+            (host) =>
+              this.targetAccess?.allows("termixHostIds", String(host.id)) ??
+              true,
+          )
+          .map((host) => ({
+            id: host.id,
+            name: host.name,
+            ip: host.ip,
+            port: host.port,
+            username: host.username,
+            folder: host.folder,
+            tags: host.tags,
+          })),
       };
     }
     return { ok: false, error: "Unknown Termix tool" };
@@ -169,8 +194,12 @@ export class TermixService implements ToolSource {
         ok: false,
         error: `Termix host list unavailable (${list.status})`,
       };
+    const visibleHosts = list.data.filter(
+      (host) =>
+        this.targetAccess?.allows("termixHostIds", String(host.id)) ?? true,
+    );
     const wanted = hostRef.toLowerCase().trim();
-    const exact = list.data.filter(
+    const exact = visibleHosts.filter(
       (host) =>
         String(host.id) === wanted ||
         String(host.name).toLowerCase() === wanted,
@@ -182,7 +211,7 @@ export class TermixService implements ToolSource {
     );
     const matches = exact.length
       ? exact
-      : list.data.filter((host) => word.test(String(host.name)));
+      : visibleHosts.filter((host) => word.test(String(host.name)));
     const host = matches[0];
     if (matches.length !== 1 || !host)
       return {

@@ -162,7 +162,8 @@ export class HomeSummaryService {
 
   /** The catalog as the panel shows it, or null when Home Assistant has nothing. Throws when it is unreachable. */
   async current(): Promise<HomeSummary | null> {
-    return homeSummary(await this.home.sync());
+    await this.home.sync();
+    return homeSummary(this.home.visibleEntities());
   }
 
   summarize(entities: HaEntity[]): HomeSummary | null {

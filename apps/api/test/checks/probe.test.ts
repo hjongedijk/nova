@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseTargets } from "../../src/checks/probe.js";
 import {
+  containerChanges,
   certificateDaysRemaining,
   highPowerEvents,
   powerSensors,
@@ -62,6 +63,41 @@ describe("Home Assistant device tracker inventory", () => {
       added: [["device_tracker.new", "Nieuw"]],
       removed: [["device_tracker.old", "Oud"]],
     });
+  });
+});
+
+describe("Compose container monitoring", () => {
+  it("detects down, recovered and restarted states without treating a baseline as an event", () => {
+    const status = [
+      {
+        id: "nova",
+        label: "NOVA",
+        state: "running",
+        health: "healthy",
+        canRestart: true,
+        revision: "a".repeat(64),
+        startedAt: "2026-10-11T10:00:00Z",
+      },
+    ] as const;
+    expect(containerChanges({}, [...status] as never)).toEqual([]);
+    expect(
+      containerChanges(
+        { nova: { state: "running", startedAt: "2026-10-11T10:00:00Z" } },
+        [{ ...status[0], state: "exited" }] as never,
+      ).map(({ kind }) => kind),
+    ).toEqual(["stopped"]);
+    expect(
+      containerChanges(
+        { nova: { state: "exited", startedAt: "2026-10-11T10:00:00Z" } },
+        [...status] as never,
+      ).map(({ kind }) => kind),
+    ).toEqual(["recovered"]);
+    expect(
+      containerChanges(
+        { nova: { state: "running", startedAt: "2026-10-11T09:00:00Z" } },
+        [...status] as never,
+      ).map(({ kind }) => kind),
+    ).toEqual(["restarted"]);
   });
 });
 

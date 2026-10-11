@@ -93,6 +93,38 @@ beforeEach(() => {
 });
 
 describe("ProxmoxSource", () => {
+  it("filters Proxmox reports and refuses direct actions on unselected guests", async () => {
+    const access = {
+      allows: () => false,
+      allowsProxmoxGuest: (_node: string, vmid: number | string) =>
+        String(vmid) === "104",
+      get: () => ({ mode: "allowlist" }),
+    };
+    const filtered = new ProxmoxService(
+      {
+        timezone: "Europe/Amsterdam",
+        proxmox: {
+          url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+          tokenId: "test@pve!jarvis",
+          tokenSecret: "mock-token",
+          verifyTls: false,
+        },
+      } as NovaConfig,
+      state,
+      { publish: () => undefined } as unknown as MqttService,
+      access as never,
+    );
+    const filteredSource = new ProxmoxSource(filtered);
+    expect((await filtered.guestViews()).map((item) => item.vmid)).toEqual([
+      104,
+    ]);
+    expect((await filtered.status()).nodes).toEqual([]);
+    expect(
+      await filteredSource.execute("proxmox_stop_guest", { vmid: 105 }, call),
+    ).toMatchObject({ ok: false, error: "Guest not available to NOVA" });
+    expect(actions).toEqual([]);
+  });
+
   it("offers the tools with the right risks", () => {
     const defs = source.definitions();
     const risk = Object.fromEntries(defs.map((d) => [d.name, d.risk]));

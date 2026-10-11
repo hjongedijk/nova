@@ -64,8 +64,15 @@ describe("Home Assistant", () => {
     delete process.env.JARVIS_ENABLE_ACTIONS;
   });
   beforeEach(() => {
-    fake.setVerificationFailure(false);
-    fake.setOffline(false);
+    fake.reset();
+    home.setAccessPolicy({
+      mode: "all",
+      areaIds: [],
+      deviceIds: [],
+      entityIds: [],
+    });
+    config.actionsEnabled = true;
+    config.autoExecuteSafe = true;
   });
 
   it("loads the catalog over REST and WebSocket, resolves area and alias, refuses invented and ambiguous entities", () => {
@@ -86,6 +93,56 @@ describe("Home Assistant", () => {
       sonos: true,
       musicAssistant: true,
       error: null,
+    });
+  });
+
+  it("enforces Home Assistant area and device allowlists on lookup, state, registry and service paths", async () => {
+    home.setAccessPolicy({
+      mode: "allowlist",
+      areaIds: ["office"],
+      deviceIds: [],
+      entityIds: [],
+    });
+    expect(home.search().map((item) => item.entity_id)).toContain(
+      "light.office",
+    );
+    expect(home.search().map((item) => item.entity_id)).not.toContain(
+      "light.living",
+    );
+    const registry = (await run("ha_get_registry", {}, "allowlist")).result as {
+      entities: { entity_id: string }[];
+      areas: { area_id: string }[];
+      devices: { id: string }[];
+    };
+    expect(
+      registry.entities.every((item) => item.entity_id.includes("office")),
+    ).toBe(true);
+    expect(registry.areas.map((item) => item.area_id)).toEqual(["office"]);
+    expect(registry.devices).toHaveLength(1);
+    expect(home.resolve("light.living")).toMatchObject({
+      error: "Unknown target. Never invent entity IDs.",
+    });
+    await expect(home.state("light.living")).rejects.toThrow(/niet toegestaan/);
+    await expect(
+      home.service("light", "turn_off", { entity_id: "light.living" }),
+    ).rejects.toThrow(/niet toegestaan/);
+    expect(
+      home.visibleEntities().every((item) => item.area_id === "office"),
+    ).toBe(true);
+    home.setAccessPolicy({
+      mode: "allowlist",
+      areaIds: [],
+      deviceIds: ["sonos-living"],
+      entityIds: [],
+    });
+    expect(home.visibleEntities().map((item) => item.entity_id)).toEqual([
+      "media_player.living",
+    ]);
+    home.setAccessPolicy({
+      mode: "all",
+      areaIds: [],
+      deviceIds: [],
+      entityIds: [],
     });
   });
 
@@ -304,6 +361,10 @@ describe("Home Assistant", () => {
   });
 
   it("an accepted action with the wrong poststate never becomes verified success", async () => {
+    // Start in the opposite state so a failed service call cannot look successful
+    // merely because the desired state was already present.
+    fake.entities.find((entity) => entity.entity_id === "light.office")!.state =
+      "on";
     fake.setVerificationFailure(true);
     const result = await run(
       "ha_turn_off",
