@@ -240,7 +240,8 @@ export class SessionMemoryService {
   static memoryNote(relevant: StoredMessage[]): string | null {
     if (!relevant.length) return null;
     const lines = relevant.map(
-      (item) => `${item.role === "user" ? "User" : "NOVA"}: ${item.content}`,
+      (item) =>
+        `${item.role === "user" ? "User" : "NOVA"}: ${sanitize(item.content)}`,
     );
     return `Relevant earlier conversation memory:\n\n${lines.join("\n")}\n\nUse this only when relevant.`;
   }

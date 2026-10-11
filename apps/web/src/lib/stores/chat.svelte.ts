@@ -1,8 +1,14 @@
-import type { ChatAttachment, PendingConfirmation } from "@nova/contracts";
+import type {
+  ChatAttachment,
+  ModelRoleId,
+  PendingConfirmation,
+} from "@nova/contracts";
 
 /** What the entity is doing; the sphere's colour and motion follow it. */
 export type UiState =
   "ready" | "listening" | "thinking" | "executing" | "speaking";
+export type AssistantMood =
+  "happy" | "thoughtful" | "concerned" | "enthusiastic" | "neutral";
 
 export interface HistoryMessage {
   role: "user" | "assistant";
@@ -20,6 +26,8 @@ export const chat = $state({
   /** A few words about what NOVA is doing ("Proxmox controleren…"); empty shows the idle hint. */
   hint: "",
   model: "",
+  modelRole: "",
+  mood: "neutral" as AssistantMood,
   choices: [] as { entityId: string; label: string }[],
   toolResult: "",
   activeTool: "",
@@ -41,12 +49,14 @@ export let ask: (
   text: string,
   attachments?: ChatAttachment[],
   inputMode?: "text" | "voice",
+  modelRole?: Exclude<ModelRoleId, "embedding">,
 ) => Promise<boolean> = async () => false;
 export function provideAsk(
   fn: (
     text: string,
     attachments?: ChatAttachment[],
     inputMode?: "text" | "voice",
+    modelRole?: Exclude<ModelRoleId, "embedding">,
   ) => Promise<boolean>,
 ): void {
   ask = fn;

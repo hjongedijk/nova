@@ -1,7 +1,9 @@
 import type { Risk } from "./tools.js";
+import type { ModelRoleId } from "./model-roles.js";
 
 /** POST /api/chat-stream sends Server-Sent Events of these kinds. */
 export type ChatEvent =
+  | { event: "route"; data: { role: ModelRoleId } }
   | { event: "token"; data: { text: string } }
   | { event: "tool_start"; data: { name: string } }
   | { event: "tool_result"; data: { name: string; ok: boolean } }
@@ -12,7 +14,10 @@ export type ChatEvent =
   | { event: "confirmation"; data: PendingConfirmation }
   | { event: "attachment_notice"; data: { message: string } }
   | { event: "error"; data: { message: string } }
-  | { event: "done"; data: { reply: string } };
+  | {
+      event: "done";
+      data: { reply: string; role?: ModelRoleId; model?: string | null };
+    };
 
 export interface ChatAttachment {
   name: string;
@@ -27,10 +32,19 @@ export interface ChatRequest {
   attachments?: ChatAttachment[];
   message: string;
   inputMode?: "text" | "voice";
+  /** Client-local quiet-hours state; affects voice brevity only, never routing or tools. */
+  quietHours?: boolean;
+  /** Bounded, user-selected communication preferences; only used for conversation role. */
+  communicationPreferences?: CommunicationPreference[];
+  /** Optional manual override; embeddings are internal and cannot be selected for chat. */
+  modelRole?: Exclude<ModelRoleId, "embedding">;
   sessionId: string;
   /** Answers this pending confirmation ("ja"/"nee") instead of starting a new request. */
   confirmationId?: string;
 }
+
+export type CommunicationPreference =
+  "concise" | "fewer_jokes" | "more_detail" | "warmer";
 
 export interface PendingConfirmation {
   confirmationId: string;

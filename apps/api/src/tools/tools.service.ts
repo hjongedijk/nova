@@ -1,6 +1,11 @@
 import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
 import { DiscoveryService } from "@nestjs/core";
-import type { PendingConfirmation, Risk, ToolInfo } from "@nova/contracts";
+import type {
+  ModelRoleId,
+  PendingConfirmation,
+  Risk,
+  ToolInfo,
+} from "@nova/contracts";
 import { Ajv, type ValidateFunction } from "ajv";
 import crypto from "node:crypto";
 import { AuditService } from "../core/audit/audit.service.js";
@@ -12,6 +17,7 @@ import { memoryCandidate } from "../memory/semantic/candidate.js";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { SettingsStore } from "../settings/store/settings.store.js";
 import { coerceArguments, dropTransportReason } from "./tool-arguments.js";
+import { selectToolsForRequest } from "./tool-selection.js";
 import {
   TOOL_SOURCE,
   type ToolDefinition,
@@ -81,6 +87,7 @@ const PERSONAL_SETTINGS_TOOLS = new Set([
   "settings_persona_set",
   "settings_instruction_create",
   "settings_skill_toggle",
+  "settings_helper_preference_set",
   "settings_skills",
 ]);
 
@@ -92,6 +99,31 @@ const DASHBOARD_TOOLS = new Set([
   "list_show",
   "alerts_list",
 ]);
+
+const codeTool = (name: string) => name.startsWith("code_");
+function auditArgs(
+  name: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  if (name === "node_red_flow")
+    return {
+      flow: args.flow,
+      payloadBytes: Buffer.byteLength(JSON.stringify(args.payload ?? {})),
+    };
+  if (!codeTool(name)) return args;
+  const safe: Record<string, unknown> = {};
+  for (const key of ["path", "projectId", "draftId"])
+    if (typeof args[key] === "string") safe[key] = args[key];
+  for (const key of ["command", "testCommand"])
+    if (Array.isArray(args[key]))
+      safe[key] = {
+        executable: (args[key] as unknown[])[0],
+        argumentCount: Math.max(0, (args[key] as unknown[]).length - 1),
+      };
+  if (typeof args.content === "string")
+    safe.content = { bytes: Buffer.byteLength(args.content) };
+  return safe;
+}
 
 /**
  * Every tool NOVA has, from every source, and the one way to run one: arguments cleaned and
@@ -170,6 +202,7 @@ export class ToolsService implements OnModuleInit {
           raw.enabled !== false &&
           (this.config.extensionsEnabled ||
             source.source === "nova" ||
+            source.source === "code" ||
             (source.source === "settings" &&
               PERSONAL_SETTINGS_TOOLS.has(raw.name)));
         const definition = {
@@ -210,17 +243,20 @@ export class ToolsService implements OnModuleInit {
   }
 
   /** The enabled tools in the format the chat model receives. */
-  forModel(): ModelTool[] {
-    return [...this.registry().values()]
+  forModel(context?: { message: string; role: ModelRoleId }): ModelTool[] {
+    const tools = [...this.registry().values()]
       .filter((tool) => tool.definition.enabled)
       .map((tool) => ({
-        type: "function",
+        type: "function" as const,
         function: {
           name: tool.definition.name,
           description: tool.definition.description,
           parameters: tool.definition.parameters,
         },
       }));
+    return context
+      ? selectToolsForRequest(tools, context.message, context.role)
+      : tools;
   }
 
   /**
@@ -250,18 +286,33 @@ export class ToolsService implements OnModuleInit {
       this.audit.record({
         sessionId,
         tool: name,
-        arguments:
-          name === "memory_remember" &&
-          !memoryCandidate(args?.text, { explicit: true })
+        arguments: codeTool(name)
+          ? auditArgs(name, args)
+          : name === "memory_remember" &&
+              !memoryCandidate(args?.text, { explicit: true })
             ? { text: "[rejected memory candidate]" }
             : args,
         risk,
         confirmation,
-        result: clean,
+        result:
+          codeTool(name) || name === "node_red_flow"
+            ? {
+                ok: clean.ok,
+                ...(clean.error ? { error: clean.error } : {}),
+                verified: clean.verified ?? null,
+                ...(name === "node_red_flow" && clean.status !== undefined
+                  ? { status: clean.status }
+                  : {}),
+              }
+            : clean,
         verification: clean.verified ?? null,
         durationMs: Date.now() - started,
       });
-      if (!SYSTEM_SESSIONS.has(sessionId))
+      if (
+        !SYSTEM_SESSIONS.has(sessionId) &&
+        !codeTool(name) &&
+        name !== "node_red_flow"
+      )
         this.memory.rememberTool(sessionId, name, args ?? {}, clean, entity);
       this.mqtt.publish("jarvis/events/tool", {
         type: "completed",
@@ -428,7 +479,7 @@ export class ToolsService implements OnModuleInit {
         this.audit.record({
           sessionId,
           tool: name,
-          arguments: args,
+          arguments: auditArgs(name, args),
           risk,
           confirmation,
           phase: "execution_started",

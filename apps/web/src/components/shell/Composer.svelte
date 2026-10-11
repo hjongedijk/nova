@@ -12,12 +12,14 @@
   import { dialogs } from "#lib/stores/dialogs.svelte.ts";
   import { shell } from "#lib/stores/shell.svelte.ts";
   import { pressCore } from "#lib/voice/core.ts";
+  import type { ModelRoleId } from "@nova/contracts";
 
   let input: HTMLInputElement;
   let picker: HTMLInputElement;
   let attachments: File[] = $state([]);
   let fileError = $state("");
   let reading = $state(false);
+  let modelRole = $state<Exclude<ModelRoleId, "embedding"> | "">("");
 
   function selectFiles(event: Event) {
     const target = event.currentTarget as HTMLInputElement;
@@ -45,7 +47,7 @@
       const text = shell.draft;
       // Preserve the draft and files when a request fails, so it can be retried.
       reading = false;
-      const sent = await ask(text, files);
+      const sent = await ask(text, files, "text", modelRole || undefined);
       if (sent) {
         attachments = [];
         shell.draft = "";
@@ -91,6 +93,19 @@
     onchange={selectFiles}
     accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,text/*,.txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.js,.ts,.py,.sh,.ps1,.html,.css"
   />
+  <select
+    class="role-select"
+    aria-label="Rol voor dit bericht"
+    bind:value={modelRole}
+    disabled={chat.busy || reading}
+  >
+    <option value="">Automatisch</option>
+    <option value="conversation">Gesprek</option>
+    <option value="code">Code</option>
+    <option value="planning">Denken en plannen</option>
+    <option value="summary">Samenvatten</option>
+    <option value="vision">Beeld</option>
+  </select>
   <button
     class="icon"
     type="button"
@@ -108,6 +123,7 @@
     class="icon"
     type="button"
     aria-label="Spreek met NOVA"
+    title="Tik om te spreken of houd F8 ingedrukt"
     hidden={!shell.speechSupported}
     onclick={pressCore}
   >
@@ -171,6 +187,15 @@
 <style>
   .composer {
     flex-wrap: wrap;
+  }
+  .role-select {
+    min-height: 44px;
+    max-width: 190px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 0 8px;
+    background: var(--panel);
+    color: var(--text);
   }
   .attachments {
     flex-basis: 100%;

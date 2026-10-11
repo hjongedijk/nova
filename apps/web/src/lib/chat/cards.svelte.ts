@@ -5,6 +5,7 @@ import { getSessionId } from "./session.ts";
 
 export interface Card {
   id: string;
+  tool?: string;
   risk?: PendingConfirmation["risk"];
   allowAlways?: boolean;
   label: string;
@@ -35,12 +36,30 @@ export const isConfirmReply = (text: string): boolean =>
 export function confirmationLabel(action: PendingConfirmation): string {
   const args = action.args as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- free-form tool arguments
   const expiry = "Bevestiging verloopt na 60 seconden.";
+  if (action.tool === "node_red_flow_create")
+    return args.kind === "morning_briefing"
+      ? `Node-RED: stel de ochtendbriefing dagelijks in op ${args.time} in ${args.label || args.tabId}. Een actief NOVA-scherm spreekt de korte samenvatting uit. ${expiry}`
+      : `Node-RED: voeg een foutenmelding toe aan ${args.label || args.tabId}. Dit meldt alleen foutmeldingen die deze flow opvangt. ${expiry}`;
+  if (action.tool === "node_red_flow_state")
+    return `Node-RED: ${args.enabled ? "schakel in" : "schakel uit"} tab ${args.tabId}. ${expiry}`;
+  if (action.tool === "code_file_write")
+    return `Wijzig bestand ${args.projectId ? `${args.projectId}/` : ""}${args.path}.\n\n${String(args.diffPreview || "Verschil niet beschikbaar.").slice(0, 4000)}\n\n${expiry}`;
+  if (action.tool === "code_self_test")
+    return `Test ${args.path} eerst in de afgesloten sandbox met ${(Array.isArray(args.testCommand) ? args.testCommand : []).join(" ")}. Het voorstel wordt nog niet opgeslagen.\n\n${String(args.diffPreview || "Verschil niet beschikbaar.").slice(0, 4000)}\n\n${expiry}`;
+  if (action.tool === "code_self_save")
+    return `Sla het succesvol geteste script op in ${args.projectId}/${args.path}.\n\n${String(args.diffPreview || "Verschil niet beschikbaar.").slice(0, 4000)}\n\n${expiry}`;
+  if (action.tool === "code_file_delete")
+    return `Verwijder bestand ${args.projectId}/${args.path}. Dit kan niet ongedaan worden gemaakt. ${expiry}`;
+  if (action.tool === "code_run_tests")
+    return `Voer ${(Array.isArray(args.command) ? args.command : []).join(" ") || "testcommando"} uit in de afgesloten project-sandbox. ${expiry}`;
   if (action.tool === "settings_persona_set")
     return `Eigen regels vervangen: ${args.text || "(regels wissen)"}. ${expiry}`;
   if (action.tool === "settings_instruction_create")
     return `Instructie “${args.name}” toevoegen: ${args.instructions}${args.description ? `\nBeschrijving: ${args.description}` : ""}${args.examples?.length ? `\nVoorbeelden: ${args.examples.join("; ")}` : ""}. ${expiry}`;
   if (action.tool === "settings_skill_toggle")
     return `Instructie “${args.id}” ${args.enabled ? "aanzetten" : "uitzetten"}. ${expiry}`;
+  if (action.tool === "settings_model_visibility")
+    return `Model ${args.provider}/${args.modelId} ${args.hidden ? "verbergen" : "tonen"} in de OmniRoute-catalogus. Dit blokkeert directe modelaanroepen niet; verbergen kan modelaliassen wijzigen. ${expiry}`;
   const values = { ...args, ...args?.data };
   const changes = [
     values.temperature !== undefined ? `${values.temperature} °C` : null,
@@ -89,6 +108,7 @@ export function addCard(action: PendingConfirmation | null | undefined): void {
   const wait = Math.max(0, action.expiresAt - Date.now());
   cards.push({
     id,
+    tool: action.tool,
     risk: action.risk,
     allowAlways: action.allowAlways,
     label: confirmationLabel(action),

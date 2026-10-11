@@ -10,7 +10,12 @@
     type="button"
     class="btn go"
     disabled={card.locked}
-    onclick={() => answerCard(card.id, true)}>Bevestigen</button
+    onclick={() => answerCard(card.id, true)}
+    >{card.tool === "code_file_write"
+      ? "Toepassen"
+      : card.tool === "code_self_save"
+        ? "Opslaan"
+        : "Bevestigen"}</button
   >
   <button
     type="button"

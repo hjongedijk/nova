@@ -1,6 +1,11 @@
 import { attachmentMessage } from "./attachments.js";
 import { Injectable } from "@nestjs/common";
-import type { ChatAttachment, PendingConfirmation } from "@nova/contracts";
+import type {
+  ChatAttachment,
+  CommunicationPreference,
+  ModelRoleId,
+  PendingConfirmation,
+} from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { confirmationQuestion } from "../confirmations/confirmation-words.js";
@@ -17,6 +22,7 @@ import {
 import { capabilityNotes } from "./prompt.js";
 import { ContextBuilder } from "./context-builder.service.js";
 import { ConfirmationHandler } from "./confirmation-handler.service.js";
+import type { AssistantMood } from "./assistant-mood.js";
 
 /*
  * Questions whose answer lives outside the model: weather, time, device and server state, news,
@@ -33,6 +39,8 @@ const EXPLICIT_REQUEST =
   /\b(?:kun je|kan je|wil je|hoe|wat is|wat zijn|welke|zoek|check|controleer|zet|doe|open|sluit|speel|help|can you|could you|please|what|when|where|check|turn|play)\b/i;
 const LIVE_WITH_FILES =
   /\b(?:nu|momenteel|actueel|live|current|currently|today|vandaag|check|controleer|zet|schakel|herstart|restart|reboot|turn|open|sluit|speel|play)\b/i;
+const MOOD_STYLE =
+  "Before any user-facing answer text, emit exactly one private marker: <!--NOVA_MOOD:happy-->, <!--NOVA_MOOD:thoughtful-->, <!--NOVA_MOOD:concerned-->, <!--NOVA_MOOD:enthusiastic--> or <!--NOVA_MOOD:neutral-->. Choose the tone of your answer, not a diagnosis or a claim about the user's feelings. Do not mention the marker. Do not add it to tool calls.";
 export const requiresLiveData = (
   message: string,
   hasAttachments = false,
@@ -43,14 +51,23 @@ export const requiresLiveData = (
   return LIVE_DATA.test(message);
 };
 
-export function responseStyle(inputMode: "text" | "voice" = "text"): string {
+export function responseStyle(
+  inputMode: "text" | "voice" = "text",
+  quietHours = false,
+): string {
   const manner =
     "Answer the user's actual request in their language. Be calm, warm and capable, like a trusted personal assistant. Give the useful result, not a tool report. Keep simple answers brief; give enough detail for complex requests. Do not force a joke, an opening catchphrase or a follow-up question.";
   return inputMode === "voice"
     ? manner +
-        " This is a spoken conversation: use natural sentences and no markdown. Start with the key point; expand when asked."
+        (quietHours
+          ? " Quiet hours are active: keep the spoken answer brief and limited to the essential result. Do not add an optional offer, filler or follow-up question."
+          : " This is a spoken conversation: use natural sentences and no markdown. Start with the key point; expand when asked.")
     : manner +
         " This is typed chat: use readable paragraphs, lists, links, tables or code when they help, especially for documents and technical help. Do not arbitrarily stop after four sentences.";
+}
+
+export function codeResponseStyle(): string {
+  return "Code mode: be direct and technically precise. Do not apply the warm conversation persona or add jokes. Explain the approach briefly in Dutch, then put requested code in fenced blocks. For voice requests, place a short plain-language summary before the code; code itself is for the screen, not speech.";
 }
 
 const REMINDER: ModelMessage = {
@@ -66,6 +83,9 @@ export interface OrchestrateInput {
   message: string;
   attachments?: ChatAttachment[];
   inputMode?: "text" | "voice";
+  quietHours?: boolean;
+  communicationPreferences?: CommunicationPreference[];
+  modelRole?: Exclude<ModelRoleId, "embedding">;
   /** The confirmation the user is answering, when the interface knows it. */
   confirmationId?: string;
   stream?: boolean;
@@ -80,6 +100,37 @@ export interface Reply {
   confirmation?: PendingConfirmation;
   routing?: GatewayMetadata;
   result?: unknown;
+  role?: ModelRoleId;
+  mood?: AssistantMood;
+}
+
+export function classifyModelRole(
+  message: string,
+  attachments: ChatAttachment[] = [],
+): Exclude<ModelRoleId, "embedding"> {
+  if (attachments.some((item) => item.mimeType?.startsWith("image/")))
+    return "vision";
+  // Classify the requested outcome before the subject: "summarize this Python
+  // code" needs a summary model, even though it mentions code.
+  if (
+    /\b(vat|samenvat|samenvatting|kort overzicht|tl;?dr|summari[sz]e)\b/i.test(
+      message,
+    )
+  )
+    return "summary";
+  if (
+    /\b(plan|planning|stappenplan|roadmap|ontwerp|architectuur|aanpak)\b/i.test(
+      message,
+    )
+  )
+    return "planning";
+  if (
+    /\b(code|programmeer|programmeren|script|functie|typescript|javascript|python|powershell|html|css|debug|bugfix)\b/i.test(
+      message,
+    )
+  )
+    return "code";
+  return "conversation";
 }
 
 /**
@@ -111,14 +162,20 @@ export class OrchestratorService {
       emit: Emit;
       signal?: AbortSignal;
       sessionId: string;
+      maxTokens?: number;
+      roleModel?: { role: ModelRoleId; modelId: string };
+      tools: ReturnType<ToolsService["forModel"]>;
+      includeMood?: boolean;
     },
   ): Promise<ModelAnswer> {
     const held: string[] = [];
+    let heldMood: AssistantMood | undefined;
     const quiet: Emit = (event, data) => {
       if (event === "token") held.push(String(data.text));
+      else if (event === "mood") heldMood = data.mood as AssistantMood;
       else options.emit(event, data);
     };
-    const tools = this.tools.forModel();
+    const tools = options.tools;
     const attempt = (
       toolChoice: "auto" | "required",
       extra: ModelMessage[] = [],
@@ -128,6 +185,9 @@ export class OrchestratorService {
         emit: quiet,
         toolChoice,
         tools,
+        maxTokens: options.maxTokens,
+        roleModel: options.roleModel,
+        includeMood: options.includeMood,
       });
     let result: ModelAnswer;
     try {
@@ -135,14 +195,17 @@ export class OrchestratorService {
     } catch (error) {
       if (options.signal?.aborted) throw error;
       held.length = 0;
+      heldMood = undefined;
       result = await attempt("auto", [REMINDER]);
     }
     if (!result.assistant.tool_calls?.length) {
       held.length = 0;
+      heldMood = undefined;
       result = await attempt("required", [REMINDER]).catch(() => result);
     }
     if (!result.assistant.tool_calls?.length && options.stream) {
       // Nothing worked: the model really has no tool for this, so its text is the answer.
+      if (heldMood) options.emit("mood", { mood: heldMood });
       const text = held.length
         ? held.join("")
         : (result.assistant.content ?? "");
@@ -156,6 +219,7 @@ export class OrchestratorService {
       sessionId,
       message,
       confirmationId,
+      modelRole,
       stream = false,
       emit = () => {},
       signal,
@@ -171,18 +235,35 @@ export class OrchestratorService {
     }
     this.confirmations.cancel(sessionId);
     this.routing.assertFree();
+    const role = modelRole ?? classifyModelRole(message, input.attachments);
+    const preferredModel = this.routing.preferredModelForRole(role);
+    const roleModel = preferredModel
+      ? { role, modelId: preferredModel }
+      : undefined;
+    emit("route", { role });
 
-    const tools = this.tools.list().filter((tool) => tool.enabled);
+    const allTools = this.tools.list().filter((tool) => tool.enabled);
+    const modelTools = this.tools.forModel({ message, role });
     emit("tools", {
-      count: tools.length,
-      names: tools.map((tool) => tool.name),
+      count: modelTools.length,
+      total: allTools.length,
+      names: modelTools.map((tool) => tool.function.name),
     });
     const messages: ModelInputMessage[] = await this.context.build(
       sessionId,
       message,
+      role,
+      input.communicationPreferences,
     );
-    const style = responseStyle(input.inputMode);
+    const style = responseStyle(input.inputMode, input.quietHours);
     messages.splice(1, 0, { role: "system", content: style });
+    if (role === "conversation")
+      messages.splice(1, 0, { role: "system", content: MOOD_STYLE });
+    if (role === "code")
+      messages.splice(1, 0, {
+        role: "system",
+        content: codeResponseStyle(),
+      });
     if (input.attachments?.length) {
       const prepared = await attachmentMessage(input.attachments, message);
       for (const notice of prepared.notices)
@@ -190,10 +271,9 @@ export class OrchestratorService {
       // Keep the user's question last, alongside its files, instead of two competing user messages.
       messages[messages.length - 1] = prepared.message;
     }
-    const notes = capabilityNotes(tools.map((tool) => tool.name));
+    const notes = capabilityNotes(modelTools.map((tool) => tool.function.name));
     if (notes) messages.splice(1, 0, { role: "system", content: notes });
 
-    const modelTools = this.tools.forModel();
     const mustUseTool =
       modelTools.length > 0 &&
       requiresLiveData(message, !!input.attachments?.length);
@@ -209,6 +289,15 @@ export class OrchestratorService {
               emit,
               signal,
               sessionId,
+              maxTokens:
+                input.inputMode === "voice"
+                  ? input.quietHours
+                    ? 500
+                    : 1000
+                  : 2400,
+              roleModel,
+              tools: modelTools,
+              includeMood: role === "conversation",
             })
           : await this.client.call(messages, {
               stream,
@@ -216,7 +305,14 @@ export class OrchestratorService {
               signal,
               sessionId,
               tools: modelTools,
-              maxTokens: input.inputMode === "voice" ? 1000 : 2400,
+              maxTokens:
+                input.inputMode === "voice"
+                  ? input.quietHours
+                    ? 500
+                    : 1000
+                  : 2400,
+              roleModel,
+              includeMood: role === "conversation",
             });
       const assistant = last.assistant;
       // A model that asks for more than eight calls at once gets its first eight run.
@@ -227,6 +323,7 @@ export class OrchestratorService {
         model: last.model,
         usage: last.usage,
         routing: last.metadata,
+        role,
       };
 
       if (!calls.length && !String(assistant.content ?? "").trim()) {
@@ -240,7 +337,12 @@ export class OrchestratorService {
         if (stream) emit("token", { text: reply });
         return { reply, ...base };
       }
-      if (!calls.length) return { reply: assistant.content ?? "", ...base };
+      if (!calls.length)
+        return {
+          reply: assistant.content ?? "",
+          ...base,
+          ...(role === "conversation" ? { mood: last.mood ?? "neutral" } : {}),
+        };
       if (round === rounds - 1)
         throw new Error("Maximum tool-call rounds reached");
 
