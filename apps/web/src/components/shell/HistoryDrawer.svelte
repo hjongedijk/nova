@@ -6,10 +6,29 @@
   import { chat } from "#lib/stores/chat.svelte.ts";
   import { dialogs } from "#lib/stores/dialogs.svelte.ts";
   import { stopSpeech } from "#lib/voice/speaker.ts";
+  import type { CommunicationPreference } from "@nova/contracts";
+  import {
+    readCommunicationPreferences,
+    saveCommunicationPreference,
+  } from "#lib/chat/communication-preferences.ts";
 
   let messages: HTMLElement;
   let closeButton: HTMLButtonElement;
   let seen = false;
+  let feedback = $state<Record<number, "up" | "down">>({});
+  let savedPreference = $state<CommunicationPreference[]>(
+    readCommunicationPreferences(),
+  );
+  const feedbackChoices: { id: CommunicationPreference; label: string }[] = [
+    { id: "concise", label: "Kortere antwoorden" },
+    { id: "fewer_jokes", label: "Minder grapjes" },
+    { id: "more_detail", label: "Meer uitleg" },
+    { id: "warmer", label: "Wat warmer" },
+  ];
+
+  function rememberFeedback(preference: CommunicationPreference): void {
+    savedPreference = saveCommunicationPreference(preference);
+  }
 
   function close() {
     dialogs.history = false;
@@ -38,6 +57,7 @@
       /* the screen is cleared either way */
     }
     chat.history.length = 0;
+    feedback = {};
     addMessage("assistant", "We beginnen opnieuw. Waar kan ik mee helpen?");
     showStage("", "", false);
     close();
@@ -84,6 +104,43 @@
         <div class:assistant-content={message.role === "assistant"}>
           {message.text}
         </div>
+        {#if message.role === "assistant" && message.text.trim()}
+          <div class="answer-feedback" aria-label="Was dit antwoord prettig?">
+            <button
+              class:chosen={feedback[i] === "up"}
+              type="button"
+              aria-label="Dit antwoord was goed"
+              aria-pressed={feedback[i] === "up"}
+              onclick={() => (feedback[i] = "up")}>👍</button
+            >
+            <button
+              class:chosen={feedback[i] === "down"}
+              type="button"
+              aria-label="Dit antwoord was niet goed"
+              aria-pressed={feedback[i] === "down"}
+              onclick={() =>
+                (feedback[i] = feedback[i] === "down" ? "up" : "down")}
+              >👎</button
+            >
+          </div>
+          {#if feedback[i] === "down"}
+            <div
+              class="feedback-preferences"
+              role="group"
+              aria-label="Wat wil je anders?"
+            >
+              {#each feedbackChoices as choice (choice.id)}
+                <button
+                  class:chosen={savedPreference.includes(choice.id)}
+                  type="button"
+                  aria-pressed={savedPreference.includes(choice.id)}
+                  onclick={() => rememberFeedback(choice.id)}
+                  >{choice.label}</button
+                >
+              {/each}
+            </div>
+          {/if}
+        {/if}
       </div>
     {/each}
   </div>
