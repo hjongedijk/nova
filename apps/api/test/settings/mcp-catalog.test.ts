@@ -91,6 +91,44 @@ describe("reviewed MCP catalog management", () => {
     expect(spec?.env?.CALDAV_PASSWORD).toBe("${CALDAV_PASSWORD}");
   });
 
+  it("pins IMAP to TLS and only two non-mutating message tools", () => {
+    const spec = reviewedMcpServerSpec("imap");
+    expect(spec).toMatchObject({
+      command: "/opt/imap-mcp/node_modules/.bin/imap-mcp",
+      args: [],
+      enabled: false,
+      risk: "READ_ONLY",
+      toolRisks: {
+        list_messages: "READ_ONLY",
+        get_message: "READ_ONLY",
+      },
+      env: {
+        IMAP_HOST: "${IMAP_HOST}",
+        IMAP_USER: "${IMAP_USER}",
+        IMAP_PASSWORD: "${IMAP_PASSWORD}",
+        IMAP_TLS: "implicit",
+        IMAP_PORT: "993",
+        IMAP_READ_ONLY: "true",
+        IMAP_SEEN_KEYWORD: "",
+        IMAP_ALLOW_TOOLS: "list_messages,get_message",
+      },
+    });
+    expect(isReviewedMcpServer("imap", spec!)).toBe(true);
+    expect(
+      isReviewedMcpServer("imap", {
+        ...spec!,
+        env: { ...spec!.env, IMAP_READ_ONLY: "false" },
+      }),
+    ).toBe(false);
+    expect(
+      isReviewedMcpServer("imap", {
+        ...spec!,
+        env: { ...spec!.env, IMAP_ALLOW_TOOLS: "essential" },
+      }),
+    ).toBe(false);
+    expect(spec?.env?.IMAP_PASSWORD).toBe("${IMAP_PASSWORD}");
+  });
+
   it("adds only a fixed reviewed server disabled, then removes it after confirmation", async () => {
     const f = fixture();
     const before = f.service.catalog();

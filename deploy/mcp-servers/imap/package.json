@@ -1,0 +1,7 @@
+{
+  "name": "nova-imap-lock",
+  "private": true,
+  "dependencies": {
+    "@ni-c/imap-mcp": "0.5.2"
+  }
+}

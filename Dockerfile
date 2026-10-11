@@ -47,6 +47,10 @@ RUN python3 -m venv /opt/arxiv-mcp \
 COPY deploy/mcp-servers/caldav/package.json deploy/mcp-servers/caldav/package-lock.json /opt/caldav-mcp/
 RUN npm ci --omit=dev --prefix /opt/caldav-mcp \
     && npm cache clean --force
+# The optional IMAP MCP uses an immutable package lock and a fixed read-only tool allowlist.
+COPY deploy/mcp-servers/imap/package.json deploy/mcp-servers/imap/package-lock.json /opt/imap-mcp/
+RUN npm ci --omit=dev --prefix /opt/imap-mcp \
+    && npm cache clean --force
 COPY deploy/mcp-servers.json /app/mcp-servers.default.json
 ENV NOVA_MCP_DEFAULT=/app/mcp-servers.default.json
 # The Windows agent is downloaded from NOVA's settings screen.

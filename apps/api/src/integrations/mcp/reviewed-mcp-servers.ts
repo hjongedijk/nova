@@ -37,6 +37,20 @@ const REVIEWED: Record<
         "list_calendars,list_events,get_event,search_events,get_free_busy",
     },
   },
+  imap: {
+    command: "/opt/imap-mcp/node_modules/.bin/imap-mcp",
+    args: [],
+    env: {
+      IMAP_HOST: "${IMAP_HOST}",
+      IMAP_USER: "${IMAP_USER}",
+      IMAP_PASSWORD: "${IMAP_PASSWORD}",
+      IMAP_TLS: "implicit",
+      IMAP_PORT: "993",
+      IMAP_READ_ONLY: "true",
+      IMAP_SEEN_KEYWORD: "",
+      IMAP_ALLOW_TOOLS: "list_messages,get_message",
+    },
+  },
 };
 
 const CATALOG: Record<
@@ -100,6 +114,16 @@ const CATALOG: Record<
       get_event: "READ_ONLY",
       search_events: "READ_ONLY",
       get_free_busy: "READ_ONLY",
+    },
+  },
+  imap: {
+    description: "Zoekt en leest e-mail uit de ingestelde mailbox.",
+    rights:
+      "Leest alleen berichtlijsten en berichtinhoud via versleuteld IMAP; kan geen mail wijzigen of versturen.",
+    risk: "READ_ONLY",
+    toolRisks: {
+      list_messages: "READ_ONLY",
+      get_message: "READ_ONLY",
     },
   },
 };
