@@ -124,13 +124,18 @@ export async function ask(
       ? (cardsBefore.at(-1) ?? null)
       : null;
   const responseLanguage = getConversationLanguage();
-  const speaker = createSpeaker(responseLanguage);
+  const t0 = performance.now();
+  chat.latency = null;
+  chat.speechLatency = null;
+  const speaker = createSpeaker(responseLanguage, () => {
+    if (chat.speechLatency === null)
+      chat.speechLatency = (performance.now() - t0) / 1000;
+  });
   let interjectionTimer: ReturnType<typeof setTimeout> | null = null;
   const clearInterjection = () => {
     if (interjectionTimer) clearTimeout(interjectionTimer);
     interjectionTimer = null;
   };
-  const t0 = performance.now();
   let gotFirst = false;
   const requestController = new AbortController();
   activeRequest = requestController;

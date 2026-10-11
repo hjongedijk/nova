@@ -69,7 +69,10 @@ function soundBlockedToast(): void {
  * sound at once, the next one is made ready while the current one plays, and the voice
  * starts after the first sentence instead of after the whole answer.
  */
-export function createSpeaker(language?: ConversationLanguage): Speaker {
+export function createSpeaker(
+  language?: ConversationLanguage,
+  onFirstPlayback?: () => void,
+): Speaker {
   if (quietWallpaper) return NO_SPEAKER;
   const tts = ttsElement();
   const abort = new AbortController();
@@ -81,6 +84,7 @@ export function createSpeaker(language?: ConversationLanguage): Speaker {
   let finished = false;
   let playIndex = 0;
   let mood: AssistantMood = "neutral";
+  let reportedFirstPlayback = false;
   let wake: (() => void) | null = null;
   let endCurrent: (() => void) | null = null;
   const nudge = () => {
@@ -114,7 +118,7 @@ export function createSpeaker(language?: ConversationLanguage): Speaker {
       const end = () => {
         if (ended) return;
         ended = true;
-        tts.onended = tts.onerror = null;
+        tts.onended = tts.onerror = tts.onplaying = null;
         endCurrent = null;
         playedChars += length;
         resolve();
@@ -122,6 +126,11 @@ export function createSpeaker(language?: ConversationLanguage): Speaker {
       endCurrent = end;
       tts.onended = end;
       tts.onerror = end;
+      tts.onplaying = () => {
+        if (reportedFirstPlayback) return;
+        reportedFirstPlayback = true;
+        onFirstPlayback?.();
+      };
       void attachAnalyser(tts).then(() => {
         if (cancelled) return end();
         applyVolume(tts, cueQuiet(helper.cues) ? 0.7 : 1);

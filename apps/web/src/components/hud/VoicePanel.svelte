@@ -31,7 +31,9 @@
 <section class="hud" data-panel="stem" aria-label="Stem">
   <h2>
     Stem <em id="latency"
-      >{chat.latency != null ? `${chat.latency.toFixed(1)} s` : "–"}</em
+      >{chat.speechLatency != null
+        ? `${chat.speechLatency.toFixed(1)} s`
+        : "–"}</em
     >
   </h2>
   <canvas id="eq" bind:this={eq} aria-hidden="true"></canvas>

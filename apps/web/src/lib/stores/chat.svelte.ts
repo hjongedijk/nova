@@ -36,6 +36,8 @@ export const chat = $state({
   history: [] as HistoryMessage[],
   /** Time to the first token of the last answer, in seconds. */
   latency: null as number | null,
+  /** Time from sending until the browser starts playing NOVA's first sentence. */
+  speechLatency: null as number | null,
 });
 
 /** Change what the entity is doing. Only "executing" keeps a tool hint on the status line. */
