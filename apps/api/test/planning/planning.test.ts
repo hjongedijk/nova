@@ -9,6 +9,7 @@ import { JarvisStateStore } from "../../src/planning/jarvis-state.store.js";
 import { PlanningService } from "../../src/planning/planning.service.js";
 import { PlanningSource } from "../../src/planning/planning.source.js";
 import type { ProxmoxService } from "../../src/proxmox/proxmox.service.js";
+import type { CalDavService } from "../../src/planning/caldav.service.js";
 
 let dir: string;
 let store: JarvisStateStore;
@@ -33,6 +34,7 @@ function boot() {
     store,
     proxmox as unknown as ProxmoxService,
     config,
+    { configured: false, upcoming: async () => [] } as unknown as CalDavService,
   );
   events = [];
   planning.onEvent((e) => events.push(e));
@@ -97,6 +99,7 @@ describe("tools", () => {
       list_show: "READ_ONLY",
       list_remove: "SAFE",
       list_clear: "CONFIRM",
+      calendar_events: "READ_ONLY",
       daily_briefing: "READ_ONLY",
     });
   });

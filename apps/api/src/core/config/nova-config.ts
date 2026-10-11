@@ -121,6 +121,12 @@ export class NovaConfig {
     url: url("HOME_ASSISTANT_URL", "http://host.docker.internal:8123"),
     token: text("HOME_ASSISTANT_TOKEN"),
   };
+  /** Optional private CalDAV calendar. Credentials are read only from the server environment. */
+  readonly calDav = {
+    url: text("CALDAV_URL"),
+    username: text("CALDAV_USERNAME"),
+    password: text("CALDAV_PASSWORD"),
+  };
   readonly windowsAgent = {
     url: url("WINDOWS_AGENT_URL", ""),
     token: text("WINDOWS_AGENT_TOKEN"),
