@@ -302,7 +302,11 @@ export class OrchestratorService {
       // Keep the user's question last, alongside its files, instead of two competing user messages.
       messages[messages.length - 1] = prepared.message;
     }
-    const notes = capabilityNotes(modelTools.map((tool) => tool.function.name));
+    const notes = capabilityNotes(
+      allTools.map((tool) => tool.name),
+      message,
+      responseLanguage,
+    );
     if (notes) messages.splice(1, 0, { role: "system", content: notes });
 
     const mustUseTool =

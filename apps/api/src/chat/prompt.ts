@@ -91,8 +91,8 @@ SMALL TALK AND FEELINGS:
 - When the user shares a mood or just chats ("ik ben moe", "ik heb het druk", "wat een dag"), answer like a friend: one or two warm, natural sentences, maybe a light offer to help. You may gently acknowledge their words ("Klinkt als een drukke dag") without diagnosing, exaggerating, or assuming more. Do not call tools, do not mention the time or the weather unless asked, and do not claim you looked something up.
 - Only say you checked, looked up or did something when you called a tool in this very turn.
 
-WHAT YOU CAN DO (when asked, give a few relevant examples based on the enabled tools; do not list unavailable integrations):
-- Control the house and music through Home Assistant, set timers and keep lists, give weather and news and look things up, watch the servers, and control the Windows PC. Read attached documents and images when the gateway supports them. Remember explicit preferences through the memory tools.
+WHAT YOU CAN DO (when asked):
+- Use the current capability overview supplied for this turn. Give a few relevant examples in plain language; do not name internal tools or promise anything absent from that overview. Mention setup requirements only when the overview says they apply.
 
 MEMORY:
 - You may receive recent conversation history and relevant older memories.
@@ -150,9 +150,106 @@ SEARCHING AND OPENING THINGS ON THE USER'S PC:
 - You are not able to browse step by step on this PC, and you do not have a browser_* tool: never call one.
 `.trim();
 
-export function capabilityNotes(toolNames: string[]): string | null {
+const CAPABILITY_GROUPS = [
+  {
+    match: (names: Set<string>) =>
+      [...names].some((name) => name.startsWith("ha_")),
+    nl: "slimme apparaten en muziek in huis (Home Assistant)",
+    en: "smart-home devices and music (Home Assistant)",
+  },
+  {
+    match: (names: Set<string>) =>
+      [...names].some((name) => name.startsWith("calendar_")),
+    nl: "afspraken lezen en, met bevestiging, beheren",
+    en: "read appointments and, with confirmation, manage them",
+  },
+  {
+    match: (names: Set<string>) =>
+      [...names].some(
+        (name) => name.startsWith("timer_") || name.startsWith("list_"),
+      ),
+    nl: "timers en taken- of boodschappenlijsten",
+    en: "timers and task or shopping lists",
+  },
+  {
+    match: (names: Set<string>) =>
+      [...names].some((name) =>
+        [
+          "weather_forecast",
+          "news_headlines",
+          "web_search",
+          "wikipedia",
+        ].includes(name),
+      ),
+    nl: "weer, nieuws en informatie opzoeken",
+    en: "weather, news and looking up information",
+  },
+  {
+    match: (names: Set<string>) =>
+      [...names].some(
+        (name) => name.startsWith("proxmox_") || name === "network_check",
+      ),
+    nl: "servers en netwerkstatus bekijken",
+    en: "check servers and network status",
+  },
+  {
+    match: (names: Set<string>) =>
+      [...names].some(
+        (name) =>
+          name.startsWith("windows_") ||
+          name.startsWith("browser_") ||
+          name === "windows_search",
+      ),
+    nl: "je Windows-pc en browser bedienen",
+    en: "control your Windows PC and browser",
+  },
+  {
+    match: (names: Set<string>) =>
+      [...names].some((name) => name.startsWith("documents_")),
+    nl: "geüploade documenten doorzoeken",
+    en: "search uploaded documents",
+  },
+  {
+    match: (names: Set<string>) =>
+      [...names].some((name) => name.startsWith("notes_")),
+    nl: "notities opslaan en terugvinden",
+    en: "save and find notes",
+  },
+  {
+    match: (names: Set<string>) =>
+      [...names].some((name) => name.startsWith("memory_")),
+    nl: "informatie onthouden wanneer je dat expliciet vraagt",
+    en: "remember information when you explicitly ask",
+  },
+  {
+    match: (names: Set<string>) =>
+      [...names].some((name) => name.startsWith("code_")),
+    nl: "code in een afgeschermde werkruimte lezen, aanpassen en testen",
+    en: "read, edit and test code in an isolated workspace",
+  },
+];
+
+const CAPABILITY_QUESTION =
+  /\b(?:wat (?:kun|kan) je(?: allemaal)?|wat kan nova|wat kun je doen|waarmee kun je helpen|what can (?:you|nova) do|what are you able to do|your capabilities)\b/i;
+
+export function capabilityNotes(
+  toolNames: string[],
+  question = "",
+  language: "nl" | "en" = "nl",
+): string | null {
   const has = (name: string) => toolNames.includes(name);
-  if (has("browser_status")) return BROWSER_NOTES;
-  if (has("windows_search")) return WINDOWS_SEARCH_NOTES;
-  return null;
+  const notes = [
+    ...(has("browser_status") ? [BROWSER_NOTES] : []),
+    ...(has("windows_search") ? [WINDOWS_SEARCH_NOTES] : []),
+  ];
+  if (CAPABILITY_QUESTION.test(question)) {
+    const names = new Set(toolNames);
+    const groups = CAPABILITY_GROUPS.filter((group) => group.match(names)).map(
+      (group) => (language === "en" ? group.en : group.nl),
+    );
+    notes.push(
+      `${language === "en" ? "CURRENT CAPABILITIES" : "MOGELIJKHEDEN IN DEZE INSTALLATIE"}: ${groups.length ? groups.join("; ") : language === "en" ? "no connected action tools; general conversation only" : "geen gekoppelde actietools; alleen algemeen gesprek"}. ${language === "en" ? "Use only these capabilities when answering what you can do; give a few relevant examples and do not claim absent features." : "Gebruik alleen deze mogelijkheden bij de vraag wat je kunt; geef enkele passende voorbeelden en beloof geen ontbrekende functies."}`,
+    );
+  }
+  return notes.length ? notes.join("\n\n") : null;
 }

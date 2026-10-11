@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SYSTEM_PROMPT } from "../../src/chat/prompt.js";
+import { capabilityNotes, SYSTEM_PROMPT } from "../../src/chat/prompt.js";
 import {
   classifyModelRole,
   codeResponseStyle,
@@ -92,6 +92,26 @@ describe("natural-language timers", () => {
     expect(SYSTEM_PROMPT).toContain('"morgen om zeven"');
     expect(SYSTEM_PROMPT).toContain("explicit UTC offset");
     expect(SYSTEM_PROMPT).toContain("Set multiple timers independently");
+  });
+});
+
+describe("installation-aware capability answers", () => {
+  it("builds a short overview only from enabled tool names and follows the chat language", () => {
+    expect(
+      capabilityNotes(
+        ["timer_set", "calendar_events", "documents_search"],
+        "Wat kun je allemaal?",
+      ),
+    ).toContain(
+      "afspraken lezen en, met bevestiging, beheren; timers en taken- of boodschappenlijsten; geüploade documenten doorzoeken",
+    );
+    const english = capabilityNotes(["web_search"], "What can you do?", "en");
+    expect(english).toContain("weather, news and looking up information");
+    expect(english).toContain("CURRENT CAPABILITIES");
+    expect(capabilityNotes(["timer_set"], "Hello there")).toBeNull();
+    expect(capabilityNotes([], "Wat kun je?")).toContain(
+      "geen gekoppelde actietools",
+    );
   });
 });
 
