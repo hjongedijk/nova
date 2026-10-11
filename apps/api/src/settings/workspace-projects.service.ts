@@ -33,6 +33,8 @@ const MAX_HISTORY = 20;
 type SelectionRevision = {
   id: string;
   at: string;
+  kind: "selection" | "created";
+  projectId?: string;
   beforeId: string | null;
   afterId: string | null;
   beforeRevision: string;
@@ -41,6 +43,8 @@ type SelectionRevision = {
 type SelectionDraft = {
   sessionId: string;
   revision: string;
+  kind: "selection" | "created";
+  projectId?: string;
   beforeId: string | null;
   afterId: string | null;
   expiresAt: number;
@@ -174,21 +178,32 @@ export class WorkspaceProjects {
         typeof item.beforeRevision !== "string" ||
         !/^[a-f0-9]{64}$/.test(item.beforeRevision) ||
         typeof item.afterRevision !== "string" ||
-        !/^[a-f0-9]{64}$/.test(item.afterRevision)
+        !/^[a-f0-9]{64}$/.test(item.afterRevision) ||
+        (item.kind !== undefined &&
+          item.kind !== "selection" &&
+          item.kind !== "created") ||
+        (item.kind === "created" && !validId(item.projectId))
       )
         throw new ValidationError(["Projectgeschiedenis is ongeldig."]);
       return {
         ...item,
+        // Older history entries predate the explicit operation kind.
+        kind: item.kind === "created" ? "created" : "selection",
         at: new Date(item.at).toISOString(),
       } as SelectionRevision;
     });
   }
 
   private appendHistory(before: Catalog, after: Catalog): string | undefined {
-    if (before.activeId === after.activeId) return;
+    const created = after.projects.find(
+      (project) => !before.projects.some((item) => item.id === project.id),
+    );
+    if (!created && before.activeId === after.activeId) return;
     const entry: SelectionRevision = {
       id: randomUUID(),
       at: new Date().toISOString(),
+      kind: created ? "created" : "selection",
+      ...(created ? { projectId: created.id } : {}),
       beforeId: before.activeId,
       afterId: after.activeId,
       beforeRevision: catalogDigest(before),
@@ -229,9 +244,11 @@ export class WorkspaceProjects {
       revisions: revisions
         .slice(-20)
         .reverse()
-        .map(({ id, at, beforeId, afterId }) => ({
+        .map(({ id, at, kind, projectId, beforeId, afterId }) => ({
           id,
           at,
+          kind,
+          ...(projectId ? { projectId } : {}),
           beforeId,
           afterId,
         })),
@@ -242,6 +259,20 @@ export class WorkspaceProjects {
   private projectDir(id: string): string {
     if (!validId(id)) throw new ValidationError(["Ongeldig project."]);
     return path.join(this.root, id);
+  }
+
+  private projectDirectoryIsEmpty(id: string): boolean {
+    try {
+      const directory = this.projectDir(id);
+      const stat = fs.lstatSync(directory);
+      return (
+        stat.isDirectory() &&
+        !stat.isSymbolicLink() &&
+        fs.readdirSync(directory).length === 0
+      );
+    } catch {
+      return false;
+    }
   }
 
   list(): Catalog {
@@ -365,6 +396,22 @@ export class WorkspaceProjects {
         error:
           "Projectkeuze is intussen gewijzigd. Laad de geschiedenis opnieuw.",
       };
+    if (revision.kind === "created") {
+      const created = current.projects.find(
+        (item) => item.id === revision.projectId,
+      );
+      if (!created || current.activeId !== created.id)
+        return {
+          ok: false,
+          error: "Het aangemaakte project is intussen gewijzigd.",
+        };
+      if (!this.projectDirectoryIsEmpty(created.id))
+        return {
+          ok: false,
+          error:
+            "Het project bevat bestanden of de projectmap is ongeldig; terugzetten is geweigerd.",
+        };
+    }
     if (
       revision.beforeId &&
       !current.projects.some((item) => item.id === revision.beforeId)
@@ -382,6 +429,8 @@ export class WorkspaceProjects {
     }
     const args = {
       revisionId,
+      kind: revision.kind,
+      projectId: revision.projectId,
       beforeId: revision.beforeId,
       afterId: revision.afterId,
       revision: revision.afterRevision,
@@ -408,6 +457,8 @@ export class WorkspaceProjects {
     this.drafts.set(action.confirmationId, {
       sessionId: action.sessionId,
       revision: revision.afterRevision,
+      kind: revision.kind,
+      projectId: revision.projectId,
       beforeId: revision.beforeId,
       afterId: revision.afterId,
       expiresAt: action.expiresAt,
@@ -416,7 +467,10 @@ export class WorkspaceProjects {
       ok: true,
       fromName: current.projects.find((item) => item.id === current.activeId)
         ?.name,
-      toName: target?.name ?? "Geen actief project",
+      toName:
+        revision.kind === "created"
+          ? "Project verwijderen"
+          : (target?.name ?? "Geen actief project"),
       action,
     };
   }
@@ -463,7 +517,9 @@ export class WorkspaceProjects {
         catalogDigest(current) !== draft.revision ||
         current.activeId !== draft.afterId ||
         action.args.revision !== draft.revision ||
-        action.args.beforeId !== draft.beforeId
+        action.args.beforeId !== draft.beforeId ||
+        action.args.kind !== draft.kind ||
+        action.args.projectId !== draft.projectId
       )
         return {
           ok: false,
@@ -480,6 +536,27 @@ export class WorkspaceProjects {
         } catch {
           return { ok: false, error: "De vorige projectmap is ongeldig." };
         }
+      }
+      const removingCreated = draft.kind === "created";
+      const createdId = draft.projectId;
+      if (removingCreated) {
+        if (
+          typeof createdId !== "string" ||
+          createdId !== draft.afterId ||
+          current.activeId !== createdId ||
+          !current.projects.some((item) => item.id === createdId)
+        )
+          return {
+            ok: false,
+            error:
+              "Het aangemaakte project is intussen gewijzigd. Er is niets verwijderd.",
+          };
+        if (!this.projectDirectoryIsEmpty(createdId))
+          return {
+            ok: false,
+            error:
+              "Het project bevat bestanden of de projectmap is ongeldig; er is niets verwijderd.",
+          };
       }
       try {
         this.audit.record({
@@ -502,13 +579,36 @@ export class WorkspaceProjects {
       }
       const restored = structuredClone(current);
       restored.activeId = draft.beforeId;
-      this.write(restored);
+      if (removingCreated) {
+        restored.projects = restored.projects.filter(
+          (item) => item.id !== createdId,
+        );
+        // rmdir is deliberately non-recursive: files added since the check are never deleted.
+        this.write(restored);
+        try {
+          fs.rmdirSync(this.projectDir(createdId!));
+        } catch {
+          this.write(current);
+          return {
+            ok: false,
+            error:
+              "De lege projectmap kon niet veilig worden verwijderd. Er is niets teruggezet.",
+          };
+        }
+      } else this.write(restored);
       const verified = this.read();
       if (catalogDigest(verified) !== catalogDigest(restored))
         return {
           ok: false,
           verified: false,
           error: "Projectkeuze kon niet worden gecontroleerd.",
+        };
+      if (removingCreated && fs.existsSync(this.projectDir(createdId!)))
+        return {
+          ok: false,
+          verified: false,
+          error:
+            "De projectmap bestaat nog; terugzetten kon niet worden gecontroleerd.",
         };
       const historyWarning = this.appendHistory(current, verified);
       let auditWarning: string | undefined;

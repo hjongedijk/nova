@@ -178,10 +178,19 @@
   >
   {#if pending?.action}
     <div role="group" aria-label="Projectkeuze terugzetten bevestigen">
-      <h3>Open project terugzetten?</h3>
+      <h3>
+        {pending.toName === "Project verwijderen"
+          ? "Nieuw project verwijderen?"
+          : "Open project terugzetten?"}
+      </h3>
       <p>
-        Dit verandert het project voor volgende code-opdrachten: {pending.fromName}
-        → {pending.toName}.
+        {#if pending.toName === "Project verwijderen"}
+          Dit verwijdert alleen het nieuw aangemaakte project als de map nog
+          leeg is. Projectbestanden blijven behouden.
+        {:else}
+          Dit verandert het project voor volgende code-opdrachten: {pending.fromName}
+          → {pending.toName}.
+        {/if}
       </p>
       <p>
         Vereist DANGEROUS-bevestiging. Deze toestemming geldt één keer binnen 60
@@ -193,7 +202,10 @@
       <button
         type="button"
         onclick={() => confirmRollback(true)}
-        disabled={busy || expired}>Projectkeuze terugzetten</button
+        disabled={busy || expired}
+        >{pending.toName === "Project verwijderen"
+          ? "Leeg project verwijderen"
+          : "Projectkeuze terugzetten"}</button
       >
       <button
         type="button"
@@ -205,18 +217,24 @@
   {#if showHistory}
     {#if history === null}<p>Projectgeschiedenis laden…</p>
     {:else if history.revisions.length === 0}<p>
-        Geen projectkeuzes vastgelegd.
+        Geen projectwijzigingen vastgelegd.
       </p>
-    {:else}<ol aria-label="Projectkeuzegeschiedenis">
+    {:else}<ol aria-label="Projectgeschiedenis">
         {#each history.revisions as revision, index (revision.id)}
           <li>
             <time datetime={revision.at}
               >{new Date(revision.at).toLocaleString("nl-NL")}</time
             >
-            · {report?.projects.find((item) => item.id === revision.beforeId)
-              ?.name ?? "Geen actief project"}
-            → {report?.projects.find((item) => item.id === revision.afterId)
-              ?.name ?? "Geen actief project"}
+            {#if revision.kind === "created"}
+              · Aangemaakt: {report?.projects.find(
+                (item) => item.id === revision.projectId,
+              )?.name ?? "project"}
+            {:else}
+              · {report?.projects.find((item) => item.id === revision.beforeId)
+                ?.name ?? "Geen actief project"}
+              → {report?.projects.find((item) => item.id === revision.afterId)
+                ?.name ?? "Geen actief project"}
+            {/if}
             {#if index === 0 && report?.activeId === revision.afterId}
               <button
                 type="button"

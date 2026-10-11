@@ -777,6 +777,8 @@ export interface WorkspaceProjectSelectionHistory {
   revisions: {
     id: string;
     at: string;
+    kind?: "selection" | "created";
+    projectId?: string;
     beforeId: string | null;
     afterId: string | null;
   }[];
