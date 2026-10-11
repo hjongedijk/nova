@@ -2,6 +2,7 @@
   import OmniRouteAccountRemoval from "./OmniRouteAccountRemoval.svelte";
   import OmniRouteAccountCreate from "./OmniRouteAccountCreate.svelte";
   import OmniRouteAccountKeyUpdate from "./OmniRouteAccountKeyUpdate.svelte";
+  import OmniRouteAccountRename from "./OmniRouteAccountRename.svelte";
   import OmniRouteAccountActivation from "./OmniRouteAccountActivation.svelte";
   import OmniRouteComboActivation from "./OmniRouteComboActivation.svelte";
   import OmniRouteKeyActivation from "./OmniRouteKeyActivation.svelte";
@@ -13,6 +14,7 @@
     OmniRouteAccountRemovalResult,
     OmniRouteAccountCreateResult,
     OmniRouteAccountKeyUpdateResult,
+    OmniRouteAccountRenameResult,
     OmniRouteAccountActivationResult,
     OmniRouteAccountsReport,
     OmniRouteApiKeyInventory,
@@ -56,6 +58,14 @@
       ? "API-sleutel vervangen en gecontroleerd; de gratis route blijft geverifieerd."
       : "API-sleutel vervangen en gecontroleerd. NOVA houdt AI geblokkeerd tot het gratis routebeleid is geverifieerd.";
     if (result.auditWarning) notice += ` ${result.auditWarning}`;
+    await load();
+  }
+  async function accountRenamed(
+    id: string,
+    result?: OmniRouteAccountRenameResult,
+  ) {
+    if (!result?.verified) return;
+    notice = `Accountnaam gewijzigd en gecontroleerd voor ${result.name || id}; dit geldt voor alle OmniRoute-clients.${result.auditWarning ? ` ${result.auditWarning}` : ""}`;
     await load();
   }
   function comboChanged(
@@ -376,6 +386,12 @@
               ? "Sleutel aanwezig"
               : "Geen sleutel gemeld"}</span
           >
+          <OmniRouteAccountRename
+            id={account.id}
+            provider={account.provider}
+            initialName={account.name}
+            done={(result) => accountRenamed(account.id, result)}
+          />
           {#if account.active !== null}
             <OmniRouteAccountActivation
               id={account.id}

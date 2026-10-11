@@ -26,6 +26,8 @@ import { OmniRouteAccountCreateController } from "./omniroute-account-create.con
 import { OmniRouteAccountCreate } from "./omniroute-account-create.service.js";
 import { OmniRouteAccountKeyUpdateController } from "./omniroute-account-key-update.controller.js";
 import { OmniRouteAccountKeyUpdate } from "./omniroute-account-key-update.service.js";
+import { OmniRouteAccountRenameController } from "./omniroute-account-rename.controller.js";
+import { OmniRouteAccountRename } from "./omniroute-account-rename.service.js";
 import { Module } from "@nestjs/common";
 import { PlanningModule } from "../planning/planning.module.js";
 import { SettingsSource } from "./settings.source.js";
@@ -140,6 +142,7 @@ import { HomeAssistantAccessHistory } from "./home-assistant-access-history.serv
     OmniRouteAccountRemovalController,
     OmniRouteAccountCreateController,
     OmniRouteAccountKeyUpdateController,
+    OmniRouteAccountRenameController,
     FreePolicyWizardController,
     McpStatusController,
     StackControlController,
@@ -161,6 +164,7 @@ import { HomeAssistantAccessHistory } from "./home-assistant-access-history.serv
     OmniRouteAccountRemoval,
     OmniRouteAccountCreate,
     OmniRouteAccountKeyUpdate,
+    OmniRouteAccountRename,
     OmniRouteAccountActivation,
     OmniRouteActivationHistory,
     OmniRouteKeyActivation,

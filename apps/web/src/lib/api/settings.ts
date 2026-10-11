@@ -15,6 +15,8 @@ import type {
   OmniRouteAccountCreateResult,
   OmniRouteAccountKeyUpdatePrepared,
   OmniRouteAccountKeyUpdateResult,
+  OmniRouteAccountRenamePrepared,
+  OmniRouteAccountRenameResult,
   OmniRouteAccountActivationPrepared,
   OmniRouteAccountActivationResult,
   OmniRouteActivationHistoryEntry,
@@ -1146,6 +1148,26 @@ export const confirmOmniRouteAccountKeyUpdate = (
   write<OmniRouteAccountKeyUpdateResult>(
     "POST",
     "/omniroute/accounts/key-update/confirm",
+    { sessionId, confirmationId, approve },
+  );
+export const prepareOmniRouteAccountRename = (
+  id: string,
+  name: string,
+  acknowledgeEffects: boolean,
+) =>
+  write<OmniRouteAccountRenamePrepared>(
+    "POST",
+    "/omniroute/accounts/rename/prepare",
+    { id, name, acknowledgeEffects },
+  );
+export const confirmOmniRouteAccountRename = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteAccountRenameResult>(
+    "POST",
+    "/omniroute/accounts/rename/confirm",
     { sessionId, confirmationId, approve },
   );
 

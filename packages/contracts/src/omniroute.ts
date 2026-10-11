@@ -332,6 +332,24 @@ export interface OmniRouteAccountKeyUpdateResult {
   routeReady?: boolean;
   auditWarning?: string;
 }
+export interface OmniRouteAccountRenamePrepared {
+  ok: boolean;
+  error?: string;
+  id?: string;
+  provider?: string;
+  oldName?: string;
+  newName?: string;
+  action?: PendingConfirmation;
+}
+export interface OmniRouteAccountRenameResult {
+  ok: boolean;
+  error?: string;
+  verified?: boolean | null;
+  id?: string;
+  provider?: string;
+  name?: string;
+  auditWarning?: string;
+}
 export interface OmniRouteAccountRemovalResult {
   ok: boolean;
   error?: string;
