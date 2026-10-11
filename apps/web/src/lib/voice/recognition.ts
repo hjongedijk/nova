@@ -4,6 +4,7 @@ import { secureBase, shell } from "#lib/stores/shell.svelte.ts";
 import { showToast } from "#lib/stores/toasts.svelte.ts";
 import { IS_IOS } from "#lib/stores/device.ts";
 import { recognizerCtor, type Recognizer } from "./speech-types.ts";
+import { ttsLocale } from "./voice-preference.ts";
 import {
   onInputDeviceChange,
   openSelectedInputStream,
@@ -49,7 +50,7 @@ export function initRecognition(): boolean {
   const rec = new Ctor();
   recognition = rec;
   onInputDeviceChange(stopListening);
-  rec.lang = "nl-NL";
+  rec.lang = ttsLocale();
   rec.interimResults = true;
   rec.continuous = false;
 

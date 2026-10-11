@@ -4,6 +4,7 @@ import { fetchSpeech } from "#lib/api/chat.ts";
 import {
   saveTtsProsody,
   saveTtsVoice,
+  ttsLocale,
   ttsProsody,
   ttsProsodyForMood,
   ttsVoice,
@@ -35,6 +36,22 @@ describe("TTS voice preference", () => {
     expect(ttsVoice()).toBe("nl-NL-FennaNeural");
     expect(saveTtsVoice("unreviewed-voice")).toBe("nl-NL-FennaNeural");
     expect(save).toHaveBeenCalledWith("novaTtsVoice", "nl-NL-FennaNeural");
+  });
+
+  it("offers multiple languages and uses the selected language for recognition", () => {
+    const values = new Map<string, string>([
+      ["novaTtsVoice", "de-DE-KatjaNeural"],
+    ]);
+    vi.spyOn(storage, "get").mockImplementation(
+      (key, fallback) => values.get(key) ?? fallback,
+    );
+    vi.spyOn(storage, "set").mockImplementation((key, value) =>
+      values.set(key, value),
+    );
+
+    expect(ttsLocale()).toBe("de-DE");
+    expect(saveTtsVoice("en-GB-RyanNeural")).toBe("en-GB-RyanNeural");
+    expect(ttsLocale()).toBe("en-GB");
   });
 
   it("persists prosody and clamps it to the supported range", () => {

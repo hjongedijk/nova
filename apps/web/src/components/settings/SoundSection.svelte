@@ -11,6 +11,7 @@
     TTS_VOICES,
     saveTtsProsody,
     saveTtsVoice,
+    ttsLocale,
     ttsProsody,
     ttsVoice,
   } from "#lib/voice/voice-preference.ts";
@@ -36,7 +37,31 @@
   let pronunciationTerm = $state("");
   let pronunciationSay = $state("");
   let pronunciationNote = $state("");
-  const voiceExample = "Ik ben er. Wat wil je als eerste aanpakken?";
+  const voiceExamples: Record<string, string> = {
+    "de-DE": "Ich bin da. Womit möchtest du anfangen?",
+    "en-US": "I'm here. What would you like to tackle first?",
+    "en-GB": "I'm here. What would you like to tackle first?",
+    "es-ES": "Estoy aquí. ¿Qué quieres hacer primero?",
+    "fr-FR": "Je suis là. Par quoi voulez-vous commencer ?",
+    "it-IT": "Ci sono. Da cosa vuoi iniziare?",
+    "ja-JP": "ここにいます。何から始めましょうか？",
+    "nl-BE": "Ik ben er. Wat wil je als eerste aanpakken?",
+    "nl-NL": "Ik ben er. Wat wil je als eerste aanpakken?",
+    "pt-BR": "Estou aqui. O que você quer fazer primeiro?",
+  };
+  const voiceGroups = [
+    ["Nederlands", ["nl-NL", "nl-BE"]],
+    ["Engels", ["en-US", "en-GB"]],
+    ["Duits", ["de-DE"]],
+    ["Frans", ["fr-FR"]],
+    ["Spaans", ["es-ES"]],
+    ["Italiaans", ["it-IT"]],
+    ["Portugees", ["pt-BR"]],
+    ["Japans", ["ja-JP"]],
+  ] as const;
+  let voiceExample = $derived(
+    voiceExamples[ttsLocale()] ?? voiceExamples["nl-NL"]!,
+  );
 
   function setVolume(percent: number): void {
     volume = percent;
@@ -149,8 +174,12 @@
       value={selectedVoice}
       onchange={(event) => chooseVoice(event.currentTarget.value)}
     >
-      {#each TTS_VOICES as voice (voice.id)}
-        <option value={voice.id}>{voice.label}</option>
+      {#each voiceGroups as [language, locales] (language)}
+        <optgroup label={language}>
+          {#each TTS_VOICES.filter( (voice) => (locales as readonly string[]).includes(voice.id.slice(0, 5)) ) as voice (voice.id)}
+            <option value={voice.id}>{voice.label}</option>
+          {/each}
+        </optgroup>
       {/each}
     </select>
     <p class="help">

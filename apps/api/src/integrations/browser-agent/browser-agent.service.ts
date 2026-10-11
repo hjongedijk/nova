@@ -257,7 +257,7 @@ export class BrowserAgentService implements ToolSource {
       return {
         ok: false,
         error:
-          "De Windows-agent op je pc is nog oud en kent de browser niet. Werk jarvis-agent.ps1 bij en start de taak JarvisAgent opnieuw.",
+          "De Windows-agent op je pc is nog oud en kent de browser niet. Werk nova-agent.ps1 bij en start NOVAAgent opnieuw in Taakplanner.",
       };
     const { ok, ...rest } = response.data ?? {};
     if (response.status !== 200 || ok !== true)

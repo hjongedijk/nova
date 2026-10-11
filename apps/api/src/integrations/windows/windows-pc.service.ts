@@ -314,7 +314,7 @@ export class WindowsPcService {
       return {
         ok: false,
         error:
-          "De Windows-agent op je pc is nog oud. Werk jarvis-agent.ps1 bij en start de taak JarvisAgent opnieuw.",
+          "De Windows-agent op je pc is nog oud. Werk nova-agent.ps1 bij en start NOVAAgent opnieuw in Taakplanner.",
       };
     if (response.status !== 200 || response.data?.ok !== true)
       return {

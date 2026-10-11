@@ -191,6 +191,8 @@ policy and tool-call limits; MCP file path; memory backend and embedding model/d
 fallback coordinates; Node-RED shared secret; reachability-check targets; host metrics address; and the
 default TTS voice (`TTS_VOICE`, one of the voices listed in Sound settings). A saved browser voice
 choice takes precedence for speech from that browser; the default applies when no valid choice exists.
+Sound settings offer 20 Microsoft Edge neural voices across Dutch, English, German, French, Spanish,
+Italian, Brazilian Portuguese and Japanese. Speech recognition follows the selected voice locale.
 The free-only routing verifier remains mandatory in production, regardless of `FREE_ONLY`. Change
 deployment variables in compose/`.env` and recreate the NOVA container. `NOVA_RESTART_ENABLED` is
 the exception: the official compose file sets it so NOVA can request its own supervised restart after

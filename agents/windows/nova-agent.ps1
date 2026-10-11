@@ -1845,7 +1845,7 @@ function Invoke-BrowserAction([string]$name, $body) {
 $listener = New-Object Net.HttpListener
 $listener.Prefixes.Add("http://+:$Port/")
 $listener.Start()
-Write-Host "Jarvis agent listening on port $Port"
+Write-Host "NOVA agent listening on port $Port"
 try { if (-not [NovaClick]::Start()) { Write-Host 'Click hook not available' } } catch { Write-Host "Click hook: $($_.Exception.Message)" }
 try { Apply-Mode } catch { Write-Host "Mode: $($_.Exception.Message)" }
 $script:agentPaused = $false

@@ -2,6 +2,23 @@ import { storage } from "#lib/util/storage.ts";
 import type { AssistantMood } from "#lib/stores/chat.svelte.ts";
 
 export const TTS_VOICES = [
+  { id: "en-US-GuyNeural", label: "Guy · Engels (VS)" },
+  { id: "en-US-JennyNeural", label: "Jenny · Engels (VS)" },
+  { id: "en-GB-RyanNeural", label: "Ryan · Engels (VK)" },
+  { id: "en-GB-SoniaNeural", label: "Sonia · Engels (VK)" },
+  { id: "de-DE-ConradNeural", label: "Conrad · Duits" },
+  { id: "de-DE-KatjaNeural", label: "Katja · Duits" },
+  { id: "fr-FR-HenriNeural", label: "Henri · Frans" },
+  { id: "fr-FR-DeniseNeural", label: "Denise · Frans" },
+  { id: "es-ES-AlvaroNeural", label: "Álvaro · Spaans" },
+  { id: "es-ES-ElviraNeural", label: "Elvira · Spaans" },
+  { id: "it-IT-DiegoNeural", label: "Diego · Italiaans" },
+  { id: "it-IT-ElsaNeural", label: "Elsa · Italiaans" },
+  { id: "pt-BR-AntonioNeural", label: "Antônio · Portugees (Brazilië)" },
+  { id: "pt-BR-FranciscaNeural", label: "Francisca · Portugees (Brazilië)" },
+  { id: "ja-JP-KeitaNeural", label: "Keita · Japans" },
+  { id: "ja-JP-NanamiNeural", label: "Nanami · Japans" },
+  { id: "nl-NL-MaartenNeural", label: "Maarten · Nederlands" },
   { id: "nl-NL-FennaNeural", label: "Fenna (Nederlands)" },
   { id: "nl-NL-ColetteNeural", label: "Colette (Nederlands)" },
   { id: "nl-BE-DenaNeural", label: "Dena (Vlaams)" },
@@ -25,6 +42,11 @@ export function saveTtsVoice(voice: string): TtsVoiceId {
     : DEFAULT_VOICE;
   storage.set(KEY, selected);
   return selected;
+}
+
+/** Locale used by browser speech recognition; keep listening in the chosen voice language. */
+export function ttsLocale(): string {
+  return ttsVoice().split("-").slice(0, 2).join("-");
 }
 
 export interface TtsProsody {

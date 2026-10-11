@@ -114,7 +114,19 @@ describe("POST /api/tts", () => {
     expect(response.body).toMatchObject({
       ok: true,
       voice: "nl-NL-FennaNeural",
-      voices: ["nl-NL-FennaNeural", "nl-NL-ColetteNeural", "nl-BE-DenaNeural"],
+      voices: expect.arrayContaining([
+        "nl-NL-FennaNeural",
+        "nl-NL-ColetteNeural",
+        "nl-BE-DenaNeural",
+        "en-US-GuyNeural",
+        "en-GB-SoniaNeural",
+        "de-DE-KatjaNeural",
+        "fr-FR-DeniseNeural",
+        "es-ES-ElviraNeural",
+        "it-IT-ElsaNeural",
+        "pt-BR-FranciscaNeural",
+        "ja-JP-NanamiNeural",
+      ]),
     });
   });
 });

@@ -30,9 +30,10 @@ New-NetFirewallRule -DisplayName 'NOVA Windows agent' -Direction Inbound -Protoc
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$dir\nova-agent.ps1`" -Port $Port"
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+Unregister-ScheduledTask -TaskName 'NOVAAgent' -Confirm:$false -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName 'JarvisAgent' -Confirm:$false -ErrorAction SilentlyContinue
-Register-ScheduledTask -TaskName 'JarvisAgent' -Action $action -Trigger $trigger -Principal $principal | Out-Null
-Start-ScheduledTask -TaskName 'JarvisAgent'
+Register-ScheduledTask -TaskName 'NOVAAgent' -Action $action -Trigger $trigger -Principal $principal | Out-Null
+Start-ScheduledTask -TaskName 'NOVAAgent'
 $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like '192.168.*' } | Select-Object -First 1).IPAddress
 Write-Host ''
 Write-Host 'Agent installed. Add these two lines to the .env of your NOVA install, then recreate the nova container:' -ForegroundColor Green

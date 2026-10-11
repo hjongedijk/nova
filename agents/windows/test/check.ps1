@@ -257,4 +257,9 @@ if ($installer -notmatch "nova-agent\.ps1" -or $installer -notmatch "Alias\('Jar
   $failed = $true
   Write-Host 'install.ps1: new agent path or legacy host argument alias is missing'
 }
+if ($installer -notmatch "Register-ScheduledTask -TaskName 'NOVAAgent'" -or
+    $installer -notmatch "Unregister-ScheduledTask -TaskName 'JarvisAgent'") {
+  $failed = $true
+  Write-Host 'install.ps1: new NOVAAgent task or old task migration is missing'
+} else { Write-Host 'install.ps1: new installs use NOVAAgent and migrate the legacy task' }
 if ($failed) { exit 1 }

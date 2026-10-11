@@ -197,7 +197,7 @@
       "no-agent":
         "NOVA heeft nog geen verbinding met je Windows-pc. Installeer de Windows-agent uit de map agents/windows en zet WINDOWS_AGENT_URL en WINDOWS_AGENT_TOKEN in .env.",
       "old-agent":
-        "De Windows-agent op je pc is nog oud. Download jarvis-agent.ps1, zet hem in de map van de agent op je pc (bijvoorbeeld C:\\JarvisAgent) en start daarna de taak JarvisAgent opnieuw.",
+        "De Windows-agent op je pc is nog oud. Download nova-agent.ps1, zet hem in de map van de agent op je pc (bijvoorbeeld C:\\NOVAAgent) en start daarna NOVAAgent opnieuw in Taakplanner.",
       unreachable: `NOVA bereikt de Windows-agent niet${data.error ? `: ${data.error}` : "."}`,
     }[data.reason];
   }
@@ -355,8 +355,8 @@
       {#if wallpaper.reason === "old-agent"}
         <Button
           go
-          href="/windows-agent/jarvis-agent.ps1"
-          download="jarvis-agent.ps1">Download de nieuwe agent</Button
+          href="/windows-agent/nova-agent.ps1"
+          download="nova-agent.ps1">Download de nieuwe agent</Button
         >
       {/if}
     {:else}
@@ -424,15 +424,16 @@
     <Button href="/windows-agent/nova-agent.ps1" download="nova-agent.ps1"
       >Download de NOVA-agent</Button
     >
-    <Button href="/windows-agent/jarvis-agent.ps1" download="jarvis-agent.ps1"
+    <Button href="/windows-agent/nova-agent.ps1" download="nova-agent.ps1"
       >Download voor bestaande installatie</Button
     >
   </div>
   <p class="hint">
     Nieuwe installatie: gebruik nova-agent.ps1 en install.ps1. Bij een bestaande
     installatie kun je via de tweede download de huidige implementatie opslaan
-    als jarvis-agent.ps1; vervang daarmee het oude bestand en start de taak
-    JarvisAgent opnieuw in Taakplanner.
+    als nova-agent.ps1; vervang daarmee het oude bestand en start NOVAAgent
+    opnieuw in Taakplanner. Voer install.ps1 uit om ook de oude taaknaam te
+    vernieuwen.
   </p>
 </section>
 

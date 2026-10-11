@@ -4,6 +4,23 @@ import { ValidationError } from "../core/errors/validation.error.js";
 
 export const TTS_DEFAULT_VOICE = "nl-NL-FennaNeural";
 export const TTS_VOICES = [
+  "en-US-GuyNeural",
+  "en-US-JennyNeural",
+  "en-GB-RyanNeural",
+  "en-GB-SoniaNeural",
+  "de-DE-ConradNeural",
+  "de-DE-KatjaNeural",
+  "fr-FR-HenriNeural",
+  "fr-FR-DeniseNeural",
+  "es-ES-AlvaroNeural",
+  "es-ES-ElviraNeural",
+  "it-IT-DiegoNeural",
+  "it-IT-ElsaNeural",
+  "pt-BR-AntonioNeural",
+  "pt-BR-FranciscaNeural",
+  "ja-JP-KeitaNeural",
+  "ja-JP-NanamiNeural",
+  "nl-NL-MaartenNeural",
   "nl-NL-FennaNeural",
   "nl-NL-ColetteNeural",
   "nl-BE-DenaNeural",

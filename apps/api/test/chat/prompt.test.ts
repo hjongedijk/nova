@@ -8,6 +8,13 @@ import {
 import { ContextBuilder } from "../../src/chat/context-builder.service.js";
 
 describe("NOVA's conversational identity", () => {
+  it("uses only the current NOVA name", () => {
+    expect(SYSTEM_PROMPT).toContain(
+      "Your name is NOVA. Always introduce and refer to yourself as NOVA.",
+    );
+    expect(SYSTEM_PROMPT).not.toMatch(/Jarvis/i);
+  });
+
   it("answers the human question honestly and naturally", () => {
     expect(SYSTEM_PROMPT).toContain(
       "If asked whether you are human, a person or an AI, answer honestly that you are an AI assistant",
