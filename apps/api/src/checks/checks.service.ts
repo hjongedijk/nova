@@ -1,9 +1,14 @@
 import {
   Injectable,
+  Optional,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
-import type { AlertInfo, ServiceCheckResult } from "@nova/contracts";
+import type {
+  AlertInfo,
+  HaEntity,
+  ServiceCheckResult,
+} from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
 import {
   JarvisStateStore,
@@ -11,6 +16,7 @@ import {
   newId,
 } from "../planning/jarvis-state.store.js";
 import { ProxmoxService } from "../proxmox/proxmox.service.js";
+import { HomeAssistantService } from "../home/home-assistant.service.js";
 import { parseTargets, probe } from "./probe.js";
 
 interface Raise {
@@ -18,6 +24,28 @@ interface Raise {
   severity: "info" | "warning" | "critical";
   title: string;
   detail?: string;
+}
+
+/** Inventory only Home Assistant's explicit device_tracker entities; no IP/MAC data is kept. */
+export function trackerInventory(entities: HaEntity[]): Record<string, string> {
+  return Object.fromEntries(
+    entities
+      .filter((entity) => entity.domain === "device_tracker")
+      .map((entity) => [
+        entity.entity_id,
+        String(entity.friendly_name || entity.entity_id).slice(0, 80),
+      ]),
+  );
+}
+
+export function trackerChanges(
+  previous: Record<string, string>,
+  current: Record<string, string>,
+) {
+  return {
+    added: Object.entries(current).filter(([id]) => !(id in previous)),
+    removed: Object.entries(previous).filter(([id]) => !(id in current)),
+  };
 }
 
 /** Reachability checks and the watchdog that raises (and closes) alerts. */
@@ -30,6 +58,7 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     private readonly config: NovaConfig,
     private readonly store: JarvisStateStore,
     private readonly proxmox: ProxmoxService,
+    @Optional() private readonly home?: HomeAssistantService,
   ) {}
 
   onModuleInit(): void {
@@ -197,6 +226,32 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
             title: `${result.name} reageert niet`,
             detail: result.detail,
           });
+      }
+    }
+    if (this.home?.configured) {
+      try {
+        const next = trackerInventory(await this.home.sync());
+        const previous = state.watch.devices;
+        if (previous) {
+          const changes = trackerChanges(previous, next);
+          for (const [id, name] of changes.added)
+            this.raise({
+              key: `device-tracker-${id}`,
+              severity: "info",
+              title: `Nieuw apparaat gevonden: ${name}`,
+              detail: "Home Assistant meldt een nieuwe device tracker.",
+            });
+          for (const [id, name] of changes.removed)
+            this.raise({
+              key: `device-tracker-${id}`,
+              severity: "info",
+              title: `Apparaat niet meer gevonden: ${name}`,
+              detail: "De device tracker staat niet meer in Home Assistant.",
+            });
+        }
+        state.watch.devices = next;
+      } catch {
+        // A failed Home Assistant sync must not look like mass device removal.
       }
     }
     this.store.save();

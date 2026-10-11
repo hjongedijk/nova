@@ -1,6 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import dns from "node:dns/promises";
 import type { ServiceCheckResult } from "@nova/contracts";
 
 type Probe = Omit<ServiceCheckResult, "name">;
@@ -10,7 +11,10 @@ export function parseTargets(
   raw: string,
   proxmoxUrl = "",
 ): Record<string, string> {
-  const targets: Record<string, string> = {};
+  const targets: Record<string, string> = {
+    internet: "https://1.1.1.1/",
+    dns: "dns://cloudflare.com",
+  };
   if (raw) {
     for (const part of raw.split(",")) {
       const [name, ...rest] = part.split("=");
@@ -63,6 +67,20 @@ export function probe(url: string, timeoutMs = 4000): Promise<Probe> {
         done(false, "time-out");
       });
       socket.on("error", () => done(false, "geen verbinding"));
+      return;
+    }
+    if (target.protocol === "dns:") {
+      const timer = setTimeout(() => done(false, "time-out"), timeoutMs);
+      void dns.lookup(target.hostname).then(
+        () => {
+          clearTimeout(timer);
+          done(true, "DNS bereikbaar");
+        },
+        () => {
+          clearTimeout(timer);
+          done(false, "DNS niet bereikbaar");
+        },
+      );
       return;
     }
     const client = target.protocol === "https:" ? https : http;

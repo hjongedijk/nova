@@ -34,6 +34,7 @@ export interface JarvisState {
   watch: {
     guests: Record<string, string> | null;
     down: Record<string, number>;
+    devices?: Record<string, string> | null;
   };
   [extra: string]: unknown;
 }
