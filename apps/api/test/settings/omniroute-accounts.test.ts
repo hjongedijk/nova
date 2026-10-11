@@ -1,10 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
 import { OmniRouteAccountsController } from "../../src/settings/omniroute-accounts.controller.js";
 import { createApp } from "./helpers.js";
 
 const gateway = "http://verified-gateway.invalid/v1";
+const cleanup: (() => void)[] = [];
+afterEach(() => {
+  for (const dispose of cleanup.splice(0)) dispose();
+});
 const ERROR =
   "OmniRoute-accounts zijn niet beschikbaar. Controleer de koppeling.";
 const connection = {
@@ -41,6 +49,17 @@ const combo = {
 };
 
 function fixture({ verified = true, configured = true } = {}) {
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "nova-omniroute-inventory-"),
+  );
+  const database = path.join(dir, "omniroute.sqlite");
+  const db = new DatabaseSync(database);
+  db.exec("CREATE TABLE api_keys(id TEXT PRIMARY KEY,key TEXT)");
+  db.prepare("INSERT INTO api_keys VALUES(?,?)").run("key-1", "nova-secret");
+  cleanup.push(() => {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
   const management = {
     configured,
     request: vi.fn(async (endpoint: string): Promise<unknown> => {
@@ -54,6 +73,8 @@ function fixture({ verified = true, configured = true } = {}) {
     {
       omniUrl: gateway,
       verifiedOmniUrl: verified ? gateway : "http://changed.invalid/v1",
+      omniDatabase: database,
+      omniKey: "nova-secret",
     } as NovaConfig,
     management as unknown as OmniRouteManagement,
   );
@@ -75,6 +96,29 @@ function expectUnavailable(result: unknown) {
 }
 
 describe("private OmniRoute account inventory", () => {
+  it("projects only explicit hidden-model metadata and documents catalog-only effect", async () => {
+    const { controller, management } = fixture();
+    management.request.mockResolvedValue({
+      models: [{ provider: "private-provider-model", apiKey: "private" }],
+      hiddenModelsByProvider: {
+        provider: ["vendor/model-a", "vendor/model-b", "../../invalid"],
+        "../invalid": ["hidden"],
+      },
+      modelCompatOverrides: { private: "metadata" },
+    });
+    const result = await controller.modelVisibility();
+    expect(result).toEqual({
+      available: true,
+      truncated: false,
+      hidden: [
+        { provider: "provider", modelId: "vendor/model-a" },
+        { provider: "provider", modelId: "vendor/model-b" },
+      ],
+    });
+    expect(management.request).toHaveBeenCalledWith("/api/provider-models");
+    expect(JSON.stringify(result)).not.toContain("private");
+  });
+
   it("requests only fixed account and catalog metadata endpoints and projects no secrets", async () => {
     const { controller, management } = fixture();
     const result = await controller.report();
@@ -117,6 +161,170 @@ describe("private OmniRoute account inventory", () => {
       ["/api/free-models"],
       ["/api/combos?limit=200&offset=0"],
     ]);
+    expect(JSON.stringify(result)).not.toContain("private");
+  });
+
+  it("projects only bounded API-key rights and never forwards masked or raw key values", async () => {
+    const { controller, management } = fixture();
+    management.request.mockImplementation(async (endpoint) =>
+      endpoint === "/api/keys"
+        ? {
+            total: 1,
+            allowKeyReveal: true,
+            keys: [
+              {
+                id: "key-1",
+                name: "NOVA local key",
+                isActive: true,
+                modelAccessMode: "restricted",
+                allowedModels: ["auto"],
+                allowedCombos: [],
+                allowedConnections: ["connection-1"],
+                expiresAt: "2026-12-01T00:00:00Z",
+                key: "sk-secret-raw",
+                maskedKey: "sk-••••secret",
+              },
+            ],
+          }
+        : {},
+    );
+    const result = await controller.apiKeys();
+    expect(result).toEqual({
+      available: true,
+      truncated: false,
+      keys: [
+        {
+          id: "key-1",
+          name: "NOVA local key",
+          active: true,
+          isNovaKey: true,
+          accessMode: "restricted",
+          allowedModelCount: 1,
+          allowedComboCount: 0,
+          allowedConnectionCount: 1,
+          expiresAt: "2026-12-01T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(management.request).toHaveBeenCalledWith("/api/keys");
+    expect(JSON.stringify(result)).not.toMatch(
+      /secret|masked|key-raw|allowKeyReveal/,
+    );
+  });
+
+  it("shows bounded cached quotas for live accounts only without refreshing", async () => {
+    const { controller, management } = fixture();
+    const fetchedAt = new Date().toISOString();
+    management.request.mockImplementation(async (endpoint) => {
+      if (endpoint === "/api/providers?limit=200&offset=0")
+        return { connections: [connection], total: 1 };
+      if (endpoint === "/api/usage/provider-limits")
+        return {
+          intervalMinutes: 70,
+          lastAutoSyncAt: fetchedAt,
+          caches: {
+            "connection-1": {
+              fetchedAt,
+              source: "private-source",
+              message: "private provider response",
+              plan: "private-plan",
+              billing: { secret: "private-billing" },
+              quotas: {
+                daily: {
+                  limit: 1000,
+                  remaining: 750,
+                  remainingPercentage: 75,
+                  resetAt: fetchedAt,
+                  unlimited: false,
+                  token: "private-quota-token",
+                },
+              },
+            },
+            "deleted-connection": {
+              fetchedAt,
+              quotas: { daily: { remaining: 10 } },
+            },
+          },
+        };
+      return {};
+    });
+    const result = await controller.usage();
+    expect(result).toEqual({
+      available: true,
+      truncated: false,
+      intervalMinutes: 70,
+      lastAutoSyncAt: fetchedAt,
+      billingVerified: false,
+      connections: [
+        {
+          id: "connection-1",
+          provider: "provider-1",
+          name: "Account",
+          fetchedAt,
+          stale: false,
+          quotas: [
+            {
+              window: "daily",
+              limit: 1000,
+              remaining: 750,
+              remainingPercentage: 75,
+              resetAt: fetchedAt,
+              unlimited: false,
+            },
+          ],
+        },
+      ],
+    });
+    expect(management.request.mock.calls).toEqual([
+      ["/api/providers?limit=200&offset=0"],
+      ["/api/usage/provider-limits"],
+    ]);
+    expect(JSON.stringify(result)).not.toMatch(
+      /private|deleted-connection|quota-token|private-billing/,
+    );
+  });
+
+  it("marks cached usage truncated when the provider page exceeds its bound without a total", async () => {
+    const { controller, management } = fixture();
+    const fetchedAt = new Date().toISOString();
+    management.request.mockImplementation(async (endpoint) =>
+      endpoint === "/api/providers?limit=200&offset=0"
+        ? {
+            connections: Array.from({ length: 201 }, (_, index) => ({
+              ...connection,
+              id: `connection-${index}`,
+            })),
+          }
+        : {
+            intervalMinutes: 70,
+            caches: {
+              "connection-200": {
+                fetchedAt,
+                quotas: { daily: { remaining: 5 } },
+              },
+            },
+          },
+    );
+
+    const result = await controller.usage();
+
+    expect(result.truncated).toBe(true);
+    expect(result.connections).toEqual([]);
+  });
+
+  it("fails closed and hides upstream details when cached usage shape is invalid", async () => {
+    const { controller, management } = fixture();
+    management.request.mockImplementation(async (endpoint) =>
+      endpoint === "/api/providers?limit=200&offset=0"
+        ? { connections: [connection], total: 1 }
+        : { caches: "private-invalid-response", secret: "private" },
+    );
+    const result = await controller.usage();
+    expect(result).toMatchObject({
+      available: false,
+      connections: [],
+      billingVerified: false,
+    });
     expect(JSON.stringify(result)).not.toContain("private");
   });
 

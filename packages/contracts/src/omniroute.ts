@@ -199,6 +199,49 @@ export interface OmniRouteApiKeyInventory {
   }[];
 }
 
+export interface OmniRouteKeyModelAccessOptions {
+  available: boolean;
+  error?: string;
+  accessMode: "restricted" | "all" | "unknown";
+  allowedModels: string[];
+  verifiedFreeModels: string[];
+  revision: string | null;
+}
+export interface OmniRouteKeyModelAccessHistory {
+  revisions: {
+    id: string;
+    at: string;
+    keyId: string;
+    name: string;
+    beforeMode: "all" | "restricted";
+    beforeModels: string[];
+    afterMode: "all" | "restricted";
+    afterModels: string[];
+    revertedFrom?: string;
+  }[];
+  truncated: boolean;
+}
+
+export interface OmniRouteKeyModelAccessPrepared {
+  ok: true;
+  name: string;
+  modelCount: number;
+  warning?: string;
+  action: PendingConfirmation;
+}
+export type OmniRouteKeyModelAccessPrepareResult =
+  OmniRouteKeyModelAccessPrepared | { ok: false; error: string };
+
+export interface OmniRouteKeyModelAccessResult {
+  ok: boolean;
+  cancelled?: boolean;
+  verified?: boolean | null;
+  routeReady?: boolean;
+  allowedModels?: string[];
+  historyWarning?: string;
+  error?: string;
+}
+
 export interface OmniRouteKeyActivationPrepared {
   ok: true;
   name: string;
