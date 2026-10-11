@@ -36,6 +36,8 @@ export interface ChatRequest {
   quietHours?: boolean;
   /** Bounded, user-selected communication preferences; only used for conversation role. */
   communicationPreferences?: CommunicationPreference[];
+  /** Explicit language for this conversation and its spoken responses. */
+  responseLanguage?: "nl" | "en";
   /** Optional manual override; embeddings are internal and cannot be selected for chat. */
   modelRole?: Exclude<ModelRoleId, "embedding">;
   sessionId: string;

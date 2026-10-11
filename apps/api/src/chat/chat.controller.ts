@@ -39,6 +39,7 @@ function check(body: ChatBody): {
   inputMode: "text" | "voice";
   quietHours: boolean;
   communicationPreferences: CommunicationPreference[];
+  responseLanguage?: "nl" | "en";
   confirmationId?: string;
   modelRole?: Exclude<ModelRoleId, "embedding">;
 } {
@@ -85,6 +86,12 @@ function check(body: ChatBody): {
     "warmer",
   ] as const;
   if (
+    body.responseLanguage !== undefined &&
+    body.responseLanguage !== "nl" &&
+    body.responseLanguage !== "en"
+  )
+    throw new ValidationError(["Invalid response language"]);
+  if (
     body.communicationPreferences !== undefined &&
     (!Array.isArray(body.communicationPreferences) ||
       body.communicationPreferences.length > allowedPreferences.length ||
@@ -105,6 +112,7 @@ function check(body: ChatBody): {
     communicationPreferences: Array.isArray(body.communicationPreferences)
       ? (body.communicationPreferences as CommunicationPreference[])
       : [],
+    responseLanguage: body.responseLanguage as "nl" | "en" | undefined,
     message: sanitize(body.message.trim()),
     confirmationId: body.confirmationId as string | undefined,
     modelRole: body.modelRole as Exclude<ModelRoleId, "embedding"> | undefined,
@@ -146,6 +154,7 @@ export class ChatController {
       inputMode,
       quietHours,
       communicationPreferences,
+      responseLanguage,
       modelRole,
     } = check(body);
     if (!this.client.configured)
@@ -164,6 +173,7 @@ export class ChatController {
         inputMode,
         quietHours,
         communicationPreferences,
+        responseLanguage,
         modelRole,
         confirmationId,
       });
@@ -192,6 +202,7 @@ export class ChatController {
       inputMode,
       quietHours,
       communicationPreferences,
+      responseLanguage,
       modelRole,
     } = check(body);
     if (!this.client.configured) {
@@ -234,6 +245,7 @@ export class ChatController {
         inputMode,
         quietHours,
         communicationPreferences,
+        responseLanguage,
         modelRole,
         confirmationId,
         stream: true,
@@ -262,10 +274,17 @@ export class ChatController {
       confirmationId?: unknown;
       approve?: unknown;
       always?: unknown;
+      responseLanguage?: unknown;
     },
   ) {
     if (typeof body?.confirmationId !== "string")
       throw new ValidationError(["Confirmation ID required"]);
+    if (
+      body.responseLanguage !== undefined &&
+      body.responseLanguage !== "nl" &&
+      body.responseLanguage !== "en"
+    )
+      throw new ValidationError(["Invalid response language"]);
     const sessionId = normalizeSessionId(body.sessionId);
     if (active.has(sessionId))
       throw new ConflictException(
@@ -278,10 +297,14 @@ export class ChatController {
         body.approve === true ? "yes" : "cancel",
         body.confirmationId,
         body.approve === true && body.always === true,
+        body.responseLanguage === "en" ? "en" : "nl",
       );
       return sanitize(
         reply ?? {
-          reply: "Daar staat niets meer voor open. Vraag het gerust opnieuw.",
+          reply:
+            body.responseLanguage === "en"
+              ? "There is nothing waiting for confirmation. Please ask again."
+              : "Daar staat niets meer voor open. Vraag het gerust opnieuw.",
         },
       );
     } finally {

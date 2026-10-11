@@ -5,6 +5,7 @@ import { showToast } from "#lib/stores/toasts.svelte.ts";
 import { IS_IOS } from "#lib/stores/device.ts";
 import { recognizerCtor, type Recognizer } from "./speech-types.ts";
 import { ttsLocale } from "./voice-preference.ts";
+import { getConversationLanguage } from "../chat/session.ts";
 import {
   onInputDeviceChange,
   openSelectedInputStream,
@@ -50,7 +51,7 @@ export function initRecognition(): boolean {
   const rec = new Ctor();
   recognition = rec;
   onInputDeviceChange(stopListening);
-  rec.lang = ttsLocale();
+  rec.lang = ttsLocale(getConversationLanguage());
   rec.interimResults = true;
   rec.continuous = false;
 
@@ -202,6 +203,7 @@ export function startListening(): void {
     return;
   }
   const attempt = ++listenAttempt;
+  rec.lang = ttsLocale(getConversationLanguage());
   if (selectedInputDevice()) {
     startWithSelectedInput(rec, attempt);
     return;

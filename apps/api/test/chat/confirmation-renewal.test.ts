@@ -153,4 +153,40 @@ describe("confirmation changes after approval", () => {
       true,
     );
   });
+
+  it("answers direct confirmation results in the selected conversation language", async () => {
+    const { confirmations, tools, handler, original } = fixture();
+    tools.execute.mockResolvedValue({ ok: true, verified: true });
+    const response = await handler.handle(
+      "chat",
+      "yes",
+      original.confirmationId,
+      false,
+      "en",
+    );
+    expect(response?.reply).toBe("Done, and I verified it.");
+    expect(confirmations.has("chat")).toBe(false);
+  });
+
+  it("returns English after a button confirmation in an English conversation", async () => {
+    const { tools, handler, original, outcome } = fixture();
+    tools.execute.mockResolvedValue({
+      ok: true,
+      result: { output: "confirmed output" },
+    });
+    outcome.describe.mockResolvedValue("The result.");
+
+    const response = await handler.handle(
+      "chat",
+      "yes",
+      original.confirmationId,
+      false,
+      "en",
+    );
+
+    expect(response?.reply).toBe("The result.");
+    expect(outcome.describe).toHaveBeenCalledWith(
+      expect.objectContaining({ language: "en" }),
+    );
+  });
 });

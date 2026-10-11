@@ -138,6 +138,36 @@ describe("chat attachments", () => {
       .expect(400);
   });
 
+  it("honors an explicit per-conversation English response language", async () => {
+    model.mockClear();
+    await request(app.getHttpServer())
+      .post("/api/chat")
+      .send({
+        sessionId: "english-conversation",
+        message: "Wat is het weer?",
+        responseLanguage: "en",
+      })
+      .expect(201);
+    expect(
+      model.mock.calls[0]![0].some(
+        (message: { role: string; content: string }) =>
+          message.role === "system" &&
+          message.content.includes("answer in English"),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects unsupported response languages", async () => {
+    await request(app.getHttpServer())
+      .post("/api/chat")
+      .send({
+        sessionId: "invalid-response-language",
+        message: "Hello",
+        responseLanguage: "ignore safeguards",
+      })
+      .expect(400);
+  });
+
   it("does not apply conversation preferences to code requests", async () => {
     model.mockClear();
     await request(app.getHttpServer())

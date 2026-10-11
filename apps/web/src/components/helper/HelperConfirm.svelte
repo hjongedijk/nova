@@ -1,7 +1,16 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { answerCard, type Card } from "#lib/chat/cards.svelte.ts";
+  import { getConversationLanguage } from "#lib/chat/session.ts";
 
   let { card }: { card: Card } = $props();
+  let language = $state(getConversationLanguage());
+  onMount(() => {
+    const update = () => (language = getConversationLanguage());
+    window.addEventListener("nova-conversation-language-changed", update);
+    return () =>
+      window.removeEventListener("nova-conversation-language-changed", update);
+  });
 </script>
 
 <div class="hc" class:done={card.done}>
@@ -13,10 +22,16 @@
       disabled={card.locked}
       onclick={() => answerCard(card.id, true)}
       >{card.tool === "code_file_write"
-        ? "Toepassen"
+        ? language === "en"
+          ? "Apply"
+          : "Toepassen"
         : card.tool === "code_self_save"
-          ? "Opslaan"
-          : "Bevestigen"}
+          ? language === "en"
+            ? "Save"
+            : "Opslaan"
+          : language === "en"
+            ? "Confirm"
+            : "Bevestigen"}
       <kbd aria-hidden="true">Y</kbd></button
     >
     <button
@@ -24,15 +39,19 @@
       class="hc-no"
       disabled={card.locked}
       onclick={() => answerCard(card.id, false)}
-      >Annuleren <kbd aria-hidden="true">N</kbd></button
+      >{language === "en" ? "Cancel" : "Annuleren"}
+      <kbd aria-hidden="true">N</kbd></button
     >
     {#if card.risk === "CONFIRM" && card.allowAlways !== false}
       <button
         type="button"
         class="hc-no"
         disabled={card.locked}
-        title="Alleen deze tool met exact dezelfde parameters toestaan"
-        onclick={() => answerCard(card.id, true, true)}>Altijd</button
+        title={language === "en"
+          ? "Always allow this tool with these exact parameters"
+          : "Alleen deze tool met exact dezelfde parameters toestaan"}
+        onclick={() => answerCard(card.id, true, true)}
+        >{language === "en" ? "Always" : "Altijd"}</button
       >
     {/if}
   </div>

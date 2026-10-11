@@ -45,10 +45,22 @@ export function saveTtsVoice(voice: string): TtsVoiceId {
   return selected;
 }
 
-/** Locale used by browser speech recognition; keep listening in the chosen voice language. */
-export function ttsLocale(): string {
-  if (ttsVoice() === "jarvis-en-GB-piper") return "en-GB";
-  return ttsVoice().split("-").slice(0, 2).join("-");
+function localeOf(voice: TtsVoiceId): string {
+  if (voice === "jarvis-en-GB-piper") return "en-GB";
+  return voice.split("-").slice(0, 2).join("-");
+}
+
+/** Prefer the configured voice when it matches this conversation's language. */
+export function ttsVoiceForLanguage(language?: "nl" | "en"): TtsVoiceId {
+  const selected = ttsVoice();
+  if (!language || localeOf(selected).startsWith(`${language}-`))
+    return selected;
+  return language === "en" ? "en-GB-RyanNeural" : DEFAULT_VOICE;
+}
+
+/** Locale used by recognition; an explicit conversation language overrides the settings voice. */
+export function ttsLocale(language?: "nl" | "en"): string {
+  return localeOf(ttsVoiceForLanguage(language));
 }
 
 export interface TtsProsody {

@@ -15,6 +15,8 @@ export interface DirectReply {
 
 const NOTHING_OPEN =
   "Daar staat niets meer voor open. Vraag het gerust opnieuw.";
+const NOTHING_OPEN_EN =
+  "There is nothing waiting for confirmation. Please ask again.";
 
 /**
  * Turns "ja", "nee" and the interface's confirm buttons into the approved or cancelled action.
@@ -36,6 +38,7 @@ export class ConfirmationHandler {
     message: string,
     confirmationId?: string,
     always = false,
+    language: "nl" | "en" = "nl",
   ): Promise<DirectReply | null> {
     const intent = confirmationIntent(message);
     if (!intent) return null;
@@ -46,7 +49,7 @@ export class ConfirmationHandler {
         confirmationId &&
         this.confirmations.peek(sessionId)?.confirmationId !== confirmationId
       )
-        return { reply: NOTHING_OPEN };
+        return { reply: language === "en" ? NOTHING_OPEN_EN : NOTHING_OPEN };
       const pending = this.confirmations.peek(sessionId);
       if (pending)
         this.audit.record({
@@ -57,18 +60,25 @@ export class ConfirmationHandler {
           arguments: pending.args,
         });
       this.confirmations.cancel(sessionId);
-      return { reply: "Oké, ik laat het zitten." };
+      return {
+        reply:
+          language === "en"
+            ? "Okay, I will leave it."
+            : "Oké, ik laat het zitten.",
+      };
     }
 
     const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action) return { reply: NOTHING_OPEN };
-    return this.run(sessionId, action, always);
+    if (!action)
+      return { reply: language === "en" ? NOTHING_OPEN_EN : NOTHING_OPEN };
+    return this.run(sessionId, action, always, language);
   }
 
   private async run(
     sessionId: string,
     action: PendingConfirmation,
     always = false,
+    language: "nl" | "en" = "nl",
   ): Promise<DirectReply> {
     const result = await this.tools.execute(
       action.tool,
@@ -84,7 +94,9 @@ export class ConfirmationHandler {
       )
         this.confirmations.cancel(sessionId, "confirmation_changed");
       const reply =
-        "De instellingen zijn gewijzigd. Ik heb niets uitgevoerd. Vraag het opnieuw, dan kun je de actuele wijziging bevestigen.";
+        language === "en"
+          ? "The settings changed, so I did not run the action. Please ask again to review and confirm the current change."
+          : "De instellingen zijn gewijzigd. Ik heb niets uitgevoerd. Vraag het opnieuw, dan kun je de actuele wijziging bevestigen.";
       const failed = { ...result, ok: false, error: reply };
       delete failed.requiresConfirmation;
       delete failed.action;
@@ -97,18 +109,27 @@ export class ConfirmationHandler {
           action,
           result,
           history: this.memory.recent(sessionId, 4),
+          language,
         }),
         result,
       };
     return {
       reply:
-        result.verified === true
-          ? "Gelukt, en ik heb het gecontroleerd."
-          : result.accepted
-            ? "Aangenomen, maar of het echt gelukt is weet ik nog niet."
-            : result.ok
-              ? "Is gedaan."
-              : `Dat is niet gelukt${result.error ? `: ${result.error}` : "."}`,
+        language === "en"
+          ? result.verified === true
+            ? "Done, and I verified it."
+            : result.accepted
+              ? "Accepted, but I could not verify that it completed."
+              : result.ok
+                ? "Done."
+                : `That did not work${result.error ? `: ${result.error}` : "."}`
+          : result.verified === true
+            ? "Gelukt, en ik heb het gecontroleerd."
+            : result.accepted
+              ? "Aangenomen, maar of het echt gelukt is weet ik nog niet."
+              : result.ok
+                ? "Is gedaan."
+                : `Dat is niet gelukt${result.error ? `: ${result.error}` : "."}`,
       result,
     };
   }

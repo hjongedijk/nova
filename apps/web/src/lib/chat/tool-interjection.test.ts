@@ -19,5 +19,8 @@ describe("tool waiting phrases", () => {
     expect(nextToolInterjection("", "calendar_events", 2, () => 0)).toBe(
       "Vervolgens: Ik kijk eerst in je agenda.",
     );
+    expect(nextToolInterjection("", "calendar_events", 2, () => 0, "en")).toBe(
+      "Next, I am checking your calendar.",
+    );
   });
 });

@@ -44,12 +44,42 @@ export function nextToolInterjection(
   toolNameOrRandom: string | (() => number) = "",
   stepOrRandom: number | (() => number) = 1,
   random: () => number = Math.random,
+  language: "nl" | "en" = "nl",
 ): string {
   const toolName = typeof toolNameOrRandom === "string" ? toolNameOrRandom : "";
   if (typeof toolNameOrRandom === "function") random = toolNameOrRandom;
   if (typeof stepOrRandom === "function") random = stepOrRandom;
+  const english = /^(ha_|home_|media_|sonos_|music_)/.test(toolName)
+    ? [
+        "I am checking which devices are available.",
+        "I am setting that up for you now.",
+        "I will check that everything is in place.",
+      ]
+    : /^calendar_/.test(toolName)
+      ? [
+          "I am checking your calendar.",
+          "I am checking the event details.",
+          "I am updating your calendar now.",
+        ]
+      : /^(documents_|notes_)/.test(toolName)
+        ? [
+            "I am searching your documents.",
+            "I am finding the relevant details.",
+            "I am checking one more detail in your documents.",
+          ]
+        : /^(web_search|web_read|wikipedia|news_headlines)/.test(toolName)
+          ? [
+              "I am looking for reliable information.",
+              "I am reading the relevant source.",
+              "I am comparing this with another source.",
+            ]
+          : [
+              "I am checking that for you.",
+              "One moment, I am looking into it.",
+              "I am verifying the next step.",
+            ];
   const contextual = CONTEXT.find(([pattern]) => pattern.test(toolName))?.[1];
-  const lines = contextual ?? DEFAULT_LINES;
+  const lines = language === "en" ? english : (contextual ?? DEFAULT_LINES);
   const choices = lines.filter((line) => line !== previous);
   const index = Math.min(
     choices.length - 1,
@@ -57,6 +87,8 @@ export function nextToolInterjection(
   );
   const line = choices[index] ?? lines[0] ?? DEFAULT_LINES[0];
   return typeof stepOrRandom === "number" && stepOrRandom > 1
-    ? `Vervolgens: ${line}`
+    ? language === "en"
+      ? `Next, ${line}`
+      : `Vervolgens: ${line}`
     : line;
 }

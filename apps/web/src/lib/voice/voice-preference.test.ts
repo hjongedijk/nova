@@ -8,6 +8,7 @@ import {
   ttsProsody,
   ttsProsodyForMood,
   ttsVoice,
+  ttsVoiceForLanguage,
 } from "./voice-preference.ts";
 
 describe("TTS voice preference", () => {
@@ -54,6 +55,13 @@ describe("TTS voice preference", () => {
     expect(ttsLocale()).toBe("en-GB");
   });
 
+  it("matches the TTS voice to the selected conversation language", () => {
+    vi.spyOn(storage, "get").mockReturnValue("nl-NL-FennaNeural");
+    expect(ttsVoiceForLanguage("en")).toBe("en-GB-RyanNeural");
+    expect(ttsLocale("en")).toBe("en-GB");
+    expect(ttsVoiceForLanguage("nl")).toBe("nl-NL-FennaNeural");
+  });
+
   it("persists prosody and clamps it to the supported range", () => {
     const values = new Map<string, string>();
     vi.spyOn(storage, "get").mockImplementation(
@@ -94,6 +102,17 @@ describe("TTS voice preference", () => {
       text: "Wat fijn.",
       voice: "nl-NL-FennaNeural",
       prosody: { rate: -1, pitch: -1 },
+    });
+  });
+
+  it("uses a matching voice for English conversation speech", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("audio"));
+    vi.stubGlobal("fetch", fetchMock);
+    await fetchSpeech("Good morning.", undefined, "neutral", "en");
+    const request = fetchMock.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      text: "Good morning.",
+      voice: "en-GB-RyanNeural",
     });
   });
 });

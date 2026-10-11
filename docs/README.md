@@ -17,6 +17,7 @@
 | [Music and media](media-control.md)                 | Home Assistant and Music Assistant playback, volume, and confirmation rules                   |
 | [Web research](research.md)                         | Multi-step source research, citations, and uncertainty                                        |
 | [Node-RED routines](node-red-routines.md)           | Personal daily reminder routines and their safety boundaries                                  |
+| [Conversation language](conversation-language.md)   | Switch one conversation between Dutch and English, including voice                            |
 | [Urgent phone notifications](push-notifications.md) | Private ntfy setup and what NOVA sends to the phone                                           |
 
 Back to the [README](../README.md).

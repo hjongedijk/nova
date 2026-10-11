@@ -15,29 +15,52 @@ import {
 } from "./cards.svelte.ts";
 import { chatEvents } from "./events.ts";
 import { getSessionId } from "./session.ts";
+import { getConversationLanguage } from "./session.ts";
 import { readEvents } from "./sse.ts";
 import { showStage } from "./stage.ts";
 import { nextToolInterjection } from "./tool-interjection.ts";
 import { readCommunicationPreferences } from "./communication-preferences.ts";
 
 // A few words about what NOVA is doing, so a long task never looks stuck.
-const TOOL_HINTS: [RegExp, string][] = [
-  [/^(web_search|web_read|wikipedia|news_headlines)/, "Informatie opzoeken…"],
-  [/^browser_/, "De browser bedienen…"],
-  [/^windows_/, "Je pc bedienen…"],
-  [/^proxmox_/, "Proxmox controleren…"],
-  [/^(weather|air|moon|iss)_/, "Opzoeken…"],
-  [/^(market|currency)/, "Marktgegevens controleren…"],
-  [/^calendar_/, "Je agenda controleren…"],
-  [/^(documents_|notes_)/, "Je documenten doorzoeken…"],
-  [/^(timer|list)_/, "Je planning bijwerken…"],
-  [/^termix_/, "Je server controleren…"],
-  [/^(ha_|home_|media_|sonos_|music_)/, "Je huis klaarmaken…"],
-  [/^(network|alerts|daily)_/, "Controleren…"],
+const TOOL_HINTS: [RegExp, { nl: string; en: string }][] = [
+  [
+    /^(web_search|web_read|wikipedia|news_headlines)/,
+    { nl: "Informatie opzoeken…", en: "Looking up information…" },
+  ],
+  [/^browser_/, { nl: "De browser bedienen…", en: "Using the browser…" }],
+  [/^windows_/, { nl: "Je pc bedienen…", en: "Using your PC…" }],
+  [/^proxmox_/, { nl: "Proxmox controleren…", en: "Checking Proxmox…" }],
+  [/^(weather|air|moon|iss)_/, { nl: "Opzoeken…", en: "Checking…" }],
+  [
+    /^(market|currency)/,
+    { nl: "Marktgegevens controleren…", en: "Checking market data…" },
+  ],
+  [
+    /^calendar_/,
+    { nl: "Je agenda controleren…", en: "Checking your calendar…" },
+  ],
+  [
+    /^(documents_|notes_)/,
+    { nl: "Je documenten doorzoeken…", en: "Searching your documents…" },
+  ],
+  [
+    /^(timer|list)_/,
+    { nl: "Je planning bijwerken…", en: "Updating your plans…" },
+  ],
+  [/^termix_/, { nl: "Je server controleren…", en: "Checking your server…" }],
+  [
+    /^(ha_|home_|media_|sonos_|music_)/,
+    { nl: "Je huis klaarmaken…", en: "Preparing your home…" },
+  ],
+  [/^(network|alerts|daily)_/, { nl: "Controleren…", en: "Checking…" }],
 ];
-const toolHint = (name: unknown): string =>
-  TOOL_HINTS.find(([re]) => re.test(String(name || "")))?.[1] ??
-  "Actie uitvoeren…";
+const toolHint = (name: unknown, language: "nl" | "en"): string => {
+  const hint = TOOL_HINTS.find(([re]) => re.test(String(name || "")))?.[1];
+  return (
+    hint?.[language] ??
+    (language === "en" ? "Working on that…" : "Actie uitvoeren…")
+  );
+};
 let previousToolInterjection = "";
 let activeRequest: AbortController | null = null;
 
@@ -100,7 +123,8 @@ export async function ask(
     cardsBefore.length && isConfirmReply(text)
       ? (cardsBefore.at(-1) ?? null)
       : null;
-  const speaker = createSpeaker();
+  const responseLanguage = getConversationLanguage();
+  const speaker = createSpeaker(responseLanguage);
   let interjectionTimer: ReturnType<typeof setTimeout> | null = null;
   const clearInterjection = () => {
     if (interjectionTimer) clearTimeout(interjectionTimer);
@@ -121,6 +145,7 @@ export async function ask(
         communicationPreferences: readCommunicationPreferences(),
         ...(modelRole ? { modelRole } : {}),
         sessionId: getSessionId(),
+        responseLanguage,
         ...(answering ? { confirmationId: answering } : {}),
       },
       requestController.signal,
@@ -161,7 +186,7 @@ export async function ask(
           typeof stepValue === "number" && Number.isSafeInteger(stepValue)
             ? stepValue
             : 0;
-        chat.hint = `${step > 1 ? `Stap ${step} · ` : ""}${toolHint(data?.name)}`;
+        chat.hint = `${step > 1 ? `${responseLanguage === "en" ? "Step" : "Stap"} ${step} · ` : ""}${toolHint(data?.name, responseLanguage)}`;
         chat.activeTool = String(data?.name ?? "");
         if (inputMode === "voice")
           interjectionTimer = setTimeout(() => {
@@ -169,6 +194,8 @@ export async function ask(
               previousToolInterjection,
               String(data?.name ?? ""),
               step,
+              undefined,
+              responseLanguage,
             );
             previousToolInterjection = line;
             speaker.feed(line);
@@ -180,7 +207,23 @@ export async function ask(
         setState("thinking");
         chat.hint = "";
         chat.activeTool = "";
-        chat.toolResult = `${toolHint(data?.name).replace(/…$/, "")}: ${data?.ok === true ? (data?.verified === true ? "gecontroleerd" : data?.accepted === true ? "aangenomen · nog niet gecontroleerd" : "afgerond · niet gecontroleerd") : "niet gelukt"}${data?.standingApproval === true ? " · altijd toegestaan" : ""}`;
+        const resultText =
+          responseLanguage === "en"
+            ? data?.verified === true
+              ? "verified"
+              : data?.accepted === true
+                ? "accepted · not verified"
+                : data?.ok === true
+                  ? "done · not verified"
+                  : "failed"
+            : data?.verified === true
+              ? "gecontroleerd"
+              : data?.accepted === true
+                ? "aangenomen · nog niet gecontroleerd"
+                : data?.ok === true
+                  ? "afgerond · niet gecontroleerd"
+                  : "niet gelukt";
+        chat.toolResult = `${toolHint(data?.name, responseLanguage).replace(/…$/, "")}: ${resultText}${data?.standingApproval === true ? (responseLanguage === "en" ? " · always allowed" : " · altijd toegestaan") : ""}`;
       }
       if (
         event === "mood" &&
@@ -220,7 +263,12 @@ export async function ask(
             (candidate.length <= 280 && !/[{};<>]/.test(candidate))
               ? candidate
               : "";
-          speaker.feed(summary || "De code staat op het scherm.");
+          speaker.feed(
+            summary ||
+              (responseLanguage === "en"
+                ? "The code is on the screen."
+                : "De code staat op het scherm."),
+          );
         }
       }
       if (event === "token" && typeof data?.text === "string" && data.text) {
@@ -240,7 +288,10 @@ export async function ask(
     });
 
     if (!fullReply) {
-      fullReply = "Daar kreeg ik geen antwoord op. Probeer het nog eens?";
+      fullReply =
+        responseLanguage === "en"
+          ? "I did not get a response. Please try again."
+          : "Daar kreeg ik geen antwoord op. Probeer het nog eens?";
       speaker.feed(fullReply);
       setAssistant(fullReply);
     }
@@ -254,7 +305,9 @@ export async function ask(
         id,
         id === answering
           ? fullReply
-          : "Niet uitgevoerd: je vroeg ondertussen iets anders.",
+          : responseLanguage === "en"
+            ? "Not run: you asked for something else in the meantime."
+            : "Niet uitgevoerd: je vroeg ondertussen iets anders.",
       );
     // The voice has been speaking along; wait until it has said the last sentence.
     noteSpoken(fullReply);
@@ -266,7 +319,11 @@ export async function ask(
     speaker.cancel();
     if (requestController.signal.aborted) {
       setAssistant(
-        fullReply ? `${fullReply}\n\n(onderbroken)` : "(onderbroken)",
+        fullReply
+          ? `${fullReply}\n\n${responseLanguage === "en" ? "(interrupted)" : "(onderbroken)"}`
+          : responseLanguage === "en"
+            ? "(interrupted)"
+            : "(onderbroken)",
       );
       showStage(text, fullReply, false);
       setState("ready");
@@ -274,8 +331,12 @@ export async function ask(
     }
     const message = (error as Error).message;
     console.warn("Chat request failed:", message);
-    setAssistant(`Er ging iets mis: ${message}`);
-    showStage(text, `Er ging iets mis: ${message}`, false);
+    const failure =
+      responseLanguage === "en"
+        ? `Something went wrong: ${message}`
+        : `Er ging iets mis: ${message}`;
+    setAssistant(failure);
+    showStage(text, failure, false);
     setState("ready");
   } finally {
     if (activeRequest === requestController) activeRequest = null;

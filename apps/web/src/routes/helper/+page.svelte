@@ -15,7 +15,12 @@
   import { encodeAttachments } from "#lib/chat/attachments.ts";
   import { forgetConversation } from "#lib/api/chat.ts";
   import { showToast } from "#lib/stores/toasts.svelte.ts";
-  import { getSessionId, resetSession } from "#lib/chat/session.ts";
+  import {
+    getSessionId,
+    resetSession,
+    getConversationLanguage,
+    setConversationLanguage,
+  } from "#lib/chat/session.ts";
   import "#lib/chat/ask.ts";
   import { loadPublicConfig } from "#lib/chat/index.ts";
   import { MODE_LABELS, MOOD_LABELS } from "#lib/entity/states.ts";
@@ -56,6 +61,11 @@
   import { installAudioUnlock } from "#lib/voice/unlock.ts";
   import { initWake, setWake, cancelAwait } from "#lib/voice/wake.ts";
   import "../../components/helper/helper.css";
+
+  let responseLanguage = $state(getConversationLanguage());
+  function changeConversationLanguage(value: "nl" | "en") {
+    responseLanguage = setConversationLanguage(value);
+  }
 
   const notificationKinds: { key: keyof NotificationModes; label: string }[] = [
     { key: "info", label: "Informatie" },
@@ -242,6 +252,7 @@
       return;
     }
     resetSession();
+    responseLanguage = getConversationLanguage();
     chat.history = [];
     chat.reply = "";
     chat.you = "";
@@ -935,6 +946,18 @@
         </section>
       {:else if view === "chat"}
         <div class="hp-chat-actions">
+          <select
+            class="hp-button"
+            aria-label="Gesprekstaal"
+            value={responseLanguage}
+            onchange={(event) =>
+              changeConversationLanguage(
+                event.currentTarget.value === "en" ? "en" : "nl",
+              )}
+          >
+            <option value="nl">Nederlands</option>
+            <option value="en">English</option>
+          </select>
           <span
             >{chat.model
               ? `${MODEL_ROLE_LABELS[chat.modelRole] ?? "Model"} · ${chat.model}`

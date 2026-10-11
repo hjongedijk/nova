@@ -13,6 +13,10 @@
   import { shell } from "#lib/stores/shell.svelte.ts";
   import { pressCore } from "#lib/voice/core.ts";
   import type { ModelRoleId } from "@nova/contracts";
+  import {
+    getConversationLanguage,
+    setConversationLanguage,
+  } from "#lib/chat/session.ts";
 
   let input: HTMLInputElement;
   let picker: HTMLInputElement;
@@ -20,6 +24,11 @@
   let fileError = $state("");
   let reading = $state(false);
   let modelRole = $state<Exclude<ModelRoleId, "embedding"> | "">("");
+  let responseLanguage = $state(getConversationLanguage());
+
+  function changeLanguage(value: "nl" | "en"): void {
+    responseLanguage = setConversationLanguage(value);
+  }
 
   function selectFiles(event: Event) {
     const target = event.currentTarget as HTMLInputElement;
@@ -93,6 +102,17 @@
     onchange={selectFiles}
     accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,text/*,.txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.js,.ts,.py,.sh,.ps1,.html,.css"
   />
+  <select
+    class="role-select language-select"
+    aria-label="Gesprekstaal"
+    value={responseLanguage}
+    onchange={(event) =>
+      changeLanguage(event.currentTarget.value === "en" ? "en" : "nl")}
+    disabled={chat.busy || reading}
+  >
+    <option value="nl">Nederlands</option>
+    <option value="en">English</option>
+  </select>
   <select
     class="role-select"
     aria-label="Rol voor dit bericht"
@@ -196,6 +216,9 @@
     padding: 0 8px;
     background: var(--panel);
     color: var(--text);
+  }
+  .language-select {
+    max-width: 140px;
   }
   .attachments {
     flex-basis: 100%;

@@ -66,8 +66,10 @@ export function responseStyle(
         " This is typed chat: use readable paragraphs, lists, links, tables or code when they help, especially for documents and technical help. Do not arbitrarily stop after four sentences.";
 }
 
-export function codeResponseStyle(): string {
-  return "Code mode: be direct and technically precise. Do not apply the warm conversation persona or add jokes. Explain the approach briefly in Dutch, then put requested code in fenced blocks. For voice requests, place a short plain-language summary before the code; code itself is for the screen, not speech.";
+export function codeResponseStyle(language: "nl" | "en" = "nl"): string {
+  return language === "en"
+    ? "Code mode: be direct and technically precise. Do not apply the warm conversation persona or add jokes. Explain the approach briefly in English, then put requested code in fenced blocks. For voice requests, place a short plain-language summary before the code; code itself is for the screen, not speech."
+    : "Code mode: be direct and technically precise. Do not apply the warm conversation persona or add jokes. Explain the approach briefly in Dutch, then put requested code in fenced blocks. For voice requests, place a short plain-language summary before the code; code itself is for the screen, not speech.";
 }
 
 const REMINDER: ModelMessage = {
@@ -85,6 +87,7 @@ export interface OrchestrateInput {
   inputMode?: "text" | "voice";
   quietHours?: boolean;
   communicationPreferences?: CommunicationPreference[];
+  responseLanguage?: "nl" | "en";
   modelRole?: Exclude<ModelRoleId, "embedding">;
   /** The confirmation the user is answering, when the interface knows it. */
   confirmationId?: string;
@@ -220,6 +223,7 @@ export class OrchestratorService {
       message,
       confirmationId,
       modelRole,
+      responseLanguage,
       stream = false,
       emit = () => {},
       signal,
@@ -228,6 +232,8 @@ export class OrchestratorService {
       sessionId,
       message,
       confirmationId,
+      false,
+      responseLanguage,
     );
     if (direct) {
       if (stream) emit("token", { text: direct.reply });
@@ -255,6 +261,14 @@ export class OrchestratorService {
       role,
       input.communicationPreferences,
     );
+    if (responseLanguage)
+      messages.splice(1, 0, {
+        role: "system",
+        content:
+          responseLanguage === "en"
+            ? "For this conversation, answer in English. Keep names and quoted source text unchanged."
+            : "Schrijf in dit gesprek in het Nederlands. Laat namen en geciteerde brontekst ongewijzigd.",
+      });
     const style = responseStyle(input.inputMode, input.quietHours);
     messages.splice(1, 0, { role: "system", content: style });
     if (role === "conversation")
@@ -262,7 +276,7 @@ export class OrchestratorService {
     if (role === "code")
       messages.splice(1, 0, {
         role: "system",
-        content: codeResponseStyle(),
+        content: codeResponseStyle(responseLanguage),
       });
     if (input.attachments?.length) {
       const prepared = await attachmentMessage(input.attachments, message);
@@ -382,7 +396,8 @@ export class OrchestratorService {
         if (result.requiresConfirmation && result.action) {
           const reply = confirmationQuestion(
             result.action,
-            /\b(please|restart|reboot|start|stop)\b/i.test(message),
+            responseLanguage === "en" ||
+              /\b(please|restart|reboot|start|stop)\b/i.test(message),
           );
           emit(
             "confirmation",

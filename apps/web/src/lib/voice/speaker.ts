@@ -9,6 +9,7 @@ export { speechText } from "./speech-filter.ts";
 import { helper } from "#lib/stores/helper.svelte.ts";
 import { cueQuiet } from "./helper-cues.ts";
 import type { AssistantMood } from "#lib/stores/chat.svelte.ts";
+import type { ConversationLanguage } from "#lib/chat/session.ts";
 
 export interface Speaker {
   /** Add a piece of the answer as it streams in. */
@@ -68,7 +69,7 @@ function soundBlockedToast(): void {
  * sound at once, the next one is made ready while the current one plays, and the voice
  * starts after the first sentence instead of after the whole answer.
  */
-export function createSpeaker(): Speaker {
+export function createSpeaker(language?: ConversationLanguage): Speaker {
   if (quietWallpaper) return NO_SPEAKER;
   const tts = ttsElement();
   const abort = new AbortController();
@@ -87,9 +88,12 @@ export function createSpeaker(): Speaker {
     wake = null;
   };
   const load = (item: { text: string; audio?: Promise<string> }) =>
-    (item.audio ??= fetchSpeech(speechText(item.text), abort.signal, mood).then(
-      (blob) => URL.createObjectURL(blob),
-    ));
+    (item.audio ??= fetchSpeech(
+      speechText(item.text),
+      abort.signal,
+      mood,
+      language,
+    ).then((blob) => URL.createObjectURL(blob)));
   const prefetch = () => {
     for (let i = playIndex; i <= playIndex + 1 && i < items.length; i++) {
       const item = items[i];
