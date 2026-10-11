@@ -19,6 +19,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - run: npm test -w @nova/web
       - run: npm run build
       - run: node scripts/check-nodered-flows.mjs
       - run: npm test --prefix deploy/nodered/node-red-contrib-nova
