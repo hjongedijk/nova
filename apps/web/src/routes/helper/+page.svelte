@@ -11,6 +11,8 @@
   import HelperDevices from "#components/helper/HelperDevices.svelte";
   import HelperConfirm from "#components/helper/HelperConfirm.svelte";
   import { requestHelperSize } from "#lib/api/helper.ts";
+  import { ApiError } from "#lib/api/client.ts";
+  import { friendlyApiError } from "#lib/api/error-copy.ts";
   import { answerCard, cards } from "#lib/chat/cards.svelte.ts";
   import { encodeAttachments } from "#lib/chat/attachments.ts";
   import { forgetConversation } from "#lib/api/chat.ts";
@@ -116,6 +118,9 @@
   let previousState = "ready";
   let thinkingTimer: ReturnType<typeof setInterval> | undefined;
   let idle: ReturnType<typeof setTimeout>;
+  function safeErrorCopy(error: unknown): string {
+    return error instanceof ApiError ? error.message : friendlyApiError(error);
+  }
   const waiting = $derived(cards.some((card) => !card.done));
   const status = $derived(
     shell.awaiting ? "Ik luister" : MODE_LABELS[chat.uiState],
@@ -269,7 +274,7 @@
         files = [];
       }
     } catch (error) {
-      fileError = (error as Error).message;
+      fileError = safeErrorCopy(error);
     } finally {
       reading = false;
       activity();
@@ -284,7 +289,7 @@
       showToast({
         severity: "warning",
         title: "Gesprek wissen mislukt",
-        detail: (error as Error).message,
+        detail: safeErrorCopy(error),
       });
       return;
     }

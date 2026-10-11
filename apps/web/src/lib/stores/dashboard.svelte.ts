@@ -14,6 +14,8 @@ import {
   getOverview,
   getSystem,
 } from "#lib/api/dashboard.ts";
+import { ApiError } from "#lib/api/client.ts";
+import { friendlyApiError } from "#lib/api/error-copy.ts";
 import { showToast } from "./toasts.svelte.ts";
 import { pollWidgetData } from "./sidebar.svelte.ts";
 
@@ -247,7 +249,8 @@ export async function runAction(
     showToast({
       severity: "warning",
       title: "Dat lukte niet",
-      detail: error instanceof Error ? error.message : "Dat is niet gelukt.",
+      detail:
+        error instanceof ApiError ? error.message : friendlyApiError(error),
     });
   }
   void pollOverview();
