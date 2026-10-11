@@ -46,6 +46,24 @@ describe("NOVA's conversational identity", () => {
     expect(SYSTEM_PROMPT).toContain(
       'Avoid stock phrases: "Natuurlijk!", "Zeker!"',
     );
+    expect(SYSTEM_PROMPT).toContain(
+      "Keep a simple factual answer to one to three sentences by default",
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      "play along briefly and stay on the requested subject",
+    );
+  });
+
+  it("never claims unconfirmed actions or guesses device identifiers", () => {
+    expect(SYSTEM_PROMPT).toContain(
+      "If a tool reports failure, confirmation required, executed=false, or no verified result, never say the action happened",
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      "Never invent an entity ID; use the exact ID returned by a search",
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      "Never say you reported, checked, fixed or escalated a problem unless a tool in this turn confirms it",
+    );
   });
 
   it("uses prior-conversation search hints only when the user refers back", () => {

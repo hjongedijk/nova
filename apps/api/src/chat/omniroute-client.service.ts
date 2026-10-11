@@ -64,6 +64,8 @@ export interface CallOptions {
   /** A pure text answer is wanted: no tools are offered. */
   tools?: ModelTool[];
   maxTokens?: number;
+  /** Optional bounded temperature for controlled evaluations; normal chat keeps the default. */
+  temperature?: number;
   /** Set only by the internal role router; validated against both role settings and free policy. */
   roleModel?: { role: ModelRoleId; modelId: string };
   includeMood?: boolean;
@@ -121,6 +123,9 @@ export class OmniRouteClient {
       tools = [],
       includeMood = false,
     } = options;
+    const temperature = options.temperature ?? 0.7;
+    if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2)
+      throw new Error("Invalid model temperature");
     const started = Date.now();
     const roleModels = options.roleModel
       ? this.routing.roleModels(options.roleModel.role)
@@ -137,7 +142,7 @@ export class OmniRouteClient {
     const body: Record<string, unknown> = {
       model,
       messages: sanitize(messages),
-      temperature: 0.7,
+      temperature,
       max_tokens: options.maxTokens ?? 1800,
       reasoning_effort: "none",
       stream,
