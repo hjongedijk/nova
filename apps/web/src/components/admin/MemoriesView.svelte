@@ -23,7 +23,21 @@
   let cards = $state<Record<string, PendingConfirmation>>({});
   let formCard = $state<PendingConfirmation | null>(null);
   let text = $state("");
+  let type = $state("USER_FACT");
+  let relatedEntity = $state("");
   let saving = $state(false);
+
+  const memoryTypes = [
+    { value: "USER_FACT", label: "Feit" },
+    { value: "PERSON", label: "Persoon" },
+    { value: "PET", label: "Huisdier" },
+    { value: "PREFERENCE", label: "Voorkeur" },
+    { value: "HABIT", label: "Gewoonte" },
+    { value: "PROJECT", label: "Project" },
+  ];
+  const labels = Object.fromEntries(
+    memoryTypes.map(({ value, label }) => [value, label]),
+  );
 
   async function forget(id: string): Promise<void> {
     try {
@@ -40,7 +54,12 @@
     event.preventDefault();
     saving = true;
     try {
-      const result: ConfirmableResult = await rememberMemory(text, sessionId());
+      const result: ConfirmableResult = await rememberMemory(
+        text,
+        sessionId(),
+        type,
+        relatedEntity,
+      );
       if (result.requiresConfirmation && result.action) {
         formCard = result.action;
         say("Bevestig deze herinnering om hem op te slaan.");
@@ -48,6 +67,8 @@
       }
       if (!result.ok) throw new Error(result.error || "Niet opgeslagen");
       await reload();
+      text = "";
+      relatedEntity = "";
       say("Opgeslagen");
     } catch (error) {
       say(error instanceof Error ? error.message : "Niet opgeslagen");
@@ -59,7 +80,8 @@
 
 {#each data.memories ?? [] as item (item.id)}
   <section class="admin-row">
-    <strong>{item.type}</strong>
+    <strong>{labels[item.type ?? ""] ?? item.type ?? "Feit"}</strong>
+    {#if item.related_entity}<small>Bij: {item.related_entity}</small>{/if}
     <p>{item.text}</p>
     <Button onclick={() => forget(item.id)}>Vergeten</Button>
     {#if cards[item.id]}
@@ -83,7 +105,22 @@
   <textarea
     id="memoryText"
     aria-label="Duurzame herinnering"
-    placeholder="Een duurzame voorkeur of feit. Geen wachtwoorden of tokens."
+    placeholder="Wat wil je dat NOVA onthoudt? Geen wachtwoorden of tokens."
     bind:value={text}></textarea>
+  <label for="memoryType">Soort</label>
+  <select id="memoryType" bind:value={type}>
+    {#each memoryTypes as option (option.value)}
+      <option value={option.value}>{option.label}</option>
+    {/each}
+  </select>
+  <label for="memoryRelatedEntity"
+    >Persoon, huisdier of project (optioneel)</label
+  >
+  <input
+    id="memoryRelatedEntity"
+    bind:value={relatedEntity}
+    maxlength="200"
+    autocomplete="off"
+  />
   <Button type="submit" disabled={saving}>Onthouden</Button>
 </form>

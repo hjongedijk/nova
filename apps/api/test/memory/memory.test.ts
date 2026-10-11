@@ -130,6 +130,37 @@ describe("QdrantMemory", () => {
       expect(memoryCandidate(text)).toBeNull();
   });
 
+  it("stores relationship memories only on explicit request and keeps their links", () => {
+    expect(memoryCandidate("Mijn partner heet Alex")).toBeNull();
+    expect(memoryCandidate("Onthoud dat mijn partner Alex heet")?.type).toBe(
+      "PERSON",
+    );
+    expect(
+      memoryCandidate("Onthoud dat mijn hond Nova heet", {
+        related_entity: "Nova",
+      }),
+    ).toMatchObject({
+      type: "PET",
+      related_entity: "Nova",
+      source: "explicit_user",
+    });
+    expect(
+      memoryCandidate("Onthoud dat het project Nova eind oktober klaar is", {
+        type: "PROJECT",
+      })?.type,
+    ).toBe("PROJECT");
+    expect(
+      memoryCandidate("Onthoud elke ochtend een korte planning", {
+        type: "HABIT",
+      })?.type,
+    ).toBe("HABIT");
+    expect(
+      memoryCandidate("Onthoud dat mijn partner Alex heet", {
+        related_entity: "Bearer secret-token",
+      }),
+    ).toBeNull();
+  });
+
   it("writes, merges duplicates, searches, lists, deletes and archives", async () => {
     const stored = await memory.write(
       "Onthoud mijn volume voorkeur is 20 procent",

@@ -108,6 +108,13 @@ export class MemoryController {
     @Body() body: Record<string, unknown> | undefined,
   ): Promise<ToolResult> {
     const { sessionId, ...args } = body ?? {};
+    if (
+      typeof args.text === "string" &&
+      !/^(onthoud|remember|bewaar als voorkeur|mijn voorkeur is|my preference is)\b/i.test(
+        args.text.trim(),
+      )
+    )
+      args.text = `Onthoud ${args.text}`;
     const result = await this.tools.execute(
       "memory_remember",
       args,

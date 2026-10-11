@@ -25,12 +25,19 @@ export const getMemories = (limit = 50) =>
 export async function rememberMemory(
   text: string,
   sessionId: string,
+  type: string,
+  relatedEntity = "",
 ): Promise<ConfirmableResult> {
   const response = await fetch("/api/memories", {
     method: "POST",
     cache: "no-store",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text, sessionId }),
+    body: JSON.stringify({
+      text,
+      type,
+      ...(relatedEntity.trim() ? { related_entity: relatedEntity.trim() } : {}),
+      sessionId,
+    }),
   });
   return (await response
     .json()

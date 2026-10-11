@@ -14,7 +14,10 @@ import { CoreModule } from "../../src/core/core.module.js";
 import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import { SettingsStore } from "../../src/settings/store/settings.store.js";
 import { ToolsModule } from "../../src/tools/tools.module.js";
-import { ToolsService } from "../../src/tools/tools.service.js";
+import {
+  memoryAuditProjection,
+  ToolsService,
+} from "../../src/tools/tools.service.js";
 import {
   integer,
   schema,
@@ -486,5 +489,23 @@ describe("ToolsService", () => {
     expect((await tools.executeQuiet("fake_read")).error).toBe(
       "Not a dashboard tool",
     );
+  });
+});
+
+describe("memory audit projection", () => {
+  it("keeps relationship text and names out of the action log", () => {
+    expect(
+      memoryAuditProjection(
+        {
+          text: "Onthoud dat mijn partner Alex heet",
+          type: "PERSON",
+          related_entity: "Alex",
+        },
+        { ok: true, result: { text: "dat mijn partner Alex heet" } },
+      ),
+    ).toEqual({
+      arguments: { type: "PERSON", text: "[redacted]" },
+      result: { ok: true, stored: true },
+    });
   });
 });

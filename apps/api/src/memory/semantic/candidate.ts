@@ -2,7 +2,11 @@ import { sanitize } from "../../core/security/sanitize.js";
 
 export const MEMORY_TYPES = [
   "USER_FACT",
+  "PERSON",
+  "PET",
   "PREFERENCE",
+  "HABIT",
+  "PROJECT",
   "DEVICE_CONTEXT",
   "HOME_CONTEXT",
   "INFRASTRUCTURE",
@@ -35,6 +39,9 @@ export interface CandidateMetadata {
   related_device?: string | null;
 }
 
+const SECRET =
+  /bearer\s|PVEAPIToken|(?:api[ _-]?key|password|wachtwoord|token|secret|authorization|private.key|credential|pincode)\b|sk-[a-z0-9_-]{10,}|eyJ[a-z0-9_-]{15,}|-----BEGIN|https?:\/\/[^\s/]+:[^\s]+@/i;
+
 /**
  * Whether something may become a long-term memory, and as what. Secrets, current states and
  * one-off requests never qualify; automatic writes need an explicit "onthoud" or a durable fact.
@@ -46,12 +53,7 @@ export function memoryCandidate(
   if (typeof text !== "string" || text.length < 5 || text.length > 2000)
     return null;
   const normalized = text.replace(/\s+/g, " ").trim();
-  if (
-    /bearer\s|PVEAPIToken|(?:api[ _-]?key|password|wachtwoord|token|secret|authorization|private.key|credential|pincode)\b|sk-[a-z0-9_-]{10,}|eyJ[a-z0-9_-]{15,}|-----BEGIN|https?:\/\/[^\s/]+:[^\s]+@/i.test(
-      normalized,
-    )
-  )
-    return null;
+  if (SECRET.test(normalized)) return null;
   if (
     JSON.stringify(sanitize({ text: normalized })) !==
     JSON.stringify({ text: normalized })
@@ -83,13 +85,17 @@ export function memoryCandidate(
     /^(hallo|hi|hello|hey|dank|thanks)\b/i.test(content)
   )
     return null;
-  const type = (metadata.type ??
-    (/\b(noem|alias|call .+|heet)\b/i.test(content)
-      ? "LEARNED_ALIAS"
-      : /\b(voorkeur|prefer|graag|volume|temperatuur)\b/i.test(content)
-        ? "PREFERENCE"
-        : "USER_FACT")) as MemoryType;
+  const type = (metadata.type ?? inferMemoryType(content)) as MemoryType;
   if (!MEMORY_TYPES.includes(type)) return null;
+  const relatedEntity = safeMetadataText(metadata.related_entity);
+  const relatedArea = safeMetadataText(metadata.related_area);
+  const relatedDevice = safeMetadataText(metadata.related_device);
+  if (
+    relatedEntity === undefined ||
+    relatedArea === undefined ||
+    relatedDevice === undefined
+  )
+    return null;
   return {
     text: content,
     type,
@@ -99,13 +105,59 @@ export function memoryCandidate(
         : "conversation_fact",
     importance: Math.max(0, Math.min(1, Number(metadata.importance) || 0.6)),
     confidence: 1,
-    tags: Array.isArray(metadata.tags)
-      ? metadata.tags
-          .filter((tag): tag is string => typeof tag === "string")
-          .slice(0, 10)
-      : [],
-    related_entity: metadata.related_entity || null,
-    related_area: metadata.related_area || null,
-    related_device: metadata.related_device || null,
+    tags: safeTags(metadata.tags),
+    related_entity: relatedEntity,
+    related_area: relatedArea,
+    related_device: relatedDevice,
   };
+}
+
+function inferMemoryType(content: string): MemoryType {
+  if (/\b(project|projectnaam|projectwerk)\b/i.test(content)) return "PROJECT";
+  if (/\b(hond|kat|konijn|cavia|vogel|paard|huisdier)\b/i.test(content))
+    return "PET";
+  if (
+    /\b(partner|vrouw|man|dochter|zoon|moeder|vader|broer|zus|vriend|vriendin|collega|buurman|buurvrouw)\b/i.test(
+      content,
+    )
+  )
+    return "PERSON";
+  if (
+    /\b(elke|iedere|elke dag|elke week|routine|gewoonte|habit)\b/i.test(content)
+  )
+    return "HABIT";
+  if (/\b(voorkeur|prefer|graag|volume|temperatuur)\b/i.test(content))
+    return "PREFERENCE";
+  if (/\b(noem|alias|call .+|heet)\b/i.test(content)) return "LEARNED_ALIAS";
+  return "USER_FACT";
+}
+
+/** Undefined means the field was absent; null is a valid empty relationship. */
+function safeMetadataText(value: unknown): string | null | undefined {
+  if (value === undefined) return null;
+  if (value === null || value === "") return null;
+  if (typeof value !== "string" || value.length > 200) return undefined;
+  const normalized = value.trim();
+  if (
+    !normalized ||
+    SECRET.test(normalized) ||
+    sanitize({ value: normalized }).value !== normalized
+  )
+    return undefined;
+  return normalized;
+}
+
+function safeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((tag): tag is string => typeof tag === "string")
+    .map((tag) => tag.trim())
+    .filter(
+      (tag) =>
+        tag.length > 0 &&
+        tag.length <= 60 &&
+        !SECRET.test(tag) &&
+        sanitize({ tag }).tag === tag,
+    )
+    .slice(0, 10);
 }

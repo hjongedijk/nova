@@ -32,7 +32,7 @@ export class MemorySource implements ToolSource {
       {
         name: "memory_remember",
         description:
-          "Store an explicit durable fact or preference. Secrets and transient state are rejected.",
+          "Store only durable facts the user explicitly asked NOVA to remember (for example ‘Onthoud dat…’). Include that request prefix in text. Use PERSON/PET/HABIT/PROJECT/PREFERENCE when appropriate; never infer or save secrets/transient state.",
         parameters: schema(
           {
             text: { type: "string", minLength: 5, maxLength: 2000 },
@@ -59,10 +59,7 @@ export class MemorySource implements ToolSource {
     name: string,
     args: Record<string, unknown>,
   ): Promise<ToolPlan | ToolPlanError> {
-    if (
-      name === "memory_remember" &&
-      !memoryCandidate(args.text, { ...args, explicit: true })
-    )
+    if (name === "memory_remember" && !memoryCandidate(args.text, args))
       return { error: "Memory rejected: not durable or contains secrets" };
     const risk =
       name === "memory_forget"
@@ -93,7 +90,7 @@ export class MemorySource implements ToolSource {
     }
     if (name === "memory_remember")
       return {
-        ...(await this.memory.write(args.text, { ...args, explicit: true })),
+        ...(await this.memory.write(args.text, args)),
       };
     if (name === "memory_forget") {
       try {

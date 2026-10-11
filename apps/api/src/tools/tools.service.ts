@@ -44,6 +44,21 @@ export function approvalHash(value: unknown): string {
     .digest("hex");
 }
 
+/** Relationship details belong in the user's memory store, not a duplicate action-log copy. */
+export function memoryAuditProjection(
+  args: Record<string, unknown>,
+  result: ToolResult,
+): { arguments: Record<string, unknown>; result: Record<string, unknown> } {
+  const candidate = memoryCandidate(args.text, args);
+  return {
+    arguments: {
+      ...(candidate ? { type: candidate.type } : { rejected: true }),
+      text: "[redacted]",
+    },
+    result: { ok: result.ok, stored: result.ok },
+  };
+}
+
 /** Even fields the coercer discards must never silently match a standing approval. */
 function hasUnknownArguments(parameters: unknown, value: unknown): boolean {
   if (
@@ -283,15 +298,14 @@ export class ToolsService implements OnModuleInit {
       const clean = sanitize(
         standingApproval ? { ...result, standingApproval: true } : result,
       );
+      const privateMemory =
+        name === "memory_remember" ? memoryAuditProjection(args, clean) : null;
       this.audit.record({
         sessionId,
         tool: name,
         arguments: codeTool(name)
           ? auditArgs(name, args)
-          : name === "memory_remember" &&
-              !memoryCandidate(args?.text, { explicit: true })
-            ? { text: "[rejected memory candidate]" }
-            : args,
+          : (privateMemory?.arguments ?? args),
         risk,
         confirmation,
         result:
@@ -304,7 +318,7 @@ export class ToolsService implements OnModuleInit {
                   ? { status: clean.status }
                   : {}),
               }
-            : clean,
+            : (privateMemory?.result ?? clean),
         verification: clean.verified ?? null,
         durationMs: Date.now() - started,
       });
