@@ -10,7 +10,7 @@
 
 ```sh
 cp .env.example .env                              # fill in the keys you have
-docker compose -f docker-compose.dev.yml up -d    # OmniRoute, MQTT, Qdrant
+docker compose -f docker-compose.dev.yml up -d    # OmniRoute, MQTT, Qdrant, Node-RED
 npm install
 set -a; . ./.env; set +a                          # NOVA does not read .env itself: export it
 npm run dev                                       # API on :3000, web on :5173 (proxies /api)
@@ -18,9 +18,11 @@ npm run dev                                       # API on :3000, web on :5173 (
 
 NOVA reads only real environment variables; it does not load a `.env` file. In production Docker Compose passes `.env` in. In development, export the file into your shell as above (or set the variables you need inline) before `npm run dev`.
 
-The development compose file (`docker-compose.dev.yml`) starts only what NOVA talks to: OmniRoute (port 20128, data in `dev-data/omniroute`), Mosquitto without authentication (1883), Qdrant (6333, data in `dev-data/qdrant`) and, under the profile `node-red`, Node-RED (1880): `docker compose -f docker-compose.dev.yml --profile node-red up -d`. Home Assistant is not included; point `HOME_ASSISTANT_URL` at yours.
+The development compose file (`docker-compose.dev.yml`) starts OmniRoute (port 20128, data in `dev-data/omniroute`), Mosquitto without authentication (1883), Qdrant (6333, data in `dev-data/qdrant`) and Node-RED (1880, editor bound to localhost). Prepare its persistent folder for the image's uid 1000 before first start: `mkdir -p dev-data/node-red && sudo chown -R 1000:1000 dev-data/node-red`. Home Assistant is not included; point `HOME_ASSISTANT_URL` at yours.
 
-NOVA itself runs on the host with `npm run dev`. Outside Docker the API still defaults to the compose service names (`http://omniroute:20128/v1`, `mqtt://mqtt:1883`, `http://qdrant:6333`), which do not resolve on the host, so set `OMNIROUTE_URL`, `MQTT_URL`, `QDRANT_URL` and `OMNIROUTE_DATABASE` to the published ports (for example `http://localhost:20128/v1`, `mqtt://localhost:1883`, `http://localhost:6333` and `./dev-data/omniroute/storage.sqlite`). Without them NOVA still starts; the corresponding features report themselves unavailable.
+NOVA itself runs on the host with `npm run dev`. That command waits for Node-RED at `NODE_RED_URL` or `http://127.0.0.1:1880` before starting the API and web app. Outside Docker the API still defaults to the compose service names (`http://omniroute:20128/v1`, `mqtt://mqtt:1883`, `http://qdrant:6333`), which do not resolve on the host, so set `OMNIROUTE_URL`, `MQTT_URL`, `QDRANT_URL` and `OMNIROUTE_DATABASE` to the published ports (for example `http://localhost:20128/v1`, `mqtt://localhost:1883`, `http://localhost:6333` and `./dev-data/omniroute/storage.sqlite`). Without them the corresponding features report themselves unavailable.
+
+For Node-RED callbacks, set `NODE_RED_EVENT_TOKEN` to the same generated value in the shell used for Compose and NOVA. See [Node-RED, MQTT and HTTP](node-red-mqtt.md).
 
 ## Ports and runtime data
 

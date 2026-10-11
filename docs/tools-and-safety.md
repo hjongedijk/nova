@@ -6,24 +6,26 @@ NOVA does things through **tools**: small, typed functions the language model ma
 
 A tool source is a class marked `@ToolSourceProvider()` that offers tool definitions; the registry discovers them by itself. Around a hundred tools exist in total. The list is also available at `GET /api/tools`, including tools that are currently off.
 
-| Source           | Tools                                                                                                                                                                                                          | Needs                                |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `nova`, `system` | `system_integrations`, `system_time`                                                                                                                                                                           | nothing                              |
-| `world`          | `weather_forecast`, `web_search`, `web_read`, `wikipedia`, `news_headlines`, `currency_convert`, `air_quality`, `market_rates`, `iss_position`, `moon_phase`, `calculate`                                      | internet                             |
-| `planning`       | `timer_set`, `timer_list`, `timer_cancel`, `list_add`, `list_show`, `list_remove`, `list_clear`, `daily_briefing`                                                                                              | nothing                              |
-| `checks`         | `alerts_list`, `network_check`                                                                                                                                                                                 | nothing (see `JARVIS_CHECK_TARGETS`) |
-| `memory`         | `memory_search`, `memory_remember`, `memory_forget`                                                                                                                                                            | memory backend for long-term use     |
-| `proxmox`        | `proxmox_status`, `proxmox_nodes`, `proxmox_guests`, `proxmox_storage`, `proxmox_tasks`, `proxmox_guest_status`, `proxmox_start_guest`, `proxmox_stop_guest`, `proxmox_shutdown_guest`, `proxmox_reboot_guest` | `PROXMOX_*`                          |
-| `home-assistant` | lights, switches, climate, scenes, scripts, media players and Sonos: `home_status`, `ha_*`, `media_*`, `sonos_*`, `music_play`                                                                                 | `HOME_ASSISTANT_*`                   |
-| `windows`        | `windows_status`, `windows_open_app`, `windows_open_url`, `windows_play_youtube`, `windows_search`, `windows_displays`, `windows_wallpaper`, `windows_close_app`, `windows_lock`                               | Windows agent                        |
-| `browser`        | `browser_status`, `browser_search`, `browser_open`, `browser_read`, `browser_click`, `browser_click_confirmed`, `browser_type`, `browser_press`, `browser_scroll`, `browser_back`, `browser_tab`               | Windows agent                        |
-| `termix`         | `termix_status`, `termix_hosts`, `termix_run_command`                                                                                                                                                          | `TERMIX_*`                           |
-| `pangolin`       | `pangolin_orgs`, `pangolin_sites`, `pangolin_resources`                                                                                                                                                        | `PANGOLIN_*`                         |
-| `omniroute`      | `omniroute_status`, `omniroute_agent_skills`                                                                                                                                                                   | `OMNIROUTE_ADMIN_PASSWORD`           |
-| `mcp`            | `mcp_<server>_<tool>` from your MCP servers (`deploy/mcp-servers.json`, or `mcp-servers.json` in the data folder)                                                                                              | the servers you configure            |
-| `skills`         | `skill_<id>` for each webhook skill you made in Settings                                                                                                                                                       | Settings screen                      |
+| Source           | Tools                                                                                                                                                                                                          | Needs                              |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `nova`, `system` | `system_integrations`, `system_time`                                                                                                                                                                           | nothing                            |
+| `world`          | `weather_forecast`, `web_search`, `web_read`, `wikipedia`, `news_headlines`, `currency_convert`, `air_quality`, `market_rates`, `iss_position`, `moon_phase`, `calculate`                                      | internet                           |
+| `planning`       | `timer_set`, `timer_list`, `timer_cancel`, `list_add`, `list_show`, `list_remove`, `list_clear`, `daily_briefing`                                                                                              | nothing                            |
+| `checks`         | `alerts_list`, `network_check`                                                                                                                                                                                 | nothing (see `NOVA_CHECK_TARGETS`) |
+| `memory`         | `memory_search`, `memory_remember`, `memory_forget`                                                                                                                                                            | memory backend for long-term use   |
+| `proxmox`        | `proxmox_status`, `proxmox_nodes`, `proxmox_guests`, `proxmox_storage`, `proxmox_tasks`, `proxmox_guest_status`, `proxmox_start_guest`, `proxmox_stop_guest`, `proxmox_shutdown_guest`, `proxmox_reboot_guest` | `PROXMOX_*`                        |
+| `home-assistant` | lights, switches, climate, scenes, scripts, media players and Sonos: `home_status`, `ha_*`, `media_*`, `sonos_*`, `music_play`                                                                                 | `HOME_ASSISTANT_*`                 |
+| `windows`        | `windows_status`, `windows_open_app`, `windows_open_url`, `windows_play_youtube`, `windows_search`, `windows_displays`, `windows_wallpaper`, `windows_close_app`, `windows_lock`                               | Windows agent                      |
+| `browser`        | `browser_status`, `browser_search`, `browser_open`, `browser_read`, `browser_click`, `browser_click_confirmed`, `browser_type`, `browser_press`, `browser_scroll`, `browser_back`, `browser_tab`               | Windows agent                      |
+| `termix`         | `termix_status`, `termix_hosts`, `termix_run_command`                                                                                                                                                          | `TERMIX_*`                         |
+| `pangolin`       | `pangolin_orgs`, `pangolin_sites`, `pangolin_resources`                                                                                                                                                        | `PANGOLIN_*`                       |
+| `omniroute`      | `omniroute_status`, `omniroute_agent_skills`                                                                                                                                                                   | `OMNIROUTE_ADMIN_PASSWORD`         |
+| `mcp`            | `mcp_<server>_<tool>` from your MCP servers (`deploy/mcp-servers.json`, or `mcp-servers.json` in the data folder)                                                                                              | the servers you configure          |
+| `skills`         | `skill_<id>` for each webhook skill you made in Settings                                                                                                                                                       | Settings screen                    |
 
-A tool whose integration is not configured stays in the list but is disabled; calling it answers "Unknown tool or integration unavailable". You can also switch tools or whole ability groups off in **Settings, Wat NOVA kan**, and `JARVIS_EXTENSIONS=false` switches off every source except NOVA's own.
+A tool whose integration is not configured stays in the list but is disabled; calling it answers "Unknown tool or integration unavailable". You can also switch tools or whole ability groups off in **Settings, Wat NOVA kan**, and `NOVA_EXTENSIONS=false` switches off every source except NOVA's own.
+
+Before adding or enabling a tool, complete the [new-tool checklist](new-tool-checklist.md). It records the risk decision, confirmation and audit behavior, secret handling, network boundary and required regression evidence.
 
 The default MCP list ships three servers installed in the image: `sequential-thinking` and `context7` (both `READ_ONLY`) and `filesystem` restricted to `/data/workspace` (`CONFIRM`). Servers whose `${VAR}` environment references are unset stay offline.
 
@@ -31,24 +33,24 @@ The default MCP list ships three servers installed in the image: `sequential-thi
 
 Each tool declares a risk. A source can refine it per call (for example Home Assistant decides from the exact device and service).
 
-| Risk        | Meaning                                                                                                                                      | Behaviour                                                                              |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `READ_ONLY` | Reads or calculates, changes nothing.                                                                                                        | Runs immediately.                                                                      |
-| `SAFE`      | Changes something minor and easy to undo (timer, light, volume, opening a program, a browser click).                                         | Runs immediately; with `JARVIS_AUTO_EXECUTE_SAFE_ACTIONS=false` it needs confirmation. |
-| `CONFIRM`   | Hard to undo or with real effects (VM power, closing programs, locking the screen, scenes, running a command over SSH, forgetting a memory). | Always needs confirmation.                                                             |
-| `DANGEROUS` | Security or safety relevant.                                                                                                                 | Always needs confirmation.                                                             |
+| Risk        | Meaning                                                                                                                                      | Behaviour                                                                            |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `READ_ONLY` | Reads or calculates, changes nothing.                                                                                                        | Runs immediately.                                                                    |
+| `SAFE`      | Changes something minor and easy to undo (timer, light, volume, opening a program, a browser click).                                         | Runs immediately; with `NOVA_AUTO_EXECUTE_SAFE_ACTIONS=false` it needs confirmation. |
+| `CONFIRM`   | Hard to undo or with real effects (VM power, closing programs, locking the screen, scenes, running a command over SSH, forgetting a memory). | Always needs confirmation.                                                           |
+| `DANGEROUS` | Security or safety relevant.                                                                                                                 | Always needs confirmation.                                                           |
 
 Examples of how risk is decided:
 
 - **Proxmox**: starting, stopping, shutting down and rebooting a guest are `CONFIRM`; everything else is read-only.
 - **Home Assistant** (`home/risk.ts`): unlocking a lock is `DANGEROUS`; locks, covers, scenes, scripts, toggles, announcements and Sonos grouping are `CONFIRM`; a switch whose name looks like a server, router, NAS, pump, heater, boiler or outlet is `DANGEROUS`; large temperature changes (more than 2 degrees, or outside 16 to 26) and large volume jumps are `CONFIRM`; everything else is `SAFE`.
 - **Windows**: opening apps, URLs, YouTube, search and the wallpaper are `SAFE`; closing programs and locking are `CONFIRM`. In the browser, normal clicks and typing are `SAFE`; a click on a button that buys, pays, orders, donates, subscribes or deletes must go through `browser_click_confirmed` (`CONFIRM`).
-- **MCP servers**: a tool that declares `readOnlyHint` is `READ_ONLY`; otherwise the server's `risk` in the config applies, default `CONFIRM`.
+- **MCP servers**: a tool that declares `readOnlyHint` is `READ_ONLY`; otherwise the server's explicit `risk` in the config applies. A server with a missing or invalid risk is not started. Set unreviewed servers to `CONFIRM` explicitly.
 - **Your own webhook skills** declare `READ_ONLY`, `SAFE` or `CONFIRM`.
 
 ### The master switch
 
-`JARVIS_ENABLE_ACTIONS` defaults to `false`. While it is `false`, every tool whose risk is not `READ_ONLY` is refused ("Device actions are disabled until integration onboarding is complete"), except the `memory_*` tools. NOVA is therefore read-only until you set it to `true`.
+`NOVA_ENABLE_ACTIONS` defaults to `false`. While it is `false`, every tool whose risk is not `READ_ONLY` is refused ("Device actions are disabled until integration onboarding is complete"), except the `memory_*` tools. NOVA is therefore read-only until you set it to `true`.
 
 ## Confirmation flow
 
@@ -69,10 +71,10 @@ In order, for each tool call:
 4. The source may **prepare** the call: decide the real risk, resolve names, refuse ambiguous requests.
 5. The master switch and the confirmation rules above.
 6. For anything that is not read-only, a log line `execution_started` is written **before** the action, so the call is not made if the log cannot be written.
-7. **Execution** with a timeout of at most 60 seconds (`JARVIS_TOOL_TIMEOUT_MS`).
+7. **Execution** with a timeout of at most 60 seconds (`NOVA_TOOL_TIMEOUT_MS`).
 8. The result is sanitised, logged, remembered in the session context and a completion event is published on MQTT (`jarvis/events/tool`).
 
-Tools may report `verified`: `true` when NOVA checked the effect (for example by reading the state back), `null` when it was done but could not be checked. A model may run at most eight tool calls from one reply; extra calls are dropped. The number of model rounds per message is limited by `JARVIS_MAX_TOOL_ITERATIONS`.
+Tools may report `verified`: `true` when NOVA checked the effect (for example by reading the state back), `null` when it was done but could not be checked. A model may run at most eight tool calls from one reply; extra calls are dropped. The number of model rounds per message is limited by `NOVA_MAX_TOOL_ITERATIONS`.
 
 The dashboard polls a few read-only tools (`proxmox_guests`, `proxmox_storage`, `timer_list`, `list_show`, `alerts_list`) quietly: no log entries and no conversation context.
 

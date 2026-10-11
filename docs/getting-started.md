@@ -13,15 +13,19 @@ NOVA has no login of its own. Install it on a trusted network or behind an authe
 
 ## 1. Get the compose file and the environment file
 
-Make a folder for the installation and download the two files into it. The compose file is attached to every [GitHub release](https://github.com/hjongedijk/nova/releases) and lives in the repository as `deploy/docker-compose.yml`; `.env.example` is in the repository root.
+Make a folder for the installation and download the compose file, environment template, and Node-RED seed files into it. The compose file is attached to every [GitHub release](https://github.com/hjongedijk/nova/releases) and lives in the repository as `deploy/docker-compose.yml`; `.env.example` is in the repository root.
 
 ```sh
 mkdir nova && cd nova
 curl -fsSLO https://raw.githubusercontent.com/hjongedijk/nova/main/deploy/docker-compose.yml
 curl -fsSL  https://raw.githubusercontent.com/hjongedijk/nova/main/.env.example -o .env
+mkdir -p nodered
+for file in flows.json settings.js package.json seed-entrypoint.sh; do
+  curl -fsSL "https://raw.githubusercontent.com/hjongedijk/nova/main/deploy/nodered/$file" -o "nodered/$file"
+done
 ```
 
-Everything NOVA and its services write ends up in folders next to the compose file (`nova-data`, `omniroute-data`, `qdrant-data`, `mosquitto-data`, `home-assistant-data`, `nodered-data`).
+Everything NOVA and its services write ends up in folders next to the compose file (`nova-data`, `nova-backups`, `omniroute-data`, `qdrant-data`, `mosquitto-data`, `home-assistant-data`, `nodered-data`). Node-RED copies the repository's initial `flows.json`, `settings.js`, and node manifest only when those files are absent. Updates preserve the persistent copies and all operator-created flows. See [scheduled data backups](data-backups.md) for schedule, retention, permissions, and coverage limits.
 
 ## 2. Fill in `.env`
 
@@ -36,17 +40,17 @@ OMNIROUTE_API_KEY=              # filled in at step 5
 OMNIROUTE_MODEL=auto
 ```
 
-Integrations (Proxmox, Home Assistant, Windows agent, Termix, Pangolin) are filled in when you have them. Every variable is explained in [Configuration](configuration.md). `JARVIS_ENABLE_ACTIONS` stays `false` until you are ready for NOVA to change things.
+Integrations (Proxmox, Home Assistant, Windows agent, Termix, Pangolin) are filled in when you have them. Every variable is explained in [Configuration](configuration.md). `NOVA_ENABLE_ACTIONS` stays `false` until you are ready for NOVA to change things.
 
 ## 3. Prepare the data folders
 
 NOVA runs as the unprivileged user `node` (uid 1000) in the container; give it its folder:
 
 ```sh
-mkdir -p nova-data && sudo chown -R 1000:1000 nova-data
+mkdir -p nova-data nova-backups nodered-data && sudo chown -R 1000:1000 nova-data nova-backups nodered-data
 ```
 
-The other containers run as root and create their own folders.
+NOVA and Node-RED run as uid 1000 and need write access to their data folders. For an existing installation, adjust the ownership of `nodered-data/` once before upgrading to this compose file. Other service folders are created by Compose. Node-RED's editor is not published on a host port in production; NOVA reaches its API on the private Compose network. Do not publish port 1880 to an untrusted network.
 
 Mosquitto is started without a configuration file by the compose file. MQTT is optional for NOVA (it publishes status and tool events there; chat, tools and the dashboard work without it). If you want it, create `mosquitto-data/config/mosquitto.conf` for your network before starting, for example with `listener 1883` and `allow_anonymous true` for a closed internal network.
 
@@ -82,7 +86,7 @@ The details, including the structure of the policy file and everything NOVA chec
 - **Windows PC**: install the [Windows agent](windows-agent.md) and set `WINDOWS_AGENT_URL` and `WINDOWS_AGENT_TOKEN`.
 - **Long-term memory**: see [Configuration](configuration.md#memory).
 
-After any `.env` change run `docker compose up -d`. When you are ready for NOVA to act, set `JARVIS_ENABLE_ACTIONS=true`; risky actions still need your confirmation.
+After any `.env` change run `docker compose up -d`. When you are ready for NOVA to act, set `NOVA_ENABLE_ACTIONS=true`; risky actions still need your confirmation.
 
 ## 7. HTTPS, the microphone and installing as an app
 
@@ -110,7 +114,7 @@ On a phone, open NOVA over HTTPS and use the browser's "install app" / "add to h
 | Symptom                                          | Look at                                                                                                        |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | "Geen geverifieerde gratis AI-route beschikbaar" | `curl http://<nova-host>:8080/api/providers`: the `status` and `reason` fields. See [OmniRoute](omniroute.md). |
-| Tools answer "Device actions are disabled"       | `JARVIS_ENABLE_ACTIONS` is `false`.                                                                            |
+| Tools answer "Device actions are disabled"       | `NOVA_ENABLE_ACTIONS` is `false`.                                                                              |
 | A tool says the integration is unavailable       | Its variables are not set; check **Settings, Wat NOVA kan** and `GET /api/integrations`.                       |
 | The microphone or "Hey NOVA" does not work       | The page is not on HTTPS (or `localhost`), or the browser has no speech recognition.                           |
 | Writes to `/data` fail                           | `sudo chown -R 1000:1000 nova-data`.                                                                           |

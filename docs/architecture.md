@@ -2,7 +2,7 @@
 
 ## Overview
 
-NOVA ships as **one Docker image**: a NestJS API that also serves the built SvelteKit web app as static files, so there is no separate web server. Speech (Microsoft neural voices through `msedge-tts`) and NOVA's own tools (Proxmox, timers, lists, checks) are modules of the API and need no container of their own. The services NOVA talks to keep their own images: OmniRoute, Mosquitto, Qdrant, Home Assistant and, optionally, Node-RED for your own flows.
+NOVA ships as **one Docker image**: a NestJS API that also serves the built SvelteKit web app as static files, so there is no separate web server. Speech (Microsoft neural voices through `msedge-tts`) and NOVA's own tools (Proxmox, timers, lists, checks) are modules of the API and need no container of their own. The services NOVA talks to keep their own images: OmniRoute, Mosquitto, Qdrant, Node-RED and Home Assistant. Node-RED is required by the Compose stack; flow management is being added separately.
 
 ```mermaid
 flowchart LR
@@ -39,10 +39,18 @@ flowchart LR
   Tools -->|bearer token| Agent
   Agent -->|opens NOVA page| Helper
   API --> Qdrant
-  API --> MQTT
+API --> MQTT
 ```
 
 All runtime state lives outside the image in the data folder (`nova-data/` in production, `dev-data/` in development): settings, memory, the action log, the routing policy, MCP configuration and certificates. Nothing in the repository changes at runtime and no secret is committed. See [Configuration](configuration.md#the-data-folder).
+
+The current event topics and MQTT/HTTP boundaries are documented in [Node-RED, MQTT and HTTP](node-red-mqtt.md). MQTT remains publish-only from NOVA; Node-RED may post allow-listed notifications to NOVA over authenticated HTTP.
+
+## Node-RED responsibilities
+
+Node-RED owns orchestration across time and events: schedules, retries, event-to-service wiring and operator-authored flows. It may call service APIs directly for routine integrations, but it must not hold a second copy of NOVA's authorization rules or invoke privileged NOVA actions through an unguarded path.
+
+NOVA's NestJS modules remain the authority for identity, service credentials, tool schemas, risk classification, confirmation, allowlists, validation, audit and post-action verification. A flow that asks NOVA to perform an action must use a narrow authenticated API/tool boundary; NOVA applies the same policy as a chat request. Flow inputs and returned data are untrusted and bounded. The current Node-RED event endpoint accepts allow-listed alerts and runtime errors only; it does not run tools or model actions. MQTT is the existing publish-only status/event bus, not a flow-trigger or command channel. See [Node-RED, MQTT and HTTP](node-red-mqtt.md) for the implemented boundary.
 
 ## Repository layout
 
@@ -66,7 +74,7 @@ Rules that keep it clean:
 
 ## API modules
 
-One folder per domain under `apps/api/src/`, wired together in `app.module.ts`. All routes live under `/api` except `/windows-agent/jarvis-agent.ps1` and `/nova-ca.crt`.
+One folder per domain under `apps/api/src/`, wired together in `app.module.ts`. All routes live under `/api` except `/windows-agent/nova-agent.ps1`, its legacy `/windows-agent/jarvis-agent.ps1` download name, and `/nova-ca.crt`.
 
 | Module                          | Does                                                                                                                                                                                                                                            |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -100,7 +108,7 @@ One folder per domain under `apps/api/src/`, wired together in `app.module.ts`. 
 1. The web app posts to `/api/chat-stream` and reads server-sent events (`connected`, `tools`, `token`, `tool_start`, `tool_result`, `confirmation`, `done`, `error`).
 2. The orchestrator first checks whether the message answers a pending confirmation ("ja", a confirm button).
 3. Otherwise it verifies the free route (it throws and nothing is sent if that fails), builds the context (persona, matching instruction skills, session memory, relevant long-term memories) and calls OmniRoute with the enabled tools.
-4. Tool calls the model makes (at most eight per reply, at most `JARVIS_MAX_TOOL_ITERATIONS` rounds) run through `ToolsService`. A call that needs confirmation ends the turn with a question and a confirmation card.
+4. Tool calls the model makes (at most eight per reply, at most `NOVA_MAX_TOOL_ITERATIONS` rounds) run through `ToolsService`. A call that needs confirmation ends the turn with a question and a confirmation card.
 5. The answer streams to the browser, which speaks it with `/api/tts`. Every event is sanitised on the way out.
 
 ## Web app
