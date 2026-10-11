@@ -50,6 +50,12 @@ describe("NOVA's conversational identity", () => {
       "Vertel me iets over de keuken",
     );
     expect(SYSTEM_PROMPT).toContain("never force a nostalgic callback");
+    expect(SYSTEM_PROMPT).toContain(
+      "search memory and answer only from returned records",
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      "Deleting a record always needs the normal explicit confirmation",
+    );
   });
 });
 
