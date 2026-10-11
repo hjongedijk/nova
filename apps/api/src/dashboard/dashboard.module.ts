@@ -17,6 +17,7 @@ import { HostMetricsService } from "./host-metrics.service.js";
 import { IntegrationsHealth } from "./integrations-health.service.js";
 import { OverviewService } from "./overview.service.js";
 import { SystemSource } from "./system.source.js";
+import { NodeRedFlowSource } from "./node-red-flow.source.js";
 import { SpeechPresenceService } from "./speech-presence.service.js";
 import { WeatherDepartureAlertService } from "./weather-departure-alert.service.js";
 
@@ -45,6 +46,7 @@ import { WeatherDepartureAlertService } from "./weather-departure-alert.service.
     SpeechPresenceService,
     WeatherDepartureAlertService,
     SystemSource,
+    NodeRedFlowSource,
   ],
   exports: [HostMetricsService, OverviewService, IntegrationsHealth],
 })

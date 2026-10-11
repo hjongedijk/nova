@@ -98,6 +98,25 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     return stored;
   }
 
+  /** Accepts only the already-validated Node-RED alert projection. */
+  recordNodeRedAlert(input: {
+    title: string;
+    detail?: string;
+    severity?: "info" | "warning" | "critical";
+    at?: string;
+  }): FeedEvent | null {
+    return this.record({
+      topic: "jarvis/alerts",
+      payload: {
+        title: input.title,
+        detail: input.detail ?? "",
+        severity: input.severity ?? "info",
+        key: "node-red",
+        at: input.at,
+      },
+    });
+  }
+
   recent(since = 0): AlertsResponse {
     return {
       latest: this.sequence,

@@ -3,13 +3,17 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InfrastructureEvent } from "@nova/contracts";
+import type { AuditEntry } from "../../src/core/audit/audit.service.js";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import type { MqttService } from "../../src/core/mqtt/mqtt.service.js";
 import { JarvisStateStore } from "../../src/planning/jarvis-state.store.js";
 import { PlanningService } from "../../src/planning/planning.service.js";
 import { PlanningSource } from "../../src/planning/planning.source.js";
 import type { ProxmoxService } from "../../src/proxmox/proxmox.service.js";
-import type { CalDavService } from "../../src/planning/caldav.service.js";
+import type {
+  CalDavService,
+  CalendarEvent,
+} from "../../src/planning/caldav.service.js";
 
 let dir: string;
 let store: JarvisStateStore;
@@ -17,6 +21,8 @@ let planning: PlanningService;
 let source: PlanningSource;
 let events: InfrastructureEvent[];
 let proxmox: { configured: boolean; resources: () => Promise<unknown[]> };
+let calendarEvents: CalendarEvent[];
+let auditEntries: AuditEntry[];
 const run = (name: string, args: Record<string, unknown> = {}) =>
   source.execute(name, args);
 
@@ -34,7 +40,13 @@ function boot() {
     store,
     proxmox as unknown as ProxmoxService,
     config,
-    { configured: false, upcoming: async () => [] } as unknown as CalDavService,
+    {
+      configured: true,
+      upcoming: async () => calendarEvents,
+    } as unknown as CalDavService,
+    {
+      read: () => auditEntries,
+    } as unknown as import("../../src/core/audit/audit.service.js").AuditService,
   );
   events = [];
   planning.onEvent((e) => events.push(e));
@@ -43,6 +55,8 @@ function boot() {
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-planning-"));
   proxmox = { configured: false, resources: async () => [] };
+  calendarEvents = [];
+  auditEntries = [];
   boot();
 });
 afterEach(() => {
@@ -223,6 +237,16 @@ describe("timers firing", () => {
     expect(events[0]?.payload.late).toBe(true);
   });
 
+  it("resumes a persisted timer after the service starts again", async () => {
+    vi.useFakeTimers();
+    await run("timer_set", { seconds: 5, label: "restart tea" });
+    boot();
+    planning.onModuleInit();
+    await vi.advanceTimersByTimeAsync(6000);
+    planning.onModuleDestroy();
+    expect(events.map((event) => event.payload.label)).toEqual(["restart tea"]);
+  });
+
   it("reads a state file from the prototype unchanged", () => {
     fs.writeFileSync(
       path.join(dir, "jarvis-state.json"),
@@ -294,6 +318,72 @@ describe("daily_briefing", () => {
       ((await run("daily_briefing")).result as { servers: unknown }).servers,
     ).toEqual({
       error: "Proxmox is niet bereikbaar",
+    });
+  });
+
+  it("includes successful action names without private arguments or results and marks tomorrow's calendar", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-03-31T22:30:00.000Z"));
+    calendarEvents = [
+      {
+        summary: "Tomorrow",
+        start: "2024-04-02T09:00:00",
+        end: null,
+        timeZone: "Europe/Amsterdam",
+        allDay: false,
+      },
+    ];
+    auditEntries = [
+      {
+        id: "one",
+        timestamp: "2024-04-01T18:15:00.000Z",
+        tool: "timer_set",
+        risk: "SAFE",
+        result: { ok: true, result: { label: "private timer detail" } },
+        arguments: { label: "private timer detail" },
+      },
+      {
+        id: "read",
+        timestamp: "2024-04-01T18:14:00.000Z",
+        tool: "weather_forecast",
+        risk: "READ_ONLY",
+        result: { ok: true },
+      },
+      {
+        id: "started",
+        timestamp: "2024-04-01T18:13:00.000Z",
+        tool: "home_control",
+        risk: "SAFE",
+        phase: "execution_started",
+      },
+    ];
+    boot();
+    const result = (await run("daily_briefing")).result as {
+      activity: {
+        tracked: boolean;
+        complete: boolean;
+        entries: { tool: string; time: string }[];
+      };
+      tomorrow: {
+        calendar: {
+          configured: boolean;
+          untrusted: boolean;
+          events: CalendarEvent[];
+        };
+      };
+    };
+    expect(result.activity).toMatchObject({
+      tracked: true,
+      complete: true,
+      entries: [{ tool: "timer_set" }],
+    });
+    expect(JSON.stringify(result.activity)).not.toContain(
+      "private timer detail",
+    );
+    expect(result.tomorrow.calendar).toMatchObject({
+      configured: true,
+      untrusted: true,
+      events: [{ summary: "Tomorrow" }],
     });
   });
 });
