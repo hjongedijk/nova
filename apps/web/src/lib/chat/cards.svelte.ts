@@ -37,9 +37,11 @@ export function confirmationLabel(action: PendingConfirmation): string {
   const args = action.args as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- free-form tool arguments
   const expiry = "Bevestiging verloopt na 60 seconden.";
   if (action.tool === "node_red_flow_create")
-    return args.kind === "morning_briefing"
-      ? `Node-RED: stel de ochtendbriefing dagelijks in op ${args.time} in ${args.label || args.tabId}. Een actief NOVA-scherm spreekt de korte samenvatting uit. ${expiry}`
-      : `Node-RED: voeg een foutenmelding toe aan ${args.label || args.tabId}. Dit meldt alleen foutmeldingen die deze flow opvangt. ${expiry}`;
+    return args.kind === "daily_reminder"
+      ? `Node-RED: maak dagelijks om ${args.time} de melding “${String(args.message || "").slice(0, 240)}” in ${args.label || args.tabId}. De flow bewaart deze tekst en stuurt hem via NOVA. ${expiry}`
+      : args.kind === "morning_briefing"
+        ? `Node-RED: stel de ochtendbriefing dagelijks in op ${args.time} in ${args.label || args.tabId}. Een actief NOVA-scherm spreekt de korte samenvatting uit. ${expiry}`
+        : `Node-RED: voeg een foutenmelding toe aan ${args.label || args.tabId}. Dit meldt alleen foutmeldingen die deze flow opvangt. ${expiry}`;
   if (action.tool === "node_red_flow_state")
     return `Node-RED: ${args.enabled ? "schakel in" : "schakel uit"} tab ${args.tabId}. ${expiry}`;
   if (action.tool === "code_file_write")

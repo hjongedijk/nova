@@ -335,7 +335,10 @@ describe("Node-RED flow tool", () => {
     const result = await tool.execute("node_red_flow_create", plan.args, {
       signal: AbortSignal.timeout(5000),
     });
-    expect(result).toMatchObject({ ok: true, verified: true });
+    expect(result, JSON.stringify(result)).toMatchObject({
+      ok: true,
+      verified: true,
+    });
     expect((result as { result: string }).result).toContain("offline-status");
   });
 
@@ -440,5 +443,79 @@ describe("Node-RED flow tool", () => {
     expect((eveningResult as { result: string }).result).toContain(
       "evening overview",
     );
+  });
+
+  it("creates a user-defined daily reminder from fixed safe Node-RED nodes", async () => {
+    const tabId = "tab-routines";
+    let flows: unknown[] = [
+      { id: tabId, type: "tab", label: "Routines", disabled: false },
+    ];
+    const server = createServer((request, response) => {
+      if (request.method === "GET") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ rev: "rev-1", flows }));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        const added = body.flows.filter(
+          (flow: { id: string }) =>
+            !flows.some((before) => (before as { id: string }).id === flow.id),
+        );
+        expect(added.map((node: { type: string }) => node.type)).toEqual([
+          "inject",
+          "change",
+          "nova-notify",
+        ]);
+        expect(added[0].crontab).toBe("45 7 * * *");
+        expect(added[1].rules[0].to).toContain("Zet de afvalcontainer buiten.");
+        expect(
+          added.some((node: { type: string }) => node.type === "function"),
+        ).toBe(false);
+        flows = body.flows;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ rev: "rev-2" }));
+      });
+    });
+    const port = await listen(server);
+    const tool = new NodeRedFlowSource({
+      nodeRedUrl: `http://127.0.0.1:${port}`,
+      nodeRedAdminToken: "admin-fixture-01234567890123456789",
+      nodeRedEventToken: "event-fixture-01234567890123456789",
+      nodeRedFlowAllowlist:
+        '[{"id":"routines","label":"Routines","risk":"CONFIRM","tabId":"tab-routines"}]',
+    } as NovaConfig);
+    expect(
+      await tool.prepare("node_red_flow_create", {
+        flow: tabId,
+        kind: "daily_reminder",
+        time: "24:00",
+        message: "Zet de afvalcontainer buiten.",
+      }),
+    ).toEqual({ error: "Node-RED flow creation is not allow-listed" });
+    const plan = await tool.prepare("node_red_flow_create", {
+      flow: tabId,
+      kind: "daily_reminder",
+      time: "07:45",
+      message: "Zet de afvalcontainer buiten.",
+    });
+    if ("error" in plan) throw new Error(plan.error);
+    expect(plan).toMatchObject({
+      risk: "DANGEROUS",
+      args: {
+        tabId,
+        kind: "daily_reminder",
+        time: "07:45",
+        message: "Zet de afvalcontainer buiten.",
+      },
+    });
+    const result = await tool.execute("node_red_flow_create", plan.args, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!result.ok) throw new Error(JSON.stringify(result));
+    expect(result).toMatchObject({ ok: true, verified: true });
+    expect((result as { result: string }).result).toContain("daily reminder");
   });
 });

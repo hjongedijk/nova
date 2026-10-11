@@ -309,6 +309,7 @@ export class NodeRedManagement {
       "alert_on_offline",
       "morning_briefing",
       "evening_review",
+      "daily_reminder",
     ];
   }
 

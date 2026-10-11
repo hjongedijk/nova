@@ -18,6 +18,7 @@ import {
   memoryAuditProjection,
   noteAuditProjection,
   documentAuditProjection,
+  nodeRedRoutineAuditProjection,
   ToolsService,
 } from "../../src/tools/tools.service.js";
 import {
@@ -556,5 +557,31 @@ describe("document audit projection", () => {
     expect(JSON.stringify(projected)).not.toContain(excerpt);
     expect(JSON.stringify(projected)).not.toContain("contract.pdf");
     expect(JSON.stringify(projected)).not.toContain("private contract");
+  });
+});
+
+describe("Node-RED routine audit projection", () => {
+  it("keeps custom reminder text out of durable action logs", () => {
+    const message = "A private family reminder.";
+    const projected = nodeRedRoutineAuditProjection(
+      "node_red_flow_create",
+      {
+        tabId: "tab-home",
+        kind: "daily_reminder",
+        time: "07:30",
+        message,
+      },
+      { ok: true, verified: true, result: `Created: ${message}` },
+    );
+    expect(projected).toEqual({
+      arguments: {
+        tabId: "tab-home",
+        kind: "daily_reminder",
+        time: "07:30",
+        messageCharacters: message.length,
+      },
+      result: { ok: true, verified: true },
+    });
+    expect(JSON.stringify(projected)).not.toContain(message);
   });
 });

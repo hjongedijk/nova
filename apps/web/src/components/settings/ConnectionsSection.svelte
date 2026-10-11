@@ -88,6 +88,8 @@
   let nodeRedRunMessage = $state("");
   let nodeRedBriefingTime = $state("07:30");
   let nodeRedEveningReviewTime = $state("20:30");
+  let nodeRedReminderTime = $state("08:00");
+  let nodeRedReminderText = $state("Zet de afvalcontainer buiten.");
   let nodeRedRunConfirmation = $state<{
     label: string;
     action: PendingConfirmation;
@@ -112,6 +114,11 @@
       id: "evening_review",
       label: "Avondoverzicht",
       description: "dagelijks overzicht van open punten en morgen",
+    },
+    {
+      id: "daily_reminder",
+      label: "Eigen dagelijkse routine",
+      description: "stuur dagelijks een eigen herinnering",
     },
   ];
   function formatBytes(value: number | null): string {
@@ -629,12 +636,14 @@
           ? { time: nodeRedBriefingTime }
           : template.id === "evening_review"
             ? { time: nodeRedEveningReviewTime }
-            : {}),
+            : template.id === "daily_reminder"
+              ? { time: nodeRedReminderTime, message: nodeRedReminderText }
+              : {}),
       });
       if ("requiresConfirmation" in result && result.requiresConfirmation) {
         if (!result.action) throw new Error("Bevestiging niet beschikbaar.");
         nodeRedRunConfirmation = {
-          label: `${template.label} toevoegen aan ${flow.label} (${template.description}${template.id === "morning_briefing" ? `, dagelijks om ${nodeRedBriefingTime}` : template.id === "evening_review" ? `, dagelijks om ${nodeRedEveningReviewTime}` : ""})`,
+          label: `${template.label} toevoegen aan ${flow.label} (${template.description}${template.id === "morning_briefing" ? `, dagelijks om ${nodeRedBriefingTime}` : template.id === "evening_review" ? `, dagelijks om ${nodeRedEveningReviewTime}` : template.id === "daily_reminder" ? `, dagelijks om ${nodeRedReminderTime}: ${nodeRedReminderText}` : ""})`,
           action: result.action as PendingConfirmation,
         };
         nodeRedRunMessage = `Bevestig het toevoegen van ${template.label} aan ${flow.label}.`;
@@ -1112,6 +1121,20 @@
                               type="time"
                               aria-label="Tijd voor avondoverzicht"
                               bind:value={nodeRedEveningReviewTime}
+                            />
+                          </label>{:else if template.id === "daily_reminder"}<label
+                            >Bericht
+                            <input
+                              maxlength="240"
+                              aria-label="Tekst van dagelijkse routine"
+                              bind:value={nodeRedReminderText}
+                            />
+                          </label><label>
+                            Tijd
+                            <input
+                              type="time"
+                              aria-label="Tijd voor dagelijkse routine"
+                              bind:value={nodeRedReminderTime}
                             />
                           </label>{/if}{/each}
                     {/if}

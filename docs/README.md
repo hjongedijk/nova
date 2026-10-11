@@ -16,6 +16,7 @@
 | [Planning lists](planning-lists.md)                 | Local lists and synchronized Home Assistant to-do entities                                    |
 | [Music and media](media-control.md)                 | Home Assistant and Music Assistant playback, volume, and confirmation rules                   |
 | [Web research](research.md)                         | Multi-step source research, citations, and uncertainty                                        |
+| [Node-RED routines](node-red-routines.md)           | Personal daily reminder routines and their safety boundaries                                  |
 | [Urgent phone notifications](push-notifications.md) | Private ntfy setup and what NOVA sends to the phone                                           |
 
 Back to the [README](../README.md).

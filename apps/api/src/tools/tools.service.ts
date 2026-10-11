@@ -200,6 +200,32 @@ export function documentAuditProjection(
   return { arguments: auditArgs(name, args), result: safe };
 }
 
+export function nodeRedRoutineAuditProjection(
+  name: string,
+  args: Record<string, unknown>,
+  result: ToolResult,
+): {
+  arguments: Record<string, unknown>;
+  result: Record<string, unknown>;
+} | null {
+  if (name !== "node_red_flow_create") return null;
+  const safeArgs: Record<string, unknown> = {};
+  for (const key of ["tabId", "kind", "time"])
+    if (typeof args[key] === "string") safeArgs[key] = args[key];
+  if (typeof args.message === "string")
+    safeArgs.messageCharacters = args.message.length;
+  return {
+    arguments: safeArgs,
+    result: {
+      ok: result.ok,
+      verified: result.verified ?? null,
+      ...(result.ok === false
+        ? { error: "Node-RED routine operation failed" }
+        : {}),
+    },
+  };
+}
+
 /**
  * Every tool NOVA has, from every source, and the one way to run one: arguments cleaned and
  * checked, the real risk decided, a confirmation asked when needed, every action logged,
@@ -362,6 +388,7 @@ export class ToolsService implements OnModuleInit {
         name === "memory_remember" ? memoryAuditProjection(args, clean) : null;
       const privateNote = noteAuditProjection(name, args, clean);
       const privateDocument = documentAuditProjection(name, args, clean);
+      const privateRoutine = nodeRedRoutineAuditProjection(name, args, clean);
       this.audit.record({
         sessionId,
         tool: name,
@@ -370,6 +397,7 @@ export class ToolsService implements OnModuleInit {
           : (privateMemory?.arguments ??
             privateNote?.arguments ??
             privateDocument?.arguments ??
+            privateRoutine?.arguments ??
             args),
         risk,
         confirmation,
@@ -386,6 +414,7 @@ export class ToolsService implements OnModuleInit {
             : (privateMemory?.result ??
               privateNote?.result ??
               privateDocument?.result ??
+              privateRoutine?.result ??
               clean),
         verification: clean.verified ?? null,
         durationMs: Date.now() - started,
