@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@ni-c/caldav-mcp": "0.1.4"
+  }
+}

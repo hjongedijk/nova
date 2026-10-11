@@ -48,3 +48,6 @@ EXPOSE 8080 8443
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO- http://localhost:8080/api/nova/health >/dev/null || exit 1
 CMD ["node", "apps/api/dist/main.js"]
+# The reviewed CalDAV MCP runs read-only, with a fixed read-tool allowlist.
+COPY deploy/mcp-servers/caldav/package.json deploy/mcp-servers/caldav/package-lock.json /opt/caldav-mcp/
+RUN npm ci --omit=dev --prefix /opt/caldav-mcp
