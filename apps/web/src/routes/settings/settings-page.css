@@ -165,3 +165,11 @@
     transition: none !important;
   }
 }
+
+/* The shared chat shell locks body scrolling; the full settings page needs document scroll. */
+body:has(#settingsDialog.settings-page) {
+  height: auto;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+}

@@ -4458,21 +4458,42 @@ try {
       .getByText("Geen instelling gevonden. Probeer een ander woord.")
       .waitFor();
     await page.locator("#settingsSearch").fill("");
+    let documentScrollTested = false;
     for (const section of sections) {
       await page
         .locator(`.settings-sidebar a[href="/settings?section=${section}"]`)
         .click();
       await page.waitForURL(`**/settings?section=${section}`);
       assert(await page.locator(".settings-content h1").isVisible());
-      assert(
-        await page.evaluate(
-          () =>
-            document.documentElement.scrollWidth <=
-            document.documentElement.clientWidth,
-        ),
-        `Horizontal overflow in ${section} at ${width}`,
+      const scroll = await page.evaluate(() => ({
+        overflowY: getComputedStyle(document.body).overflowY,
+        maxScroll: document.documentElement.scrollHeight - window.innerHeight,
+        widthFits:
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      }));
+      assert.notEqual(
+        scroll.overflowY,
+        "hidden",
+        `Document scrolling is locked in ${section} at ${width}`,
       );
+      assert(scroll.widthFits, `Horizontal overflow in ${section} at ${width}`);
+      if (scroll.maxScroll > 0) {
+        await page.evaluate(() =>
+          window.scrollTo(0, document.documentElement.scrollHeight),
+        );
+        assert(
+          (await page.evaluate(() => window.scrollY)) > 0,
+          `Long settings content cannot scroll in ${section} at ${width}`,
+        );
+        documentScrollTested = true;
+        await page.evaluate(() => window.scrollTo(0, 0));
+      }
     }
+    assert(
+      documentScrollTested,
+      `No long settings section could be scrolled at ${width}`,
+    );
     await page.goto(`${base}/settings?section=code`);
     await page.locator("#workspaceProjectName").fill("Demo Project");
     await page.getByRole("button", { name: "Aanmaken", exact: true }).click();
