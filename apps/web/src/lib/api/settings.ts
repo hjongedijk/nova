@@ -38,6 +38,7 @@ import type {
   MqttOverview,
   McpServerStatus,
   McpServerCatalog,
+  McpServerConfigStatus,
   McpServerActivity,
   McpSettingHistory,
   Risk,
@@ -647,6 +648,17 @@ export const getMqttOverview = () =>
 export const getMcpServerStatus = () => read<McpServerStatus>("/mcp/servers");
 export const getMcpServerCatalog = () =>
   read<McpServerCatalog>("/mcp/servers/catalog");
+export const getMcpServerConfig = (id: string) =>
+  read<McpServerConfigStatus>(`/mcp/servers/${enc(id)}/config`);
+export const saveMcpServerConfig = (
+  id: string,
+  values: Record<string, string>,
+  clear = false,
+) =>
+  write<McpServerConfigStatus>("POST", `/mcp/servers/${enc(id)}/config`, {
+    values,
+    clear,
+  });
 export const prepareMcpServerCatalogChange = (
   id: string,
   operation: "add" | "remove",

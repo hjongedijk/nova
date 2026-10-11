@@ -33,7 +33,11 @@ const configFile = (servers: unknown, name = "mcp.json") => {
   fs.writeFileSync(file, JSON.stringify({ servers }));
   return file;
 };
-const hubFor = (file: string) => new McpHub({ mcpConfig: file } as NovaConfig);
+const hubFor = (file: string) =>
+  new McpHub(
+    { mcpConfig: file } as NovaConfig,
+    { environment: () => ({}) } as never,
+  );
 const call = { sessionId: "t", signal: new AbortController().signal };
 
 describe("MCP hub", () => {

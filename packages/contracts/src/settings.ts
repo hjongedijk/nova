@@ -705,6 +705,10 @@ export interface McpServerCatalog {
   available: { id: string; description: string; rights: string; risk: Risk }[];
 }
 
+export interface McpServerConfigStatus {
+  fields: Array<{ key: string; configured: boolean }>;
+}
+
 export interface McpServerActivity {
   events: Array<{
     at: string;

@@ -20,6 +20,7 @@ import {
 } from "./mcp-config.js";
 import { declaresModelProviderAccess } from "./model-provider-guard.js";
 import { isReviewedMcpServer } from "./reviewed-mcp-servers.js";
+import { McpSecretsStore } from "./mcp-secrets.store.js";
 
 const MAX_RESULT = 20000;
 const MAX_TOOLS_PER_SERVER = 50;
@@ -71,7 +72,10 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
   private syncing: Promise<void> | null = null;
   private stopped = false;
 
-  constructor(private readonly config: NovaConfig) {}
+  constructor(
+    private readonly config: NovaConfig,
+    private readonly secrets: McpSecretsStore,
+  ) {}
 
   /** Start in the background: the API is ready before any server is. */
   onModuleInit(): void {
@@ -120,6 +124,7 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
 
   /** Restart one locally configured server so reviewed tool-risk changes take effect. */
   async refresh(server: string): Promise<void> {
+    await this.syncing?.catch(() => {});
     const client = this.clients.get(server);
     if (client) {
       this.clients.delete(server);
@@ -128,7 +133,19 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
       this.recordActivity(server, "disconnected");
       await client.close().catch(() => {});
     }
-    await this.sync();
+    const spec = readMcpServers(this.config.mcpConfig)[server];
+    if (this.stopped || !spec || spec.enabled === false) return;
+    try {
+      await this.connect(server, spec);
+      this.lastFailure.delete(server);
+    } catch (error) {
+      this.lastFailure.set(
+        server,
+        error instanceof Error ? error.name.slice(0, 80) : "Error",
+      );
+      this.recordActivity(server, "connection_failed");
+      this.log.warn(`${server} unavailable: MCP connection failed`);
+    }
   }
 
   /** Send a harmless MCP ping to an already connected local server; never starts a process. */
@@ -285,7 +302,8 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
           await this.connect(id, spec);
           this.lastFailure.delete(id);
         } catch (error) {
-          const message = (error as Error).message;
+          const message =
+            error instanceof Error ? error.name.slice(0, 80) : "Error";
           // Retried every minute: say it once, not every time.
           if (this.lastFailure.get(id) !== message) {
             this.lastFailure.set(id, message);
@@ -304,7 +322,10 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
       throw new Error("server identity is not in the reviewed catalog");
     if (!RISKS.includes(spec.risk as Risk))
       throw new Error("missing or invalid risk; set risk explicitly");
-    const resolved = resolveEnv(spec.env);
+    const resolved = resolveEnv(spec.env, {
+      ...process.env,
+      ...this.secrets.environment(),
+    });
     if (resolved.missing)
       throw new Error(`missing ${resolved.missing.join(", ")}`);
     const client = new Client({ name: "nova", version: "1.0.0" });

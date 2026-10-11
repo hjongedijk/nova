@@ -445,6 +445,8 @@ try {
     let mcpCatalogInstalled = false;
     let mcpCatalogOperation = "add";
     let mcpCatalogConfirms = 0;
+    let mcpSecretWrites = 0;
+    let mcpSecretValues = {};
     let skillVersion = 2;
     let skillContentReads = 0;
     let skillContentRollbacks = 0;
@@ -652,6 +654,14 @@ try {
                   },
                 ]
               : []),
+            {
+              id: "imap",
+              enabled: false,
+              connected: false,
+              toolCount: 0,
+              defaultRisk: "READ_ONLY",
+              tools: [],
+            },
           ],
         };
       } else if (endpoint === "/settings/mcp/servers/catalog") {
@@ -668,6 +678,22 @@ try {
                   risk: "CONFIRM",
                 },
               ],
+        };
+      } else if (
+        /^\/settings\/mcp\/servers\/(imap|caldav)\/config$/.test(endpoint)
+      ) {
+        if (request.method() === "POST") {
+          const body = request.postDataJSON();
+          assert.deepEqual(Object.keys(body).sort(), ["clear", "values"]);
+          assert.equal(body.clear, false);
+          mcpSecretValues = body.values;
+          mcpSecretWrites++;
+        }
+        data = {
+          fields: ["IMAP_HOST", "IMAP_USER", "IMAP_PASSWORD"].map((key) => ({
+            key,
+            configured: request.method() === "POST",
+          })),
         };
       } else if (
         endpoint === "/settings/mcp/servers/context7/prepare-catalog" &&
@@ -4558,6 +4584,32 @@ try {
     const mcp = page.getByRole("region", { name: "MCP-servers" });
     await mcp.getByRole("button", { name: "Status ophalen" }).click();
     await mcp.getByText("echo", { exact: true }).waitFor();
+    const imap = mcp
+      .getByRole("list")
+      .first()
+      .getByRole("listitem")
+      .filter({ hasText: "imap" });
+    await imap.getByRole("button", { name: "Koppeling instellen" }).click();
+    await imap.getByLabel("IMAP-hostnaam").fill("mail.example.test");
+    await imap
+      .getByLabel("E-mailadres / gebruikersnaam")
+      .fill("nova@example.test");
+    await imap.getByLabel("Wachtwoord").fill("fixture-secret-not-real");
+    await imap.getByRole("button", { name: "Opslaan" }).click();
+    await imap.getByText("ingesteld", { exact: true }).first().waitFor();
+    assert.equal(mcpSecretWrites, 1);
+    assert.deepEqual(mcpSecretValues, {
+      IMAP_HOST: "mail.example.test",
+      IMAP_USER: "nova@example.test",
+      IMAP_PASSWORD: "fixture-secret-not-real",
+    });
+    assert.equal(await imap.getByLabel("Wachtwoord").inputValue(), "");
+    assert.doesNotMatch(await imap.innerText(), /fixture-secret-not-real/);
+    const echo = mcp
+      .getByRole("list")
+      .first()
+      .getByRole("listitem")
+      .filter({ hasText: /^echo/ });
     await mcp
       .getByText(
         "Standaardrisico voor gereedschappen zonder eigen instelling: CONFIRM.",
@@ -4574,7 +4626,7 @@ try {
       .waitFor();
     assert.equal(mcpRiskPrepares, 1);
     assert.equal(mcpRiskConfirms, 1);
-    await mcp.getByRole("button", { name: "Wijzigingsgeschiedenis" }).click();
+    await echo.getByRole("button", { name: "Wijzigingsgeschiedenis" }).click();
     const riskRevision = mcp
       .getByRole("list", { name: "MCP-wijzigingsgeschiedenis echo" })
       .getByRole("listitem")
@@ -4584,17 +4636,17 @@ try {
     await page.getByText(/Eerder risico voor write_note teruggezet/).waitFor();
     assert.equal(mcpRiskConfirms, 2);
     assert.equal(mcpToolRisk, "SAFE");
-    await mcp.getByRole("button", { name: "Activiteit" }).click();
+    await echo.getByRole("button", { name: "Activiteit" }).click();
     await mcp
       .getByText("gereedschap geslaagd: echo", { exact: false })
       .waitFor();
     await mcp.getByText(/Alleen de nieuwste 50 activiteiten/).waitFor();
     assert.equal(mcpActivityReads, 1);
-    await mcp.getByRole("button", { name: "Uitschakelen" }).click();
+    await echo.getByRole("button", { name: "Uitschakelen" }).click();
     await page.getByText(/MCP-server echo uitgeschakeld/).waitFor();
     assert.equal(mcpTogglePrepares, 1);
     assert.equal(mcpToggleConfirms, 1);
-    await mcp.getByRole("button", { name: "Wijzigingsgeschiedenis" }).click();
+    await echo.getByRole("button", { name: "Wijzigingsgeschiedenis" }).click();
     await mcp.getByText(/aan → uit/).waitFor();
     const disabledRevision = mcp
       .getByRole("list", { name: "MCP-wijzigingsgeschiedenis echo" })
@@ -5551,7 +5603,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note and value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note and value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP secret entry with cleared password field and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();

@@ -22,6 +22,7 @@
   } from "#lib/api/settings.ts";
   import { fail, say } from "./state.svelte.ts";
   import Button from "#components/ui/Button.svelte";
+  import McpConnectionConfig from "./McpConnectionConfig.svelte";
 
   let report = $state<McpServerStatus | null>(null);
   let catalog = $state<McpServerCatalog | null>(null);
@@ -299,6 +300,9 @@
             {server.toolCount} gereedschappen
             {#if server.description}<p>{server.description}</p>{/if}
             {#if server.rights}<p>Rechten: {server.rights}</p>{/if}
+            {#if server.id === "caldav" || server.id === "imap"}
+              <McpConnectionConfig id={server.id} onSaved={load} />
+            {/if}
             <p>
               Standaardrisico voor gereedschappen zonder eigen instelling: {server.defaultRisk}.
             </p>

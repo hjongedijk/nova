@@ -12,6 +12,7 @@ import { McpHub } from "../integrations/mcp/mcp.hub.js";
 import { SettingsGuard } from "./settings.guard.js";
 import { McpManagement } from "./mcp-management.service.js";
 import { RISKS } from "../integrations/mcp/mcp-config.js";
+import { McpSecretsStore } from "../integrations/mcp/mcp-secrets.store.js";
 import type { Risk } from "@nova/contracts";
 
 /** PIN-protected status only; never projects MCP commands, arguments, variables or process errors. */
@@ -21,7 +22,33 @@ export class McpStatusController {
   constructor(
     private readonly hub: McpHub,
     private readonly management: McpManagement,
+    private readonly secrets: McpSecretsStore,
   ) {}
+
+  @Get("servers/:id/config")
+  getConfig(@Param("id") id: string) {
+    return this.secrets.status(id);
+  }
+
+  @Post("servers/:id/config")
+  @HttpCode(200)
+  async saveConfig(@Param("id") id: string, @Body() body: unknown) {
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      throw new ValidationError(["Ongeldige MCP-instellingen."]);
+    const value = body as Record<string, unknown>;
+    if (
+      Object.keys(value).some((key) => !["values", "clear"].includes(key)) ||
+      (value.clear !== undefined && typeof value.clear !== "boolean")
+    )
+      throw new ValidationError(["Ongeldige MCP-instellingen."]);
+    const status = this.secrets.save(
+      id,
+      value.values ?? {},
+      value.clear === true,
+    );
+    await this.hub.refresh(id);
+    return status;
+  }
 
   @Get("servers")
   getServers() {
