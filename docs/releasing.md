@@ -11,14 +11,14 @@ The version that matters is the tag: the image build receives it as `NOVA_VERSIO
 ## Cut a release
 
 1. Make sure `main` is green (CI runs format check, lint, typecheck, tests, build, the Windows agent check and a trial image build).
-2. Tag and push:
+2. After explicit approval, tag and push the next version:
 
    ```sh
    git tag v0.1.6
    git push origin v0.1.6
    ```
 
-   (Use the next free number. Never reuse or move a published tag.)
+   Substitute the next free number. Never reuse or move a published tag. Do not tag or push without explicit approval.
 
 3. Watch the **Release** workflow on GitHub Actions.
 
@@ -39,4 +39,4 @@ On the server, set `NOVA_VERSION` in `.env` to the new version (without the `v`)
 docker compose pull && docker compose up -d
 ```
 
-If the Windows agent changed, replace `jarvis-agent.ps1` on the PC (download it from **Settings, More** in NOVA, or take it from the release zip) and run the `JarvisAgent` scheduled task again. See [Windows agent](windows-agent.md).
+If the Windows agent changed, replace the implementation at `jarvis-agent.ps1` through NOVA’s compatibility download, or install `nova-agent.ps1` from the release zip and run the `JarvisAgent` scheduled task again. See [Windows agent](windows-agent.md).
