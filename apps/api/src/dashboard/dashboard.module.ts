@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AppAccessModule } from "../access/access.module.js";
 import { ChecksModule } from "../checks/checks.module.js";
 import { HomeModule } from "../home/home.module.js";
 import { BrowserAgentModule } from "../integrations/browser-agent/browser-agent.module.js";
@@ -32,6 +33,7 @@ import { CalendarReminderService } from "./calendar-reminder.service.js";
 /** Home-screen data: this machine, the side panels, the unasked-for alerts, and the health of everything. */
 @Module({
   imports: [
+    AppAccessModule,
     ProxmoxModule,
     PlanningModule,
     ChecksModule,

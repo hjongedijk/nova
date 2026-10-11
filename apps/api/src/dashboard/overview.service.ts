@@ -13,6 +13,8 @@ import { homeSummary } from "../home/home-summary.service.js";
 import { WorldService } from "../integrations/world/world.service.js";
 import { PlanningService } from "../planning/planning.service.js";
 import { ProxmoxService } from "../proxmox/proxmox.service.js";
+import { AppAccessService } from "../access/access.service.js";
+import { CalDavService } from "../planning/caldav.service.js";
 
 const weatherFrom = (entities: HaEntity[]): Omit<WeatherNow, "forecast"> => {
   const entity = entities.find((item) => item.domain === "weather");
@@ -125,6 +127,8 @@ export class OverviewService {
     private readonly checks: ChecksService,
     private readonly home: HomeAssistantService,
     private readonly world: WorldService,
+    private readonly calendar: CalDavService,
+    private readonly appAccess: AppAccessService,
   ) {}
 
   async overview(now = Date.now(), maxAgeMs = 5000): Promise<OverviewResponse> {
@@ -147,25 +151,46 @@ export class OverviewService {
         (value) => value,
         () => null,
       );
-    const [guests, storage, entities, forecast, news, air, markets, iss] =
-      await Promise.all([
-        this.proxmox.configured
-          ? settle(this.proxmox.guests())
-          : Promise.resolve(null),
-        this.proxmox.configured
-          ? settle(this.proxmox.storage())
-          : Promise.resolve(null),
-        this.home.configured ? settle(this.home.sync()) : Promise.resolve(null),
-        this.forecast(),
-        this.news(),
-        this.air(),
-        this.markets(),
-        this.iss(),
-      ]);
+    const calendarAvailable =
+      this.appAccess.required && this.calendar.configured;
+    const [
+      guests,
+      storage,
+      entities,
+      forecast,
+      news,
+      air,
+      markets,
+      iss,
+      appointments,
+    ] = await Promise.all([
+      this.proxmox.configured
+        ? settle(this.proxmox.guests())
+        : Promise.resolve(null),
+      this.proxmox.configured
+        ? settle(this.proxmox.storage())
+        : Promise.resolve(null),
+      this.home.configured ? settle(this.home.sync()) : Promise.resolve(null),
+      this.forecast(),
+      this.news(),
+      this.air(),
+      this.markets(),
+      this.iss(),
+      calendarAvailable
+        ? settle(this.calendar.upcoming())
+        : Promise.resolve(null),
+    ]);
     const timers = settle(Promise.resolve(this.planning.timers()));
     const lists = settle(Promise.resolve(this.planning.lists()));
     const alerts = settle(Promise.resolve(this.checks.alerts()));
     const visibleHomeEntities = entities ? this.home.visibleEntities() : null;
+    const calendarStatus = !this.appAccess.required
+      ? "protected"
+      : !this.calendar.configured
+        ? "not-configured"
+        : appointments === null
+          ? "error"
+          : "ready";
     return sanitize({
       at: new Date().toISOString(),
       proxmox:
@@ -181,6 +206,16 @@ export class OverviewService {
       lists: await lists,
       alerts: await alerts,
       home: visibleHomeEntities ? homeSummary(visibleHomeEntities) : null,
+      calendarStatus,
+      nextAppointment: appointments?.[0]
+        ? {
+            summary: appointments[0].summary,
+            start: appointments[0].start,
+            end: appointments[0].end,
+            allDay: appointments[0].allDay,
+            timeZone: appointments[0].timeZone ?? null,
+          }
+        : null,
       air,
       markets,
       iss,

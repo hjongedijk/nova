@@ -98,6 +98,14 @@ import assert from "node:assert/strict";
             home: null,
             timers: [],
             lists: { Boodschappen: ["Appels", "Koffie"] },
+            calendarStatus: "ready",
+            nextAppointment: {
+              summary: "Tandarts",
+              start: "2026-10-13T09:00:00+02:00",
+              end: "2026-10-13T09:30:00+02:00",
+              allDay: false,
+              timeZone: "Europe/Amsterdam",
+            },
             weather: {
               name: "Voorbeeld",
               condition: "Helder",
@@ -315,6 +323,9 @@ import assert from "node:assert/strict";
       await page.getByRole("button", { name: /Timers 0 actief/ }).click();
       await page.getByText("Geen actieve timers.").waitFor();
       await page.getByRole("button", { name: /Timers 0 actief/ }).click();
+      await page.getByRole("button", { name: /^Agenda / }).click();
+      await page.getByText(/Tandarts/).waitFor();
+      await page.getByRole("button", { name: /^Agenda / }).click();
       assert.equal(
         await page.locator(".hp-overview-orb canvas").count(),
         1,

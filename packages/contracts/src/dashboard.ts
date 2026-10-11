@@ -105,6 +105,14 @@ export interface OverviewResponse {
   lists: ListsOverview | null;
   alerts: AlertInfo[] | null;
   home: HomeSummary | null;
+  calendarStatus: "protected" | "not-configured" | "ready" | "error";
+  nextAppointment: {
+    summary: string;
+    start: string;
+    end: string | null;
+    allDay: boolean;
+    timeZone?: string | null;
+  } | null;
   air: AirNow | null;
   markets: MarketRates | null;
   iss: IssPosition | null;

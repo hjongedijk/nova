@@ -120,6 +120,27 @@
   const status = $derived(
     shell.awaiting ? "Ik luister" : MODE_LABELS[chat.uiState],
   );
+  const nextAppointment = $derived(dashboard.overview?.nextAppointment ?? null);
+  function appointmentStart(): string {
+    if (!nextAppointment) return "";
+    const date = nextAppointment.allDay
+      ? new Date(`${nextAppointment.start.slice(0, 10)}T12:00:00`)
+      : new Date(nextAppointment.start);
+    return nextAppointment.allDay
+      ? date.toLocaleDateString("nl-NL", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+        })
+      : date.toLocaleString("nl-NL", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: nextAppointment.timeZone ?? undefined,
+        });
+  }
   const visibleNotices = $derived(
     notices.filter((event) => !((snoozed[event.seq] ?? 0) > now)),
   );
@@ -155,9 +176,25 @@
     },
     {
       name: "Agenda",
-      value: "Nog niet gekoppeld",
-      detail: "Agendakoppeling volgt in fase E.",
-      available: false,
+      value: nextAppointment
+        ? appointmentStart()
+        : dashboard.overview?.calendarStatus === "ready"
+          ? "Geen komende afspraak"
+          : dashboard.overview?.calendarStatus === "error"
+            ? "Niet bereikbaar"
+            : dashboard.overview?.calendarStatus === "not-configured"
+              ? "Niet gekoppeld"
+              : "Beveiliging vereist",
+      detail: nextAppointment
+        ? `${nextAppointment.summary} · ${appointmentStart()}`
+        : dashboard.overview?.calendarStatus === "ready"
+          ? "Er staan geen komende afspraken in de gekoppelde agenda."
+          : dashboard.overview?.calendarStatus === "error"
+            ? "De gekoppelde agenda kon niet worden opgehaald."
+            : dashboard.overview?.calendarStatus === "not-configured"
+              ? "Koppel een agenda via de instellingen om afspraken te tonen."
+              : "Stel NOVA_APP_TOKEN in om agenda-afspraken veilig in dit overzicht te tonen.",
+      available: dashboard.overview?.calendarStatus === "ready",
     },
   ]);
   const busy = () =>
