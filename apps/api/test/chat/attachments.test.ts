@@ -219,7 +219,7 @@ describe("chat attachments", () => {
 
   it("sends images using vision content parts, with the user's question last", async () => {
     model.mockClear();
-    await request(app.getHttpServer())
+    const response = await request(app.getHttpServer())
       .post("/api/chat")
       .send({
         sessionId: "vision",
@@ -235,6 +235,7 @@ describe("chat attachments", () => {
       })
       .expect(201);
     const last = model.mock.calls[0]![0].at(-1);
+    expect(response.body.role).toBe("vision");
     expect(last.content).toContainEqual({
       type: "image_url",
       image_url: {

@@ -12,6 +12,7 @@
 | [Releasing](releasing.md)                           | Version numbers and how a tag publishes the image and agent                                   |
 | [Private notes](notes.md)                           | Explicit note capture, local storage, search and deletion                                     |
 | [Document library](document-library.md)             | Explicit file indexing and private Qdrant search                                              |
+| [Image understanding](image-understanding.md)       | Photo uploads, free vision routing and privacy                                                |
 | [Planning lists](planning-lists.md)                 | Local lists and synchronized Home Assistant to-do entities                                    |
 | [Music and media](media-control.md)                 | Home Assistant and Music Assistant playback, volume, and confirmation rules                   |
 | [Web research](research.md)                         | Multi-step source research, citations, and uncertainty                                        |
