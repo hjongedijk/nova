@@ -7,6 +7,7 @@ import type {
   WidgetType,
 } from "@nova/contracts";
 import { ApiError } from "#lib/api/client.ts";
+import { friendlyApiError, uiErrorLanguage } from "#lib/api/error-copy.ts";
 import { getSettings, setPin } from "#lib/api/settings.ts";
 import { loadSidebar } from "#lib/stores/sidebar.svelte.ts";
 
@@ -69,9 +70,11 @@ export function say(
 }
 
 export function fail(error: unknown): void {
-  if (error instanceof ApiError) say(error.message, "bad", error.details);
-  else
-    say(error instanceof Error ? error.message : "Dat is niet gelukt.", "bad");
+  if (error instanceof ApiError) {
+    say(error.message, "bad");
+  } else {
+    say(friendlyApiError(error, 0, uiErrorLanguage()), "bad");
+  }
 }
 
 /** Load the overview. A 401 with pinRequired switches the dialog to the PIN prompt. */

@@ -482,4 +482,6 @@ L2.4-kandidaatbeoordeling aangescherpt: `@ni-c/imap-mcp` schrijft onder `list_ne
 
 2026-10-12 — F6-deel: chat/API- en bevestigingsfouten worden vertaald naar korte NL/EN-meldingen; onbekende provider- en netwerktekst blijft uit chat en wordt alleen lokaal gelogd. Bevestigingsresponses verwijderen ruwe foutdetails. 12 gerichte web-/API-tests, webcheck, API-typecheck en lint slagen. Resterende instellingen- en integratiefoutmeldingen moeten nog worden geïnventariseerd.
 
+2026-10-12 — F6-vervolg: JSON-API-fouten tonen nu korte NL/EN-meldingen en geen ruwe `details`; Home Assistant-sync en Windows-agentfouten geven vaste, veilige tekst. Regressietests injecteren private host-/pad-/wachtwoordtekst en bewijzen dat die niet in de responses verschijnt. 70 gerichte API-tests, 7 webtests, Svelte-check en API-typecheck slagen. Andere integratiepanelen die `error`-velden direct tonen moeten nog worden nagelopen.
+
 2026-10-12 — F7: CI draaide API-, Node-RED-, flow-, en agentchecks, maar niet de web-Vitest-suite. `npm test -w @nova/web` toegevoegd. Gerichte dekking: 83 webtests en 52 relevante API-tests over stem/TTS, persona, Node-RED en proactiviteit groen.

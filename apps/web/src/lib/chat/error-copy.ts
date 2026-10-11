@@ -8,7 +8,7 @@ export function friendlyChatError(
   const raw = error instanceof Error ? error.message : String(error ?? "");
   const message = raw.toLowerCase();
   if (
-    /omniroute.*not configured|no verified free|geen geverifieerd gratis/.test(
+    /omniroute.*not configured|no verified free|no available free|geen geverifieerde gratis/.test(
       message,
     )
   )

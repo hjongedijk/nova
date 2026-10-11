@@ -198,7 +198,8 @@
         "NOVA heeft nog geen verbinding met je Windows-pc. Installeer de Windows-agent uit de map agents/windows en zet WINDOWS_AGENT_URL en WINDOWS_AGENT_TOKEN in .env.",
       "old-agent":
         "De Windows-agent op je pc is nog oud. Download nova-agent.ps1, zet hem in de map van de agent op je pc (bijvoorbeeld C:\\NOVAAgent) en start daarna NOVAAgent opnieuw in Taakplanner.",
-      unreachable: `NOVA bereikt de Windows-agent niet${data.error ? `: ${data.error}` : "."}`,
+      unreachable:
+        "NOVA bereikt de Windows-agent niet. Controleer de verbinding en probeer het opnieuw.",
     }[data.reason];
   }
 

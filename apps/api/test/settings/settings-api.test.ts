@@ -285,6 +285,29 @@ describe("the settings API", () => {
     expect(unavailable.status).toBe(503);
   });
 
+  it("hides Home Assistant sync diagnostics from the settings response", async () => {
+    const home = nova.app.get(HomeAssistantService);
+    const sync = vi
+      .spyOn(home, "sync")
+      .mockRejectedValue(
+        new Error("private-ha.internal /srv/private/password=abc123"),
+      );
+    try {
+      const response = await nova.api.get(
+        "/api/settings/home-assistant/inventory",
+      );
+      expect(response.status).toBe(503);
+      expect(response.body.error).toBe(
+        "Home Assistant reageert niet. Controleer de koppeling en probeer opnieuw.",
+      );
+      expect(JSON.stringify(response.body)).not.toMatch(
+        /private-ha|\/srv\/private|abc123/,
+      );
+    } finally {
+      sync.mockRestore();
+    }
+  });
+
   it("keeps private bounded history for existing note text and checks rollback conflicts", async () => {
     const created = await call("post", "/widgets", {
       type: "note",

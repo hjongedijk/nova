@@ -1,12 +1,16 @@
+import { friendlyApiError, uiErrorLanguage } from "./error-copy.ts";
+
 /** All calls to the NOVA API go through here; components never call fetch themselves. */
 export class ApiError extends Error {
+  readonly details?: string[];
+
   constructor(
     message: string,
     readonly status: number,
-    readonly details?: string[],
+    _details?: string[],
     readonly pinRequired = false,
   ) {
-    super(message);
+    super(friendlyApiError(message, status, uiErrorLanguage()));
     this.name = "ApiError";
   }
 }
@@ -21,7 +25,7 @@ async function parse<T>(response: Response, path: string): Promise<T> {
     throw new ApiError(
       data.error || `${path}: HTTP ${response.status}`,
       response.status,
-      data.details,
+      undefined,
       data.pinRequired === true,
     );
   return data as T;

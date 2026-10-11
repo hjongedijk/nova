@@ -167,9 +167,12 @@ export class SettingsController {
   async homeAssistantInventory() {
     try {
       await this.homeAssistant.sync();
-    } catch (error) {
+    } catch {
       throw new HttpException(
-        { error: sanitize((error as Error).message) },
+        {
+          message:
+            "Home Assistant reageert niet. Controleer de koppeling en probeer opnieuw.",
+        },
         503,
       );
     }

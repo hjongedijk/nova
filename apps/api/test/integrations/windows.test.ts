@@ -52,7 +52,11 @@ describe("Windows tools", () => {
     expect(JSON.parse(fake.requests.at(-1)!.body).app).toBe("notepad");
     const wrong = await agent("wrong", undefined);
     const bad = await wrong.tools.execute("windows_status", {}, call());
-    expect([bad.ok, bad.error]).toEqual([false, "Unauthorized"]);
+    expect(bad.ok).toBe(false);
+    expect(bad.error).toBe(
+      "De Windows-agent reageert niet zoals verwacht. Controleer de verbinding en probeer opnieuw.",
+    );
+    expect(bad.error).not.toContain("Unauthorized");
     const risks = Object.fromEntries(
       tools.definitions().map((item) => [item.name, item.risk]),
     );

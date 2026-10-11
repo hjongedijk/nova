@@ -320,7 +320,7 @@ export class WindowsPcService {
       return {
         ok: false,
         error:
-          response.data?.error || `Windows agent error (${response.status})`,
+          "De Windows-agent reageert niet zoals verwacht. Controleer de verbinding en probeer opnieuw.",
       };
     return { ok: true, verified: null, result: response.data };
   }
