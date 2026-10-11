@@ -19,6 +19,8 @@ type Revision = {
   widgetId: string;
   before: string;
   after: string;
+  beforeSnapshot?: { title: string; enabled: boolean; text: string };
+  afterSnapshot?: { title: string; enabled: boolean; text: string };
   createdSnapshot?: { title: string; enabled: boolean; text: string };
   revertedFrom?: string;
 };
@@ -31,7 +33,32 @@ const safeText = (value: unknown): string | null =>
     ? value
     : null;
 
-/** Private, bounded history for existing note text only. */
+function safeSnapshot(value: unknown): Revision["beforeSnapshot"] {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  const row = value as Record<string, unknown>;
+  const title = safeText(row.title);
+  const text = safeText(row.text);
+  if (
+    Object.keys(row).some(
+      (key) => !["title", "enabled", "text"].includes(key),
+    ) ||
+    title === null ||
+    title.length > 40 ||
+    text === null ||
+    typeof row.enabled !== "boolean"
+  )
+    return undefined;
+  return { title, enabled: row.enabled, text };
+}
+
+const snapshot = (widget: NoteWidget) => ({
+  title: widget.title,
+  enabled: widget.enabled,
+  text: widget.text,
+});
+
+/** Private, bounded history for sanitized note content and metadata only. */
 @Injectable()
 export class NoteWidgetHistory {
   lastWarning: string | undefined;
@@ -60,6 +87,8 @@ export class NoteWidgetHistory {
             !Array.isArray(row.createdSnapshot)
               ? (row.createdSnapshot as Record<string, unknown>)
               : undefined;
+          const beforeSnapshot = safeSnapshot(row.beforeSnapshot);
+          const afterSnapshot = safeSnapshot(row.afterSnapshot);
           const createdTitle = safeText(createdSnapshot?.title);
           const createdText = safeText(createdSnapshot?.text);
           const isCreated =
@@ -67,6 +96,11 @@ export class NoteWidgetHistory {
             createdText !== null &&
             createdText === after &&
             typeof createdSnapshot?.enabled === "boolean";
+          const isSnapshotRevision =
+            beforeSnapshot !== undefined &&
+            afterSnapshot !== undefined &&
+            beforeSnapshot.text === before &&
+            afterSnapshot.text === after;
           if (
             typeof row.id !== "string" ||
             !/^[0-9a-f-]{36}$/i.test(row.id) ||
@@ -75,6 +109,9 @@ export class NoteWidgetHistory {
             typeof row.widgetId !== "string" ||
             !/^[a-z0-9_-]{1,80}$/.test(row.widgetId) ||
             (before === null && !isCreated) ||
+            ((row.beforeSnapshot !== undefined ||
+              row.afterSnapshot !== undefined) &&
+              !isSnapshotRevision) ||
             after === null
           )
             return [];
@@ -85,6 +122,7 @@ export class NoteWidgetHistory {
               widgetId: row.widgetId,
               before: before ?? "",
               after,
+              ...(isSnapshotRevision ? { beforeSnapshot, afterSnapshot } : {}),
               ...(isCreated
                 ? {
                     createdSnapshot: {
@@ -144,22 +182,28 @@ export class NoteWidgetHistory {
     if (remaining.length !== rows.length) this.write(remaining);
   }
 
-  record(widgetId: string, beforeValue: unknown, afterValue: unknown): void {
+  record(
+    widgetId: string,
+    beforeWidget: NoteWidget,
+    afterWidget: NoteWidget,
+  ): void {
     this.lastWarning = undefined;
-    const before = safeText(beforeValue);
-    const after = safeText(afterValue);
-    if (before === null || after === null) {
+    const beforeSnapshot = safeSnapshot(snapshot(beforeWidget));
+    const afterSnapshot = safeSnapshot(snapshot(afterWidget));
+    if (!beforeSnapshot || !afterSnapshot) {
       this.lastWarning =
         "De notitie is opgeslagen, maar tekst die op een geheim lijkt is niet in de geschiedenis gezet.";
       return;
     }
-    if (before === after) return;
+    if (isDeepStrictEqual(beforeSnapshot, afterSnapshot)) return;
     const revision: Revision = {
       id: crypto.randomUUID(),
       at: new Date().toISOString(),
       widgetId,
-      before,
-      after,
+      before: beforeSnapshot.text,
+      after: afterSnapshot.text,
+      beforeSnapshot,
+      afterSnapshot,
     };
     try {
       this.write([...this.read(), revision]);
@@ -175,7 +219,7 @@ export class NoteWidgetHistory {
         risk: "SAFE",
         confirmation: "admin_ui",
         arguments: {
-          what: "note_widget_text",
+          what: "note_widget_update",
           widgetId,
           revision: revision.id,
         },
@@ -247,7 +291,7 @@ export class NoteWidgetHistory {
       throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
     const widget = this.settings
       .get()
-      .widgets.find((item) => item.id === widgetId);
+      .widgets.find((item) => item.id === widgetId) as NoteWidget | undefined;
     if (!widget || widget.type !== "note")
       throw new ConflictException(
         "De notitie bestaat niet meer. Terugdraaien is afgebroken.",
@@ -275,7 +319,9 @@ export class NoteWidgetHistory {
         phase: "attempt",
       });
       this.settings.update((settings) => {
-        const current = settings.widgets.find((item) => item.id === widgetId);
+        const current = settings.widgets.find(
+          (item) => item.id === widgetId,
+        ) as NoteWidget | undefined;
         if (
           !current ||
           current.type !== "note" ||
@@ -323,7 +369,12 @@ export class NoteWidgetHistory {
         ...(this.lastWarning ? { historyWarning: this.lastWarning } : {}),
       };
     }
-    if (!isDeepStrictEqual(widget.text, revision.after))
+    const widgetSnapshot = snapshot(widget);
+    const expectedAfter = revision.afterSnapshot ?? {
+      ...widgetSnapshot,
+      text: revision.after,
+    };
+    if (!isDeepStrictEqual(widgetSnapshot, expectedAfter))
       throw new ConflictException(
         "De notitie is daarna gewijzigd. Terugdraaien is afgebroken.",
       );
@@ -342,12 +393,20 @@ export class NoteWidgetHistory {
       if (
         !current ||
         current.type !== "note" ||
-        current.text !== revision.after
+        !isDeepStrictEqual(
+          snapshot(current),
+          revision.afterSnapshot ?? {
+            ...snapshot(current),
+            text: revision.after,
+          },
+        )
       )
         throw new ConflictException(
           "De notitie is daarna gewijzigd. Terugdraaien is afgebroken.",
         );
-      restored = { ...current, text: revision.before };
+      restored = revision.beforeSnapshot
+        ? { ...current, ...revision.beforeSnapshot }
+        : { ...current, text: revision.before };
       settings.widgets[index] = restored as unknown as Record<string, unknown>;
     });
     const inverse: Revision = {
@@ -356,6 +415,12 @@ export class NoteWidgetHistory {
       widgetId,
       before: revision.after,
       after: revision.before,
+      ...(revision.beforeSnapshot && revision.afterSnapshot
+        ? {
+            beforeSnapshot: revision.afterSnapshot,
+            afterSnapshot: revision.beforeSnapshot,
+          }
+        : {}),
       revertedFrom: id,
     };
     try {

@@ -501,6 +501,8 @@ export type NoteWidgetRevision = {
   at: string;
   before: string;
   after: string;
+  beforeSnapshot?: { title: string; enabled: boolean; text: string };
+  afterSnapshot?: { title: string; enabled: boolean; text: string };
   createdSnapshot?: { title: string; enabled: boolean; text: string };
   revertedFrom?: string;
 };

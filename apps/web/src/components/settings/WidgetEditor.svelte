@@ -108,7 +108,10 @@
     }
     try {
       const result = await rollbackNoteWidget(widget.id, revision.id);
-      if (result.widget?.type === "note") text = result.widget.text;
+      if (result.widget?.type === "note") {
+        title = result.widget.title;
+        text = result.widget.text;
+      }
       rollbackId = "";
       if (result.removed) settings.editingWidget = null;
       else await loadHistory();
@@ -277,8 +280,27 @@
             {#if revision.createdSnapshot}
               <p>
                 <strong>Aangemaakt:</strong>
-                {revision.createdSnapshot.title}
+                {revision.createdSnapshot.title} · {revision.createdSnapshot
+                  .enabled
+                  ? "aan"
+                  : "uit"}
               </p>
+            {:else if revision.beforeSnapshot && revision.afterSnapshot}
+              <p>
+                <strong>Van:</strong>
+                {revision.beforeSnapshot.title} · {revision.beforeSnapshot
+                  .enabled
+                  ? "aan"
+                  : "uit"}
+              </p>
+              <p><strong>Tekst:</strong> {revision.beforeSnapshot.text}</p>
+              <p>
+                <strong>Naar:</strong>
+                {revision.afterSnapshot.title} · {revision.afterSnapshot.enabled
+                  ? "aan"
+                  : "uit"}
+              </p>
+              <p><strong>Tekst:</strong> {revision.afterSnapshot.text}</p>
             {:else}
               <p><strong>Van:</strong> {revision.before}</p>
               <p><strong>Naar:</strong> {revision.after}</p>

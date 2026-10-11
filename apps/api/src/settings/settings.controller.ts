@@ -44,6 +44,7 @@ import type {
   SkillSuggestion,
   SkillTestResult,
   ToolOverride,
+  NoteWidget,
   Widget,
   HelperState,
   HelperSettings,
@@ -962,7 +963,7 @@ export class SettingsController {
     @Body() body: unknown,
   ): { widget: Widget; historyWarning?: string } {
     let widget!: Widget;
-    let beforeNote: string | undefined;
+    let beforeNote: NoteWidget | undefined;
     let beforeDisplay: Widget | undefined;
     this.noteWidgetHistory.lastWarning = undefined;
     this.widgetDisplayHistory.lastWarning = undefined;
@@ -971,15 +972,15 @@ export class SettingsController {
       if (index < 0) throw new ValidationError(["Dit paneel bestaat niet."]);
       const previous = widgetsOf(settings)[index];
       beforeDisplay = previous;
-      if (previous?.type === "note") beforeNote = previous.text;
+      if (previous?.type === "note") beforeNote = structuredClone(previous);
       widget = normalizeWidget(body, {
         existing: previous,
         skillIds: this.webhookIds(settings),
       });
       settings.widgets[index] = widget as never;
     });
-    if (beforeNote !== undefined && widget.type === "note")
-      this.noteWidgetHistory.record(id, beforeNote, widget.text);
+    if (beforeNote && widget.type === "note")
+      this.noteWidgetHistory.record(id, beforeNote, widget);
     if (
       beforeDisplay &&
       (beforeDisplay.type === "value" || beforeDisplay.type === "list") &&

@@ -2867,6 +2867,16 @@ try {
               at: "2026-10-10T10:00:00.000Z",
               before: "Oude notitie",
               after: "Vergeet de planten niet.",
+              beforeSnapshot: {
+                title: "Oude titel",
+                enabled: true,
+                text: "Oude notitie",
+              },
+              afterSnapshot: {
+                title: "Mijn notitie",
+                enabled: false,
+                text: "Vergeet de planten niet.",
+              },
             },
             {
               id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
@@ -2892,7 +2902,7 @@ try {
           widget: {
             id: "notitie",
             type: "note",
-            title: "Mijn notitie",
+            title: "Oude titel",
             text: "Oude notitie",
             enabled: true,
           },
@@ -3571,6 +3581,9 @@ try {
       .click();
     await page.waitForFunction(
       () => document.querySelector("#wText")?.value === "Oude notitie",
+    );
+    await page.waitForFunction(
+      () => document.querySelector("#wTitle")?.value === "Oude titel",
     );
     await page
       .getByRole("button", {

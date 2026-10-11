@@ -380,6 +380,101 @@ describe("the settings API", () => {
     ).not.toContain("operator:private");
   });
 
+  it("records and restores safe note title and enabled changes", async () => {
+    const created = await call("post", "/widgets", {
+      type: "note",
+      title: "Oude titel",
+      text: "Zelfde tekst",
+      enabled: true,
+    });
+    const widgetId = (created.widget as { id: string }).id;
+    await call("put", `/widgets/${widgetId}`, {
+      type: "note",
+      title: "Nieuwe titel",
+      text: "Zelfde tekst",
+      enabled: false,
+    });
+    const history = await call("get", `/widgets/${widgetId}/history`);
+    const revision = (
+      history.revisions as {
+        id: string;
+        beforeSnapshot?: { title: string; enabled: boolean; text: string };
+        afterSnapshot?: { title: string; enabled: boolean; text: string };
+      }[]
+    ).find((row) => row.beforeSnapshot);
+    expect(revision).toMatchObject({
+      beforeSnapshot: {
+        title: "Oude titel",
+        enabled: true,
+        text: "Zelfde tekst",
+      },
+      afterSnapshot: {
+        title: "Nieuwe titel",
+        enabled: false,
+        text: "Zelfde tekst",
+      },
+    });
+    const rawHistory = fs.readFileSync(
+      nova.app.get(NovaConfig).dataFile("note-widget-history.json"),
+      "utf8",
+    );
+    expect(rawHistory).toContain("Oude titel");
+    expect(JSON.stringify(nova.audits)).not.toContain("Oude titel");
+
+    expect(
+      (
+        await call(
+          "post",
+          `/widgets/${widgetId}/history/${revision!.id}/rollback`,
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      nova.store.get().widgets.find((item) => item.id === widgetId),
+    ).toMatchObject({
+      title: "Oude titel",
+      enabled: true,
+      text: "Zelfde tekst",
+    });
+  });
+
+  it("rejects note metadata rollback after any snapshot field changes", async () => {
+    const created = await call("post", "/widgets", {
+      type: "note",
+      title: "Start",
+      text: "Tekst",
+      enabled: true,
+    });
+    const widgetId = (created.widget as { id: string }).id;
+    await call("put", `/widgets/${widgetId}`, {
+      type: "note",
+      title: "Doel",
+      text: "Tekst",
+      enabled: false,
+    });
+    const history = await call("get", `/widgets/${widgetId}/history`);
+    const revision = (
+      history.revisions as {
+        id: string;
+        beforeSnapshot?: unknown;
+      }[]
+    ).find((row) => row.beforeSnapshot)!;
+    await call("put", `/widgets/${widgetId}`, {
+      type: "note",
+      title: "Doel",
+      text: "Tekst",
+      enabled: true,
+    });
+    expect(
+      (
+        await call(
+          "post",
+          `/widgets/${widgetId}/history/${revision.id}/rollback`,
+        )
+      ).status,
+    ).toBe(409);
+  });
+
   it("can undo creation only while the secret-screened note is unchanged", async () => {
     const created = await call("post", "/widgets", {
       type: "note",
