@@ -94,11 +94,17 @@
               prepared.action.confirmationId,
               approve,
             )
-          : await confirmMcpServerToggle(
-              prepared.action.sessionId,
-              prepared.action.confirmationId,
-              approve,
-            );
+          : revision?.change.kind === "catalog"
+            ? await confirmMcpServerCatalogChange(
+                prepared.action.sessionId,
+                prepared.action.confirmationId,
+                approve,
+              )
+            : await confirmMcpServerToggle(
+                prepared.action.sessionId,
+                prepared.action.confirmationId,
+                approve,
+              );
       if (!approve) {
         say("MCP-herstel geannuleerd.");
         return;
@@ -110,7 +116,9 @@
         result.warning ??
           (revision?.change.kind === "tool-risk"
             ? `Eerder risico voor ${revision.change.tool} teruggezet.`
-            : `Eerdere MCP-stand van ${id} hersteld.`),
+            : revision?.change.kind === "catalog"
+              ? `NOVA-toevoeging ${id} teruggedraaid.`
+              : `Eerdere MCP-stand van ${id} hersteld.`),
         result.warning ? "bad" : "ok",
       );
     } catch (cause) {
@@ -208,7 +216,7 @@
         throw new Error(
           result.error ?? "Cataloguswijziging kon niet worden gecontroleerd.",
         );
-      await load();
+      await Promise.all([load(), loadHistory(id)]);
       say(
         operation === "add"
           ? `MCP-server ${id} toegevoegd en uitgeschakeld.`
@@ -373,12 +381,18 @@
                       >
                       — {revision.change.kind === "enabled"
                         ? `${revision.change.before ? "aan" : "uit"} → ${revision.change.after ? "aan" : "uit"}`
-                        : `${revision.change.tool} · ${revision.change.before} → ${revision.change.after}`}
-                      <Button
-                        onclick={() => rollback(server.id, revision.id)}
-                        disabled={busy || activityBusy !== null}
-                        >Herstellen</Button
-                      >
+                        : revision.change.kind === "tool-risk"
+                          ? `${revision.change.tool} · ${revision.change.before} → ${revision.change.after}`
+                          : revision.change.operation === "add"
+                            ? "door NOVA toegevoegd · uitgeschakeld"
+                            : "uit catalogus verwijderd"}
+                      {#if revision.change.kind !== "catalog" || revision.change.operation === "add"}
+                        <Button
+                          onclick={() => rollback(server.id, revision.id)}
+                          disabled={busy || activityBusy !== null}
+                          >Herstellen</Button
+                        >
+                      {/if}
                     </li>
                   {/each}
                 </ul>

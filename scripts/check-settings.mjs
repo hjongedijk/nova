@@ -2,7 +2,7 @@ import { chromium } from "playwright-core";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-/* global document */
+/* global document, getComputedStyle, window */
 const base = process.env.NOVA_SETTINGS_TEST_URL ?? "https://localhost:5173";
 const screenshots = path.resolve("docs/img");
 fs.mkdirSync(screenshots, { recursive: true });
@@ -448,7 +448,18 @@ try {
     let mcpPendingRisk = "SAFE";
     let mcpCatalogInstalled = false;
     let mcpCatalogOperation = "add";
+    let mcpCatalogRollback = false;
     let mcpCatalogConfirms = 0;
+    const mcpCatalogRevision = {
+      id: "00000000-0000-4000-8000-000000000101",
+      at: "2026-10-11T09:00:00Z",
+      server: "context7",
+      change: { kind: "catalog", operation: "add" },
+    };
+    const mcpCatalogHistory = {
+      revisions: [],
+      truncated: false,
+    };
     let mcpSecretWrites = 0;
     let mcpSecretValues = {};
     let skillVersion = 2;
@@ -704,6 +715,7 @@ try {
         request.method() === "POST"
       ) {
         mcpCatalogOperation = request.postDataJSON().operation;
+        mcpCatalogRollback = false;
         assert.ok(["add", "remove"].includes(mcpCatalogOperation));
         data = {
           ok: true,
@@ -726,7 +738,22 @@ try {
       ) {
         assert.equal(request.postDataJSON().approve, true);
         mcpCatalogConfirms++;
+        const catalogBody = request.postDataJSON();
+        mcpCatalogOperation = catalogBody.operation ?? mcpCatalogOperation;
         mcpCatalogInstalled = mcpCatalogOperation === "add";
+        mcpCatalogHistory.revisions.unshift({
+          id: `00000000-0000-4000-8000-${String(100 + mcpCatalogConfirms).padStart(12, "0")}`,
+          at: `2026-10-11T09:0${mcpCatalogConfirms}:00Z`,
+          server: "context7",
+          change: {
+            kind: "catalog",
+            operation: mcpCatalogOperation,
+            ...(mcpCatalogRollback
+              ? { rollbackOf: mcpCatalogRevision.id }
+              : {}),
+          },
+        });
+        mcpCatalogRollback = false;
         data = {
           ok: true,
           verified: true,
@@ -872,6 +899,35 @@ try {
       } else if (endpoint === "/settings/mcp/servers/echo/history") {
         mcpHistoryReads++;
         data = mcpHistory;
+      } else if (endpoint === "/settings/mcp/servers/context7/history") {
+        data = mcpCatalogHistory;
+      } else if (
+        endpoint ===
+          `/settings/mcp/servers/context7/history/${mcpCatalogRevision.id}/prepare-rollback` &&
+        request.method() === "POST"
+      ) {
+        mcpCatalogOperation = "remove";
+        mcpCatalogRollback = true;
+        data = {
+          ok: true,
+          warning:
+            "NOVA-toevoeging verwijderen; server moet uitgeschakeld zijn.",
+          action: {
+            confirmationId: "15151515-1515-4151-8151-151515151515",
+            sessionId:
+              "settings-mcp-catalog:16161616-1616-4161-8161-161616161616",
+            tool: "settings_mcp_catalog_change",
+            args: {
+              server: "context7",
+              operation: "remove",
+              rollbackRevisionId: mcpCatalogRevision.id,
+            },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: 1791630000000,
+            expiresAt: 1791630060000,
+          },
+        };
       } else if (endpoint === "/settings/mcp/servers/echo/activity") {
         mcpActivityReads++;
         data = {
@@ -4708,18 +4764,57 @@ try {
       .getByText("MCP-server context7 toegevoegd en uitgeschakeld.")
       .waitFor();
     assert.equal(mcpCatalogConfirms, 1);
-    const context7 = mcp
+    let context7 = mcp
       .getByRole("list")
       .first()
       .getByRole("listitem")
       .filter({ hasText: "context7" });
+    await context7
+      .getByRole("button", { name: "Wijzigingsgeschiedenis" })
+      .click();
+    const catalogRevision = mcp
+      .getByRole("list", { name: "MCP-wijzigingsgeschiedenis context7" })
+      .getByRole("listitem")
+      .filter({ hasText: "door NOVA toegevoegd" });
+    await catalogRevision.getByRole("button", { name: "Herstellen" }).click();
+    await page.getByText(/NOVA-toevoeging context7 teruggedraaid/).waitFor();
+    assert.equal(mcpCatalogConfirms, 2);
+    assert.equal(mcpCatalogInstalled, false);
+    assert.equal(mcpCatalogHistory.revisions[0].change.operation, "remove");
+    await reviewedCatalog.getByRole("button", { name: "Toevoegen" }).click();
+    await page
+      .getByText("MCP-server context7 toegevoegd en uitgeschakeld.")
+      .waitFor();
+    assert.equal(mcpCatalogConfirms, 3);
+    context7 = mcp
+      .getByRole("list")
+      .first()
+      .getByRole("listitem")
+      .filter({ hasText: "context7" });
+    await context7
+      .getByRole("button", { name: "Wijzigingsgeschiedenis" })
+      .click();
+    const refreshedCatalogHistory = mcp.getByRole("list", {
+      name: "MCP-wijzigingsgeschiedenis context7",
+    });
+    await refreshedCatalogHistory
+      .getByText("uit catalogus verwijderd", { exact: false })
+      .waitFor();
+    const removalRevision = refreshedCatalogHistory
+      .getByRole("listitem")
+      .filter({ hasText: "uit catalogus verwijderd" });
+    assert.equal(
+      await removalRevision.getByRole("button", { name: "Herstellen" }).count(),
+      0,
+      "catalog removal is not offered as a rollback",
+    );
     await context7
       .getByRole("button", { name: "Uit catalogus verwijderen" })
       .click();
     await page
       .getByText("MCP-server context7 verwijderd en verbinding gesloten.")
       .waitFor();
-    assert.equal(mcpCatalogConfirms, 2);
+    assert.equal(mcpCatalogConfirms, 4);
     assert.equal(mcpCatalogInstalled, false);
     assert.doesNotMatch(
       await mcp.innerText(),

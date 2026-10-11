@@ -178,6 +178,97 @@ describe("reviewed MCP catalog management", () => {
     );
   });
 
+  it("undoes only the latest unchanged NOVA catalog addition", async () => {
+    const f = fixture();
+    const added = await confirm(f, f.service.prepareCatalog("context7", "add"));
+    if (!added.ok) throw new Error(added.error);
+    const history = f.service.history("context7");
+    expect(history.revisions).toHaveLength(1);
+    const revision = history.revisions[0]!;
+    expect(revision.change).toEqual({ kind: "catalog", operation: "add" });
+    expect(JSON.stringify(history)).not.toMatch(
+      /command|context7-mcp|env|Fingerprint/i,
+    );
+
+    const prepared = f.service.prepareRollback("context7", revision.id);
+    expect(prepared).toMatchObject({
+      ok: true,
+      warning: expect.stringContaining("uitgeschakeld"),
+    });
+    const undone = await confirm(f, prepared);
+    expect(undone).toMatchObject({
+      ok: true,
+      verified: true,
+      server: "context7",
+      operation: "remove",
+    });
+    expect(f.service.catalog().installed).toEqual([]);
+    expect(f.service.history("context7").revisions[0]?.change).toEqual({
+      kind: "catalog",
+      operation: "remove",
+    });
+    expect(f.reconfigure).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses catalog-add undo after enablement, configuration changes, or a stale confirm", async () => {
+    const enabled = fixture();
+    await confirm(enabled, enabled.service.prepareCatalog("context7", "add"));
+    const enabledConfig = JSON.parse(fs.readFileSync(enabled.file, "utf8"));
+    enabledConfig.servers.context7.enabled = true;
+    fs.writeFileSync(enabled.file, JSON.stringify(enabledConfig), {
+      mode: 0o600,
+    });
+    const enabledRevision = enabled.service.history("context7").revisions[0]!;
+    expect(() =>
+      enabled.service.prepareRollback("context7", enabledRevision.id),
+    ).toThrow("uitgeschakelde NOVA-toevoeging");
+
+    const changed = fixture();
+    await confirm(changed, changed.service.prepareCatalog("context7", "add"));
+    const changedConfig = JSON.parse(fs.readFileSync(changed.file, "utf8"));
+    changedConfig.servers.context7.description = "custom";
+    fs.writeFileSync(changed.file, JSON.stringify(changedConfig), {
+      mode: 0o600,
+    });
+    const changedRevision = changed.service.history("context7").revisions[0]!;
+    expect(() =>
+      changed.service.prepareRollback("context7", changedRevision.id),
+    ).toThrow("uitgeschakelde NOVA-toevoeging");
+
+    const stale = fixture();
+    await confirm(stale, stale.service.prepareCatalog("context7", "add"));
+    const staleRevision = stale.service.history("context7").revisions[0]!;
+    const prepared = stale.service.prepareRollback(
+      "context7",
+      staleRevision.id,
+    );
+    if (!prepared.ok) throw new Error(prepared.error);
+    const staleConfig = JSON.parse(fs.readFileSync(stale.file, "utf8"));
+    staleConfig.servers.context7.enabled = true;
+    fs.writeFileSync(stale.file, JSON.stringify(staleConfig), { mode: 0o600 });
+    await expect(confirm(stale, prepared)).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("intussen gewijzigd"),
+    });
+  });
+
+  it("cancels catalog-add undo without changing the installed server", async () => {
+    const f = fixture();
+    await confirm(f, f.service.prepareCatalog("context7", "add"));
+    const revision = f.service.history("context7").revisions[0]!;
+    const prepared = f.service.prepareRollback("context7", revision.id);
+    if (!prepared.ok) throw new Error(prepared.error);
+    await expect(
+      f.service.confirmCatalog(
+        prepared.action.sessionId,
+        prepared.action.confirmationId,
+        false,
+      ),
+    ).resolves.toMatchObject({ ok: true, cancelled: true });
+    expect(f.service.catalog().installed).toEqual(["context7"]);
+    expect(f.reconfigure).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects custom IDs and removal of an unreviewed server", () => {
     const f = fixture();
     expect(() => f.service.prepareCatalog("arbitrary", "add")).toThrow(

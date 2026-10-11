@@ -33,8 +33,29 @@ type McpSettingRevision = {
   server: string;
   change:
     | { kind: "enabled"; before: boolean; after: boolean }
-    | { kind: "tool-risk"; tool: string; before: Risk; after: Risk };
+    | { kind: "tool-risk"; tool: string; before: Risk; after: Risk }
+    | {
+        kind: "catalog";
+        operation: "add" | "remove";
+        specFingerprint: string;
+        rollbackOf?: string;
+      };
 };
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function serverFingerprint(value: unknown): string {
+  return crypto.createHash("sha256").update(stableJson(value)).digest("hex");
+}
 
 /** One-time confirmed edits and private history for NOVA-owned MCP settings. */
 @Injectable()
@@ -65,7 +86,21 @@ export class McpManagement {
       throw new ValidationError(["Ongeldige MCP-server-ID."]);
     const all = this.readHistory();
     return {
-      revisions: all.filter((item) => item.server === server),
+      revisions: all
+        .filter((item) => item.server === server)
+        .map((item) =>
+          item.change.kind === "catalog"
+            ? {
+                id: item.id,
+                at: item.at,
+                server: item.server,
+                change: {
+                  kind: "catalog" as const,
+                  operation: item.change.operation,
+                },
+              }
+            : item,
+        ),
       truncated: all.length >= 40,
     };
   }
@@ -200,18 +235,42 @@ export class McpManagement {
     }
     const operation = draft.catalogOperation;
     const spec = reviewedMcpServerSpec(draft.server);
+    const rollbackRevision = draft.rollbackRevisionId
+      ? this.readHistory().find(
+          (item) =>
+            item.id === draft.rollbackRevisionId &&
+            item.server === draft.server &&
+            item.change.kind === "catalog" &&
+            item.change.operation === "add",
+        )
+      : undefined;
+    const latestServerRevision = this.readHistory().find(
+      (item) => item.server === draft.server,
+    );
+    const currentServer = current.data.servers[draft.server];
+    const validCatalogRollback =
+      !draft.rollbackRevisionId ||
+      (!!rollbackRevision &&
+        latestServerRevision?.id === rollbackRevision.id &&
+        rollbackRevision.change.kind === "catalog" &&
+        !!spec &&
+        currentServer?.enabled === false &&
+        serverFingerprint(currentServer) ===
+          rollbackRevision.change.specFingerprint &&
+        serverFingerprint(currentServer) === serverFingerprint(spec));
     if (
       action.args.server !== draft.server ||
       action.args.operation !== operation ||
+      (draft.rollbackRevisionId !== undefined &&
+        action.args.rollbackRevisionId !== draft.rollbackRevisionId) ||
       current.fileDigest !== draft.fileDigest ||
       !spec ||
-      (operation === "add"
-        ? current.data.servers[draft.server] !== undefined
-        : !current.data.servers[draft.server] ||
-          !isReviewedMcpServer(
-            draft.server,
-            current.data.servers[draft.server] as never,
-          ))
+      !validCatalogRollback ||
+      (!draft.rollbackRevisionId &&
+        (operation === "add"
+          ? currentServer !== undefined
+          : !currentServer ||
+            !isReviewedMcpServer(draft.server, currentServer as never)))
     )
       return {
         ok: false as const,
@@ -281,6 +340,27 @@ export class McpManagement {
           "MCP-configuratie is opgeslagen maar de serverstatus kon niet worden gecontroleerd.",
       };
     }
+    let historyWarning: string | undefined;
+    try {
+      this.appendHistory({
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        server: draft.server,
+        change: {
+          kind: "catalog",
+          operation,
+          specFingerprint: serverFingerprint(
+            operation === "add" ? spec : currentServer,
+          ),
+          ...(draft.rollbackRevisionId
+            ? { rollbackOf: draft.rollbackRevisionId }
+            : {}),
+        },
+      });
+    } catch {
+      historyWarning =
+        "De MCP-catalogus is gewijzigd, maar de lokale wijzigingsgeschiedenis kon niet worden opgeslagen.";
+    }
     // The attempt record already exists. Do not turn a verified filesystem and
     // hub change into an apparent failure if the final audit append fails.
     try {
@@ -301,6 +381,7 @@ export class McpManagement {
       verified: true as const,
       server: draft.server,
       operation,
+      ...(historyWarning ? { warning: historyWarning } : {}),
     };
   }
 
@@ -327,6 +408,63 @@ export class McpManagement {
         "Deze MCP-wijziging staat niet in de geschiedenis.",
       ]);
     const { data, fileDigest } = this.read();
+    if (revision.change.kind === "catalog") {
+      const latest = this.readHistory().find((item) => item.server === server);
+      const spec = data.servers[server];
+      const canonical = reviewedMcpServerSpec(server);
+      if (
+        revision.change.operation !== "add" ||
+        latest?.id !== revision.id ||
+        !spec ||
+        spec.enabled !== false ||
+        !canonical ||
+        !isReviewedMcpServer(server, spec as never) ||
+        serverFingerprint(spec) !== revision.change.specFingerprint ||
+        serverFingerprint(spec) !== serverFingerprint(canonical)
+      )
+        throw new ValidationError([
+          "Alleen een ongewijzigde, uitgeschakelde NOVA-toevoeging kan worden teruggedraaid.",
+        ]);
+      const sessionId = `settings-mcp-catalog:${crypto.randomUUID()}`;
+      const action = this.confirmations.create(
+        sessionId,
+        "settings_mcp_catalog_change",
+        { server, operation: "remove", rollbackRevisionId: revision.id },
+        "DANGEROUS",
+        undefined,
+        false,
+      );
+      try {
+        this.audit.record({
+          sessionId,
+          tool: "settings_mcp_catalog_change",
+          risk: "DANGEROUS",
+          confirmation: "pending_admin_ui",
+          arguments: { server, operation: "remove", rollback: true },
+        });
+      } catch {
+        this.confirmations.cancel(sessionId, "rejected_admin_ui");
+        return {
+          ok: false as const,
+          error: "Auditlog niet beschikbaar; MCP-herstel gestopt.",
+        };
+      }
+      this.drafts.set(action.confirmationId, {
+        sessionId,
+        server,
+        enabled: false,
+        catalogOperation: "remove",
+        rollbackRevisionId: revision.id,
+        fileDigest,
+        expiresAt: action.expiresAt,
+      });
+      return {
+        ok: true as const,
+        warning:
+          "Dit verwijdert alleen de ongewijzigde MCP-server die NOVA heeft toegevoegd. De server moet uitgeschakeld blijven; apart opgeslagen inloggegevens blijven bewaard. Eenmalige gevaarlijke bevestiging vereist.",
+        action,
+      };
+    }
     const spec = data.servers[server];
     if (!spec)
       throw new ValidationError(["Deze MCP-server is niet meer ingesteld."]);
@@ -481,6 +619,29 @@ export class McpManagement {
             tool: item.change.tool,
             before: item.change.before as Risk,
             after: item.change.after as Risk,
+          },
+        });
+      } else if (
+        item.change?.kind === "catalog" &&
+        (item.change.operation === "add" ||
+          item.change.operation === "remove") &&
+        typeof item.change.specFingerprint === "string" &&
+        /^[a-f0-9]{64}$/.test(item.change.specFingerprint) &&
+        (item.change.rollbackOf === undefined ||
+          (typeof item.change.rollbackOf === "string" &&
+            /^[0-9a-f-]{36}$/i.test(item.change.rollbackOf)))
+      ) {
+        revisions.push({
+          id: item.id,
+          at: item.at,
+          server: item.server,
+          change: {
+            kind: "catalog",
+            operation: item.change.operation,
+            specFingerprint: item.change.specFingerprint,
+            ...(item.change.rollbackOf
+              ? { rollbackOf: item.change.rollbackOf }
+              : {}),
           },
         });
       } else {

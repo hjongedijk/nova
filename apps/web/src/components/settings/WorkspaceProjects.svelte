@@ -219,7 +219,7 @@
     {:else if history.revisions.length === 0}<p>
         Geen projectwijzigingen vastgelegd.
       </p>
-    {:else}<ol aria-label="Projectgeschiedenis">
+    {:else}<ol aria-label="Projectkeuzegeschiedenis">
         {#each history.revisions as revision, index (revision.id)}
           <li>
             <time datetime={revision.at}

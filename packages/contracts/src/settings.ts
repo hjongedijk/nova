@@ -736,7 +736,8 @@ export interface McpSettingRevision {
         tool: string;
         before: Risk;
         after: Risk;
-      };
+      }
+    | { kind: "catalog"; operation: "add" | "remove" };
 }
 
 export interface McpSettingHistory {

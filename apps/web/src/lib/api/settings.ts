@@ -682,6 +682,7 @@ export const confirmMcpServerCatalogChange = (
     cancelled?: boolean;
     server?: string;
     operation?: "add" | "remove";
+    warning?: string;
     error?: string;
   }>("POST", "/mcp/servers/confirm-catalog", {
     sessionId,
