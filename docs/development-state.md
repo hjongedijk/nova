@@ -7,7 +7,7 @@ Do not record credentials, personal messages or actual deployment configuration 
 ## Current work
 
 - Task file: `tasks-09-10-2026.md`. Order: A → J (except J4) → K → L → B → C/J4 → D/E/F/G/H/I.
-- Current task count: 145/259. `docs/new-tool-checklist.md` is drafted early and linked from `docs/tools-and-safety.md`; F1 remains open until phase F, to preserve the task file's phase order.
+- Current task count: 156/247. `docs/new-tool-checklist.md` is drafted early and linked from `docs/tools-and-safety.md`; F1 remains open until phase F, to preserve the task file's phase order.
 - After the Phase A checkpoint, continue J. A1.3/A1.5 and several B tasks still need actual Windows/phone/audio checks. Do not claim these hardware or live-service checks from repository tests.
 - Phase A: 34/41 complete, commit `fbcad59`. Seven items await Windows testing or later features; see its checkpoint.
 - Latest A verification: `node scripts/check-helper.mjs` passed at 1x/2x, including views, audio-device behavior, stream cleanup, attachments, choices and confirmations. This does not replace the remaining real Windows/phone checks.
