@@ -22,6 +22,7 @@ import { OmniRouteComboRemovalController } from "./omniroute-combo-removal.contr
 import { OmniRouteComboRemoval } from "./omniroute-combo-removal.service.js";
 import { OmniRouteComboUpdateController } from "./omniroute-combo-update.controller.js";
 import { OmniRouteComboUpdate } from "./omniroute-combo-update.service.js";
+import { OmniRouteComboUpdateHistory } from "./omniroute-combo-update-history.service.js";
 import { OmniRouteAccountCreateController } from "./omniroute-account-create.controller.js";
 import { OmniRouteAccountCreate } from "./omniroute-account-create.service.js";
 import { OmniRouteAccountKeyUpdateController } from "./omniroute-account-key-update.controller.js";
@@ -172,6 +173,7 @@ import { HomeAssistantAccessHistory } from "./home-assistant-access-history.serv
     OmniRouteComboCreate,
     OmniRouteComboRemoval,
     OmniRouteComboUpdate,
+    OmniRouteComboUpdateHistory,
     OmniRouteComboActivation,
     ModelRolesService,
     FreePolicyWizard,

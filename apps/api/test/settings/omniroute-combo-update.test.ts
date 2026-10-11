@@ -17,6 +17,7 @@ import {
   type RoutingStatus,
 } from "../../src/routing/routing.service.js";
 import { OmniRouteComboUpdate } from "../../src/settings/omniroute-combo-update.service.js";
+import { OmniRouteComboUpdateHistory } from "../../src/settings/omniroute-combo-update-history.service.js";
 
 const ready: RoutingStatus = {
   ready: true,
@@ -94,10 +95,6 @@ function fixture() {
         return { combos: [{ id: "combo-1", name: "Custom route" }] };
       const id = endpoint.split("/").at(-1)!;
       if (options?.method === "PUT") {
-        expect(options.body).toEqual({
-          name: "Updated route",
-          models: ["provider/model-b"],
-        });
         expect(routing.status()).toMatchObject({
           ready: false,
           status: "POLICY_CHANGE_PENDING",
@@ -134,6 +131,7 @@ function fixture() {
     configured: true,
     request,
   } as unknown as OmniRouteManagement;
+  const history = new OmniRouteComboUpdateHistory(config as NovaConfig);
   const service = new OmniRouteComboUpdate(
     config as NovaConfig,
     management,
@@ -141,9 +139,12 @@ function fixture() {
     audit,
     barrier,
     routing,
+    history,
   );
   return {
     service,
+    history,
+    dir,
     db,
     record,
     request,
@@ -249,5 +250,66 @@ describe("OmniRoute combo update", () => {
       ),
     ).toMatchObject({ ok: false, verified: null, routeReady: false });
     expect(f.routing.status().ready).toBe(false);
+  });
+
+  it("records secret-free combo revisions and restores only the newest one", async () => {
+    const f = fixture();
+    const first = await f.service.prepare(
+      "combo-1",
+      "Updated route",
+      ["provider/model-b"],
+      true,
+    );
+    const action = first.action!;
+    expect(
+      await f.service.confirm(
+        "combo-1",
+        action.sessionId,
+        action.confirmationId,
+        true,
+      ),
+    ).toMatchObject({ ok: true, verified: true });
+    expect(f.request).toHaveBeenCalledWith("/api/combos/combo-1", {
+      method: "PUT",
+      body: { name: "Updated route", models: ["provider/model-b"] },
+    });
+    const historyFile = path.join(f.dir, "omniroute-combo-update-history.json");
+    const stat = fs.statSync(historyFile);
+    expect(stat.mode & 0o777).toBe(0o600);
+    const storedHistory = fs.readFileSync(historyFile, "utf8");
+    expect(storedHistory).not.toContain("keep this prompt");
+    const revisions = f.history.list("combo-1").revisions;
+    expect(revisions).toHaveLength(1);
+    const rollback = await f.service.prepareRollback(
+      "combo-1",
+      revisions[0]!.id,
+    );
+    expect(rollback).toMatchObject({
+      ok: true,
+      models: ["provider/model-a"],
+      action: { risk: "DANGEROUS" },
+    });
+    const rollbackAction = rollback.action!;
+    expect(
+      await f.service.confirm(
+        "combo-1",
+        rollbackAction.sessionId,
+        rollbackAction.confirmationId,
+        true,
+      ),
+    ).toMatchObject({ ok: true, verified: true });
+    const saved = f.db
+      .prepare("SELECT name,data FROM combos WHERE id=?")
+      .get("combo-1") as { name: string; data: string };
+    expect(saved.name).toBe("Custom route");
+    expect(JSON.parse(saved.data)).toMatchObject({
+      models: ["provider/model-a"],
+      system_message: "keep this prompt",
+    });
+    const revisionsAfterRollback = f.history.list("combo-1").revisions;
+    expect(revisionsAfterRollback).toHaveLength(2);
+    await expect(
+      f.service.prepareRollback("combo-1", revisions[0]!.id),
+    ).rejects.toThrow("nieuwste combo-wijziging");
   });
 });

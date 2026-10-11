@@ -99,8 +99,8 @@
   async function comboUpdated(result?: OmniRouteComboUpdateResult) {
     if (!result?.verified) return;
     notice = result.routeReady
-      ? `Combo bijgewerkt en gecontroleerd; gratis route blijft geverifieerd.${result.auditWarning ? ` ${result.auditWarning}` : ""}`
-      : `Combo bijgewerkt en gecontroleerd. NOVA houdt AI geblokkeerd tot het gratis routebeleid opnieuw is geverifieerd.${result.auditWarning ? ` ${result.auditWarning}` : ""}`;
+      ? `Combo bijgewerkt en gecontroleerd; gratis route blijft geverifieerd.${result.auditWarning ? ` ${result.auditWarning}` : ""}${result.historyWarning ? ` ${result.historyWarning}` : ""}`
+      : `Combo bijgewerkt en gecontroleerd. NOVA houdt AI geblokkeerd tot het gratis routebeleid opnieuw is geverifieerd.${result.auditWarning ? ` ${result.auditWarning}` : ""}${result.historyWarning ? ` ${result.historyWarning}` : ""}`;
     await load();
   }
   function accountChanged(

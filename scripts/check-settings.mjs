@@ -1579,6 +1579,46 @@ try {
           };
         } else data = { ok: true };
       } else if (
+        endpoint === "/settings/omniroute/combos/fixture-combo/update/history"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        data = {
+          revisions: [
+            {
+              id: "abababab-abab-4bab-8bab-abababababab",
+              at: "2026-10-11T18:00:00.000Z",
+              comboId: "fixture-combo",
+              beforeName: "Oorspronkelijke route",
+              afterName: "Bewerkte route",
+              beforeModels: ["fixture/original:free"],
+              afterModels: ["fixture/example:free"],
+            },
+          ],
+        };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/combos/fixture-combo/update/history/abababab-abab-4bab-8bab-abababababab/prepare-rollback"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        assert.deepEqual(request.postDataJSON(), {});
+        const now = await page.evaluate(() => Date.now());
+        data = {
+          ok: true,
+          name: "Oorspronkelijke route",
+          models: ["fixture/original:free"],
+          action: {
+            confirmationId: "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
+            sessionId:
+              "settings-combo-update:cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
+            tool: "omniroute_combo_update",
+            args: { id: "fixture-combo", revision: "fixture-combo-revision" },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: now,
+            expiresAt: now + 60000,
+          },
+        };
+      } else if (
         endpoint === "/settings/omniroute/combos/fixture-combo/update/prepare"
       ) {
         assert.equal(request.headers()["x-nova-admin"], "1");
@@ -1610,8 +1650,18 @@ try {
         assert.equal(request.headers()["x-nova-admin"], "1");
         if (request.postDataJSON().approve) {
           comboUpdateWrites++;
-          comboName = "Bewerkte route";
-          data = { ok: true, verified: true, routeReady: true };
+          comboName =
+            comboUpdateWrites === 1
+              ? "Bewerkte route"
+              : "Oorspronkelijke route";
+          data = {
+            ok: true,
+            verified: true,
+            routeReady: true,
+            ...(comboUpdateWrites > 1
+              ? { historyWarning: "Testgeschiedenis bijgewerkt." }
+              : {}),
+          };
         } else data = { ok: true };
       } else if (
         endpoint === "/settings/omniroute/combos/fixture-combo/removal/prepare"
@@ -3804,6 +3854,26 @@ try {
       )
       .waitFor();
     assert.equal(comboUpdateWrites, 1);
+    await accounts
+      .getByRole("button", { name: "Wijzigingsgeschiedenis laden" })
+      .click();
+    await accounts
+      .getByText("Oorspronkelijke route → Bewerkte route")
+      .waitFor();
+    await accounts
+      .getByRole("list", { name: "Combo-wijzigingsgeschiedenis" })
+      .getByRole("button", { name: "Nieuwste wijziging herstellen" })
+      .click();
+    const comboRollbackEditor = accounts.locator(".editor");
+    const comboRollbackConfirm = comboRollbackEditor.getByRole("button", {
+      name: "Herstel bevestigen",
+    });
+    assert.equal(await comboRollbackConfirm.isDisabled(), true);
+    await comboRollbackEditor.getByRole("checkbox").check();
+    await comboRollbackConfirm.click();
+    await accounts.getByText(/Testgeschiedenis bijgewerkt/).waitFor();
+    assert.equal(comboUpdateWrites, 2);
+    assert.equal(comboName, "Oorspronkelijke route");
     await accounts
       .getByRole("button", { name: "Account uitschakelen", exact: true })
       .click();

@@ -417,12 +417,26 @@ export interface OmniRouteComboUpdatePrepared {
   models?: string[];
   action?: PendingConfirmation;
 }
+export interface OmniRouteComboUpdateHistoryEntry {
+  id: string;
+  at: string;
+  comboId: string;
+  beforeName: string;
+  afterName: string;
+  beforeModels: string[];
+  afterModels: string[];
+  revertedFrom?: string;
+}
+export interface OmniRouteComboUpdateHistory {
+  revisions: OmniRouteComboUpdateHistoryEntry[];
+}
 export interface OmniRouteComboUpdateResult {
   ok: boolean;
   error?: string;
   verified?: boolean | null;
   routeReady?: boolean;
   auditWarning?: string;
+  historyWarning?: string;
 }
 export interface OmniRouteComboActivationResult {
   ok: boolean;

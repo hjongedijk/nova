@@ -32,6 +32,7 @@ import type {
   OmniRouteComboRemovalPrepared,
   OmniRouteComboRemovalResult,
   OmniRouteComboUpdatePrepared,
+  OmniRouteComboUpdateHistory,
   OmniRouteComboUpdateResult,
   OmniRouteComboActivationPrepared,
   OmniRouteComboActivationResult,
@@ -1080,6 +1081,19 @@ export const prepareOmniRouteComboUpdate = (
     "POST",
     `/omniroute/combos/${enc(id)}/update/prepare`,
     { name, models, acknowledgeGlobalEffect: true },
+  );
+export const getOmniRouteComboUpdateHistory = (id: string) =>
+  read<OmniRouteComboUpdateHistory>(
+    `/omniroute/combos/${enc(id)}/update/history`,
+  );
+export const prepareOmniRouteComboUpdateRollback = (
+  id: string,
+  revision: string,
+) =>
+  write<OmniRouteComboUpdatePrepared>(
+    "POST",
+    `/omniroute/combos/${enc(id)}/update/history/${enc(revision)}/prepare-rollback`,
+    {},
   );
 export const confirmOmniRouteComboUpdate = (
   id: string,

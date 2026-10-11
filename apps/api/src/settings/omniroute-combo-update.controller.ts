@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   Param,
   Post,
@@ -9,6 +10,7 @@ import {
 import { ValidationError } from "../core/errors/validation.error.js";
 import { SettingsGuard } from "./settings.guard.js";
 import { OmniRouteComboUpdate } from "./omniroute-combo-update.service.js";
+import { OmniRouteComboUpdateHistory } from "./omniroute-combo-update-history.service.js";
 
 const input = (body: unknown, keys: string[]) => {
   if (
@@ -24,7 +26,24 @@ const input = (body: unknown, keys: string[]) => {
 @Controller("settings/omniroute/combos")
 @UseGuards(SettingsGuard)
 export class OmniRouteComboUpdateController {
-  constructor(private readonly updateCombo: OmniRouteComboUpdate) {}
+  constructor(
+    private readonly updateCombo: OmniRouteComboUpdate,
+    private readonly history: OmniRouteComboUpdateHistory,
+  ) {}
+  @Get(":id/update/history")
+  historyFor(@Param("id") id: string) {
+    return this.history.list(id);
+  }
+  @Post(":id/update/history/:revision/prepare-rollback")
+  @HttpCode(200)
+  prepareRollback(
+    @Param("id") id: string,
+    @Param("revision") revision: string,
+  ) {
+    if (!/^[0-9a-f-]{36}$/i.test(revision))
+      throw new ValidationError(["Ongeldige combo-wijziging."]);
+    return this.updateCombo.prepareRollback(id, revision);
+  }
   @Post(":id/update/prepare")
   @HttpCode(200)
   prepare(@Param("id") id: string, @Body() body: unknown) {

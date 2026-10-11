@@ -13,6 +13,7 @@ import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
 import { RoutingService } from "../routing/routing.service.js";
+import { OmniRouteComboUpdateHistory } from "./omniroute-combo-update-history.service.js";
 
 type Row = { id: string; name: string; data: string; sort_order: number };
 const obj = (value: unknown): Record<string, unknown> =>
@@ -57,6 +58,7 @@ export class OmniRouteComboUpdate {
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
+    private readonly history: OmniRouteComboUpdateHistory,
   ) {}
 
   private row(id: string): Row | undefined {
@@ -146,6 +148,7 @@ export class OmniRouteComboUpdate {
     rawName: unknown,
     rawModels: unknown,
     acknowledge: unknown,
+    rollbackRevisionId?: string,
   ): Promise<OmniRouteComboUpdatePrepared> {
     const name = nameValue(rawName);
     if (
@@ -176,6 +179,16 @@ export class OmniRouteComboUpdate {
       if (!route.ready || !route.policyVerified || !route.freeOnly)
         throw new Error(unavailable);
       const before = await this.current(id);
+      if (rollbackRevisionId) {
+        const revision = this.history.rollbackTarget(id, rollbackRevisionId);
+        if (revision.afterRevision !== hash(before.row))
+          throw new Error("Combo is intussen gewijzigd.");
+      }
+      if (
+        name === before.row.name &&
+        JSON.stringify(models) === JSON.stringify(before.models)
+      )
+        return { ok: false, error: "De combo is niet gewijzigd." };
       await this.assertUniqueName(name, id);
       const eligible = await this.eligibleModels();
       if (models.some((model) => !eligible.includes(model)))
@@ -202,7 +215,14 @@ export class OmniRouteComboUpdate {
         action: this.confirmations.create(
           `settings-combo-update:${crypto.randomUUID()}`,
           "omniroute_combo_update",
-          { id, revision, name, models, eligibleRevision: hash(eligible) },
+          {
+            id,
+            revision,
+            name,
+            models,
+            eligibleRevision: hash(eligible),
+            ...(rollbackRevisionId ? { rollbackRevisionId } : {}),
+          },
           "DANGEROUS",
           revision,
           false,
@@ -218,6 +238,23 @@ export class OmniRouteComboUpdate {
             : unavailable,
       };
     }
+  }
+
+  async prepareRollback(id: string, revisionId: string) {
+    const target = this.history.rollbackTarget(id, revisionId);
+    const current = await this.current(id);
+    if (target.afterRevision !== hash(current.row))
+      return {
+        ok: false as const,
+        error: "De combo is later gewijzigd. Herlaad de geschiedenis.",
+      };
+    return this.prepare(
+      id,
+      target.beforeName,
+      target.beforeModels,
+      true,
+      revisionId,
+    );
   }
 
   async confirm(
@@ -259,11 +296,24 @@ export class OmniRouteComboUpdate {
     try {
       return await this.barrier.run(async (operation) => {
         let before: Awaited<ReturnType<OmniRouteComboUpdate["current"]>>;
+        let historyWarning: string | undefined;
         try {
           const route = this.routing.verifyForManagement();
           if (!route.ready || !route.policyVerified || !route.freeOnly)
             throw new Error(unavailable);
           before = await this.current(id);
+          if (typeof action.args.rollbackRevisionId === "string") {
+            const revision = this.history.rollbackTarget(
+              id,
+              action.args.rollbackRevisionId,
+            );
+            if (revision.afterRevision !== hash(before.row))
+              return {
+                ok: false,
+                error:
+                  "De combo is intussen gewijzigd. Controleer de geschiedenis opnieuw.",
+              };
+          }
           const eligible = await this.eligibleModels();
           if (
             hash(before.row) !== action.args.revision ||
@@ -315,6 +365,18 @@ export class OmniRouteComboUpdate {
             JSON.stringify(after.models) !== JSON.stringify(models)
           )
             throw new Error("Combo update not verified");
+          historyWarning = this.history.record({
+            comboId: id,
+            beforeName: before.row.name,
+            afterName: after.row.name,
+            beforeModels: before.models,
+            afterModels: after.models,
+            beforeRevision: hash(before.row),
+            afterRevision: hash(after.row),
+            ...(typeof action.args.rollbackRevisionId === "string"
+              ? { revertedFrom: action.args.rollbackRevisionId }
+              : {}),
+          });
         } catch {
           try {
             this.audit.record({
@@ -350,6 +412,7 @@ export class OmniRouteComboUpdate {
           ok: true,
           verified: true,
           routeReady,
+          ...(historyWarning ? { historyWarning } : {}),
         };
         try {
           this.audit.record({
