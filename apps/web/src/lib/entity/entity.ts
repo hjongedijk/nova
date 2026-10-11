@@ -12,8 +12,6 @@ import {
   type Look,
 } from "./states.ts";
 
-const TAU = Math.PI * 2;
-
 /**
  * THE ENTITY. One particle body on a full-screen canvas; its colour and motion are its state.
  * Ported from the prototype's frame loop: volumetric cloud, filaments, dust, HUD rings, radar, orbits,
@@ -336,8 +334,7 @@ export function startEntity(host: EntityHost): () => void {
     g.clearRect(0, 0, W, H);
 
     /* atmosphere */
-    /* Keep NOVA's main-stage identity mint; moods still modulate the hue subtly. */
-    const hue = compact ? cur.h : 150 + (cur.h - 150) * 0.12;
+    const hue = cur.h;
     const halo = g.createRadialGradient(
       cx,
       cy,
@@ -370,9 +367,7 @@ export function startEntity(host: EntityHost): () => void {
     }
 
     /* HUD rings, the instrument around the entity */
-    /* The main-stage orb uses the image's open, quiet composition. The helper
-       retains its compact status ring; page state is shown in the surrounding UI. */
-    const hudA = compact ? cur.hud * birth : 0;
+    const hudA = cur.hud * birth;
     const wide = W >= 1340;
     const ro = compact
       ? Math.min(R * 1.55, Math.min(W, H) * 0.4)
@@ -667,37 +662,30 @@ export function startEntity(host: EntityHost): () => void {
       }
     }
 
-    /* Keep the helper's familiar particle mesh; the main orb reads as soft vapor. */
-    if (compact) {
-      /* filaments */
-      g.lineWidth = compact ? 0.6 : 0.7;
-      g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(0.025 + 0.035 * cur.glow) * (compact ? 2.4 : 1) * birth})`;
-      g.beginPath();
-      for (let i = 0; i < N; i++) {
-        if (sz[i] < -0.15) continue;
-        const a = nb1[i];
-        const b = nb2[i];
-        if (sz[a] > -0.15) {
-          g.moveTo(sx[i], sy[i]);
-          g.lineTo(sx[a], sy[a]);
-        }
-        if (sz[b] > -0.15) {
-          g.moveTo(sx[i], sy[i]);
-          g.lineTo(sx[b], sy[b]);
-        }
+    /* filaments */
+    g.lineWidth = compact ? 0.6 : 0.7;
+    g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(0.05 + 0.09 * cur.glow) * (compact ? 2.4 : 1) * birth})`;
+    g.beginPath();
+    for (let i = 0; i < N; i++) {
+      if (sz[i] < -0.15) continue;
+      const a = nb1[i];
+      const b = nb2[i];
+      if (sz[a] > -0.15) {
+        g.moveTo(sx[i], sy[i]);
+        g.lineTo(sx[a], sy[a]);
       }
-      g.stroke();
+      if (sz[b] > -0.15) {
+        g.moveTo(sx[i], sy[i]);
+        g.lineTo(sx[b], sy[b]);
+      }
     }
+    g.stroke();
 
     /* particles */
     for (let i = 0; i < N; i++) {
       const depth = (sz[i] + 1) / 2;
       const alpha =
-        (0.12 + 0.88 * depth) *
-        (0.4 + 0.6 * cur.glow) *
-        birth *
-        dim *
-        (compact ? 1 : 0.3);
+        (0.12 + 0.88 * depth) * (0.4 + 0.6 * cur.glow) * birth * dim;
       const size =
         (0.6 + 1.7 * depth) *
         (1 + audioLevel * 0.6) *
@@ -705,16 +693,6 @@ export function startEntity(host: EntityHost): () => void {
       g.fillStyle = `hsla(${hue + depth * 24 + seed[i] * 26 - 13},${cur.s}%,${cur.l - 6 + depth * 10}%,${alpha})`;
       g.fillRect(sx[i] - size / 2, sy[i] - size / 2, size, size);
     }
-
-    /* Mint vapor gives the core the soft, illuminated volume in the reference. */
-    const coreGlow = g.createRadialGradient(cx, cy, 0, cx, cy, R * 1.12);
-    coreGlow.addColorStop(0, `hsla(151,84%,75%,${0.32 * birth * dim})`);
-    coreGlow.addColorStop(0.42, `hsla(156,78%,68%,${0.2 * birth * dim})`);
-    coreGlow.addColorStop(1, "hsla(156,78%,62%,0)");
-    g.fillStyle = coreGlow;
-    g.beginPath();
-    g.arc(cx, cy, R * 1.12, 0, TAU);
-    g.fill();
 
     /* nucleus: it looks where you look */
     const nx = cx + gx * R * 0.14;
@@ -737,92 +715,6 @@ export function startEntity(host: EntityHost): () => void {
     g.beginPath();
     g.arc(nx, ny, nr * 2.6, 0, Math.PI * 2);
     g.fill();
-
-    /* NOVA's orbit: pearl/mint light trails around the particle core. */
-    g.save();
-    g.globalCompositeOperation = "lighter";
-    const orbitHue = (145 + hue * 0.045) % 360;
-    const orbitAlpha =
-      Math.min(0.98, 0.62 + cur.glow * 0.24 + audioLevel * 0.22) * birth * dim;
-    const orbitScale = compact ? 1.06 : 1.02;
-    const orbits = [
-      { rx: 1.42, ry: 0.36, tilt: -0.48, speed: 0.2, phase: 0.4 },
-      { rx: 1.52, ry: 0.31, tilt: 0.66, speed: -0.15, phase: 2.1 },
-      { rx: 1.34, ry: 0.43, tilt: 1.23, speed: 0.11, phase: 4.3 },
-    ];
-    orbits.forEach((orbit) => {
-      const rx = R * orbit.rx * orbitScale;
-      const ry = R * orbit.ry * orbitScale;
-      const tilt =
-        orbit.tilt + Math.sin(t * 0.12 + orbit.phase) * 0.035 * MOTION;
-      const trail = g.createLinearGradient(cx - rx, cy - ry, cx + rx, cy + ry);
-      trail.addColorStop(0, `hsla(${orbitHue},82%,72%,0)`);
-      trail.addColorStop(
-        0.28,
-        `hsla(${orbitHue},86%,82%,${0.55 * orbitAlpha})`,
-      );
-      trail.addColorStop(0.48, `hsla(0,0%,100%,${0.96 * orbitAlpha})`);
-      trail.addColorStop(
-        0.62,
-        `hsla(${orbitHue},90%,82%,${0.72 * orbitAlpha})`,
-      );
-      trail.addColorStop(1, `hsla(${orbitHue},82%,72%,0)`);
-      g.strokeStyle = trail;
-      g.lineWidth =
-        Math.max(compact ? 1.1 : 1.8, R * (compact ? 0.014 : 0.012)) +
-        audioLevel * 1.2;
-      g.beginPath();
-      g.ellipse(cx, cy, rx, ry, tilt, 0, TAU);
-      g.shadowColor = `hsla(${orbitHue},100%,78%,${0.9 * orbitAlpha})`;
-      g.shadowBlur = Math.max(compact ? 5 : 9, R * 0.065);
-      g.stroke();
-      g.shadowBlur = 0;
-
-      /* A fine pearl highlight keeps the trails crisp inside their glow. */
-      g.strokeStyle = `hsla(0,0%,100%,${0.6 * orbitAlpha})`;
-      g.lineWidth = Math.max(0.65, R * 0.0035);
-      g.beginPath();
-      g.ellipse(cx, cy, rx, ry, tilt, 0, TAU);
-      g.stroke();
-
-      const angle = t * orbit.speed * MOTION + orbit.phase;
-      const ex = Math.cos(angle) * rx;
-      const ey = Math.sin(angle) * ry;
-      const beadX = cx + ex * Math.cos(tilt) - ey * Math.sin(tilt);
-      const beadY = cy + ex * Math.sin(tilt) + ey * Math.cos(tilt);
-      const bead = g.createRadialGradient(
-        beadX,
-        beadY,
-        0,
-        beadX,
-        beadY,
-        compact ? 5 : 10,
-      );
-      bead.addColorStop(0, `hsla(0,0%,100%,${0.78 * orbitAlpha})`);
-      bead.addColorStop(0.2, `hsla(${orbitHue},92%,82%,${0.55 * orbitAlpha})`);
-      bead.addColorStop(1, `hsla(${orbitHue},92%,82%,0)`);
-      g.fillStyle = bead;
-      g.beginPath();
-      g.arc(beadX, beadY, compact ? 5 : 10, 0, TAU);
-      g.fill();
-    });
-    const dottedRadius = R * (compact ? 1.42 : 1.5);
-    const dotCount = compact ? 30 : 48;
-    for (let i = 0; i < dotCount; i++) {
-      const angle = (i / dotCount) * TAU + t * 0.025 * MOTION;
-      const dotAlpha = (0.48 + 0.2 * Math.sin(i * 1.9 + t * 0.8)) * orbitAlpha;
-      g.fillStyle = `hsla(${orbitHue},66%,84%,${dotAlpha})`;
-      g.beginPath();
-      g.arc(
-        cx + Math.cos(angle) * dottedRadius,
-        cy + Math.sin(angle) * dottedRadius,
-        compact ? 0.7 : 1.15,
-        0,
-        TAU,
-      );
-      g.fill();
-    }
-    g.restore();
     compact?.life.overlay?.(g, cx, cy, R);
     g.globalCompositeOperation = "source-over";
 
