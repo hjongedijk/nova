@@ -77,6 +77,74 @@ describe("MCP private configuration", () => {
     );
   });
 
+  it("stores a single-repository fine-grained GitHub token without exposing it", () => {
+    const { root, store, record } = fixture();
+    const previousToken = process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
+    process.env.GITHUB_PERSONAL_ACCESS_TOKEN =
+      "deployment-token-must-not-be-used";
+    try {
+      store.save("github", {
+        GITHUB_REPOSITORY_OWNER: "techlepp",
+        GITHUB_REPOSITORY_NAME: "nova",
+        GITHUB_PERSONAL_ACCESS_TOKEN: "github_pat_personal_secret",
+      });
+      expect(store.environmentFor("github")).toEqual({
+        GITHUB_REPOSITORY_OWNER: "techlepp",
+        GITHUB_REPOSITORY_NAME: "nova",
+        GITHUB_PERSONAL_ACCESS_TOKEN: "github_pat_personal_secret",
+      });
+      expect(store.status("github").fields).toEqual([
+        {
+          key: "GITHUB_REPOSITORY_OWNER",
+          configured: true,
+          value: "techlepp",
+        },
+        {
+          key: "GITHUB_REPOSITORY_NAME",
+          configured: true,
+          value: "nova",
+        },
+        { key: "GITHUB_PERSONAL_ACCESS_TOKEN", configured: true },
+      ]);
+      expect(JSON.stringify(store.status("github"))).not.toContain(
+        "github_pat_personal_secret",
+      );
+      expect(
+        store.redactSecrets(
+          "issue body: github_pat_personal_secret must not reach a model",
+        ),
+      ).not.toContain("github_pat_personal_secret");
+      expect(JSON.stringify(record.mock.calls)).not.toContain(
+        "github_pat_personal_secret",
+      );
+      expect(
+        fs.statSync(path.join(root, "mcp-secrets.json")).mode & 0o777,
+      ).toBe(0o600);
+    } finally {
+      if (previousToken === undefined)
+        delete process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
+      else process.env.GITHUB_PERSONAL_ACCESS_TOKEN = previousToken;
+    }
+  });
+
+  it("rejects GitHub tokens without fine-grained prefix and invalid repository names", () => {
+    const { store } = fixture();
+    expect(() =>
+      store.save("github", {
+        GITHUB_REPOSITORY_OWNER: "techlepp",
+        GITHUB_REPOSITORY_NAME: "nova",
+        GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_classic_token",
+      }),
+    ).toThrow("fijnmazige");
+    expect(() =>
+      store.save("github", {
+        GITHUB_REPOSITORY_OWNER: "techlepp",
+        GITHUB_REPOSITORY_NAME: "nova/other",
+        GITHUB_PERSONAL_ACCESS_TOKEN: "github_pat_secret",
+      }),
+    ).toThrow("repositorynaam");
+  });
+
   it("rejects non-HTTPS CalDAV URLs, URL credentials, invalid IMAP hosts, and arbitrary fields", () => {
     const { store } = fixture();
     expect(() =>

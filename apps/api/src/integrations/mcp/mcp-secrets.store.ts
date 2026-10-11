@@ -8,11 +8,16 @@ import { ValidationError } from "../../core/errors/validation.error.js";
 const FIELDS = {
   caldav: ["CALDAV_URL", "CALDAV_USERNAME", "CALDAV_PASSWORD"],
   imap: ["IMAP_HOST", "IMAP_USER", "IMAP_PASSWORD"],
+  github: [
+    "GITHUB_REPOSITORY_OWNER",
+    "GITHUB_REPOSITORY_NAME",
+    "GITHUB_PERSONAL_ACCESS_TOKEN",
+  ],
 } as const;
 type McpConfigId = keyof typeof FIELDS;
 type SecretValues = Record<string, string>;
 
-/** Local private values for the fixed mail/calendar MCP catalog entries. */
+/** Local private values for fixed mail, calendar and GitHub MCP catalog entries. */
 @Injectable()
 export class McpSecretsStore {
   private readonly file: string;
@@ -61,6 +66,30 @@ export class McpSecretsStore {
     return Object.assign({}, ...Object.values(this.read()));
   }
 
+  /** A server gets only its own locally stored values, never deployment-wide fallbacks. */
+  environmentFor(server: string): Record<string, string> {
+    if (!(server in FIELDS)) return {};
+    return { ...(this.read()[server] ?? {}) };
+  }
+
+  /** Redact credentials stored outside process.env before MCP text reaches a model. */
+  redactSecrets(value: string): string {
+    let result = value;
+    let stored: Record<string, SecretValues>;
+    try {
+      stored = this.read();
+    } catch {
+      return "[MCP-uitvoer verborgen: geheimenbestand niet leesbaar]";
+    }
+    for (const [server, fields] of Object.entries(FIELDS)) {
+      const values = stored[server] ?? {};
+      for (const field of fields)
+        if (/PASSWORD|TOKEN|SECRET|API.?KEY/i.test(field) && values[field])
+          result = result.split(values[field]!).join("[redacted]");
+    }
+    return result;
+  }
+
   status(server: string) {
     const fields = FIELDS[server as McpConfigId];
     if (!fields)
@@ -69,7 +98,15 @@ export class McpSecretsStore {
     return {
       fields: fields.map((key) => ({
         key,
-        configured: Boolean(saved[key] || process.env[key]),
+        configured: Boolean(
+          saved[key] || (server === "github" ? undefined : process.env[key]),
+        ),
+        ...(server === "github" &&
+        (key === "GITHUB_REPOSITORY_OWNER" ||
+          key === "GITHUB_REPOSITORY_NAME") &&
+        saved[key]
+          ? { value: saved[key] }
+          : {}),
       })),
     };
   }
@@ -117,10 +154,39 @@ export class McpSecretsStore {
       )
     )
       throw new ValidationError(["IMAP-hostnaam is ongeldig."]);
+    if (
+      server === "github" &&
+      submitted.GITHUB_REPOSITORY_OWNER &&
+      !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(
+        submitted.GITHUB_REPOSITORY_OWNER,
+      )
+    )
+      throw new ValidationError([
+        "GitHub-organisatie of eigenaar is ongeldig.",
+      ]);
+    if (
+      server === "github" &&
+      submitted.GITHUB_REPOSITORY_NAME &&
+      !/^[A-Za-z0-9_.-]{1,100}$/.test(submitted.GITHUB_REPOSITORY_NAME)
+    )
+      throw new ValidationError(["GitHub-repositorynaam is ongeldig."]);
+    if (
+      server === "github" &&
+      submitted.GITHUB_PERSONAL_ACCESS_TOKEN &&
+      !/^github_pat_[A-Za-z0-9_]+$/.test(submitted.GITHUB_PERSONAL_ACCESS_TOKEN)
+    )
+      throw new ValidationError([
+        "Gebruik een fijnmazige GitHub-token die met github_pat_ begint.",
+      ]);
 
     const data = this.read();
     const before = Object.fromEntries(
-      fields.map((key) => [key, data[server]?.[key] || process.env[key] || ""]),
+      fields.map((key) => [
+        key,
+        data[server]?.[key] ||
+          (server === "github" ? "" : process.env[key]) ||
+          "",
+      ]),
     );
     const changedFields = clear
       ? fields.filter((key) => Boolean(data[server]?.[key]))

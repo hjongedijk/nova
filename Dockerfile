@@ -51,6 +51,19 @@ RUN npm ci --omit=dev --prefix /opt/caldav-mcp \
 COPY deploy/mcp-servers/imap/package.json deploy/mcp-servers/imap/package-lock.json /opt/imap-mcp/
 RUN npm ci --omit=dev --prefix /opt/imap-mcp \
     && npm cache clean --force
+# Pin the official GitHub MCP server and verify the upstream release checksum per architecture.
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+      amd64) gh_arch=x86_64; gh_sha=815e27d931c796af0c97f24fd211e14f8a4607d4528377719a5ad2352086b0b0 ;; \
+      arm64) gh_arch=arm64; gh_sha=73f5e76c6a3b5e0d731e1134a7c38575df6ec96c646192095a3be2d4d0d6c1fc ;; \
+      *) echo "Unsupported architecture for GitHub MCP: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && mkdir -p /opt/github-mcp \
+    && wget -q "https://github.com/github/github-mcp-server/releases/download/v2.0.2/github-mcp-server_Linux_${gh_arch}.tar.gz" -O /tmp/github-mcp.tar.gz \
+    && echo "$gh_sha  /tmp/github-mcp.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/github-mcp.tar.gz -C /opt/github-mcp github-mcp-server \
+    && chmod 0755 /opt/github-mcp/github-mcp-server \
+    && rm -f /tmp/github-mcp.tar.gz
 COPY deploy/mcp-servers.json /app/mcp-servers.default.json
 ENV NOVA_MCP_DEFAULT=/app/mcp-servers.default.json
 # The Windows agent is downloaded from NOVA's settings screen.

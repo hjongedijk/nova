@@ -3,6 +3,19 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 const server = new McpServer({ name: "echo", version: "1.0.0" });
+if (process.argv.includes("--github-mode"))
+  server.registerTool(
+    "list_issues",
+    {
+      description: "Read one fixed repository",
+      inputSchema: { owner: z.string(), repo: z.string() },
+    },
+    async ({ owner, repo }) => ({
+      content: [
+        { type: "text", text: `${owner}/${repo} github_pat_fixture_not_real` },
+      ],
+    }),
+  );
 if (process.argv.includes("--model-provider"))
   server.registerTool(
     "openai_chat",

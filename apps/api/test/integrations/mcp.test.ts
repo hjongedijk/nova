@@ -17,6 +17,8 @@ import {
   toolName,
   declaresModelProviderAccess,
   isReviewedMcpServer,
+  reviewedMcpCatalog,
+  reviewedMcpServerSpec,
 } from "../../src/integrations/mcp/index.js";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-mcp-"));
@@ -36,7 +38,11 @@ const configFile = (servers: unknown, name = "mcp.json") => {
 const hubFor = (file: string) =>
   new McpHub(
     { mcpConfig: file } as NovaConfig,
-    { environment: () => ({}) } as never,
+    {
+      environment: () => ({}),
+      environmentFor: () => ({}),
+      redactSecrets: (value: string) => value,
+    } as never,
   );
 const call = { sessionId: "t", signal: new AbortController().signal };
 
@@ -101,6 +107,28 @@ describe("MCP hub", () => {
     expect(Object.keys(shipped).length).toBeGreaterThan(0);
     for (const [id, spec] of Object.entries(shipped))
       expect(isReviewedMcpServer(id, spec), id).toBe(true);
+  });
+
+  it("offers GitHub MCP only through one pinned read-only toolset", () => {
+    const github = reviewedMcpServerSpec("github");
+    expect(github).toMatchObject({
+      command: "/opt/github-mcp/github-mcp-server",
+      enabled: false,
+      risk: "READ_ONLY",
+      args: expect.arrayContaining(["--read-only"]),
+    });
+    expect(isReviewedMcpServer("github", github!)).toBe(true);
+    expect(github?.args?.join(" ")).not.toContain("--toolsets=all");
+    expect(github?.args?.join(" ")).not.toMatch(/write|delete|merge/i);
+    expect(reviewedMcpCatalog().some((entry) => entry.id === "github")).toBe(
+      true,
+    );
+    expect(
+      isReviewedMcpServer("github", {
+        ...github!,
+        args: [...(github?.args ?? []), "--toolsets=all"],
+      }),
+    ).toBe(false);
   });
 
   it("refuses a server that declares access to an AI provider", async () => {
@@ -515,6 +543,53 @@ describe("MCP hub", () => {
       error: "MCP server is offline",
     });
     expect(hub.definitions()).toEqual([]);
+  });
+
+  it("limits every GitHub MCP call to the configured read-only repository", async () => {
+    const hub = new McpHub(
+      {
+        mcpConfig: configFile({
+          github: {
+            command: process.execPath,
+            args: [fixture, "--github-mode"],
+            risk: "READ_ONLY",
+          },
+        }),
+      } as NovaConfig,
+      {
+        environment: () => ({}),
+        environmentFor: () => ({
+          GITHUB_REPOSITORY_OWNER: "techlepp",
+          GITHUB_REPOSITORY_NAME: "nova",
+        }),
+        redactSecrets: (value: string) =>
+          value.replaceAll("github_pat_fixture_not_real", "[redacted]"),
+      } as never,
+    );
+    hubs.push(hub);
+    await hub.sync();
+    expect(hub.definitions().map((tool) => tool.name)).toEqual([
+      "mcp_github_list_issues",
+    ]);
+    expect(
+      await hub.execute("mcp_github_list_issues", {
+        owner: "other",
+        repo: "private",
+      }),
+    ).toEqual({
+      ok: false,
+      error: "GitHub-toegang is beperkt tot de ingestelde repository.",
+    });
+    expect(
+      await hub.execute("mcp_github_list_issues", {
+        owner: "techlepp",
+        repo: "nova",
+      }),
+    ).toMatchObject({
+      ok: true,
+      result: expect.stringContaining("techlepp/nova [redacted]"),
+    });
+    expect(hub.activity("github").events[0]?.kind).toBe("tool_succeeded");
   });
 
   it("stop closes the servers and sync does not connect twice", async () => {

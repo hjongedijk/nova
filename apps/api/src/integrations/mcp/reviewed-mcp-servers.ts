@@ -51,6 +51,20 @@ const REVIEWED: Record<
       IMAP_ALLOW_TOOLS: "list_messages,get_message",
     },
   },
+  github: {
+    command: "/opt/github-mcp/github-mcp-server",
+    args: [
+      "stdio",
+      "--read-only",
+      "--toolsets=issues,pull_requests,actions",
+      "--tools=actions_get,actions_list,issue_read,list_issues,list_pull_requests,pull_request_read",
+    ],
+    env: {
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}",
+      GITHUB_REPOSITORY_OWNER: "${GITHUB_REPOSITORY_OWNER}",
+      GITHUB_REPOSITORY_NAME: "${GITHUB_REPOSITORY_NAME}",
+    },
+  },
 };
 
 const CATALOG: Record<
@@ -124,6 +138,20 @@ const CATALOG: Record<
     toolRisks: {
       list_messages: "READ_ONLY",
       get_message: "READ_ONLY",
+    },
+  },
+  github: {
+    description: "Leest issues, pull requests en CI-status van één repository.",
+    rights:
+      "Alleen de ingestelde GitHub-repository; leesgereedschappen via een fijnmazige token.",
+    risk: "READ_ONLY",
+    toolRisks: {
+      actions_get: "READ_ONLY",
+      actions_list: "READ_ONLY",
+      issue_read: "READ_ONLY",
+      list_issues: "READ_ONLY",
+      list_pull_requests: "READ_ONLY",
+      pull_request_read: "READ_ONLY",
     },
   },
 };

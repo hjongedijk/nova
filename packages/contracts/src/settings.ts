@@ -706,7 +706,7 @@ export interface McpServerCatalog {
 }
 
 export interface McpServerConfigStatus {
-  fields: Array<{ key: string; configured: boolean }>;
+  fields: Array<{ key: string; configured: boolean; value?: string }>;
 }
 
 export interface McpServerActivity {

@@ -9,7 +9,10 @@
   let {
     id,
     onSaved,
-  }: { id: "caldav" | "imap"; onSaved: () => void | Promise<void> } = $props();
+  }: {
+    id: "caldav" | "imap" | "github";
+    onSaved: () => void | Promise<void>;
+  } = $props();
   const fields = $derived(
     id === "caldav"
       ? [
@@ -17,15 +20,33 @@
           { key: "CALDAV_USERNAME", label: "Gebruikersnaam", type: "text" },
           { key: "CALDAV_PASSWORD", label: "Wachtwoord", type: "password" },
         ]
-      : [
-          { key: "IMAP_HOST", label: "IMAP-hostnaam", type: "text" },
-          {
-            key: "IMAP_USER",
-            label: "E-mailadres / gebruikersnaam",
-            type: "text",
-          },
-          { key: "IMAP_PASSWORD", label: "Wachtwoord", type: "password" },
-        ],
+      : id === "imap"
+        ? [
+            { key: "IMAP_HOST", label: "IMAP-hostnaam", type: "text" },
+            {
+              key: "IMAP_USER",
+              label: "E-mailadres / gebruikersnaam",
+              type: "text",
+            },
+            { key: "IMAP_PASSWORD", label: "Wachtwoord", type: "password" },
+          ]
+        : [
+            {
+              key: "GITHUB_REPOSITORY_OWNER",
+              label: "GitHub-gebruiker of organisatie",
+              type: "text",
+            },
+            {
+              key: "GITHUB_REPOSITORY_NAME",
+              label: "Repository",
+              type: "text",
+            },
+            {
+              key: "GITHUB_PERSONAL_ACCESS_TOKEN",
+              label: "Fijnmazige read-only token",
+              type: "password",
+            },
+          ],
   );
   let opened = $state(false);
   let busy = $state(false);
@@ -72,6 +93,15 @@
       Bestaande waarden worden nooit teruggestuurd. Lege velden behouden de
       huidige waarde; opslaan herstart deze MCP-verbinding als hij actief is.
     </p>
+    {#if id === "github"}
+      <p>
+        Gebruik een fijnmazige token die alleen toegang heeft tot deze
+        repository en uitsluitend lezen op Metadata, Contents, Issues, Pull
+        requests en Actions. NOVA controleert elke gereedschapsaanroep op de
+        ingestelde eigenaar en repository. GitHub-waarden worden alleen lokaal
+        bewaard; de token wordt nooit teruggetoond.
+      </p>
+    {/if}
     {#each fields as field (field.key)}
       <label>
         {field.label}
@@ -79,6 +109,9 @@
           {status?.fields.find((item) => item.key === field.key)?.configured
             ? "ingesteld"
             : "ontbreekt"}
+          {#if status?.fields.find((item) => item.key === field.key)?.value}
+            · {status.fields.find((item) => item.key === field.key)?.value}
+          {/if}
         </span>
         <input
           type={field.type}

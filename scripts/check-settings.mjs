@@ -686,6 +686,16 @@ try {
               defaultRisk: "READ_ONLY",
               tools: [],
             },
+            {
+              id: "github",
+              description:
+                "Leest issues, pull requests en CI-status van één repository.",
+              enabled: false,
+              connected: false,
+              toolCount: 0,
+              defaultRisk: "READ_ONLY",
+              tools: [],
+            },
           ],
         };
       } else if (endpoint === "/settings/mcp/servers/catalog") {
@@ -704,8 +714,13 @@ try {
               ],
         };
       } else if (
-        /^\/settings\/mcp\/servers\/(imap|caldav)\/config$/.test(endpoint)
+        /^\/settings\/mcp\/servers\/(imap|caldav|github)\/config$/.test(
+          endpoint,
+        )
       ) {
+        const serverId = endpoint.match(
+          /^\/settings\/mcp\/servers\/(imap|caldav|github)\/config$/,
+        )?.[1];
         if (request.method() === "POST") {
           const body = request.postDataJSON();
           assert.deepEqual(Object.keys(body).sort(), ["clear", "values"]);
@@ -713,10 +728,25 @@ try {
           mcpSecretValues = body.values;
           mcpSecretWrites++;
         }
+        const fields =
+          serverId === "github"
+            ? [
+                "GITHUB_REPOSITORY_OWNER",
+                "GITHUB_REPOSITORY_NAME",
+                "GITHUB_PERSONAL_ACCESS_TOKEN",
+              ]
+            : serverId === "caldav"
+              ? ["CALDAV_URL", "CALDAV_USERNAME", "CALDAV_PASSWORD"]
+              : ["IMAP_HOST", "IMAP_USER", "IMAP_PASSWORD"];
         data = {
-          fields: ["IMAP_HOST", "IMAP_USER", "IMAP_PASSWORD"].map((key) => ({
+          fields: fields.map((key) => ({
             key,
             configured: request.method() === "POST",
+            ...(serverId === "github" &&
+            key !== "GITHUB_PERSONAL_ACCESS_TOKEN" &&
+            request.method() === "POST"
+              ? { value: mcpSecretValues[key] }
+              : {}),
           })),
         };
       } else if (
@@ -5048,6 +5078,35 @@ try {
     });
     assert.equal(await imap.getByLabel("Wachtwoord").inputValue(), "");
     assert.doesNotMatch(await imap.innerText(), /fixture-secret-not-real/);
+    const github = mcp
+      .getByRole("list")
+      .first()
+      .getByRole("listitem")
+      .filter({ hasText: /^github/ });
+    await github.getByRole("button", { name: "Koppeling instellen" }).click();
+    await github.getByLabel("GitHub-gebruiker of organisatie").fill("techlepp");
+    await github.getByLabel("Repository").fill("nova");
+    await github
+      .getByLabel("Fijnmazige read-only token")
+      .fill("github_pat_fixture_not_real");
+    await github.getByRole("button", { name: "Opslaan" }).click();
+    await github.getByText("ingesteld", { exact: true }).first().waitFor();
+    assert.match(await github.innerText(), /techlepp/);
+    assert.match(await github.innerText(), /nova/);
+    assert.equal(mcpSecretWrites, 2);
+    assert.deepEqual(mcpSecretValues, {
+      GITHUB_REPOSITORY_OWNER: "techlepp",
+      GITHUB_REPOSITORY_NAME: "nova",
+      GITHUB_PERSONAL_ACCESS_TOKEN: "github_pat_fixture_not_real",
+    });
+    assert.equal(
+      await github.getByLabel("Fijnmazige read-only token").inputValue(),
+      "",
+    );
+    assert.doesNotMatch(
+      await github.innerText(),
+      /github_pat_fixture_not_real/,
+    );
     const echo = mcp
       .getByRole("list")
       .first()
@@ -6085,7 +6144,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP secret entry with cleared password field and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP and GitHub secret entry with cleared secret fields and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();
