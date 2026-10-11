@@ -194,6 +194,10 @@ export class SessionMemoryService {
     return Object.keys(this.sessions);
   }
 
+  allMessages(): StoredMessage[] {
+    return Object.values(this.sessions).flatMap((session) => session.messages);
+  }
+
   lastUserMessageAt(): string | null {
     let latest: string | null = null;
     for (const session of Object.values(this.sessions))

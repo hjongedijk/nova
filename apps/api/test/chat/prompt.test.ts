@@ -9,6 +9,7 @@ import {
 import {
   ContextBuilder,
   memorySearchQuery,
+  recurringRequestSuggestion,
 } from "../../src/chat/context-builder.service.js";
 
 describe("NOVA's conversational identity", () => {
@@ -80,6 +81,47 @@ describe("calm response to a shared mood", () => {
   });
 });
 
+describe("habit-based automation suggestions", () => {
+  it("suggests only after the exact request repeats on three local days at the same hour", () => {
+    const history = [
+      {
+        role: "user" as const,
+        content: "Wat is het weer buiten vandaag?",
+        at: "2026-10-09T17:00:00.000Z",
+      },
+      {
+        role: "user" as const,
+        content: "Wat is het weer buiten vandaag?",
+        at: "2026-10-10T17:00:00.000Z",
+      },
+    ];
+    expect(
+      recurringRequestSuggestion(
+        history,
+        "Wat is het weer buiten vandaag?",
+        new Date("2026-10-11T17:00:00.000Z"),
+        "Europe/Amsterdam",
+      ),
+    ).toContain("do not create a timer");
+    expect(
+      recurringRequestSuggestion(
+        history,
+        "Wat is het weer buiten vandaag?",
+        new Date("2026-10-11T15:00:00.000Z"),
+        "Europe/Amsterdam",
+      ),
+    ).toBeNull();
+    expect(
+      recurringRequestSuggestion(
+        history,
+        "Wat is het token buiten vandaag?",
+        new Date("2026-10-11T17:00:00.000Z"),
+        "Europe/Amsterdam",
+      ),
+    ).toBeNull();
+  });
+});
+
 describe("voice response style", () => {
   it("keeps quiet-hours answers brief without changing typed chat", () => {
     expect(responseStyle("voice", true)).toContain(
@@ -137,6 +179,7 @@ describe("code role personality boundary", () => {
     const session = {
       relevant: () => [],
       recent: () => [],
+      allMessages: () => [],
       context: () => [],
     };
     const builder = new ContextBuilder(

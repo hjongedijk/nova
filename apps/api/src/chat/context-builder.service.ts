@@ -12,6 +12,7 @@ import { SYSTEM_PROMPT } from "./prompt.js";
 import type { CommunicationPreference, ModelRoleId } from "@nova/contracts";
 import { socialTimeContext } from "./social-time.js";
 import { sanitize } from "../core/security/sanitize.js";
+import type { StoredMessage } from "../memory/session-memory.service.js";
 
 const PRIOR_CONVERSATION_REFERENCE =
   /\b(gisteren|gister|eerder|vorige keer|vorige gesprek|zoals we bespraken|zoals besproken|wat hadden we|wat zei ik|last time|yesterday|earlier conversation|as we discussed|what did we decide)\b/i;
@@ -21,6 +22,68 @@ export function memorySearchQuery(message: string): string {
   return PRIOR_CONVERSATION_REFERENCE.test(message)
     ? `${message} gesprekssamenvatting eerdere gesprekken besluiten voortgang`
     : message;
+}
+
+const RECURRING_REQUEST_SECRET =
+  /(?:password|wachtwoord|api[ _-]?key|token|secret|credential|private key|bearer)\b/i;
+const DAY_MS = 86_400_000;
+
+/** Suggest automation only on the third matching local day in the same local hour. */
+export function recurringRequestSuggestion(
+  history: StoredMessage[],
+  message: string,
+  now: Date,
+  timezone: string,
+): string | null {
+  const normalized = message
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (normalized.length < 12 || RECURRING_REQUEST_SECRET.test(message))
+    return null;
+  const localTime = (date: Date) =>
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date);
+  const parts = localTime(now);
+  const part = (type: string) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  const today = `${part("year")}-${part("month")}-${part("day")}`;
+  const hour = part("hour");
+  const dates = new Set<string>([today]);
+  for (const item of history) {
+    if (item.role !== "user" || item.content.length > 2000) continue;
+    const prior = item.content
+      .toLocaleLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (prior !== normalized || RECURRING_REQUEST_SECRET.test(item.content))
+      continue;
+    const timestamp = Date.parse(item.at);
+    if (
+      !Number.isFinite(timestamp) ||
+      timestamp > now.getTime() ||
+      now.getTime() - timestamp > 7 * DAY_MS
+    )
+      continue;
+    const recordParts = localTime(new Date(timestamp));
+    const recordPart = (type: string) =>
+      recordParts.find((entry) => entry.type === type)?.value ?? "";
+    if (recordPart("hour") !== hour) continue;
+    dates.add(
+      `${recordPart("year")}-${recordPart("month")}-${recordPart("day")}`,
+    );
+  }
+  return dates.size === 3
+    ? `Possible routine: the user asked the exact same thing on three separate days around ${hour}:00 local time. If it fits naturally, offer to help schedule or automate it. This is only a suggestion: do not create a timer, schedule or automation unless the user explicitly asks.`
+    : null;
 }
 
 /**
@@ -81,6 +144,16 @@ export class ContextBuilder {
       this.session.relevant(sessionId, message, 6),
     );
     if (note) messages.push({ role: "system", content: note });
+
+    if (role === "conversation") {
+      const suggestion = recurringRequestSuggestion(
+        this.session.allMessages(),
+        message,
+        new Date(),
+        this.config.timezone,
+      );
+      if (suggestion) messages.push({ role: "system", content: suggestion });
+    }
 
     // What the user set on the settings screen: their own rules, and the playbooks that fit this request.
     const persona =
