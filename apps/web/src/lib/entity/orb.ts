@@ -5,7 +5,9 @@ import {
   type Modulation,
   type ParticleShape,
 } from "./entity.ts";
+import type { AssistantMood } from "#lib/stores/chat.svelte.ts";
 import type { Look } from "./states.ts";
+import { idleGlance } from "./orb-motion.ts";
 
 /**
  * The helper's small orb is the main entity (entity.ts) in compact mode: the same renderer, palette, filaments,
@@ -18,6 +20,7 @@ import type { Look } from "./states.ts";
 export interface OrbHost {
   canvas: HTMLCanvasElement;
   state(): UiState;
+  mood?(): AssistantMood;
   /** Open confirmations and warnings: the orb waits nervously in orange while this is above zero. */
   intensity(): number;
   shape?(): "orb" | "ring" | "mist";
@@ -227,8 +230,12 @@ export function startOrb(host: OrbHost): OrbHandle {
 
       const sq = squash.step(0, dt, 170, 11);
       const lift = hop.step(0, dt, 120, 9);
-      lookX.step(pointer.x * 0.35, dt, 90, 13);
-      lookY.step(pointer.y * 0.35, dt, 90, 13);
+      const glance =
+        state === "ready" && !hovered && !asleep && !waiting
+          ? idleGlance(t)
+          : { x: 0, y: 0 };
+      lookX.step(pointer.x * 0.35 + glance.x * calm, dt, 90, 13);
+      lookY.step(pointer.y * 0.35 + glance.y * calm, dt, 90, 13);
 
       const shake =
         now < shakeUntil
@@ -284,6 +291,7 @@ export function startOrb(host: OrbHost): OrbHandle {
   const stopEntity = startEntity({
     canvas: host.canvas,
     state: host.state,
+    mood: host.mood,
     intensity: host.intensity,
     compact: { life },
   });
