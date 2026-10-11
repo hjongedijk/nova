@@ -52,6 +52,20 @@ describe("helper preference history", () => {
       morning: { enabled: false, time: "08:00" },
       evening: { enabled: false, time: "22:00" },
       checkIn: { enabled: false, afterHours: 4 },
+      weeklyOverview: { enabled: false, time: "18:00" },
+      calendarReminders: { enabled: false, minutesBefore: 15 },
+    });
+    const legacy = normalize({
+      ...preferences,
+      rituals: {
+        morning: preferences.rituals!.morning,
+        evening: preferences.rituals!.evening,
+        checkIn: preferences.rituals!.checkIn,
+      },
+    } as HelperPreferences);
+    expect(legacy.rituals?.calendarReminders).toEqual({
+      enabled: false,
+      minutesBefore: 15,
     });
     expect(() =>
       normalize({

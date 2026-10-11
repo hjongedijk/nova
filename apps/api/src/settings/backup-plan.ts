@@ -227,12 +227,21 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
     ? object(body.rituals)
     : undefined;
   if (rituals) {
-    exactKeys(rituals, ["morning", "evening", "checkIn"], ["weeklyOverview"]);
+    exactKeys(
+      rituals,
+      ["morning", "evening", "checkIn"],
+      ["weeklyOverview", "calendarReminders"],
+    );
     exactKeys(object(rituals.morning), ["enabled", "time"]);
     exactKeys(object(rituals.evening), ["enabled", "time"]);
     exactKeys(object(rituals.checkIn), ["enabled", "afterHours"]);
     if (Object.hasOwn(rituals, "weeklyOverview"))
       exactKeys(object(rituals.weeklyOverview), ["enabled", "time"]);
+    if (Object.hasOwn(rituals, "calendarReminders"))
+      exactKeys(object(rituals.calendarReminders), [
+        "enabled",
+        "minutesBefore",
+      ]);
   }
   if (notifications)
     exactKeys(notifications, ["info", "warning", "critical", "timer"]);

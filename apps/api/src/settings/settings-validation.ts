@@ -284,6 +284,8 @@ export function normalizeHelperPreferences(
   const checkIn = rituals?.checkIn as Record<string, unknown> | undefined;
   const weeklyOverview = rituals?.weeklyOverview as
     Record<string, unknown> | undefined;
+  const calendarReminders = rituals?.calendarReminders as
+    Record<string, unknown> | undefined;
   if (
     rituals !== undefined &&
     (!rituals || typeof rituals !== "object" || Array.isArray(rituals))
@@ -292,13 +294,19 @@ export function normalizeHelperPreferences(
   if (rituals) {
     if (
       Object.keys(rituals)
-        .filter((key) => key !== "weeklyOverview")
+        .filter(
+          (key) => key !== "weeklyOverview" && key !== "calendarReminders",
+        )
         .sort()
         .join(",") !== "checkIn,evening,morning" ||
       (rituals.weeklyOverview !== undefined &&
         (!weeklyOverview ||
           typeof weeklyOverview !== "object" ||
-          Array.isArray(weeklyOverview)))
+          Array.isArray(weeklyOverview))) ||
+      (rituals.calendarReminders !== undefined &&
+        (!calendarReminders ||
+          typeof calendarReminders !== "object" ||
+          Array.isArray(calendarReminders)))
     )
       throw new ValidationError(["Ongeldige ritueelinstellingen."]);
     for (const [item, field] of [
@@ -323,8 +331,23 @@ export function normalizeHelperPreferences(
       )
         throw new ValidationError(["Ongeldige ritueelinstellingen."]);
     }
+    if (calendarReminders) {
+      if (
+        Object.keys(calendarReminders).sort().join(",") !==
+          "enabled,minutesBefore" ||
+        typeof calendarReminders.enabled !== "boolean" ||
+        ![5, 15, 30].includes(calendarReminders.minutesBefore as number)
+      )
+        throw new ValidationError(["Ongeldige ritueelinstellingen."]);
+    }
   }
-  for (const item of [morning, evening, checkIn, weeklyOverview])
+  for (const item of [
+    morning,
+    evening,
+    checkIn,
+    weeklyOverview,
+    calendarReminders,
+  ])
     if (item && item.enabled !== undefined && typeof item.enabled !== "boolean")
       throw new ValidationError(["Ongeldige ritueelinstellingen."]);
   if (
@@ -421,6 +444,12 @@ export function normalizeHelperPreferences(
       weeklyOverview: {
         enabled: weeklyOverview?.enabled === true,
         time: ritualTime(weeklyOverview?.time, "18:00"),
+      },
+      calendarReminders: {
+        enabled: calendarReminders?.enabled === true,
+        minutesBefore: (calendarReminders?.minutesBefore === undefined
+          ? 15
+          : calendarReminders.minutesBefore) as 5 | 15 | 30,
       },
     },
     cues: {

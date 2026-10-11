@@ -15,6 +15,7 @@ import {
 import { CalDavService } from "../planning/caldav.service.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { normalizeHelperPreferences } from "../settings/settings-validation.js";
+import { SettingsStore } from "../settings/store/settings.store.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
 import {
   OmniRouteClient,
@@ -115,7 +116,7 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly config: NovaConfig,
-    private readonly settings: import("../settings/store/settings.store.js").SettingsStore,
+    private readonly settings: SettingsStore,
     private readonly session: SessionMemoryService,
     private readonly audit: AuditService,
     private readonly calendar: CalDavService,

@@ -61,6 +61,18 @@ describe("NOVA's conversational identity", () => {
   });
 });
 
+describe("email handling", () => {
+  it("limits mailbox answers to a safe read-only summary", () => {
+    expect(SYSTEM_PROMPT).toContain(
+      "For a mail summary, use only the read-only IMAP tools",
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      "sender, subject, and a short gist; do not quote the body",
+    );
+    expect(SYSTEM_PROMPT).toContain("never claim to have drafted or sent mail");
+  });
+});
+
 describe("calm response to a shared mood", () => {
   it("treats mood statements as conversation, even when they mention live topics", () => {
     expect(

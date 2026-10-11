@@ -27,6 +27,7 @@ import { WeatherDepartureAlertService } from "./weather-departure-alert.service.
 import { NtfyPushService } from "./ntfy-push.service.js";
 import { RitualsService } from "./rituals.service.js";
 import { WeeklyOverviewService } from "./weekly-overview.service.js";
+import { CalendarReminderService } from "./calendar-reminder.service.js";
 
 /** Home-screen data: this machine, the side panels, the unasked-for alerts, and the health of everything. */
 @Module({
@@ -60,6 +61,7 @@ import { WeeklyOverviewService } from "./weekly-overview.service.js";
     NtfyPushService,
     RitualsService,
     WeeklyOverviewService,
+    CalendarReminderService,
   ],
   exports: [HostMetricsService, OverviewService, IntegrationsHealth],
 })

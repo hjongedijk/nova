@@ -77,6 +77,14 @@ function describe(action: Pick<PendingConfirmation, "tool" | "args">): {
     };
   if (action.tool === "windows_lock")
     return { nl: "je pc vergrendelen", en: "lock your PC" };
+  if (action.tool === "calendar_create") {
+    const phrase = `de afspraak “${a.summary}” in je agenda zetten van ${a.start} tot ${a.end}`;
+    return { nl: phrase, en: phrase };
+  }
+  if (action.tool === "calendar_move") {
+    const phrase = `de afspraak “${a.summary}” verplaatsen van ${a.oldStart} naar ${a.newStart} tot ${a.newEnd}`;
+    return { nl: phrase, en: phrase };
+  }
   if (action.tool.startsWith("list_"))
     return {
       nl: `de lijst ${a.list} leegmaken`,

@@ -19,7 +19,10 @@ export function calendarDateKey(date: Date, timeZone: string): string {
   return `${p.year}-${p.month}-${p.day}`;
 }
 
-function wallTimeAsInstant(value: string, timeZone: string): Date | null {
+export function wallTimeAsInstant(
+  value: string,
+  timeZone: string,
+): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/.exec(value);
   if (!match) return null;
   try {
@@ -43,6 +46,19 @@ function wallTimeAsInstant(value: string, timeZone: string): Date | null {
     // An invalid remote TZID cannot invalidate the rest of the agenda summary.
     return null;
   }
+}
+
+/** Resolves a CalDAV wall-time or offset timestamp to an instant for reminders and edits. */
+export function calendarEventStartInstant(
+  event: Pick<CalendarEvent, "start" | "timeZone" | "allDay">,
+  fallbackTimeZone: string,
+): Date | null {
+  if (event.allDay) return null;
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(event.start)) {
+    const instant = new Date(event.start);
+    return Number.isFinite(instant.getTime()) ? instant : null;
+  }
+  return wallTimeAsInstant(event.start, event.timeZone || fallbackTimeZone);
 }
 
 /** Selects calendar events whose start falls on the next local calendar day. */

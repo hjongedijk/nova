@@ -792,10 +792,28 @@
                 bind:value={helper.rituals.weeklyOverview.time}
               /></label
             >
+            <label
+              ><input
+                type="checkbox"
+                bind:checked={helper.rituals.calendarReminders.enabled}
+              /> Agenda-herinneringen</label
+            >
+            <label
+              >Vooraf
+              <select
+                bind:value={helper.rituals.calendarReminders.minutesBefore}
+              >
+                <option value={5}>5 minuten</option>
+                <option value={15}>15 minuten</option>
+                <option value={30}>30 minuten</option>
+              </select>
+            </label>
             <p class="hint">
               Rituelen komen als gewone melding en volgen je meldingskeuze,
-              stille uren en aanwezigheid. Het weekoverzicht gebruikt alleen de
-              gratis gecontroleerde samenvattingsroute.
+              stille uren en aanwezigheid. Agenda-herinneringen staan standaard
+              uit en werken als je een kalender hebt gekoppeld. Het
+              weekoverzicht gebruikt alleen de gratis gecontroleerde
+              samenvattingsroute.
             </p>
           </fieldset>
           <details>

@@ -114,8 +114,18 @@ describe("tools", () => {
       list_remove: "SAFE",
       list_clear: "CONFIRM",
       calendar_events: "READ_ONLY",
+      calendar_create: "CONFIRM",
+      calendar_move: "CONFIRM",
       daily_briefing: "READ_ONLY",
     });
+    const calendarWrites = source
+      .definitions()
+      .filter((d) => d.name.startsWith("calendar_") && d.risk === "CONFIRM");
+    expect(
+      calendarWrites.every(
+        (definition) => definition.allowStandingApproval === false,
+      ),
+    ).toBe(true);
   });
 
   it("timers: set, list, cancel by label, and sensible refusals", async () => {
