@@ -1,4 +1,4 @@
-import type { UiState } from "#lib/stores/chat.svelte.ts";
+import type { AssistantMood, UiState } from "#lib/stores/chat.svelte.ts";
 
 /** Look and motion of the sphere per state (hue, saturation, lightness, radius, ripple, ...). */
 export interface Look {
@@ -15,6 +15,22 @@ export interface Look {
   orb: number;
   hud: number;
 }
+
+export const MOOD_LABELS: Record<AssistantMood, string> = {
+  happy: "Blij",
+  thoughtful: "Nadenkend",
+  concerned: "Bezorgd",
+  enthusiastic: "Enthousiast",
+  neutral: "Rustig",
+};
+
+export const MOOD_LOOKS: Record<AssistantMood, Partial<Look>> = {
+  happy: { h: 45, s: 88, l: 73, glow: 0.58 },
+  thoughtful: { h: 265, s: 58, l: 70, glow: 0.58 },
+  concerned: { h: 30, s: 52, l: 65, glow: 0.44 },
+  enthusiastic: { h: 330, s: 82, l: 76, glow: 0.78, wave: 0.16 },
+  neutral: {},
+};
 
 export const STATES: Record<UiState, Look> = {
   ready: {

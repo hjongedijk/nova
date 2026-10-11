@@ -4,7 +4,13 @@ import type { UiState } from "#lib/stores/chat.svelte.ts";
 import { dashboard, guests } from "#lib/stores/dashboard.svelte.ts";
 import { audioLevel as voiceLevel } from "#lib/stores/audio-level.svelte.ts";
 import { voiceSpectrum } from "#lib/voice/audio.ts";
-import { ALERT, STATES, type Look } from "./states.ts";
+import {
+  ALERT,
+  MOOD_LOOKS,
+  STATES,
+  type AssistantMood,
+  type Look,
+} from "./states.ts";
 
 /**
  * THE ENTITY. One particle body on a full-screen canvas; its colour and motion are its state.
@@ -16,6 +22,7 @@ import { ALERT, STATES, type Look } from "./states.ts";
 export interface EntityHost {
   canvas: HTMLCanvasElement;
   state(): UiState;
+  mood?(): AssistantMood;
   /** Open confirmations plus open warnings: the entity turns red and beats while this is above zero. */
   intensity(): number;
   /** The invisible button over the sphere; it follows the body. */
@@ -224,7 +231,12 @@ export function startEntity(host: EntityHost): () => void {
     const spectrum = voiceSpectrum();
     const analyser = spectrum?.analyser ?? null;
     const freq = spectrum?.freq ?? null;
-    const base = STATES[uiState] || STATES.ready;
+    const stateLook = STATES[uiState] || STATES.ready;
+    const moodLook =
+      (uiState === "ready" || uiState === "speaking") && host.mood
+        ? MOOD_LOOKS[host.mood()]
+        : null;
+    const base = moodLook ? { ...stateLook, ...moodLook } : stateLook;
     const mod = compact ? compact.life.update(t, dt, audioLevel) : null;
     const target: Look = {
       ...(intensity > 0

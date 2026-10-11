@@ -3,6 +3,7 @@
   import AdminDialog from "#components/admin/AdminDialog.svelte";
   import Column from "#components/hud/Column.svelte";
   import Composer from "#components/shell/Composer.svelte";
+  import WorkspaceCodePanel from "#components/shell/WorkspaceCodePanel.svelte";
   import Entity from "#components/shell/Entity.svelte";
   import Header from "#components/shell/Header.svelte";
   import HistoryDrawer from "#components/shell/HistoryDrawer.svelte";
@@ -25,6 +26,22 @@
   import { initRecognition } from "#lib/voice/recognition.ts";
   import { installAudioUnlock } from "#lib/voice/unlock.ts";
   import { initWake } from "#lib/voice/wake.ts";
+  import { beginPushToTalk, finishListening } from "#lib/voice/core.ts";
+  let pushToTalkHeld = false;
+
+  function handleKeyDown(event: KeyboardEvent): void {
+    if (event.code !== "F8" || event.repeat || pushToTalkHeld) return;
+    pushToTalkHeld = true;
+    event.preventDefault();
+    beginPushToTalk();
+  }
+
+  function handleKeyUp(event: KeyboardEvent): void {
+    if (event.code !== "F8" || !pushToTalkHeld) return;
+    pushToTalkHeld = false;
+    event.preventDefault();
+    finishListening();
+  }
 
   // What the CSS needs on <body>: the entity's state and colour, the controls, the info panels.
   $effect(() => {
@@ -55,6 +72,8 @@
   });
 </script>
 
+<svelte:window onkeydown={handleKeyDown} onkeyup={handleKeyUp} />
+
 <Entity />
 <Column side="left" />
 <Column side="right" />
@@ -67,3 +86,4 @@
 <HistoryDrawer />
 <SettingsDialog />
 <AdminDialog />
+<WorkspaceCodePanel />

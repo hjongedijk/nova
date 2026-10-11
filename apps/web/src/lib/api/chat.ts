@@ -1,5 +1,7 @@
 import type { ChatRequest, ConfirmResult } from "@nova/contracts";
 import { sendJson } from "./client.ts";
+import { ttsProsodyForMood, ttsVoice } from "#lib/voice/voice-preference.ts";
+import type { AssistantMood } from "#lib/stores/chat.svelte.ts";
 
 /**
  * POST /api/chat-stream. Returns the open response (Server-Sent Events) for lib/chat to read;
@@ -38,11 +40,16 @@ export async function openChatStream(
 export async function fetchSpeech(
   text: string,
   signal?: AbortSignal,
+  mood: AssistantMood = "neutral",
 ): Promise<Blob> {
   const response = await fetch("/api/tts", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({
+      text,
+      voice: ttsVoice(),
+      prosody: ttsProsodyForMood(mood),
+    }),
     signal,
   });
   if (!response.ok) {
