@@ -40,6 +40,28 @@ describe("AlertsFeed presence delivery", () => {
     expect(feed.recent().events[0]).not.toHaveProperty("speakAllowed");
   });
 
+  it("limits unsolicited speech to five events per rolling hour without hiding alerts", () => {
+    const feed = new AlertsFeed({
+      onEvent: () => () => undefined,
+    } as unknown as PlanningService);
+    const start = new Date("2026-10-11T12:00:00.000Z");
+    for (let index = 0; index < 5; index++)
+      feed.record(event, new Date(start.getTime() + index * 60_000));
+    feed.record(event, new Date(start.getTime() + 10 * 60_000));
+
+    expect(feed.recent().events).toHaveLength(6);
+    expect(
+      feed
+        .recent()
+        .events.slice(0, 5)
+        .every((item) => !item.speakAllowed),
+    ).toBe(true);
+    expect(feed.recent().events[5]).toMatchObject({ speakAllowed: false });
+
+    feed.record(event, new Date(start.getTime() + 60 * 60_000));
+    expect(feed.recent().events[6]).not.toHaveProperty("speakAllowed");
+  });
+
   it("sends only critical alerts to the optional phone push service", () => {
     const ntfy = {
       notify: vi.fn(async () => undefined),

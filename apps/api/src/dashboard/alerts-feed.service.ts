@@ -17,6 +17,8 @@ import { NtfyPushService } from "./ntfy-push.service.js";
 
 const SEVERITIES = new Set(["info", "warning", "critical"]);
 const MAX_EVENTS = 50;
+const MAX_SPOKEN_EVENTS_PER_HOUR = 5;
+const SPOKEN_EVENT_WINDOW_MS = 60 * 60_000;
 
 const text = (value: unknown, max: number) =>
   typeof value === "string" ? sanitize(value).slice(0, max) : "";
@@ -69,6 +71,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   private readonly feed: FeedEvent[] = [];
   private sequence = 0;
   private stop?: () => void;
+  private readonly spokenEventTimes: number[] = [];
 
   constructor(
     private readonly planning: PlanningService,
@@ -85,13 +88,29 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     this.stop?.();
   }
 
-  record(event: InfrastructureEvent): FeedEvent | null {
+  record(event: InfrastructureEvent, now = new Date()): FeedEvent | null {
     const entry = toFeedEvent(event);
     if (!entry) return null;
+    const voiceEligible = entry.kind === "timer" || entry.severity !== "info";
+    const timestamp = now.getTime();
+    while (
+      this.spokenEventTimes[0] !== undefined &&
+      timestamp - this.spokenEventTimes[0] >= SPOKEN_EVENT_WINDOW_MS
+    )
+      this.spokenEventTimes.shift();
+    const presenceAllowsSpeech = this.presence?.maySpeak() !== false;
+    const withinSpeechBudget =
+      !voiceEligible ||
+      !presenceAllowsSpeech ||
+      this.spokenEventTimes.length < MAX_SPOKEN_EVENTS_PER_HOUR;
+    if (voiceEligible && presenceAllowsSpeech && withinSpeechBudget)
+      this.spokenEventTimes.push(timestamp);
     const stored: FeedEvent = {
       seq: ++this.sequence,
       ...entry,
-      ...(this.presence?.maySpeak() === false ? { speakAllowed: false } : {}),
+      ...(!presenceAllowsSpeech || !withinSpeechBudget
+        ? { speakAllowed: false }
+        : {}),
     };
     this.feed.push(stored);
     if (this.feed.length > MAX_EVENTS) this.feed.shift();
