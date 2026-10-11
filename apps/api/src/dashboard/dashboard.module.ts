@@ -11,6 +11,7 @@ import { MemoryModule } from "../memory/memory.module.js";
 import { PlanningModule } from "../planning/planning.module.js";
 import { ProxmoxModule } from "../proxmox/proxmox.module.js";
 import { RoutingModule } from "../routing/routing.module.js";
+import { SettingsStoreModule } from "../settings/store/settings-store.module.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
 import { DashboardController } from "./dashboard.controller.js";
 import { HostMetricsService } from "./host-metrics.service.js";
@@ -40,6 +41,7 @@ import { NtfyPushService } from "./ntfy-push.service.js";
     PangolinModule,
     WindowsModule,
     BrowserAgentModule,
+    SettingsStoreModule,
   ],
   controllers: [DashboardController, NodeRedEventsController],
   providers: [

@@ -84,7 +84,8 @@ import assert from "node:assert/strict";
       });
       let kind = "answer",
         fail = false,
-        request;
+        request,
+        savedNotificationModes;
       const errors = [];
       let resizeActive = 0,
         maxResizeActive = 0;
@@ -144,12 +145,22 @@ import assert from "node:assert/strict";
       await page.route("**/api/tts", (route) =>
         route.fulfill({ status: 503, body: "test voice disabled" }),
       );
-      await page.route("**/api/settings/helper/preferences", (route) =>
-        route.fulfill({
+      await page.route("**/api/settings/helper/preferences", (route) => {
+        if (route.request().method() === "PUT") {
+          savedNotificationModes = route.request().postDataJSON().notifications;
+          return route.fulfill({ json: { ok: true } });
+        }
+        return route.fulfill({
           json: {
             autohide: false,
             contrast: false,
             shape: "orb",
+            notifications: {
+              info: "helper",
+              warning: "speak",
+              critical: "speak",
+              timer: "speak",
+            },
             cues: {
               enabled: false,
               volume: 0.35,
@@ -157,8 +168,8 @@ import assert from "node:assert/strict";
               quiet: { enabled: false, start: "22:00", end: "07:00" },
             },
           },
-        }),
-      );
+        });
+      });
       await page.route("**/api/settings/helper/size", async (route) => {
         resizeActive++;
         maxResizeActive = Math.max(maxResizeActive, resizeActive);
@@ -324,6 +335,23 @@ import assert from "node:assert/strict";
         .getByRole("button", { name: "Helperinstellingen", exact: true })
         .click();
       await snap("preferences", 640, 180);
+      await page.getByLabel("Waarschuwing").selectOption("helper");
+      await page.getByLabel("Kritiek").selectOption("screen");
+      const preferencesSaved = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PUT" &&
+          response.url().includes("/api/settings/helper/preferences"),
+      );
+      await page
+        .getByRole("button", { name: "Instellingen opslaan", exact: true })
+        .click();
+      await preferencesSaved;
+      assert.deepEqual(savedNotificationModes, {
+        info: "helper",
+        warning: "helper",
+        critical: "screen",
+        timer: "speak",
+      });
       await page
         .getByRole("checkbox", { name: "Hoog contrast", exact: true })
         .check();

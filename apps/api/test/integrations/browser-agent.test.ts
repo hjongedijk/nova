@@ -180,7 +180,7 @@ describe("BrowserAgentService", () => {
     });
     const out = await browser.execute("browser_read", {}, call());
     expect(out.ok).toBe(false);
-    expect(out.error).toMatch(/jarvis-agent\.ps1/);
+    expect(out.error).toMatch(/nova-agent\.ps1/);
   });
 
   it("a timeout is reported as the browser not answering", async () => {

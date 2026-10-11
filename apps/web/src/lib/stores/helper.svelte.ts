@@ -1,6 +1,7 @@
 import { SvelteDate } from "svelte/reactivity";
 import { storage } from "#lib/util/storage.ts";
 import type { OrbEvent } from "#lib/entity/orb.ts";
+import type { NotificationModes } from "@nova/contracts";
 import {
   HELPER_CUE_NAMES,
   type CuePreferences,
@@ -13,6 +14,12 @@ export const helper = $state({
     birthday: string;
   },
   shape: "orb" as "orb" | "ring" | "mist",
+  notifications: {
+    info: "helper",
+    warning: "speak",
+    critical: "speak",
+    timer: "speak",
+  } as NotificationModes,
   event: "greet" as OrbEvent,
   eventId: 0,
   cues: {
@@ -36,6 +43,14 @@ export function loadHelperPreferences(): void {
     const saved = value as Record<string, unknown>;
     if (["orb", "ring", "mist"].includes(String(saved.shape)))
       helper.shape = saved.shape as typeof helper.shape;
+    if (saved.notifications && typeof saved.notifications === "object") {
+      const notifications = saved.notifications as Record<string, unknown>;
+      for (const kind of ["info", "warning", "critical", "timer"] as const)
+        if (["screen", "helper", "speak"].includes(String(notifications[kind])))
+          helper.notifications[kind] = notifications[
+            kind
+          ] as (typeof helper.notifications)[typeof kind];
+    }
     if (saved.wardrobe && typeof saved.wardrobe === "object") {
       const wardrobe = saved.wardrobe as Record<string, unknown>;
       if (
@@ -88,6 +103,7 @@ export function saveHelperPreferences(): void {
     "nova.helper.personality",
     JSON.stringify({
       shape: helper.shape,
+      notifications: helper.notifications,
       cues: helper.cues,
       wardrobe: helper.wardrobe,
     }),

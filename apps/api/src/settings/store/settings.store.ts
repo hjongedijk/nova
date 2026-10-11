@@ -86,6 +86,12 @@ const blank = (): NovaSettings => ({
     autohide: true,
     contrast: false,
     shape: "orb",
+    notifications: {
+      info: "helper",
+      warning: "speak",
+      critical: "speak",
+      timer: "speak",
+    },
     cues: {
       enabled: true,
       volume: 0.35,

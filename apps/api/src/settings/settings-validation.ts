@@ -213,6 +213,8 @@ export function normalizeHelperPreferences(
   const shape = body?.shape;
   const cues = body?.cues as Record<string, unknown> | undefined;
   const quiet = cues?.quiet as Record<string, unknown> | undefined;
+  const notifications = body?.notifications as
+    Record<string, unknown> | undefined;
   if (
     typeof body?.autohide !== "boolean" ||
     typeof body.contrast !== "boolean" ||
@@ -282,6 +284,12 @@ export function normalizeHelperPreferences(
     autohide: body.autohide,
     contrast: body.contrast,
     shape: shape as HelperPreferences["shape"],
+    notifications: {
+      info: notificationMode(notifications?.info, "helper"),
+      warning: notificationMode(notifications?.warning, "speak"),
+      critical: notificationMode(notifications?.critical, "speak"),
+      timer: notificationMode(notifications?.timer, "speak"),
+    },
     cues: {
       enabled: cues.enabled,
       volume: cues.volume,
@@ -295,4 +303,14 @@ export function normalizeHelperPreferences(
     },
   };
   return preferences;
+}
+
+function notificationMode(
+  value: unknown,
+  fallback: "screen" | "helper" | "speak",
+): "screen" | "helper" | "speak" {
+  if (value === undefined) return fallback;
+  if (value === "screen" || value === "helper" || value === "speak")
+    return value;
+  throw new ValidationError(["Ongeldige meldingsvoorkeur."]);
 }

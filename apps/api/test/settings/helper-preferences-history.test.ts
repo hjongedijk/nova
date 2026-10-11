@@ -30,6 +30,26 @@ function fixture() {
 }
 
 describe("helper preference history", () => {
+  it("keeps legacy delivery defaults and rejects unknown notification modes", () => {
+    const f = fixture();
+    const preferences = normalize(f.settings.get().helperPreferences);
+    expect(preferences.notifications).toEqual({
+      info: "helper",
+      warning: "speak",
+      critical: "speak",
+      timer: "speak",
+    });
+    expect(() =>
+      normalize({
+        ...preferences,
+        notifications: {
+          ...preferences.notifications!,
+          critical: "email" as never,
+        },
+      }),
+    ).toThrow("Ongeldige meldingsvoorkeur.");
+  });
+
   it("stores secret-free bounded revisions with private file permissions", () => {
     const f = fixture();
     const before = normalize(f.settings.get().helperPreferences);

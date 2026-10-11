@@ -624,6 +624,13 @@ export interface WindowsHelperDebugStatus {
 }
 
 /** Non-secret helper appearance and sound preferences, persisted by NOVA. */
+export type NotificationMode = "screen" | "helper" | "speak";
+export interface NotificationModes {
+  info: NotificationMode;
+  warning: NotificationMode;
+  critical: NotificationMode;
+  timer: NotificationMode;
+}
 export interface HelperPreferences {
   wardrobe?: {
     theme: "nova" | "violet" | "gold";
@@ -633,6 +640,7 @@ export interface HelperPreferences {
   autohide: boolean;
   contrast: boolean;
   shape: "orb" | "ring" | "mist";
+  notifications?: NotificationModes;
   cues: {
     enabled: boolean;
     volume: number;

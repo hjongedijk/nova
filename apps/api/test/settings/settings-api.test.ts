@@ -722,6 +722,7 @@ describe("the settings API", () => {
         "caldav",
         "context7",
         "filesystem",
+        "github",
         "imap",
         "sequential-thinking",
       ]);
@@ -2373,6 +2374,12 @@ describe("the helper overlay choice", () => {
       autohide: true,
       contrast: false,
       shape: "orb",
+      notifications: {
+        info: "helper",
+        warning: "speak",
+        critical: "speak",
+        timer: "speak",
+      },
       cues: {
         enabled: true,
         volume: 0.35,
@@ -2385,6 +2392,12 @@ describe("the helper overlay choice", () => {
       autohide: false,
       contrast: true,
       shape: "ring",
+      notifications: {
+        info: "screen",
+        warning: "helper",
+        critical: "speak",
+        timer: "speak",
+      },
       cues: {
         enabled: true,
         volume: 0.7,

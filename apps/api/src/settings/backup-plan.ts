@@ -198,7 +198,11 @@ function exactKeys(
 
 function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
   const body = object(value);
-  exactKeys(body, ["autohide", "contrast", "shape", "cues"], ["wardrobe"]);
+  exactKeys(
+    body,
+    ["autohide", "contrast", "shape", "cues"],
+    ["wardrobe", "notifications"],
+  );
   const cues = object(body.cues);
   exactKeys(cues, ["enabled", "volume", "theme", "quiet"], ["cues"]);
   const quiet = object(cues.quiet);
@@ -211,6 +215,11 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
   )
     fail("De helperinstellingen bevatten ongeldige waarden.");
   const perCue = Object.hasOwn(cues, "cues") ? object(cues.cues) : undefined;
+  const notifications = Object.hasOwn(body, "notifications")
+    ? object(body.notifications)
+    : undefined;
+  if (notifications)
+    exactKeys(notifications, ["info", "warning", "critical", "timer"]);
   let wardrobe: Record<string, unknown> | undefined;
   if (Object.hasOwn(body, "wardrobe")) {
     const raw = object(body.wardrobe);
@@ -226,6 +235,7 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
     autohide: body.autohide,
     contrast: body.contrast,
     shape: body.shape,
+    ...(notifications ? { notifications } : {}),
     cues: {
       enabled: cues.enabled,
       volume: cues.volume,

@@ -49,7 +49,7 @@ export interface FeedEvent {
   label?: string;
   key?: string;
   at: string;
-  /** False when cached presence signals establish there is nobody available to hear it. */
+  /** Whether policy allows speech: checks the selected mode, presence, and hourly budget. */
   speakAllowed?: boolean;
 }
 

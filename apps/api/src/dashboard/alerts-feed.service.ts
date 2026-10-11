@@ -14,6 +14,7 @@ import { WindowsPcService } from "../integrations/windows/windows-pc.service.js"
 import { PlanningService } from "../planning/planning.service.js";
 import { SpeechPresenceService } from "./speech-presence.service.js";
 import { NtfyPushService } from "./ntfy-push.service.js";
+import { SettingsStore } from "../settings/store/settings.store.js";
 
 const SEVERITIES = new Set(["info", "warning", "critical"]);
 const MAX_EVENTS = 50;
@@ -78,6 +79,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly windows?: WindowsPcService,
     @Optional() private readonly presence?: SpeechPresenceService,
     @Optional() private readonly ntfy?: NtfyPushService,
+    @Optional() private readonly settings?: SettingsStore,
   ) {}
 
   onModuleInit(): void {
@@ -91,7 +93,11 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   record(event: InfrastructureEvent, now = new Date()): FeedEvent | null {
     const entry = toFeedEvent(event);
     if (!entry) return null;
-    const voiceEligible = entry.kind === "timer" || entry.severity !== "info";
+    const notifications = this.settings?.get().helperPreferences.notifications;
+    const category = entry.kind === "timer" ? "timer" : entry.severity;
+    const mode =
+      notifications?.[category] ?? (category === "info" ? "helper" : "speak");
+    const voiceEligible = mode === "speak";
     const timestamp = now.getTime();
     while (
       this.spokenEventTimes[0] !== undefined &&
@@ -108,13 +114,12 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     const stored: FeedEvent = {
       seq: ++this.sequence,
       ...entry,
-      ...(!presenceAllowsSpeech || !withinSpeechBudget
-        ? { speakAllowed: false }
-        : {}),
+      speakAllowed:
+        mode === "speak" && presenceAllowsSpeech && withinSpeechBudget,
     };
     this.feed.push(stored);
     if (this.feed.length > MAX_EVENTS) this.feed.shift();
-    if (this.windows?.configured)
+    if (mode !== "screen" && this.windows?.configured)
       void this.windows.notifyHelper(stored).catch(() => undefined);
     if (stored.kind === "alert" && stored.severity === "critical")
       void this.ntfy?.notify(stored).catch(() => undefined);

@@ -5,7 +5,7 @@
     persistHelperPreferences,
   } from "#lib/api/settings.ts";
   import { onMount } from "svelte";
-  import type { FeedEvent } from "@nova/contracts";
+  import type { FeedEvent, NotificationModes } from "@nova/contracts";
   import Orb from "#components/helper/Orb.svelte";
   import HelperUi from "#components/helper/HelperUi.svelte";
   import HelperDevices from "#components/helper/HelperDevices.svelte";
@@ -56,6 +56,13 @@
   import { installAudioUnlock } from "#lib/voice/unlock.ts";
   import { initWake, setWake, cancelAwait } from "#lib/voice/wake.ts";
   import "../../components/helper/helper.css";
+
+  const notificationKinds: { key: keyof NotificationModes; label: string }[] = [
+    { key: "info", label: "Informatie" },
+    { key: "warning", label: "Waarschuwing" },
+    { key: "critical", label: "Kritiek" },
+    { key: "timer", label: "Timer" },
+  ];
 
   type View = "overview" | "chat" | "notifications" | "weather" | "lists";
   let extraViews = $state<("weather" | "lists")[]>([]);
@@ -364,6 +371,7 @@
         autohide = prefs.autohide;
         contrast = prefs.contrast;
         helper.shape = prefs.shape;
+        if (prefs.notifications) helper.notifications = prefs.notifications;
         helper.cues = prefs.cues;
         if (prefs.wardrobe) helper.wardrobe = prefs.wardrobe;
         const today = new Date();
@@ -716,6 +724,19 @@
             type="time"
             bind:value={helper.cues.quiet!.end}
           />
+          <fieldset class="hp-notification-preferences">
+            <legend>Meldingen</legend>
+            {#each notificationKinds as notice (notice.key)}
+              <label
+                >{notice.label}
+                <select bind:value={helper.notifications[notice.key]}>
+                  <option value="screen">Alleen scherm</option>
+                  <option value="helper">Helper met geluidje</option>
+                  <option value="speak">Uitspreken</option>
+                </select>
+              </label>
+            {/each}
+          </fieldset>
           <details>
             <summary>Geluiden kiezen</summary
             >{#each HELPER_CUE_NAMES as name (name)}<label
@@ -754,6 +775,7 @@
                   autohide,
                   contrast,
                   shape: helper.shape,
+                  notifications: helper.notifications,
                   wardrobe: helper.wardrobe,
                   cues: { ...helper.cues, quiet: helper.cues.quiet! },
                 });

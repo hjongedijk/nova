@@ -49,6 +49,12 @@ const helperPreferences: HelperPreferences = {
   autohide: false,
   contrast: true,
   shape: "mist",
+  notifications: {
+    info: "screen",
+    warning: "helper",
+    critical: "speak",
+    timer: "speak",
+  },
   wardrobe: { theme: "gold", seasonal: false, birthday: "10-10" },
   cues: {
     enabled: true,

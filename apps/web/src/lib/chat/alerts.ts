@@ -7,10 +7,20 @@ import { speak } from "#lib/voice/speaker.ts";
 import { addMessage } from "./ask.ts";
 import { chatEvents } from "./events.ts";
 import { showStage } from "./stage.ts";
+import { helper } from "#lib/stores/helper.svelte.ts";
+import { canSpeakFeedEvent } from "#lib/voice/helper-cues.ts";
 
 /** NOVA speaks up by itself, but never over a conversation. */
 function announce(text: string, speakAllowed = true): void {
-  if (!speakAllowed || !shell.voiceAlerts || chat.busy || playback.current)
+  if (
+    !speakAllowed ||
+    !shell.voiceAlerts ||
+    !canSpeakFeedEvent(
+      false,
+      chat.busy || chat.uiState !== "ready" || Boolean(playback.current),
+      helper.cues,
+    )
+  )
     return;
   addMessage("assistant", text);
   showStage("", text, false);
@@ -39,7 +49,7 @@ async function pollAlerts(): Promise<void> {
             : `Je timer voor ${event.label} is afgelopen.`,
           event.speakAllowed !== false,
         );
-      else if (event.severity !== "info")
+      else if (event.speakAllowed === true || event.severity !== "info")
         announce(
           `${event.title}.${event.detail ? ` ${event.detail}` : ""}`,
           event.speakAllowed !== false,
