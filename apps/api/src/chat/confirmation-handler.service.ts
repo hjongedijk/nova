@@ -113,6 +113,8 @@ export class ConfirmationHandler {
         }),
         result,
       };
+    const userResult = { ...result };
+    delete userResult.error;
     return {
       reply:
         language === "en"
@@ -122,15 +124,15 @@ export class ConfirmationHandler {
               ? "Accepted, but I could not verify that it completed."
               : result.ok
                 ? "Done."
-                : `That did not work${result.error ? `: ${result.error}` : "."}`
+                : "That did not work. The action was not completed."
           : result.verified === true
             ? "Gelukt, en ik heb het gecontroleerd."
             : result.accepted
               ? "Aangenomen, maar of het echt gelukt is weet ik nog niet."
               : result.ok
                 ? "Is gedaan."
-                : `Dat is niet gelukt${result.error ? `: ${result.error}` : "."}`,
-      result,
+                : "Dat is niet gelukt. De actie is niet uitgevoerd.",
+      result: userResult,
     };
   }
 }

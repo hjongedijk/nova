@@ -20,6 +20,7 @@ import { readEvents } from "./sse.ts";
 import { showStage } from "./stage.ts";
 import { nextToolInterjection } from "./tool-interjection.ts";
 import { readCommunicationPreferences } from "./communication-preferences.ts";
+import { friendlyChatError } from "./error-copy.ts";
 
 // A few words about what NOVA is doing, so a long task never looks stuck.
 const TOOL_HINTS: [RegExp, { nl: string; en: string }][] = [
@@ -336,10 +337,7 @@ export async function ask(
     }
     const message = (error as Error).message;
     console.warn("Chat request failed:", message);
-    const failure =
-      responseLanguage === "en"
-        ? `Something went wrong: ${message}`
-        : `Er ging iets mis: ${message}`;
+    const failure = friendlyChatError(message, responseLanguage);
     setAssistant(failure);
     showStage(text, failure, false);
     setState("ready");

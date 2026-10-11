@@ -11,8 +11,8 @@ import {
 } from "#lib/chat/session.ts";
 
 /**
- * POST /api/chat-stream. Returns the open response (Server-Sent Events) for lib/chat to read;
- * a failing status throws the server's own text, which the stage shows after "Er ging iets mis:".
+ * POST /api/chat-stream. Returns the open response (Server-Sent Events) for lib/chat to read.
+ * Raw server errors are translated at the user-facing chat boundary.
  */
 export async function openChatStream(
   request: ChatRequest,
@@ -33,11 +33,7 @@ export async function openChatStream(
     } catch {
       /* not JSON: show it as it is */
     }
-    throw new Error(
-      message === "OmniRoute is not configured"
-        ? "Er is nog geen taalmodel ingesteld (OMNIROUTE_API_KEY en OMNIROUTE_MODEL)."
-        : message,
-    );
+    throw new Error(message);
   }
   if (!response.body) throw new Error("Geen antwoord van de server");
   return response.body;

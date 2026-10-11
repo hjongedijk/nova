@@ -1,5 +1,6 @@
 <script lang="ts">
   import { encodeAttachments } from "#lib/chat/attachments.ts";
+  import { friendlyChatError } from "#lib/chat/error-copy.ts";
   import { onMount } from "svelte";
   import { cards } from "#lib/chat/cards.svelte.ts";
   import { installReveal } from "#lib/modes/reveal.ts";
@@ -62,7 +63,7 @@
         shell.draft = "";
       }
     } catch (error) {
-      fileError = (error as Error).message;
+      fileError = friendlyChatError(error, responseLanguage);
     } finally {
       reading = false;
     }

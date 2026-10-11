@@ -189,4 +189,24 @@ describe("confirmation changes after approval", () => {
       expect.objectContaining({ language: "en" }),
     );
   });
+
+  it("keeps raw tool diagnostics out of spoken and returned confirmation errors", async () => {
+    const { tools, handler, original } = fixture();
+    tools.execute.mockResolvedValue({
+      ok: false,
+      error: "ECONNREFUSED 10.0.0.7:8123 internal stack trace",
+    });
+
+    const response = await handler.handle(
+      "chat",
+      "ja",
+      original.confirmationId,
+    );
+
+    expect(response?.reply).toBe(
+      "Dat is niet gelukt. De actie is niet uitgevoerd.",
+    );
+    expect(JSON.stringify(response)).not.toContain("ECONNREFUSED");
+    expect(JSON.stringify(response)).not.toContain("10.0.0.7");
+  });
 });

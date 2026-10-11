@@ -479,3 +479,5 @@ L2.4-kandidaatbeoordeling aangescherpt: `@ni-c/imap-mcp` schrijft onder `list_ne
 2026-10-12 — F4-deel: nieuwe tests verifiëren dat geconfigureerde geheimen uit sessie-opslag en het actielog worden geredigeerd; het actielog houdt permissies `0600`. Bestaande tests dekken modeltransport, embeddings en `sanitize()`. Alle doelgerichte privacytests, typecheck en lint slagen. Volledige repo- en screenshotinspectie blijft open.
 
 2026-10-12 — F5-deel: stem-HUD meet nu echte audio-playback in plaats van eerste teksttoken; unit test simuleert een toolvoortgangszin en registreert pas bij audio `playing`. Voorlopige p95-doelen: directe chat ≤3 s, inclusief toolactie ≤4 s tot eerste gesproken zin. Reële meting met ingestelde TTS ontbreekt nog.
+
+2026-10-12 — F6-deel: chat/API- en bevestigingsfouten worden vertaald naar korte NL/EN-meldingen; onbekende provider- en netwerktekst blijft uit chat en wordt alleen lokaal gelogd. Bevestigingsresponses verwijderen ruwe foutdetails. 12 gerichte web-/API-tests, webcheck, API-typecheck en lint slagen. Resterende instellingen- en integratiefoutmeldingen moeten nog worden geïnventariseerd.

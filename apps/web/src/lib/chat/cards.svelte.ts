@@ -6,6 +6,7 @@ import {
   getSessionId,
   type ConversationLanguage,
 } from "./session.ts";
+import { friendlyChatError } from "./error-copy.ts";
 
 export interface Card {
   id: string;
@@ -222,15 +223,9 @@ export async function answerCard(
       new CustomEvent("nova-helper-confirmed", { detail: approve }),
     );
   } catch (error) {
-    card.label = (error as Error).message;
+    card.label = friendlyChatError(error, getConversationLanguage());
     chat.toolResult = card.label;
-    chat.history.push({
-      role: "assistant",
-      text:
-        getConversationLanguage() === "en"
-          ? `Confirmation failed: ${card.label}`
-          : `Bevestiging mislukt: ${card.label}`,
-    });
+    chat.history.push({ role: "assistant", text: card.label });
   }
   settle(id);
 }
