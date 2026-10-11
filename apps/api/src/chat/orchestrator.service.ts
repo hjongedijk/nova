@@ -34,7 +34,7 @@ const LIVE_DATA =
 
 // Sharing a mood is conversation, even if it mentions the weather or the house.
 const PERSONAL_CHAT =
-  /\b(?:ik ben (?:moe|verdrietig|blij|gestrest|eenzaam)|ik voel me|wat een dag|i(?:'m| am) (?:tired|sad|happy|stressed|lonely)|i feel)\b/i;
+  /\b(?:ik ben (?:moe|kapot|verdrietig|blij|gestrest|druk|eenzaam|overprikkeld|overweldigd|opgelucht|boos|gefrustreerd|nerveus|gespannen)|ik heb (?:een )?(?:drukke|zware|lastige|rotte|heftige) dag|ik voel me|het valt me zwaar|ik zit erdoorheen|wat een dag|i(?:'m| am) (?:tired|exhausted|sad|happy|stressed|lonely|overwhelmed|anxious|frustrated)|i feel|it's been a (?:long|rough|busy|hard) day|i(?:'ve| have) had a lot on)\b/i;
 const EXPLICIT_REQUEST =
   /\b(?:kun je|kan je|wil je|hoe|wat is|wat zijn|welke|zoek|check|controleer|zet|doe|open|sluit|speel|help|can you|could you|please|what|when|where|check|turn|play)\b/i;
 const LIVE_WITH_FILES =

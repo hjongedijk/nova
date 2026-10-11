@@ -3,6 +3,7 @@ import { SYSTEM_PROMPT } from "../../src/chat/prompt.js";
 import {
   classifyModelRole,
   codeResponseStyle,
+  requiresLiveData,
   responseStyle,
 } from "../../src/chat/orchestrator.service.js";
 import {
@@ -55,6 +56,26 @@ describe("NOVA's conversational identity", () => {
     );
     expect(SYSTEM_PROMPT).toContain(
       "Deleting a record always needs the normal explicit confirmation",
+    );
+  });
+});
+
+describe("calm response to a shared mood", () => {
+  it("treats mood statements as conversation, even when they mention live topics", () => {
+    expect(
+      requiresLiveData("Ik heb een drukke dag en het regent buiten."),
+    ).toBe(false);
+    expect(
+      requiresLiveData("Ik voel me overprikkeld; er staan lampen aan."),
+    ).toBe(false);
+    expect(requiresLiveData("I'm overwhelmed and the weather is awful.")).toBe(
+      false,
+    );
+    expect(requiresLiveData("Ik ben gestrest, wat is nu de temperatuur?")).toBe(
+      true,
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      "without diagnosing, exaggerating, or assuming more",
     );
   });
 });
