@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import AccessGate from "#components/access/AccessGate.svelte";
   import AdminDialog from "#components/admin/AdminDialog.svelte";
   import Column from "#components/hud/Column.svelte";
   import Composer from "#components/shell/Composer.svelte";
@@ -22,6 +23,7 @@
   import { chat } from "#lib/stores/chat.svelte.ts";
   import { chrome } from "#lib/stores/chrome.svelte.ts";
   import { shell } from "#lib/stores/shell.svelte.ts";
+  import { appAccess, checkAppAccess } from "#lib/stores/access.svelte.ts";
   import { storage } from "#lib/util/storage.ts";
   import { initRecognition } from "#lib/voice/recognition.ts";
   import { installAudioUnlock } from "#lib/voice/unlock.ts";
@@ -58,32 +60,43 @@
   onMount(() => {
     shell.voiceAlerts = storage.get("jarvisVoiceAlerts", "on") !== "off";
     shell.panels = storage.get("jarvisPanels", "on") !== "off";
-    initRecognition();
-    const stops = [
-      applyWallpaperMode(),
-      installAudioUnlock(),
-      startPwa(),
-      initWake(),
-      startStatus(),
-      startAlerts(),
-    ];
-    void loadPublicConfig();
-    return () => stops.forEach((stop) => stop());
+    let stopped = false;
+    let stops: (() => void)[] = [];
+    void checkAppAccess().then(() => {
+      if (stopped || (appAccess.required && !appAccess.unlocked)) return;
+      initRecognition();
+      stops = [
+        applyWallpaperMode(),
+        installAudioUnlock(),
+        startPwa(),
+        initWake(),
+        startStatus(),
+        startAlerts(),
+      ];
+      void loadPublicConfig();
+    });
+    return () => {
+      stopped = true;
+      stops.forEach((stop) => stop());
+    };
   });
 </script>
 
 <svelte:window onkeydown={handleKeyDown} onkeyup={handleKeyUp} />
 
-<Entity />
-<Column side="left" />
-<Column side="right" />
-<div class="shell">
-  <Header />
-  <Stage />
-  <Composer />
-</div>
-<Toasts />
-<HistoryDrawer />
-<SettingsDialog />
-<AdminDialog />
-<WorkspaceCodePanel />
+{#if !appAccess.checking && (!appAccess.required || appAccess.unlocked)}
+  <Entity />
+  <Column side="left" />
+  <Column side="right" />
+  <div class="shell">
+    <Header />
+    <Stage />
+    <Composer />
+  </div>
+  <Toasts />
+  <HistoryDrawer />
+  <SettingsDialog />
+  <AdminDialog />
+  <WorkspaceCodePanel />
+{/if}
+<AccessGate />

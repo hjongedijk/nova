@@ -74,6 +74,8 @@ export class NovaConfig {
   );
   readonly publicUrl = text("NOVA_PUBLIC_URL");
   readonly adminPin = text("NOVA_ADMIN_PIN");
+  /** Optional app-wide token; users exchange it for a short-lived HTTP-only session. */
+  readonly appToken = text("NOVA_APP_TOKEN");
   /** Permit a graceful process restart only when an external supervisor restarts this process. */
   readonly restartEnabled = flag("NOVA_RESTART_ENABLED", false);
   readonly stackControlUrl = url(
