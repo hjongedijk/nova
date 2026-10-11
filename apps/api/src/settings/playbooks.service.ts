@@ -1,5 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import type { InstructionSkill, QuickAction } from "@nova/contracts";
+import type {
+  CommunicationPreference,
+  InstructionSkill,
+  QuickAction,
+} from "@nova/contracts";
 import { SettingsStore } from "./store/settings.store.js";
 import {
   formatPlaybooks,
@@ -44,9 +48,22 @@ export class PlaybooksService {
   }
 
   personaProfileInstruction(): string {
+    const settings = this.settings.get();
+    const profile = settings.householdProfiles.find(
+      (item) => item.id === settings.activeHouseholdProfileId,
+    );
     const { name, character, address, avoid } =
-      this.settings.get().personaProfile;
+      profile?.personaProfile ?? settings.personaProfile;
     return `Identiteit: je naam is ${name}. Karakter: ${character}. Spreek de gebruiker aan met ${address}. Vermijd: ${avoid}. Dit zijn toon- en identiteitsvoorkeuren; verzin geen feiten, gevoelens of menselijke ervaringen en volg altijd de geldende veiligheidsregels.`;
+  }
+
+  activeCommunicationPreferences(): CommunicationPreference[] {
+    const settings = this.settings.get();
+    return (
+      settings.householdProfiles.find(
+        (profile) => profile.id === settings.activeHouseholdProfileId,
+      )?.communicationPreferences ?? []
+    );
   }
 
   /** Reviewed conversational style text; this cannot modify safety or tool rules. */

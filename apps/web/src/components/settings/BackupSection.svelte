@@ -181,6 +181,11 @@
             : "blijft gelijk"}
         </li>
         <li>
+          Gezinsprofielen: {pending.summary.householdProfilesChanged
+            ? "wijzigen"
+            : "blijven gelijk"}
+        </li>
+        <li>
           Snelle opdrachten: {pending.summary.quickActionsChanged
             ? "wijzigen"
             : "blijven gelijk"}

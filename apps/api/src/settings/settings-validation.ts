@@ -7,6 +7,7 @@ import type {
   ToolOverride,
   PersonaStyleId,
   PersonaProfile,
+  HouseholdProfile,
 } from "@nova/contracts";
 import { ValidationError } from "../core/errors/validation.error.js";
 
@@ -37,6 +38,68 @@ export function normalizePersonaProfile(value: unknown): PersonaProfile {
     address: clean("address", 40),
     avoid: clean("avoid", 300),
   };
+}
+
+const COMMUNICATION_PREFERENCES = [
+  "concise",
+  "fewer_jokes",
+  "more_detail",
+  "warmer",
+] as const;
+
+export function normalizeHouseholdProfiles(value: unknown): HouseholdProfile[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8)
+    throw new ValidationError(["Kies 1 tot 8 gezinsprofielen."]);
+  const ids = new Set<string>();
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item))
+      throw new ValidationError([`Gezinsprofiel ${index + 1} is ongeldig.`]);
+    const input = item as Record<string, unknown>;
+    if (
+      Object.keys(input).some(
+        (key) =>
+          ![
+            "id",
+            "label",
+            "personaProfile",
+            "communicationPreferences",
+          ].includes(key),
+      )
+    )
+      throw new ValidationError([`Gezinsprofiel ${index + 1} is ongeldig.`]);
+    if (
+      typeof input.id !== "string" ||
+      !/^[a-zA-Z0-9_-]{1,40}$/.test(input.id) ||
+      ids.has(input.id)
+    )
+      throw new ValidationError(["Gezinsprofielen moeten unieke IDs hebben."]);
+    ids.add(input.id);
+    const label = cleanText(input.label, "De profielnaam", {
+      required: true,
+      max: 40,
+    });
+    if (!Array.isArray(input.communicationPreferences))
+      throw new ValidationError(["Kies geldige communicatievoorkeuren."]);
+    const preferences = input.communicationPreferences;
+    if (
+      preferences.length > COMMUNICATION_PREFERENCES.length ||
+      preferences.some(
+        (preference) =>
+          !COMMUNICATION_PREFERENCES.includes(
+            preference as (typeof COMMUNICATION_PREFERENCES)[number],
+          ),
+      ) ||
+      new Set(preferences).size !== preferences.length
+    )
+      throw new ValidationError(["Kies geldige communicatievoorkeuren."]);
+    return {
+      id: input.id,
+      label,
+      personaProfile: normalizePersonaProfile(input.personaProfile),
+      communicationPreferences:
+        preferences as HouseholdProfile["communicationPreferences"],
+    };
+  });
 }
 
 /** Trimmed text with Dutch validation messages. */

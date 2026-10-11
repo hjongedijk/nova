@@ -471,6 +471,8 @@ export class SettingsController {
       persona: settings.persona,
       personaStyle: settings.personaStyle,
       personaProfile: settings.personaProfile,
+      householdProfiles: settings.householdProfiles,
+      activeHouseholdProfileId: settings.activeHouseholdProfileId,
       standingApprovals: settings.standingApprovals.map(
         ({ id, tool, scope, createdAt }) => ({ id, tool, scope, createdAt }),
       ),
@@ -500,6 +502,14 @@ export class SettingsController {
   @Put("persona/profile")
   setPersonaProfile(@Body() body: Body_) {
     return this.mutations.setPersonaProfile(body?.profile);
+  }
+
+  @Put("household-profiles")
+  setHouseholdProfiles(@Body() body: Body_) {
+    return this.mutations.setHouseholdProfiles(
+      body?.profiles,
+      body?.activeProfileId,
+    );
   }
 
   @Get("persona/preferences/history")
@@ -1505,6 +1515,8 @@ export class SettingsController {
       persona: settings.persona,
       personaStyle: settings.personaStyle,
       personaProfile: settings.personaProfile,
+      householdProfiles: settings.householdProfiles,
+      activeHouseholdProfileId: settings.activeHouseholdProfileId,
       quickActions: settings.quickActions,
       toolOverrides: settings.toolOverrides,
       // Secret header values are never exported; their names are, so they can be filled in again.

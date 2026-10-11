@@ -6,6 +6,7 @@ import {
   normalizePersona as rawnormalizePersona,
   normalizePersonaStyle as rawNormalizePersonaStyle,
   normalizePersonaProfile as rawNormalizePersonaProfile,
+  normalizeHouseholdProfiles as rawNormalizeHouseholdProfiles,
   normalizeQuickActions as rawnormalizeQuickActions,
   normalizeSidebar as rawnormalizeSidebar,
   normalizeToolOverride as rawnormalizeToolOverride,
@@ -37,6 +38,7 @@ function checked<A extends unknown[], R>(
 const normalizePersona = checked(rawnormalizePersona);
 const normalizePersonaStyle = checked(rawNormalizePersonaStyle);
 const normalizePersonaProfile = checked(rawNormalizePersonaProfile);
+const normalizeHouseholdProfiles = checked(rawNormalizeHouseholdProfiles);
 const normalizeQuickActions = checked(rawnormalizeQuickActions);
 const normalizeSidebar = checked(rawnormalizeSidebar);
 const normalizeToolOverride = checked(rawnormalizeToolOverride);
@@ -60,6 +62,8 @@ const fields = [
   "persona",
   "personaStyle",
   "personaProfile",
+  "householdProfiles",
+  "activeHouseholdProfileId",
   "quickActions",
   "toolOverrides",
   "skills",
@@ -92,6 +96,7 @@ export interface BackupPlanSummary {
   personaChanged: boolean;
   personaStyleChanged: boolean;
   personaProfileChanged: boolean;
+  householdProfilesChanged: boolean;
   quickActionsChanged: boolean;
   toolOverridesChanged: boolean;
   sidebarChanged: boolean;
@@ -580,6 +585,42 @@ export function buildBackupPlan(
       fail("De NOVA-profielvelden in de back-up zijn ongeldig.");
     next.personaProfile = normalizePersonaProfile(profile);
   }
+  if (Object.hasOwn(input, "householdProfiles")) {
+    const profiles = normalizeHouseholdProfiles(input.householdProfiles);
+    const activeId = input.activeHouseholdProfileId;
+    if (
+      activeId !== undefined &&
+      (typeof activeId !== "string" ||
+        !profiles.some((profile) => profile.id === activeId))
+    )
+      fail("Het actieve gezinsprofiel in de back-up is ongeldig.");
+    const active =
+      profiles.find((profile) => profile.id === activeId) ?? profiles[0]!;
+    next.householdProfiles = profiles;
+    next.activeHouseholdProfileId = active.id;
+    next.personaProfile = active.personaProfile;
+  } else if (Object.hasOwn(input, "personaProfile")) {
+    // Older v1 exports only contained one persona profile.
+    const legacyProfile = normalizePersonaProfile(input.personaProfile);
+    if (mode === "replace") {
+      next.householdProfiles = [
+        {
+          id: "primary",
+          label: "Gebruiker",
+          personaProfile: legacyProfile,
+          communicationPreferences: [],
+        },
+      ];
+      next.activeHouseholdProfileId = "primary";
+    } else {
+      next.householdProfiles = next.householdProfiles.map((profile) =>
+        profile.id === next.activeHouseholdProfileId
+          ? { ...profile, personaProfile: legacyProfile }
+          : profile,
+      );
+    }
+    next.personaProfile = legacyProfile;
+  }
   if (Object.hasOwn(input, "quickActions"))
     next.quickActions =
       input.quickActions === null
@@ -671,6 +712,8 @@ export function buildBackupPlan(
     persona: next.persona,
     personaStyle: next.personaStyle,
     personaProfile: next.personaProfile,
+    householdProfiles: next.householdProfiles,
+    activeHouseholdProfileId: next.activeHouseholdProfileId,
     quickActions: next.quickActions,
     toolOverrides: next.toolOverrides,
     sidebar: next.sidebar,
@@ -724,6 +767,10 @@ export function buildBackupPlan(
       personaProfileChanged:
         JSON.stringify(next.personaProfile) !==
         JSON.stringify(current.personaProfile),
+      householdProfilesChanged:
+        JSON.stringify(next.householdProfiles) !==
+          JSON.stringify(current.householdProfiles) ||
+        next.activeHouseholdProfileId !== current.activeHouseholdProfileId,
       quickActionsChanged:
         JSON.stringify(next.quickActions) !==
         JSON.stringify(current.quickActions),

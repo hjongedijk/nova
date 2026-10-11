@@ -172,6 +172,10 @@ export class PersonaPreferencesHistoryService {
         );
       state.personaStyle = revision.before.style;
       state.personaProfile = revision.before.profile;
+      const active = state.householdProfiles.find(
+        (profile) => profile.id === state.activeHouseholdProfileId,
+      );
+      if (active) active.personaProfile = revision.before.profile;
     });
     this.record(current, revision.before, revision.id);
     try {

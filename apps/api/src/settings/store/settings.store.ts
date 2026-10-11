@@ -1,5 +1,6 @@
 import type {
   HelperPreferences,
+  HouseholdProfile,
   ModelRolePreferences,
   PersonaProfile,
   PersonaStyleId,
@@ -12,6 +13,7 @@ import {
   normalizePersona,
   normalizePersonaProfile,
   normalizePersonaStyle,
+  normalizeHouseholdProfiles,
 } from "../settings-validation.js";
 
 export interface HelperChoice {
@@ -47,6 +49,8 @@ export interface NovaSettings {
   persona: string;
   personaStyle: PersonaStyleId;
   personaProfile: PersonaProfile;
+  householdProfiles: HouseholdProfile[];
+  activeHouseholdProfileId: string;
   quickActions: QuickAction[] | null;
   toolOverrides: Record<string, ToolOverride>;
   skills: Record<string, unknown>[];
@@ -112,6 +116,21 @@ const blank = (): NovaSettings => ({
     address: "je/jij",
     avoid: "doen alsof ik een mens ben of gevoelens en ervaringen verzinnen",
   },
+  householdProfiles: [
+    {
+      id: "primary",
+      label: "Gebruiker",
+      personaProfile: {
+        name: "NOVA",
+        character: "warm, nieuwsgierig en met af en toe droge humor",
+        address: "je/jij",
+        avoid:
+          "doen alsof ik een mens ben of gevoelens en ervaringen verzinnen",
+      },
+      communicationPreferences: [],
+    },
+  ],
+  activeHouseholdProfileId: "primary",
   quickActions: null,
   toolOverrides: {},
   skills: [],
@@ -189,12 +208,14 @@ export class SettingsStore {
 
   private load(): NovaSettings {
     if (this.cache) return this.cache;
+    let saved: Partial<NovaSettings> = {};
     try {
+      saved = JSON.parse(
+        fs.readFileSync(this.file, "utf8"),
+      ) as Partial<NovaSettings>;
       this.cache = {
         ...blank(),
-        ...(JSON.parse(
-          fs.readFileSync(this.file, "utf8"),
-        ) as Partial<NovaSettings>),
+        ...saved,
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -210,6 +231,34 @@ export class SettingsStore {
     this.cache.personaProfile = normalizePersonaProfile(
       this.cache.personaProfile,
     );
+    try {
+      this.cache.householdProfiles = normalizeHouseholdProfiles(
+        saved.householdProfiles ?? [
+          {
+            id: "primary",
+            label: "Gebruiker",
+            personaProfile: this.cache.personaProfile,
+            communicationPreferences: [],
+          },
+        ],
+      );
+    } catch {
+      this.cache.householdProfiles = [
+        {
+          id: "primary",
+          label: "Gebruiker",
+          personaProfile: this.cache.personaProfile,
+          communicationPreferences: [],
+        },
+      ];
+    }
+    const active = this.cache.householdProfiles.find(
+      (profile) => profile.id === this.cache!.activeHouseholdProfileId,
+    );
+    this.cache.activeHouseholdProfileId =
+      active?.id ?? this.cache.householdProfiles[0]!.id;
+    this.cache.personaProfile =
+      active?.personaProfile ?? this.cache.householdProfiles[0]!.personaProfile;
     this.cache.toolOverrides ||= {};
     this.cache.skills ||= [];
     this.cache.widgets ||= [];

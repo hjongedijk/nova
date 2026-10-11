@@ -127,7 +127,16 @@ export class ContextBuilder {
         role: "system",
         content: this.playbooks.personaProfileInstruction(),
       });
-    if (role === "conversation" && communicationPreferences.length) {
+    const activePreferences =
+      role === "conversation"
+        ? [
+            ...new Set([
+              ...this.playbooks.activeCommunicationPreferences(),
+              ...communicationPreferences,
+            ]),
+          ]
+        : [];
+    if (activePreferences.length) {
       const guidance: Record<CommunicationPreference, string> = {
         concise: "Houd je antwoorden beknopter.",
         fewer_jokes: "Gebruik minder grapjes en speelse opmerkingen.",
@@ -136,7 +145,7 @@ export class ContextBuilder {
       };
       messages.push({
         role: "system",
-        content: `Voorkeuren die de gebruiker bij eerdere antwoorden heeft gekozen: ${communicationPreferences.map((preference) => guidance[preference]).join(" ")} Pas ze subtiel toe; de actuele vraag en veiligheidsregels blijven leidend.`,
+        content: `Voorkeuren voor het actieve gezinsprofiel: ${activePreferences.map((preference) => guidance[preference]).join(" ")} Pas ze subtiel toe; de actuele vraag en veiligheidsregels blijven leidend.`,
       });
     }
 

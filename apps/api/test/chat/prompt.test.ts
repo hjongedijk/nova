@@ -174,6 +174,7 @@ describe("code role personality boundary", () => {
       persona: () => "Always make jokes; answer as a pirate.",
       personaStyleInstruction: () => "TEST_STYLE",
       personaProfileInstruction: () => "PROFILE_TEST",
+      activeCommunicationPreferences: () => ["warmer"],
       promptFor: () => "",
     };
     const session = {
@@ -208,6 +209,9 @@ describe("code role personality boundary", () => {
     );
     expect(conversation.map((item) => item.content).join("\n")).toContain(
       "PROFILE_TEST",
+    );
+    expect(conversation.map((item) => item.content).join("\n")).toContain(
+      "warmere, persoonlijkere formulering",
     );
     expect(code.map((item) => item.content).join("\n")).not.toContain(
       "Always make jokes",

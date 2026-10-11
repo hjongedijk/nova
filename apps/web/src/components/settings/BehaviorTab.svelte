@@ -2,10 +2,14 @@
   import {
     savePersona,
     savePersonaStyle,
-    savePersonaProfile,
+    saveHouseholdProfiles,
     revokeStandingApproval,
   } from "#lib/api/settings.ts";
-  import type { PersonaProfile, PersonaStyleId } from "@nova/contracts";
+  import type {
+    HouseholdProfile,
+    PersonaProfile,
+    PersonaStyleId,
+  } from "@nova/contracts";
   import Badge from "#components/ui/Badge.svelte";
   import Button from "#components/ui/Button.svelte";
   import Field from "#components/ui/Field.svelte";
@@ -21,14 +25,36 @@
   let personaStyle = $state<PersonaStyleId>(
     settings.data?.personaStyle ?? "friendly",
   );
-  let profile = $state<PersonaProfile>(
-    settings.data?.personaProfile ?? {
-      name: "NOVA",
-      character: "warm, nieuwsgierig en met af en toe droge humor",
-      address: "je/jij",
-      avoid: "doen alsof ik een mens ben of gevoelens en ervaringen verzinnen",
+  const defaultProfile = (): PersonaProfile => ({
+    name: "NOVA",
+    character: "warm, nieuwsgierig en met af en toe droge humor",
+    address: "je/jij",
+    avoid: "doen alsof ik een mens ben of gevoelens en ervaringen verzinnen",
+  });
+  const initialProfile = settings.data?.personaProfile ?? defaultProfile();
+  const initialHouseholdProfiles = settings.data?.householdProfiles ?? [
+    {
+      id: "primary",
+      label: "Gebruiker",
+      personaProfile: initialProfile,
+      communicationPreferences: [],
     },
+  ];
+  let profile = $state<PersonaProfile>(initialProfile);
+  let householdProfiles = $state<HouseholdProfile[]>(initialHouseholdProfiles);
+  let activeProfileId = $state(
+    settings.data?.activeHouseholdProfileId ?? "primary",
   );
+  let profilePreferences = $state<string[]>(
+    initialHouseholdProfiles.find((item) => item.id === activeProfileId)
+      ?.communicationPreferences ?? [],
+  );
+  const preferenceChoices = [
+    ["concise", "Kortere antwoorden"],
+    ["fewer_jokes", "Minder grapjes"],
+    ["more_detail", "Meer uitleg"],
+    ["warmer", "Warmere toon"],
+  ] as const;
   const styles: { id: PersonaStyleId; label: string }[] = [
     { id: "professional", label: "Zakelijk" },
     { id: "friendly", label: "Vriendelijk" },
@@ -59,9 +85,77 @@
 
   async function saveProfile(): Promise<void> {
     try {
-      const result = await savePersonaProfile(profile);
-      profile = result.personaProfile;
-      await afterChange("NOVA's profiel is opgeslagen.");
+      const updated = householdProfiles.map((item) =>
+        item.id === activeProfileId
+          ? {
+              ...item,
+              personaProfile: profile,
+              communicationPreferences:
+                profilePreferences as HouseholdProfile["communicationPreferences"],
+            }
+          : item,
+      );
+      const result = await saveHouseholdProfiles(updated, activeProfileId);
+      householdProfiles = result.householdProfiles;
+      await afterChange("Gezinsprofiel opgeslagen.");
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  async function switchProfile(id: string): Promise<void> {
+    const next = householdProfiles.find((item) => item.id === id);
+    if (!next) return;
+    activeProfileId = id;
+    profile = { ...next.personaProfile };
+    profilePreferences = [...next.communicationPreferences];
+    try {
+      const result = await saveHouseholdProfiles(householdProfiles, id);
+      householdProfiles = result.householdProfiles;
+      await afterChange(`Actief profiel: ${next.label}.`);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  async function addProfile(): Promise<void> {
+    if (householdProfiles.length >= 8) return;
+    const id = crypto.randomUUID().replaceAll("-", "");
+    const label = `Persoon ${householdProfiles.length + 1}`;
+    const next = [
+      ...householdProfiles,
+      {
+        id,
+        label,
+        personaProfile: defaultProfile(),
+        communicationPreferences: [],
+      },
+    ];
+    try {
+      const result = await saveHouseholdProfiles(next, id);
+      householdProfiles = result.householdProfiles;
+      activeProfileId = id;
+      profile = { ...defaultProfile() };
+      profilePreferences = [];
+      await afterChange("Gezinsprofiel toegevoegd.");
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  async function removeProfile(): Promise<void> {
+    if (householdProfiles.length <= 1) return;
+    const next = householdProfiles.filter(
+      (item) => item.id !== activeProfileId,
+    );
+    const id = next[0]!.id;
+    try {
+      const result = await saveHouseholdProfiles(next, id);
+      householdProfiles = result.householdProfiles;
+      activeProfileId = id;
+      profile = { ...next[0]!.personaProfile };
+      profilePreferences = [...next[0]!.communicationPreferences];
+      await afterChange("Gezinsprofiel verwijderd.");
     } catch (error) {
       fail(error);
     }
@@ -76,10 +170,51 @@
   <h3>Hoe NOVA zich gedraagt</h3>
   <section>
     <p class="hint">
-      Bepaal hoe NOVA zichzelf voorstelt en jou aanspreekt. Deze voorkeuren
-      gelden alleen in gewone gesprekken.
+      Kies wie NOVA nu aanspreekt. Profielen wisselen toon en
+      communicatievoorkeuren; chatgeschiedenis en geheugen blijven gedeeld.
     </p>
     <div class="persona-profile">
+      <Field id="householdProfile" label="Actief gezinslid">
+        <div class="set-toolbar">
+          <select
+            id="householdProfile"
+            value={activeProfileId}
+            onchange={(event) => void switchProfile(event.currentTarget.value)}
+          >
+            {#each householdProfiles as householdProfile (householdProfile.id)}
+              <option value={householdProfile.id}
+                >{householdProfile.label}</option
+              >
+            {/each}
+          </select>
+          <Button
+            onclick={() => void addProfile()}
+            disabled={householdProfiles.length >= 8}>Persoon toevoegen</Button
+          >
+          <Button
+            onclick={() => void removeProfile()}
+            disabled={householdProfiles.length <= 1}>Verwijderen</Button
+          >
+        </div>
+      </Field>
+      <Field
+        id="householdLabel"
+        label="Profielnaam"
+        help="Bijvoorbeeld Harm of Sam."
+      >
+        <input
+          id="householdLabel"
+          maxlength="40"
+          value={householdProfiles.find((item) => item.id === activeProfileId)
+            ?.label ?? ""}
+          oninput={(event) => {
+            const label = event.currentTarget.value;
+            householdProfiles = householdProfiles.map((item) =>
+              item.id === activeProfileId ? { ...item, label } : item,
+            );
+          }}
+        />
+      </Field>
       <Field
         id="personaName"
         label="Naam"
@@ -116,6 +251,15 @@
       >
         <input id="personaAvoid" bind:value={profile.avoid} maxlength="300" />
       </Field>
+      <fieldset>
+        <legend>Communicatievoorkeuren</legend>
+        {#each preferenceChoices as [value, label] (value)}
+          <label
+            ><input type="checkbox" {value} bind:group={profilePreferences} />
+            {label}</label
+          >
+        {/each}
+      </fieldset>
       <Button go onclick={saveProfile}>Profiel opslaan</Button>
     </div>
     <p class="hint">

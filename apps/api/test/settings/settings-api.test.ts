@@ -1536,6 +1536,47 @@ describe("the settings API", () => {
       (await call("put", "/persona/profile", { profile })).personaProfile,
     ).toEqual(profile);
     expect((await call("get", "/")).personaProfile).toEqual(profile);
+    const householdProfiles = [
+      {
+        id: "harm",
+        label: "Harm",
+        personaProfile: profile,
+        communicationPreferences: ["concise", "fewer_jokes"],
+      },
+      {
+        id: "sam",
+        label: "Sam",
+        personaProfile: { ...profile, address: "Sam" },
+        communicationPreferences: ["warmer"],
+      },
+    ];
+    const savedHousehold = await call("put", "/household-profiles", {
+      profiles: householdProfiles,
+      activeProfileId: "sam",
+    });
+    expect(savedHousehold.activeHouseholdProfileId).toBe("sam");
+    expect((await call("get", "/")).householdProfiles).toEqual(
+      householdProfiles,
+    );
+    expect((await call("get", "/")).personaProfile).toEqual(
+      householdProfiles[1]!.personaProfile,
+    );
+    expect(
+      (
+        await call("put", "/household-profiles", {
+          profiles: householdProfiles,
+          activeProfileId: "missing",
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call("put", "/household-profiles", {
+          profiles: [{ ...householdProfiles[0], id: "bad id" }],
+          activeProfileId: "bad id",
+        })
+      ).status,
+    ).toBe(400);
     expect(
       (
         await call("put", "/persona/profile", {
@@ -1942,12 +1983,14 @@ describe("the settings API", () => {
           "format",
           "helper",
           "helperPreferences",
+          "householdProfiles",
           "lists",
           "modelRoles",
           "nodeRedFlowsIncluded",
           "persona",
           "personaProfile",
           "personaStyle",
+          "activeHouseholdProfileId",
           "quickActions",
           "sidebar",
           "skills",

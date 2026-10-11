@@ -49,6 +49,21 @@ function current(): NovaSettings {
       address: "je/jij",
       avoid: "doen alsof ik een mens ben of gevoelens en ervaringen verzinnen",
     },
+    householdProfiles: [
+      {
+        id: "primary",
+        label: "Gebruiker",
+        personaProfile: {
+          name: "NOVA",
+          character: "warm, nieuwsgierig en met af en toe droge humor",
+          address: "je/jij",
+          avoid:
+            "doen alsof ik een mens ben of gevoelens en ervaringen verzinnen",
+        },
+        communicationPreferences: [],
+      },
+    ],
+    activeHouseholdProfileId: "primary",
     quickActions: [{ label: "Status", prompt: "Geef de status" }],
     toolOverrides: { echo: { enabled: false } },
     skills: [],
@@ -420,6 +435,7 @@ describe("bounded private settings backup plan", () => {
       removedWidgets: 0,
       personaChanged: false,
       personaProfileChanged: false,
+      householdProfilesChanged: false,
       personaStyleChanged: false,
       quickActionsChanged: false,
       toolOverridesChanged: false,
@@ -925,5 +941,55 @@ describe("bounded private settings backup plan", () => {
         current(),
       ),
     ).toThrow();
+  });
+
+  it("imports household profiles and keeps legacy backups compatible", () => {
+    const profiles = [
+      {
+        id: "harm",
+        label: "Harm",
+        personaProfile: current().personaProfile,
+        communicationPreferences: ["concise"],
+      },
+      {
+        id: "sam",
+        label: "Sam",
+        personaProfile: { ...current().personaProfile, address: "Sam" },
+        communicationPreferences: ["warmer"],
+      },
+    ];
+    const { next, summary } = buildBackupPlan(
+      backup({ householdProfiles: profiles, activeHouseholdProfileId: "sam" }),
+      "replace",
+      current(),
+    );
+    expect(next.householdProfiles).toEqual(profiles);
+    expect(next.activeHouseholdProfileId).toBe("sam");
+    expect(next.personaProfile).toEqual(profiles[1]!.personaProfile);
+    expect(summary.householdProfilesChanged).toBe(true);
+    const legacy = buildBackupPlan(
+      backup({ personaProfile: current().personaProfile }),
+      "replace",
+      current(),
+    ).next;
+    expect(legacy.householdProfiles).toHaveLength(1);
+    expect(legacy.activeHouseholdProfileId).toBe("primary");
+    const mergedLegacy = buildBackupPlan(
+      backup({ personaProfile: current().personaProfile }),
+      "merge",
+      {
+        ...current(),
+        householdProfiles: [
+          ...current().householdProfiles,
+          {
+            id: "other",
+            label: "Other",
+            personaProfile: current().personaProfile,
+            communicationPreferences: ["warmer"],
+          },
+        ],
+      },
+    ).next;
+    expect(mergedLegacy.householdProfiles).toHaveLength(2);
   });
 });

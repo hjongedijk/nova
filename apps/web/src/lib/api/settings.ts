@@ -43,6 +43,7 @@ import type {
   ModelRoleHistory,
   ModelRolesSettings,
   PersonaProfile,
+  HouseholdProfile,
   MqttOverview,
   McpServerStatus,
   McpServerCatalog,
@@ -394,6 +395,15 @@ export const savePersonaProfile = (profile: PersonaProfile) =>
     "/persona/profile",
     { profile },
   );
+export const saveHouseholdProfiles = (
+  profiles: HouseholdProfile[],
+  activeProfileId: string,
+) =>
+  write<{
+    ok: true;
+    householdProfiles: HouseholdProfile[];
+    activeHouseholdProfileId: string;
+  }>("PUT", "/household-profiles", { profiles, activeProfileId });
 export const getPersonaPreferencesHistory = () =>
   read<PersonaPreferencesHistory>("/persona/preferences/history");
 export const rollbackPersonaPreferences = (id: string) =>

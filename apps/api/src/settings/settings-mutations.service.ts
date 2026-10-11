@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import type { Skill } from "@nova/contracts";
+import type { HouseholdProfile, Skill } from "@nova/contracts";
 import type { PersonaStyleId } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
@@ -7,6 +7,7 @@ import {
   normalizePersona,
   normalizePersonaStyle,
   normalizePersonaProfile,
+  normalizeHouseholdProfiles,
 } from "./settings-validation.js";
 import { PersonaHistoryService } from "./persona-history.service.js";
 import { InstructionSkillHistory } from "./instruction-skill-history.service.js";
@@ -119,10 +120,47 @@ export class SettingsMutationsService {
     const profile = normalizePersonaProfile(value);
     this.settings.update((settings) => {
       settings.personaProfile = profile;
+      const active = settings.householdProfiles.find(
+        (candidate) => candidate.id === settings.activeHouseholdProfileId,
+      );
+      if (active) active.personaProfile = profile;
     });
     this.personaPreferencesHistory.record(before, { ...before, profile });
     this.log("persona_profile", { fields: Object.keys(input).length });
     return { ok: true as const, personaProfile: profile };
+  }
+
+  setHouseholdProfiles(value: unknown, activeId: unknown) {
+    const profiles = normalizeHouseholdProfiles(value);
+    if (
+      typeof activeId !== "string" ||
+      !profiles.some((profile) => profile.id === activeId)
+    )
+      throw new ValidationError(["Kies een bestaand gezinsprofiel."]);
+    const beforeSettings = this.settings.get();
+    const before = {
+      style: normalizePersonaStyle(beforeSettings.personaStyle),
+      profile: normalizePersonaProfile(beforeSettings.personaProfile),
+    };
+    const active = profiles.find((profile) => profile.id === activeId)!;
+    this.settings.update((settings) => {
+      settings.householdProfiles = profiles;
+      settings.activeHouseholdProfileId = activeId;
+      settings.personaProfile = active.personaProfile;
+    });
+    this.personaPreferencesHistory.record(before, {
+      ...before,
+      profile: active.personaProfile,
+    });
+    this.log("household_profiles", {
+      count: profiles.length,
+      preferenceCount: active.communicationPreferences.length,
+    });
+    return {
+      ok: true as const,
+      householdProfiles: profiles as HouseholdProfile[],
+      activeHouseholdProfileId: activeId,
+    };
   }
 
   setHelperPreference(

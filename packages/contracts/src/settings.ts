@@ -1,4 +1,4 @@
-import type { PendingConfirmation } from "./chat.js";
+import type { CommunicationPreference, PendingConfirmation } from "./chat.js";
 import type { Risk, ToolInfo } from "./tools.js";
 import type { ModelRolePreferences } from "./model-roles.js";
 
@@ -369,6 +369,8 @@ export interface SettingsOverview {
   persona: string;
   personaStyle: PersonaStyleId;
   personaProfile: PersonaProfile;
+  householdProfiles: HouseholdProfile[];
+  activeHouseholdProfileId: string;
   quickActions: QuickAction[];
   quickActionsAreDefault: boolean;
   skills: Skill[];
@@ -387,6 +389,14 @@ export interface PersonaProfile {
   character: string;
   address: string;
   avoid: string;
+}
+
+/** Shared-household persona switch; this does not isolate chat history or memory. */
+export interface HouseholdProfile {
+  id: string;
+  label: string;
+  personaProfile: PersonaProfile;
+  communicationPreferences: CommunicationPreference[];
 }
 
 export interface PersonaPreferencesSnapshot {
@@ -443,6 +453,9 @@ export interface SettingsBackup {
   personaStyle?: PersonaStyleId;
   /** Optional in older v1 files. */
   personaProfile?: PersonaProfile;
+  /** Optional in older v1 files. */
+  householdProfiles?: HouseholdProfile[];
+  activeHouseholdProfileId?: string;
   quickActions: QuickAction[] | null;
   toolOverrides: Record<string, ToolOverride>;
   skills: Skill[];
@@ -525,6 +538,7 @@ export interface SettingsImportSummary {
   nodeRedFlowsChanged: boolean;
   personaChanged: boolean;
   personaProfileChanged: boolean;
+  householdProfilesChanged: boolean;
   personaStyleChanged: boolean;
   quickActionsChanged: boolean;
   toolOverridesChanged: boolean;
