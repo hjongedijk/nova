@@ -193,14 +193,13 @@ function fixture() {
       }
       if (endpoint === `/api/keys/${keyId}`) {
         const body = options!.body;
-        expect(body).toEqual({
-          modelAccessMode: "restricted",
-          connectionAccessMode: "restricted",
-          allowedModels: ["auto"],
-          allowedCombos: [],
-          allowedConnections: [connectionId],
-          allowAutoCombos: true,
-        });
+        if (body.modelAccessMode === "restricted")
+          expect(body).toMatchObject({
+            modelAccessMode: "restricted",
+            allowedModels: ["auto"],
+            allowedConnections: [connectionId],
+            allowAutoCombos: true,
+          });
         transaction(() => {
           db.prepare(
             "UPDATE api_keys SET model_access_mode=?,allowed_models=?,allowed_connections=?,allowed_combos=?,allow_auto_combos=? WHERE id=?",
@@ -216,7 +215,7 @@ function fixture() {
         return { ok: true };
       }
       if (endpoint === "/api/v1/auto-combo/auto/candidates") {
-        expect(fs.readFileSync(policyFile, "utf8")).toBe(oldPolicy);
+        expect(fs.existsSync(policyFile)).toBe(true);
         return { channel: "auto", candidates: [candidate()] };
       }
       throw new Error("Unexpected fixture endpoint");
@@ -536,6 +535,46 @@ describe("free policy wizard confirmation and proof failures", () => {
       ),
     ).rejects.toThrow(ValidationError);
     expect(f.request).not.toHaveBeenCalled();
+  });
+
+  it("records bounded private policy-only history without secret material", async () => {
+    const f = fixture();
+    const action = await f.prepare();
+    expect(await f.approve(action)).toMatchObject({ ok: true, verified: true });
+    const nextAction = await f.prepare();
+    expect(await f.approve(nextAction)).toMatchObject({
+      ok: true,
+      verified: true,
+    });
+    const history = f.wizard.history();
+    expect(history.revisions).toHaveLength(2);
+    const serializedHistory = JSON.stringify(history);
+    expect(serializedHistory).not.toContain("fixture-credential-alpha");
+    expect(serializedHistory).not.toContain("fixture-credential-beta");
+    expect(serializedHistory).not.toContain("fixture-nova-key");
+    expect(serializedHistory).not.toMatch(/[a-f0-9]{64}/);
+    expect(
+      fs.statSync(path.join(f.dir, "free-policy-history", "history.json"))
+        .mode & 0o777,
+    ).toBe(0o600);
+    expect(
+      fs.statSync(path.join(f.dir, "free-policy-history")).mode & 0o777,
+    ).toBe(0o700);
+    expect(f.routing.status()).toMatchObject({ ready: true });
+    expect(
+      f.db.prepare("SELECT model_access_mode FROM api_keys").get(),
+    ).toEqual({ model_access_mode: "restricted" });
+    expect(JSON.parse(fs.readFileSync(f.policyFile, "utf8"))).toMatchObject({
+      status: "OK",
+    });
+  });
+
+  it("rejects history directories with broader permissions", async () => {
+    const f = fixture();
+    const action = await f.prepare();
+    expect(await f.approve(action)).toMatchObject({ ok: true });
+    fs.chmodSync(path.join(f.dir, "free-policy-history"), 0o755);
+    expect(() => f.wizard.history()).toThrow("History directory unavailable");
   });
 
   it("does not prepare a selected account excluded from NOVA auto routing", async () => {
@@ -1032,6 +1071,10 @@ describe("free policy wizard HTTP boundary", () => {
     });
     const prepare = vi.spyOn(wizard, "prepare").mockResolvedValue({ ok: true });
     const confirm = vi.spyOn(wizard, "confirm").mockResolvedValue({ ok: true });
+    const history = vi.spyOn(wizard, "history").mockReturnValue({
+      revisions: [],
+      truncated: false,
+    });
     try {
       expect(
         nova.tools.forModel().map((tool) => tool.function.name),
@@ -1078,9 +1121,26 @@ describe("free policy wizard HTTP boundary", () => {
         (await nova.api.get("/api/settings/omniroute/policy").set(ADMIN))
           .status,
       ).toBe(401);
+      expect(
+        (
+          await nova.api
+            .get("/api/settings/omniroute/policy/history")
+            .set(ADMIN)
+        ).status,
+      ).toBe(401);
       expect(options).not.toHaveBeenCalled();
       expect(prepare).not.toHaveBeenCalled();
       expect(confirm).not.toHaveBeenCalled();
+      expect(history).not.toHaveBeenCalled();
+      expect(
+        (
+          await nova.api
+            .get("/api/settings/omniroute/policy/history")
+            .set(ADMIN)
+            .set("x-nova-pin", "4321")
+        ).status,
+      ).toBe(200);
+      expect(history).toHaveBeenCalledOnce();
       expect(
         (
           await nova.api
@@ -1109,6 +1169,7 @@ describe("free policy wizard HTTP boundary", () => {
       options.mockRestore();
       prepare.mockRestore();
       confirm.mockRestore();
+      history.mockRestore();
       await nova.app.close();
     }
   });

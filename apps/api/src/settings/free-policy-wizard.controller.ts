@@ -16,6 +16,9 @@ export class FreePolicyWizardController {
   @Get() options() {
     return this.wizard.options();
   }
+  @Get("history") history() {
+    return this.wizard.history();
+  }
   @Post("prepare") @HttpCode(200) prepare(@Body() body: unknown) {
     return this.wizard.prepare(body);
   }

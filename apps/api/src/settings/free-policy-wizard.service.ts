@@ -78,6 +78,24 @@ type Draft = {
   sessionId: string;
   expiresAt: number;
 };
+type PolicyState = {
+  settings: Record<string, unknown>;
+  key: Pick<
+    KeyRow,
+    | "model_access_mode"
+    | "allowed_models"
+    | "allowed_connections"
+    | "allowed_combos"
+    | "allow_auto_combos"
+  >;
+  policy: Record<string, unknown> | null;
+};
+type HistoryEntry = {
+  id: string;
+  at: number;
+  before: PolicyState;
+  after: PolicyState;
+};
 
 /** A complete policy replacement, kept blocked until configuration and operator account evidence are bound. */
 @Injectable()
@@ -118,6 +136,338 @@ export class FreePolicyWizard implements OnModuleDestroy {
         return digest("absent");
       throw error;
     }
+  }
+  private historyPath(): string {
+    return this.config.dataFile("free-policy-history/history.json");
+  }
+  private safePolicy(): Record<string, unknown> | null {
+    try {
+      const source = JSON.parse(
+        fs.readFileSync(
+          this.config.dataFile("free-routing-policy.json"),
+          "utf8",
+        ),
+      ) as unknown;
+      const raw = object(source);
+      const allowed = [
+        "route",
+        "status",
+        "nativeFreeAccessPolicy",
+        "enabledModels",
+        "verifiedProviders",
+        "verifiedConnectionIds",
+        "verifiedConnections",
+        "blockedProviders",
+        "nativeModelAllowlist",
+        "catalog",
+        "providers",
+      ];
+      const projected: Record<string, unknown> = {};
+      for (const key of allowed)
+        if (Object.hasOwn(raw, key)) projected[key] = raw[key];
+      if (Array.isArray(projected.verifiedConnections)) {
+        projected.verifiedConnections = projected.verifiedConnections.map(
+          (item) => {
+            const row = object(item);
+            return { id: row.id, provider: row.provider };
+          },
+        );
+      }
+      if (Array.isArray(projected.catalog)) {
+        const fields = [
+          "provider",
+          "modelId",
+          "freeType",
+          "tos",
+          "billingVerified",
+          "hardStopGuaranteed",
+          "accountFreeVerified",
+          "evidenceSource",
+          "nativeAutoEligible",
+          "officialSource",
+        ];
+        projected.catalog = projected.catalog.map((item) =>
+          Object.fromEntries(
+            fields
+              .filter((field) => Object.hasOwn(object(item), field))
+              .map((field) => [field, object(item)[field]]),
+          ),
+        );
+      }
+      return projected;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+  private stateSummary(snapshot: Snapshot): PolicyState {
+    return {
+      settings: Object.fromEntries(
+        settingNames
+          .filter((name) => name !== "_settingsRevision")
+          .map((name) => [name, snapshot.settings[name]]),
+      ),
+      key: {
+        model_access_mode: snapshot.key.model_access_mode,
+        allowed_models: snapshot.key.allowed_models,
+        allowed_connections: snapshot.key.allowed_connections,
+        allowed_combos: snapshot.key.allowed_combos,
+        allow_auto_combos: snapshot.key.allow_auto_combos,
+      },
+      policy: this.safePolicy(),
+    };
+  }
+  private validPolicy(value: unknown): boolean {
+    if (value === null) return true;
+    const row = object(value);
+    const fields = [
+      "route",
+      "status",
+      "nativeFreeAccessPolicy",
+      "enabledModels",
+      "verifiedProviders",
+      "verifiedConnectionIds",
+      "verifiedConnections",
+      "blockedProviders",
+      "nativeModelAllowlist",
+      "catalog",
+      "providers",
+    ];
+    if (Object.keys(row).some((key) => !fields.includes(key))) return false;
+    for (const key of ["route", "status", "nativeFreeAccessPolicy"])
+      if (
+        row[key] !== undefined &&
+        (typeof row[key] !== "string" || row[key].length > 40)
+      )
+        return false;
+    for (const key of [
+      "enabledModels",
+      "verifiedProviders",
+      "verifiedConnectionIds",
+      "blockedProviders",
+      "nativeModelAllowlist",
+    ])
+      if (
+        row[key] !== undefined &&
+        (!Array.isArray(row[key]) ||
+          row[key].length > 500 ||
+          row[key].some(
+            (item) => typeof item !== "string" || item.length > 200,
+          ))
+      )
+        return false;
+    if (
+      row.verifiedConnections !== undefined &&
+      (!Array.isArray(row.verifiedConnections) ||
+        row.verifiedConnections.length > 200 ||
+        row.verifiedConnections.some((item) => {
+          const connection = object(item);
+          return (
+            Object.keys(connection).sort().join() !== "id,provider" ||
+            !uuid(connection.id) ||
+            typeof connection.provider !== "string" ||
+            connection.provider.length > 100
+          );
+        }))
+    )
+      return false;
+    if (
+      row.catalog !== undefined &&
+      (!Array.isArray(row.catalog) ||
+        row.catalog.length > 500 ||
+        row.catalog.some((item) => {
+          const model = object(item);
+          const allowed = [
+            "provider",
+            "modelId",
+            "freeType",
+            "tos",
+            "billingVerified",
+            "hardStopGuaranteed",
+            "accountFreeVerified",
+            "evidenceSource",
+            "nativeAutoEligible",
+            "officialSource",
+          ];
+          let safeSource = true;
+          if (model.officialSource !== undefined) {
+            try {
+              const parsed = new URL(String(model.officialSource));
+              safeSource =
+                parsed.protocol === "https:" &&
+                !parsed.username &&
+                !parsed.password &&
+                !parsed.search &&
+                !parsed.hash;
+            } catch {
+              safeSource = false;
+            }
+          }
+          return (
+            Object.keys(model).some((key) => !allowed.includes(key)) ||
+            !safeSource ||
+            Object.entries(model).some(([key, part]) =>
+              [
+                "provider",
+                "modelId",
+                "freeType",
+                "tos",
+                "evidenceSource",
+                "officialSource",
+              ].includes(key)
+                ? typeof part !== "string" || part.length > 2048
+                : typeof part !== "boolean",
+            )
+          );
+        }))
+    )
+      return false;
+    return (
+      row.providers === undefined ||
+      (Array.isArray(row.providers) && row.providers.length === 0)
+    );
+  }
+  private validState(value: unknown): value is PolicyState {
+    const state = object(value);
+    if (Object.keys(state).sort().join() !== "key,policy,settings")
+      return false;
+    const settings = object(state.settings);
+    const settingKeys = settingNames.filter(
+      (name) => name !== "_settingsRevision",
+    );
+    if (Object.keys(settings).some((key) => !settingKeys.includes(key)))
+      return false;
+    if (
+      (settings.freeAccessPolicy !== undefined &&
+        (typeof settings.freeAccessPolicy !== "string" ||
+          settings.freeAccessPolicy.length > 40)) ||
+      ["hidePaidModels", "excludeTosAvoid"].some(
+        (name) =>
+          settings[name] !== undefined && typeof settings[name] !== "boolean",
+      ) ||
+      ["modelVisibilityAllowlist", "blockedProviders"].some(
+        (name) =>
+          settings[name] !== undefined &&
+          (!Array.isArray(settings[name]) ||
+            settings[name].length > 500 ||
+            settings[name].some(
+              (item) => typeof item !== "string" || item.length > 200,
+            )),
+      )
+    )
+      return false;
+    const key = object(state.key);
+    const keyFields = [
+      "model_access_mode",
+      "allowed_models",
+      "allowed_connections",
+      "allowed_combos",
+      "allow_auto_combos",
+    ];
+    if (Object.keys(key).sort().join() !== keyFields.slice().sort().join())
+      return false;
+    if (
+      typeof key.model_access_mode !== "string" ||
+      !["string", "object"].includes(typeof key.allowed_models) ||
+      (key.allowed_models !== null && typeof key.allowed_models !== "string") ||
+      (key.allowed_connections !== null &&
+        typeof key.allowed_connections !== "string") ||
+      (key.allowed_combos !== null && typeof key.allowed_combos !== "string") ||
+      ![0, 1].includes(key.allow_auto_combos as number)
+    )
+      return false;
+    return this.validPolicy(state.policy);
+  }
+  private validHistoryEntry(value: unknown): boolean {
+    const entry = object(value);
+    return (
+      Object.keys(entry).sort().join() === "after,at,before,id" &&
+      uuid(entry.id) &&
+      typeof entry.at === "number" &&
+      Number.isSafeInteger(entry.at) &&
+      this.validState(entry.before) &&
+      this.validState(entry.after)
+    );
+  }
+  private readHistory(): HistoryEntry[] {
+    try {
+      const directory = path.dirname(this.historyPath());
+      const dirStat = fs.lstatSync(directory);
+      if (
+        !dirStat.isDirectory() ||
+        dirStat.isSymbolicLink() ||
+        (dirStat.mode & 0o777) !== 0o700
+      )
+        throw new Error("History directory unavailable");
+      const stat = fs.lstatSync(this.historyPath());
+      if (
+        !stat.isFile() ||
+        stat.isSymbolicLink() ||
+        stat.size > 1_000_000 ||
+        (stat.mode & 0o777) !== 0o600
+      )
+        throw new Error("History unavailable");
+      const data: unknown = JSON.parse(
+        fs.readFileSync(this.historyPath(), "utf8"),
+      );
+      if (
+        !Array.isArray(data) ||
+        data.length > 20 ||
+        !data.every((item) => this.validHistoryEntry(item))
+      )
+        throw new Error("History unavailable");
+      return data as HistoryEntry[];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
+  private writeHistory(entries: HistoryEntry[]): void {
+    const filename = this.historyPath();
+    const temporary = `${filename}.${crypto.randomUUID()}.tmp`;
+    if (
+      entries.length > 20 ||
+      !entries.every((entry) => this.validHistoryEntry(entry))
+    )
+      throw new Error("History contents invalid");
+    fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
+    const dirStat = fs.lstatSync(path.dirname(filename));
+    if (
+      !dirStat.isDirectory() ||
+      dirStat.isSymbolicLink() ||
+      (dirStat.mode & 0o777) !== 0o700
+    )
+      throw new Error("History directory permissions invalid");
+    let fd: number | undefined;
+    try {
+      fd = fs.openSync(temporary, "wx", 0o600);
+      fs.writeFileSync(fd, JSON.stringify(entries.slice(-20)));
+      fs.fsyncSync(fd);
+      fs.closeSync(fd);
+      fd = undefined;
+      fs.renameSync(temporary, filename);
+      const dir = fs.openSync(path.dirname(filename), "r");
+      try {
+        fs.fsyncSync(dir);
+      } finally {
+        fs.closeSync(dir);
+      }
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
+      fs.rmSync(temporary, { force: true });
+    }
+  }
+  history(): {
+    revisions: {
+      id: string;
+      at: number;
+      before: PolicyState;
+      after: PolicyState;
+    }[];
+    truncated: boolean;
+  } {
+    const all = this.readHistory();
+    return { revisions: all.slice(-10), truncated: all.length > 10 };
   }
   private snapshot(): Snapshot {
     this.assertGateway();
@@ -534,6 +884,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
               "Accounts, gateway-instellingen of beleid zijn ondertussen gewijzigd. Bereid het beleid opnieuw voor.",
           };
         const plan = draft.plan;
+        const beforeSummary = this.stateSummary(before);
         const metadata = {
           models: plan.enabledModels,
           accounts: plan.verifiedConnectionIds.length,
@@ -601,6 +952,14 @@ export class FreePolicyWizard implements OnModuleDestroy {
             })),
           };
           this.savePolicy(verifiedPlan);
+          const history = this.readHistory();
+          history.push({
+            id: crypto.randomUUID(),
+            at: this.confirmations.now(),
+            before: beforeSummary,
+            after: this.stateSummary(this.snapshot()),
+          });
+          this.writeHistory(history);
           const status = operation.releaseAfterVerification();
           const result: FreePolicyResult = {
             ok: true,

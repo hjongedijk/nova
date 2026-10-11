@@ -4,25 +4,79 @@ import type {
   FreePolicySelection,
   FreePolicyPrepared,
   FreePolicyResult,
+  FreePolicyHistory,
   OmniRouteAccountsReport,
+  OmniRouteApiKeyInventory,
+  OmniRouteUsageReport,
+  OmniRouteModelVisibilityReport,
   OmniRouteAccountRemovalPrepared,
   OmniRouteAccountRemovalResult,
+  OmniRouteAccountCreatePrepared,
+  OmniRouteAccountCreateResult,
+  OmniRouteAccountKeyUpdatePrepared,
+  OmniRouteAccountKeyUpdateResult,
+  OmniRouteAccountActivationPrepared,
+  OmniRouteAccountActivationResult,
+  OmniRouteActivationHistoryEntry,
+  OmniRouteKeyActivationPrepareResult,
+  OmniRouteKeyActivationResult,
+  OmniRouteComboCreatePrepared,
+  OmniRouteComboCreateResult,
+  OmniRouteComboRemovalPrepared,
+  OmniRouteComboRemovalResult,
+  OmniRouteComboUpdatePrepared,
+  OmniRouteComboUpdateResult,
+  OmniRouteComboActivationPrepared,
+  OmniRouteComboActivationResult,
+  ModelRoleHistory,
+  ModelRolesSettings,
+  PersonaProfile,
   MqttOverview,
+  McpServerStatus,
+  McpServerActivity,
+  McpSettingHistory,
+  Risk,
   QdrantOverview,
-  InstructionSkill,
+  QdrantIndexHistory,
+  ManagedTargetInventory,
   InstructionSkillContentHistory,
+  InstructionSkillContentRollbackResult,
   QuickActionHistory,
+  StackControlStatus,
+  StackRestartPrepared,
+  StackRestartResult,
+  StackServiceId,
+  ManagedTargetsAccessHistory,
+  PendingConfirmation,
+  WorkspaceProjectsReport,
+  WorkspaceProjectSelectionHistory,
+  WorkspaceProjectSelectionPrepared,
+  WorkspaceProjectSelectionResult,
 } from "@nova/contracts";
 import type {
   NativeGatewayReport,
+  NativeMemoryPrepared,
+  NativeMemoryRecordPrepared,
+  NativeMemoryRecordResult,
+  NativeMemoryRecordsDeletePrepared,
+  NativeMemoryHistory,
+  NativeMemoryRecords,
+  NativeMemoryResult,
   NativeSkillDocument,
   NativeSkillMode,
+  NativeSkillModeHistory,
   NativeSkillModePrepared,
   NativeSkillModeResult,
+  NativeSkillRemovalPrepared,
+  NativeSkillRemovalResult,
   NativePromptReplacement,
   NativePromptPrepared,
   NativePromptResult,
+  NativePromptHistory,
   WindowsAgentStatus,
+  WindowsHelperDebugStatus,
+  HelperHotkeyHistory,
+  HelperHotkeyRollbackResult,
   UpdateReport,
   ModelMetricsReport,
   SettingsImportPrepared,
@@ -35,6 +89,7 @@ import type {
   ServiceRestartResult,
   HelperPreferenceHistory,
   HelperPreferenceRollbackResult,
+  HelperModeHistory,
   ToolSwitchHistory,
   ToolSwitchRollbackResult,
   ToolDescriptionHistory,
@@ -42,6 +97,9 @@ import type {
   SidebarRollbackResult,
   PersonaHistory,
   PersonaRollbackResult,
+  PersonaPreferencesHistory,
+  PersonaPreferencesRollbackResult,
+  PersonaStyleId,
   HelperPreferences,
   Skill,
   SkillDraftResult,
@@ -52,6 +110,9 @@ import type {
   SkillTestResult,
   SettingsBackup,
   SettingsOverview,
+  HomeAssistantAccessPolicy,
+  HomeAssistantAccessHistory,
+  ManagedTargetsAccessPolicy,
   SidebarItem,
   ToolOverride,
   Widget,
@@ -60,8 +121,11 @@ import type {
   HelperMode,
   HelperState,
   WallpaperMode,
+  WallpaperHistory,
+  NodeRedFlowInventory,
   WallpaperState,
   QuickAction,
+  WidgetDisplayHistory,
 } from "@nova/contracts";
 import { getJson, sendJson } from "./client.ts";
 import { getPin } from "./pin-session.ts";
@@ -86,12 +150,98 @@ const enc = encodeURIComponent;
 export const getSettings = () => read<SettingsOverview>("");
 export const getNativeGateway = () =>
   read<NativeGatewayReport>("/omniroute/native");
+export const prepareNativeMemory = (
+  enabled: boolean,
+  acknowledgeGlobal: true,
+) =>
+  write<NativeMemoryPrepared>("POST", "/omniroute/native/memory/prepare", {
+    enabled,
+    acknowledgeGlobal,
+  });
+export const getNativeMemoryHistory = () =>
+  read<NativeMemoryHistory>("/omniroute/native/memory/history");
+export const getNativeMemoryRecords = (offset = 0) =>
+  read<NativeMemoryRecords>(`/omniroute/native/memories?offset=${offset}`);
+export const prepareNativeMemoryRecordDelete = (id: string) =>
+  write<NativeMemoryRecordPrepared>(
+    "POST",
+    "/omniroute/native/memories/delete/prepare",
+    { id },
+  );
+export const prepareNativeMemoryRecordsDelete = (ids: string[]) =>
+  write<NativeMemoryRecordsDeletePrepared>(
+    "POST",
+    "/omniroute/native/memories/delete-many/prepare",
+    { ids },
+  );
+export const prepareNativeMemoryRecordUpdate = (id: string, content: string) =>
+  write<NativeMemoryRecordPrepared>(
+    "POST",
+    "/omniroute/native/memories/update/prepare",
+    { id, content },
+  );
+export const confirmNativeMemoryRecordUpdate = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<NativeMemoryRecordResult>(
+    "POST",
+    "/omniroute/native/memories/update/confirm",
+    {
+      sessionId,
+      confirmationId,
+      approve,
+    },
+  );
+export const confirmNativeMemoryRecordDelete = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<NativeMemoryRecordResult>(
+    "POST",
+    "/omniroute/native/memories/delete/confirm",
+    {
+      sessionId,
+      confirmationId,
+      approve,
+    },
+  );
+export const confirmNativeMemoryRecordsDelete = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<NativeMemoryRecordResult>(
+    "POST",
+    "/omniroute/native/memories/delete-many/confirm",
+    { sessionId, confirmationId, approve },
+  );
+export const prepareNativeMemoryRollback = (revisionId: string) =>
+  write<NativeMemoryPrepared>(
+    "POST",
+    "/omniroute/native/memory/rollback/prepare",
+    { revisionId, acknowledgeGlobal: true },
+  );
+export const confirmNativeMemory = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<NativeMemoryResult>("POST", "/omniroute/native/memory/confirm", {
+    sessionId,
+    confirmationId,
+    approve,
+  });
 export const prepareNativePrompt = (value: NativePromptReplacement) =>
   write<NativePromptPrepared>(
     "POST",
     "/omniroute/native/prompt/prepare",
     value,
   );
+export const getNativePromptHistory = () =>
+  read<NativePromptHistory>("/omniroute/native/prompt/history");
 export const confirmNativePrompt = (
   sessionId: string,
   confirmationId: string,
@@ -102,11 +252,29 @@ export const confirmNativePrompt = (
     confirmationId,
     approve,
   });
-export const prepareNativeSkillMode = (id: string, mode: NativeSkillMode) =>
+export const prepareNativeSkillMode = (
+  id: string,
+  mode: NativeSkillMode,
+  acknowledgeGlobal = false,
+) =>
   write<NativeSkillModePrepared>(
     "POST",
     `/omniroute/native/skills/${enc(id)}/prepare`,
-    { mode },
+    { mode, acknowledgeGlobal },
+  );
+export const getNativeSkillModeHistory = (id: string) =>
+  read<NativeSkillModeHistory>(
+    `/omniroute/native/skills/${encodeURIComponent(id)}/history`,
+  );
+export const prepareNativeSkillModeRollback = (
+  id: string,
+  revisionId: string,
+  acknowledgeGlobal: boolean,
+) =>
+  write<NativeSkillModePrepared>(
+    "POST",
+    `/omniroute/native/skills/${encodeURIComponent(id)}/rollback/prepare`,
+    { revisionId, acknowledgeGlobal },
   );
 export const confirmNativeSkillMode = (
   id: string,
@@ -119,10 +287,80 @@ export const confirmNativeSkillMode = (
     `/omniroute/native/skills/${enc(id)}/confirm`,
     { sessionId, confirmationId, approve },
   );
+export const prepareNativeSkillRemoval = (id: string) =>
+  write<NativeSkillRemovalPrepared>(
+    "POST",
+    `/omniroute/native/skills/${enc(id)}/remove/prepare`,
+    {},
+  );
+export const confirmNativeSkillRemoval = (
+  id: string,
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<NativeSkillRemovalResult>(
+    "POST",
+    `/omniroute/native/skills/${enc(id)}/remove/confirm`,
+    { sessionId, confirmationId, approve },
+  );
 export const getNativeSkillDocument = (id: string) =>
   read<NativeSkillDocument>(`/omniroute/native/documentation/${enc(id)}`);
 export const getModelMetrics = () =>
   read<ModelMetricsReport>("/models/metrics");
+export const getModelRoles = () => read<ModelRolesSettings>("/model-roles");
+export const saveModelRoles = (roles: ModelRolesSettings["roles"]) =>
+  write<ModelRolesSettings>("PUT", "/model-roles", roles);
+export const getModelRoleHistory = () =>
+  read<ModelRoleHistory>("/model-roles/history");
+export const rollbackModelRoleHistory = (id: string) =>
+  write<ModelRolesSettings>(
+    "POST",
+    `/model-roles/history/${enc(id)}/rollback`,
+    {},
+  );
+export const getWorkspaceProjects = () =>
+  read<WorkspaceProjectsReport>("/workspace/projects");
+export const createWorkspaceProject = (name: string) =>
+  write<WorkspaceProjectsReport>("POST", "/workspace/projects", { name });
+export const selectWorkspaceProject = (id: string) =>
+  write<WorkspaceProjectsReport>("PUT", "/workspace/projects/active", { id });
+export const getWorkspaceProjectSelectionHistory = () =>
+  read<WorkspaceProjectSelectionHistory>("/workspace/projects/history");
+export const prepareWorkspaceProjectSelectionRollback = (revision: string) =>
+  write<WorkspaceProjectSelectionPrepared>(
+    "POST",
+    `/workspace/projects/history/${enc(revision)}/prepare-rollback`,
+    {},
+  );
+export const confirmWorkspaceProjectSelectionRollback = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<WorkspaceProjectSelectionResult>(
+    "POST",
+    "/workspace/projects/history/confirm-rollback",
+    { sessionId, confirmationId, approve },
+  );
+export const getWorkspaceCodeTree = () =>
+  read<{
+    projectId: string;
+    files: { path: string; bytes: number }[];
+    truncated: boolean;
+  }>("/workspace/code/tree");
+export const getWorkspaceCodeFile = (path: string) =>
+  read<{ path: string; bytes: number; sha256: string; content: string }>(
+    `/workspace/code/file?path=${enc(path)}`,
+  );
+export const getWorkspaceCodeRun = () =>
+  read<{
+    projectId: string;
+    command: string[];
+    output: string;
+    exitCode: number | null;
+    durationMs: number;
+  } | null>("/workspace/code/latest-run");
 export const getUpdates = () => read<UpdateReport>("/updates");
 export const checkUpdates = () => write<UpdateReport>("POST", "/updates/check");
 
@@ -131,6 +369,24 @@ export const savePersona = (text: string) =>
     "PUT",
     "/persona",
     { text },
+  );
+export const savePersonaStyle = (style: PersonaStyleId) =>
+  write<{ ok: true; personaStyle: PersonaStyleId }>("PUT", "/persona/style", {
+    style,
+  });
+export const savePersonaProfile = (profile: PersonaProfile) =>
+  write<{ ok: true; personaProfile: PersonaProfile }>(
+    "PUT",
+    "/persona/profile",
+    { profile },
+  );
+export const getPersonaPreferencesHistory = () =>
+  read<PersonaPreferencesHistory>("/persona/preferences/history");
+export const rollbackPersonaPreferences = (id: string) =>
+  write<PersonaPreferencesRollbackResult>(
+    "POST",
+    `/persona/preferences/history/${enc(id)}/rollback`,
+    {},
   );
 export const getPersonaHistory = () => read<PersonaHistory>("/persona/history");
 export const rollbackPersonaRevision = (id: string) =>
@@ -142,7 +398,7 @@ export const rollbackPersonaRevision = (id: string) =>
 export const getInstructionSkillContentHistory = (id: string) =>
   read<InstructionSkillContentHistory>(`/skills/${enc(id)}/content-history`);
 export const rollbackInstructionSkillContent = (id: string, revision: string) =>
-  write<{ ok: true; skill: InstructionSkill }>(
+  write<InstructionSkillContentRollbackResult>(
     "POST",
     `/skills/${enc(id)}/content-history/${enc(revision)}/rollback`,
     {},
@@ -215,11 +471,36 @@ export const improveSkill = (skill: SkillInput, goal: string) =>
 /* ---------- sidebar panels ---------- */
 
 export const createWidget = (widget: WidgetInput) =>
-  write<{ widget: Widget }>("POST", "/widgets", widget);
+  write<{ widget: Widget; historyWarning?: string }>(
+    "POST",
+    "/widgets",
+    widget,
+  );
 export const updateWidget = (id: string, widget: WidgetInput) =>
-  write<{ widget: Widget }>("PUT", `/widgets/${enc(id)}`, widget);
+  write<{ widget: Widget; historyWarning?: string }>(
+    "PUT",
+    `/widgets/${enc(id)}`,
+    widget,
+  );
+export type NoteWidgetRevision = {
+  id: string;
+  at: string;
+  before: string;
+  after: string;
+  revertedFrom?: string;
+};
+export const getNoteWidgetHistory = (id: string) =>
+  read<{ revisions: NoteWidgetRevision[]; truncated: boolean }>(
+    `/widgets/${enc(id)}/history`,
+  );
+export const rollbackNoteWidget = (id: string, revision: string) =>
+  write<{ ok: true; widget: Widget; historyWarning?: string }>(
+    "POST",
+    `/widgets/${enc(id)}/history/${enc(revision)}/rollback`,
+    {},
+  );
 export const deleteWidget = (id: string) =>
-  write<{ ok: true }>("DELETE", `/widgets/${enc(id)}`);
+  write<{ ok: true; historyWarning?: string }>("DELETE", `/widgets/${enc(id)}`);
 export const previewWidget = (widget: WidgetInput) =>
   write<WidgetPreviewResult>("POST", "/widgets/preview", widget);
 
@@ -233,10 +514,18 @@ export const resetSidebar = () =>
 export const getWallpaper = () => read<WallpaperState>("/wallpaper");
 export const setWallpaper = (display: number, mode: WallpaperMode) =>
   write<WallpaperState>("POST", "/wallpaper", { display, mode });
+export const getWallpaperHistory = () =>
+  read<WallpaperHistory>("/wallpaper/history");
+export const rollbackWallpaper = (id: string) =>
+  write<WallpaperState>("POST", `/wallpaper/history/${enc(id)}/rollback`, {});
+export const getNodeRedFlows = () =>
+  read<NodeRedFlowInventory>("/node-red/flows");
 
 export const getHelper = () => read<HelperState>("/helper");
 export const getWindowsAgentStatus = () =>
   read<WindowsAgentStatus>("/windows/status");
+export const getWindowsHelperDebug = () =>
+  read<WindowsHelperDebugStatus>("/windows/helper-debug");
 export const setHelper = (mode: HelperMode, display: number) =>
   write<HelperState>("POST", "/helper", { mode, display });
 
@@ -267,6 +556,7 @@ export const revokeStandingApproval = (id: string) =>
 export interface HelperHotkeys {
   ok: boolean;
   error?: string;
+  historyWarning?: string;
   preferences?: {
     hotkeys: Record<string, string>;
     warnings: string[];
@@ -276,6 +566,14 @@ export interface HelperHotkeys {
 export const getHelperHotkeys = () => read<HelperHotkeys>("/helper/hotkeys");
 export const saveHelperHotkeys = (hotkeys: Record<string, string>) =>
   write<HelperHotkeys>("PUT", "/helper/hotkeys", { hotkeys });
+export const getHelperHotkeyHistory = () =>
+  read<HelperHotkeyHistory>("/helper/hotkeys/history");
+export const rollbackHelperHotkeys = (id: string) =>
+  write<HelperHotkeyRollbackResult>(
+    "POST",
+    `/helper/hotkeys/history/${enc(id)}/rollback`,
+    {},
+  );
 
 export const getHelperPreferences = () =>
   read<HelperPreferences>("/helper/preferences");
@@ -293,6 +591,10 @@ export const rollbackHelperPreferenceRevision = (id: string) =>
     `/helper/preferences/history/${enc(id)}/rollback`,
     {},
   );
+export const getHelperModeHistory = () =>
+  read<HelperModeHistory>("/helper/history");
+export const rollbackHelperModeRevision = (id: string) =>
+  write<HelperState>("POST", `/helper/history/${enc(id)}/rollback`, {});
 export const getToolSwitchHistory = () =>
   read<ToolSwitchHistory>("/tools/history");
 export const rollbackToolSwitchRevision = (id: string) =>
@@ -312,14 +614,229 @@ export const rollbackSidebarRevision = (id: string) =>
 /* ---------- service connections (credentials never returned) ---------- */
 export const getServiceConnections = () =>
   read<{ services: ServiceConnection[] }>("/services");
+export const getServiceConnectionStatus = (id: string) =>
+  read<{ test: ServiceConnectionTest | null }>(`/services/${enc(id)}/status`);
 export const getServiceRestartStatus = () =>
   read<ServiceRestartStatus>("/services/restart");
 export const requestServiceRestart = () =>
   write<ServiceRestartResult>("POST", "/services/restart", {});
+
+export const getStackControlStatus = () =>
+  read<StackControlStatus>("/stack-control/services");
+export const prepareStackServiceRestart = (service: StackServiceId) =>
+  write<StackRestartPrepared>("POST", "/stack-control/restart/prepare", {
+    service,
+  });
+export const confirmStackServiceRestart = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<StackRestartResult>("POST", "/stack-control/restart/confirm", {
+    sessionId,
+    confirmationId,
+    approve,
+  });
 export const getMqttOverview = () =>
   read<MqttOverview>("/services/mqtt/overview");
+export const getMcpServerStatus = () => read<McpServerStatus>("/mcp/servers");
+export const getMcpServerActivity = (id: string) =>
+  read<McpServerActivity>(`/mcp/servers/${enc(id)}/activity`);
+export const getMcpServerHistory = (id: string) =>
+  read<McpSettingHistory>(`/mcp/servers/${enc(id)}/history`);
+export const prepareMcpServerHistoryRollback = (
+  id: string,
+  revisionId: string,
+) =>
+  write<{
+    ok: boolean;
+    error?: string;
+    warning?: string;
+    action?: PendingConfirmation;
+  }>(
+    "POST",
+    `/mcp/servers/${enc(id)}/history/${enc(revisionId)}/prepare-rollback`,
+    {},
+  );
+export const testMcpServerConnection = (id: string) =>
+  write<{ ok: boolean; toolCount: number }>(
+    "POST",
+    `/mcp/servers/${enc(id)}/test`,
+    {},
+  );
+export const prepareMcpServerToggle = (id: string, enabled: boolean) =>
+  write<{
+    ok: boolean;
+    error?: string;
+    warning?: string;
+    action?: PendingConfirmation;
+  }>("POST", `/mcp/servers/${enc(id)}/prepare-toggle`, { enabled });
+export const confirmMcpServerToggle = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<{
+    ok: boolean;
+    error?: string;
+    warning?: string;
+    server?: string;
+    enabled?: boolean;
+  }>("POST", "/mcp/servers/confirm-toggle", {
+    sessionId,
+    confirmationId,
+    approve,
+  });
+export const prepareMcpToolRisk = (server: string, tool: string, risk: Risk) =>
+  write<{
+    ok: boolean;
+    error?: string;
+    warning?: string;
+    action?: PendingConfirmation;
+  }>("POST", `/mcp/servers/${enc(server)}/tools/${enc(tool)}/prepare-risk`, {
+    risk,
+  });
+export const confirmMcpToolRisk = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<{
+    ok: boolean;
+    error?: string;
+    warning?: string;
+    risk?: Risk;
+  }>("POST", "/mcp/servers/confirm-tool-risk", {
+    sessionId,
+    confirmationId,
+    approve,
+  });
 export const getQdrantOverview = () =>
   read<QdrantOverview>("/services/qdrant/overview");
+export const getWidgetDisplayHistory = (id: string) =>
+  read<WidgetDisplayHistory>(`/widgets/${enc(id)}/display-history`);
+export const rollbackWidgetDisplay = (id: string, revision: string) =>
+  write<{
+    ok: true;
+    widget: Widget;
+    historyWarning?: string;
+  }>(
+    "POST",
+    `/widgets/${enc(id)}/display-history/${enc(revision)}/rollback`,
+    {},
+  );
+export const runQdrantMaintenance = () =>
+  write<{ ok: boolean; scanned?: number; archived?: number; more?: boolean }>(
+    "POST",
+    "/services/qdrant/maintenance",
+    {},
+  );
+export const runQdrantReindex = () =>
+  write<{
+    ok: boolean;
+    points?: number;
+    collection?: string;
+    warning?: string;
+    error?: string;
+  }>("POST", "/services/qdrant/reindex", {});
+export const getQdrantIndexHistory = () =>
+  read<QdrantIndexHistory>("/services/qdrant/index-history");
+export const rollbackQdrantIndex = (id: string) =>
+  write<{ ok: boolean; collection?: string; error?: string }>(
+    "POST",
+    `/services/qdrant/index-history/${enc(id)}/rollback`,
+    {},
+  );
+export const getManagedTargetInventory = () =>
+  read<ManagedTargetInventory>("/managed-targets/inventory");
+export const getManagedTargetsAccess = () =>
+  read<ManagedTargetsAccessPolicy>("/managed-targets/access");
+export const getManagedTargetsAccessHistory = () =>
+  read<ManagedTargetsAccessHistory>("/managed-targets/access/history");
+export const prepareManagedTargetsAccessRollback = (revision: string) =>
+  write<{
+    ok: boolean;
+    warning?: string;
+    error?: string;
+    action?: PendingConfirmation;
+  }>(
+    "POST",
+    `/managed-targets/access/history/${enc(revision)}/prepare-rollback`,
+    {},
+  );
+export const confirmManagedTargetsAccessRollback = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<{
+    ok: boolean;
+    error?: string;
+    historyWarning?: string;
+    auditWarning?: string;
+    policy?: ManagedTargetsAccessPolicy;
+  }>("POST", "/managed-targets/access/history/confirm-rollback", {
+    sessionId,
+    confirmationId,
+    approve,
+  });
+export const saveManagedTargetsAccess = (policy: ManagedTargetsAccessPolicy) =>
+  write<{
+    ok: true;
+    policy: ManagedTargetsAccessPolicy;
+    historyWarning?: string;
+  }>("PUT", "/managed-targets/access", policy);
+export type HomeAssistantInventory = {
+  syncedAt: string | null;
+  areas: { id: string; name: string }[];
+  devices: { id: string; name: string; areaId: string | null }[];
+  entities: {
+    id: string;
+    name: string;
+    domain: string;
+    areaId: string | null;
+    deviceId: string | null;
+  }[];
+};
+export const getHomeAssistantInventory = () =>
+  read<HomeAssistantInventory>("/home-assistant/inventory");
+export const getHomeAssistantAccess = () =>
+  read<HomeAssistantAccessPolicy>("/home-assistant/access");
+export const getHomeAssistantAccessHistory = () =>
+  read<HomeAssistantAccessHistory>("/home-assistant/access/history");
+export const prepareHomeAssistantAccessRollback = (revision: string) =>
+  write<{
+    ok: boolean;
+    warning?: string;
+    error?: string;
+    action?: PendingConfirmation;
+  }>(
+    "POST",
+    `/home-assistant/access/history/${enc(revision)}/prepare-rollback`,
+    {},
+  );
+export const confirmHomeAssistantAccessRollback = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<{
+    ok: boolean;
+    error?: string;
+    historyWarning?: string;
+    auditWarning?: string;
+    policy?: HomeAssistantAccessPolicy;
+  }>("POST", "/home-assistant/access/history/confirm-rollback", {
+    sessionId,
+    confirmationId,
+    approve,
+  });
+export const saveHomeAssistantAccess = (policy: HomeAssistantAccessPolicy) =>
+  write<{
+    ok: true;
+    policy: HomeAssistantAccessPolicy;
+    historyWarning?: string;
+  }>("PUT", "/home-assistant/access", policy);
 export const saveServiceConnection = (
   id: string,
   values: Record<string, string | boolean>,
@@ -340,14 +857,151 @@ export const testServiceConnection = (
   });
 export const getConnectionHistory = () =>
   read<{ revisions: ServiceConnectionRevision[] }>("/services/history");
-export const rollbackConnection = (id: string) =>
-  write<ServiceConnectionWrite>(
-    "POST",
-    `/services/history/${enc(id)}/rollback`,
-  );
+export const prepareConnectionRollback = (id: string) =>
+  write<{
+    ok: boolean;
+    warning?: string;
+    error?: string;
+    action?: PendingConfirmation;
+  }>("POST", `/services/history/${enc(id)}/prepare-rollback`, {});
+export const confirmConnectionRollback = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<{
+    ok: boolean;
+    error?: string;
+    auditWarning?: string;
+    services?: ServiceConnection[];
+  }>("POST", "/services/history/confirm-rollback", {
+    sessionId,
+    confirmationId,
+    approve,
+  });
 
 export const getOmniRouteAccounts = () =>
   read<OmniRouteAccountsReport>("/omniroute/accounts");
+export const getOmniRouteApiKeys = () =>
+  read<OmniRouteApiKeyInventory>("/omniroute/accounts/keys");
+export const getOmniRouteModelVisibility = () =>
+  read<OmniRouteModelVisibilityReport>("/omniroute/accounts/model-visibility");
+export const getOmniRouteUsage = () =>
+  read<OmniRouteUsageReport>("/omniroute/accounts/usage");
+
+export const prepareOmniRouteAccountActivation = (
+  id: string,
+  enabled: boolean,
+) =>
+  write<OmniRouteAccountActivationPrepared>(
+    "POST",
+    `/omniroute/accounts/${enc(id)}/activation/prepare`,
+    { enabled, acknowledgeGlobalEffect: true },
+  );
+export const confirmOmniRouteAccountActivation = (
+  id: string,
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteAccountActivationResult>(
+    "POST",
+    `/omniroute/accounts/${enc(id)}/activation/confirm`,
+    { sessionId, confirmationId, approve },
+  );
+
+export const prepareOmniRouteKeyActivation = (id: string, enabled: boolean) =>
+  write<OmniRouteKeyActivationPrepareResult>(
+    "POST",
+    `/omniroute/accounts/keys/${enc(id)}/activation/prepare`,
+    { enabled, acknowledgeGlobalEffect: true },
+  );
+export const confirmOmniRouteKeyActivation = (
+  id: string,
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteKeyActivationResult>(
+    "POST",
+    `/omniroute/accounts/keys/${enc(id)}/activation/confirm`,
+    { sessionId, confirmationId, approve },
+  );
+export const getOmniRouteKeyActivationHistory = (id: string) =>
+  read<{ revisions: OmniRouteActivationHistoryEntry[] }>(
+    `/omniroute/accounts/keys/${enc(id)}/activation/history`,
+  );
+export const prepareOmniRouteKeyActivationRollback = (
+  id: string,
+  revision: string,
+) =>
+  write<OmniRouteKeyActivationPrepareResult>(
+    "POST",
+    `/omniroute/accounts/keys/${enc(id)}/activation/history/${enc(revision)}/prepare-rollback`,
+    {},
+  );
+export const prepareOmniRouteComboCreate = (name: string, models: string[]) =>
+  write<OmniRouteComboCreatePrepared>(
+    "POST",
+    "/omniroute/combos/create/prepare",
+    {
+      name,
+      models,
+      acknowledgeGlobalEffect: true,
+    },
+  );
+export const confirmOmniRouteComboCreate = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteComboCreateResult>(
+    "POST",
+    "/omniroute/combos/create/confirm",
+    {
+      sessionId,
+      confirmationId,
+      approve,
+    },
+  );
+export const prepareOmniRouteComboRemoval = (id: string) =>
+  write<OmniRouteComboRemovalPrepared>(
+    "POST",
+    `/omniroute/combos/${enc(id)}/removal/prepare`,
+    { acknowledgeEffects: true },
+  );
+export const confirmOmniRouteComboRemoval = (
+  id: string,
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteComboRemovalResult>(
+    "POST",
+    `/omniroute/combos/${enc(id)}/removal/confirm`,
+    { sessionId, confirmationId, approve },
+  );
+export const prepareOmniRouteComboUpdate = (
+  id: string,
+  name: string,
+  models: string[],
+) =>
+  write<OmniRouteComboUpdatePrepared>(
+    "POST",
+    `/omniroute/combos/${enc(id)}/update/prepare`,
+    { name, models, acknowledgeGlobalEffect: true },
+  );
+export const confirmOmniRouteComboUpdate = (
+  id: string,
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteComboUpdateResult>(
+    "POST",
+    `/omniroute/combos/${enc(id)}/update/confirm`,
+    { sessionId, confirmationId, approve },
+  );
 
 export const prepareOmniRouteAccountRemoval = (id: string) =>
   write<OmniRouteAccountRemovalPrepared>(
@@ -366,9 +1020,83 @@ export const confirmOmniRouteAccountRemoval = (
     `/omniroute/accounts/${enc(id)}/removal/confirm`,
     { sessionId, confirmationId, approve },
   );
+export const prepareOmniRouteAccountCreate = (
+  provider: string,
+  name: string,
+  apiKey: string,
+  acknowledgeEffects: boolean,
+) =>
+  write<OmniRouteAccountCreatePrepared>(
+    "POST",
+    "/omniroute/accounts/create/prepare",
+    { provider, name, apiKey, acknowledgeEffects },
+  );
+export const confirmOmniRouteAccountCreate = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteAccountCreateResult>(
+    "POST",
+    "/omniroute/accounts/create/confirm",
+    { sessionId, confirmationId, approve },
+  );
+export const prepareOmniRouteAccountKeyUpdate = (
+  id: string,
+  apiKey: string,
+  acknowledgeEffects: boolean,
+) =>
+  write<OmniRouteAccountKeyUpdatePrepared>(
+    "POST",
+    "/omniroute/accounts/key-update/prepare",
+    { id, apiKey, acknowledgeEffects },
+  );
+export const confirmOmniRouteAccountKeyUpdate = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteAccountKeyUpdateResult>(
+    "POST",
+    "/omniroute/accounts/key-update/confirm",
+    { sessionId, confirmationId, approve },
+  );
+
+export const prepareOmniRouteComboActivation = (id: string, enabled: boolean) =>
+  write<OmniRouteComboActivationPrepared>(
+    "POST",
+    `/omniroute/combos/${enc(id)}/activation/prepare`,
+    { enabled, acknowledgeGlobalEffect: true },
+  );
+export const confirmOmniRouteComboActivation = (
+  id: string,
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteComboActivationResult>(
+    "POST",
+    `/omniroute/combos/${enc(id)}/activation/confirm`,
+    { sessionId, confirmationId, approve },
+  );
+export const getOmniRouteComboActivationHistory = (id: string) =>
+  read<{ revisions: OmniRouteActivationHistoryEntry[] }>(
+    `/omniroute/combos/${enc(id)}/activation/history`,
+  );
+export const prepareOmniRouteComboActivationRollback = (
+  id: string,
+  revision: string,
+) =>
+  write<OmniRouteComboActivationPrepared>(
+    "POST",
+    `/omniroute/combos/${enc(id)}/activation/history/${enc(revision)}/prepare-rollback`,
+    {},
+  );
 
 export const getFreePolicyOptions = () =>
   read<FreePolicyOptions>("/omniroute/policy");
+export const getFreePolicyHistory = () =>
+  read<FreePolicyHistory>("/omniroute/policy/history");
 export const prepareFreePolicy = (value: FreePolicySelection) =>
   write<FreePolicyPrepared>("POST", "/omniroute/policy/prepare", value);
 export const confirmFreePolicy = (
@@ -381,5 +1109,18 @@ export const confirmFreePolicy = (
     confirmationId,
     approve,
   });
+export const getOmniRouteAccountActivationHistory = (id: string) =>
+  read<{ revisions: OmniRouteActivationHistoryEntry[] }>(
+    `/omniroute/accounts/${enc(id)}/activation/history`,
+  );
+export const prepareOmniRouteAccountActivationRollback = (
+  id: string,
+  revision: string,
+) =>
+  write<OmniRouteAccountActivationPrepared>(
+    "POST",
+    `/omniroute/accounts/${enc(id)}/activation/history/${enc(revision)}/prepare-rollback`,
+    {},
+  );
 
 export const getToolUsage = () => read<ToolUsageReport>("/tools/usage");

@@ -1,9 +1,15 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import type { FreePolicyOptions, FreePolicyPrepared } from "@nova/contracts";
+  import type {
+    FreePolicyOptions,
+    FreePolicyPrepared,
+    FreePolicyHistory,
+    FreePolicyHistorySnapshot,
+  } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
   import {
     getFreePolicyOptions,
+    getFreePolicyHistory,
     prepareFreePolicy,
     confirmFreePolicy,
   } from "#lib/api/settings.ts";
@@ -23,6 +29,9 @@
   let busy = $state(false);
   let message = $state("");
   let pending = $state<FreePolicyPrepared | null>(null);
+  let history = $state<FreePolicyHistory | null>(null);
+  let historyBusy = $state(false);
+  let historyError = $state("");
   let expired = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const account = $derived(
@@ -32,6 +41,29 @@
     options?.models.filter((item) => item.provider === account?.provider) || [],
   );
   onDestroy(() => clearTimeout(timer));
+
+  async function loadHistory() {
+    historyBusy = true;
+    historyError = "";
+    try {
+      history = await getFreePolicyHistory();
+    } catch {
+      history = null;
+      historyError = "De beleidsgeschiedenis kon niet worden geladen.";
+    } finally {
+      historyBusy = false;
+    }
+  }
+  function describe(snapshot: FreePolicyHistorySnapshot) {
+    const policy = snapshot.policy;
+    if (!policy) return "Geen lokaal beleid";
+    const models = Array.isArray(policy.enabledModels)
+      ? policy.enabledModels.filter(
+          (item): item is string => typeof item === "string",
+        )
+      : [];
+    return `${String(snapshot.settings.freeAccessPolicy ?? "onbekend")} · ${models.length} modellen`;
+  }
 
   async function load() {
     busy = true;
@@ -287,8 +319,47 @@
   {/if}
 </section>
 
+<section class="policy-history" aria-label="Gratis beleidsgeschiedenis">
+  <h3>Beleidswijzigingen</h3>
+  <p>
+    Privégeschiedenis op deze server. Sleutelwaarden worden niet opgeslagen.
+  </p>
+  <Button onclick={loadHistory} disabled={historyBusy || busy}>
+    {historyBusy ? "Geschiedenis laden…" : "Beleidsgeschiedenis laden"}
+  </Button>
+  {#if historyError}<p role="status">{historyError}</p>{/if}
+  {#if history}
+    {#if history.truncated}<p>
+        Alleen de tien nieuwste wijzigingen worden getoond.
+      </p>{/if}
+    {#if !history.revisions.length}<p>
+        Er zijn nog geen beleidswijzigingen.
+      </p>{/if}
+    <ol>
+      {#each [...history.revisions].reverse() as revision (revision.id)}
+        <li>
+          <strong>{new Date(revision.at).toLocaleString("nl-NL")}</strong>
+          <p>
+            Van: {describe(revision.before)} → Naar: {describe(revision.after)}
+          </p>
+        </li>
+      {/each}
+    </ol>
+    {#if history.revisions.length}
+      <p role="status">
+        Terugzetten is geblokkeerd totdat OmniRoute sleutelrechten met een
+        revisiecontrole kan wijzigen. Zo voorkomen we dat een rollback een
+        gelijktijdige toegangsaanpassing overschrijft.
+      </p>
+    {/if}
+  {/if}
+</section>
+
 <style>
   .policy-wizard {
+    margin-block: 2rem;
+  }
+  .policy-history {
     margin-block: 2rem;
   }
   fieldset,
