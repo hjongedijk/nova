@@ -199,6 +199,39 @@ export interface OmniRouteApiKeyInventory {
   }[];
 }
 
+export type OmniRouteTokenResetInterval = "daily" | "weekly" | "monthly";
+export interface OmniRouteTokenLimit {
+  id: string;
+  scopeType: "model" | "provider" | "global";
+  scopeValue: string;
+  tokenLimit: number;
+  resetInterval: OmniRouteTokenResetInterval;
+  resetTime: string;
+  enabled: boolean;
+}
+export interface OmniRouteTokenLimitsReport {
+  available: boolean;
+  error?: string;
+  keyId?: string;
+  keyName?: string;
+  limits: OmniRouteTokenLimit[];
+  truncated: boolean;
+}
+export interface OmniRouteTokenLimitPrepared {
+  ok: boolean;
+  error?: string;
+  oldLimit?: number | null;
+  tokenLimit?: number;
+  resetInterval?: OmniRouteTokenResetInterval;
+  action?: PendingConfirmation;
+}
+export interface OmniRouteTokenLimitResult {
+  ok: boolean;
+  error?: string;
+  verified?: boolean | null;
+  auditWarning?: string;
+}
+
 export interface OmniRouteKeyModelAccessOptions {
   available: boolean;
   error?: string;

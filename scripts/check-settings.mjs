@@ -276,6 +276,10 @@ try {
     let accountsReads = 0;
     let omniUsageReads = 0;
     let apiKeyInventoryReads = 0;
+    let tokenLimitReads = 0;
+    let tokenLimitWrites = 0;
+    let preparedTokenLimit = 0;
+    let tokenLimit = 0;
     let keyActivationWrites = 0;
     let keyEnabled = true;
     let keyHistory = [];
@@ -1121,6 +1125,72 @@ try {
             },
           ],
         };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/accounts/keys/fixture-client-key/token-limits"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        tokenLimitReads++;
+        data = {
+          available: true,
+          keyId: "fixture-client-key",
+          keyName: "Client key",
+          truncated: false,
+          limits: tokenLimitWrites
+            ? [
+                {
+                  id: "abababab-abab-4bab-8bab-abababababab",
+                  scopeType: "global",
+                  scopeValue: "",
+                  tokenLimit,
+                  resetInterval: "weekly",
+                  resetTime: "00:00",
+                  enabled: true,
+                },
+              ]
+            : [],
+        };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/accounts/keys/fixture-client-key/token-limits/prepare"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        assert.deepEqual(request.postDataJSON(), {
+          tokenLimit: 5000,
+          resetInterval: "weekly",
+          acknowledgeGlobalEffect: true,
+        });
+        preparedTokenLimit = 5000;
+        const now = await page.evaluate(() => Date.now());
+        data = {
+          ok: true,
+          oldLimit: null,
+          tokenLimit: preparedTokenLimit,
+          resetInterval: "weekly",
+          action: {
+            confirmationId: "abababab-cccc-4bab-8bab-abababababab",
+            sessionId:
+              "settings-token-limit:abababab-cccc-4bab-8bab-abababababab",
+            tool: "omniroute_token_limit",
+            args: {
+              keyId: "fixture-client-key",
+              tokenLimit: preparedTokenLimit,
+            },
+            risk: "DANGEROUS",
+            allowAlways: false,
+            createdAt: now,
+            expiresAt: now + 60000,
+          },
+        };
+      } else if (
+        endpoint ===
+        "/settings/omniroute/accounts/keys/fixture-client-key/token-limits/confirm"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        assert.equal(request.postDataJSON().approve, true);
+        tokenLimitWrites++;
+        tokenLimit = preparedTokenLimit;
+        data = { ok: true, verified: true };
       } else if (
         endpoint ===
         "/settings/omniroute/accounts/keys/fixture-client-key/model-access"
@@ -3798,6 +3868,39 @@ try {
     assert.equal(keyModelMode, "all");
     assert.deepEqual(keyModelAllowed, ["free/one", "free/two"]);
     assert.equal(keyModelHistory[0].revertedFrom, keyModelHistory[1].id);
+    await clientKey
+      .getByRole("button", { name: "Tokenlimieten laden" })
+      .click();
+    assert.equal(tokenLimitReads, 1);
+    const tokenBudget = clientKey.getByRole("region", {
+      name: "Tokenlimieten per API-sleutel",
+    });
+    await tokenBudget.getByLabel("Globale tokenlimiet").fill("5000");
+    await tokenBudget.getByLabel("Periode").selectOption("weekly");
+    const tokenLimitImpact = page.getByLabel(
+      "Ik begrijp dat dit alle clients met deze sleutel kan raken.",
+    );
+    await tokenLimitImpact.click({ force: true, noWaitAfter: true });
+    assert.equal(await tokenLimitImpact.isChecked(), true);
+    await tokenBudget
+      .getByRole("button", { name: "Controleren en voorbereiden" })
+      .click();
+    const tokenLimitConfirm = tokenBudget.getByRole("button", {
+      name: "Tokenlimiet bevestigen",
+    });
+    assert.equal(await tokenLimitConfirm.isDisabled(), true);
+    const tokenLimitConfirmImpact = page.getByLabel(
+      "Ik begrijp dat deze limiet alle clients met deze sleutel raakt.",
+    );
+    await tokenLimitConfirmImpact.click({ force: true, noWaitAfter: true });
+    assert.equal(await tokenLimitConfirmImpact.isChecked(), true);
+    await tokenLimitConfirm.click();
+    await accounts
+      .getByText("Tokenlimiet opgeslagen en gecontroleerd.", { exact: true })
+      .waitFor();
+    assert.equal(tokenLimitWrites, 1);
+    assert.equal(tokenLimitReads, 2);
+    assert.match(await tokenBudget.innerText(), /5\.000 tokens \/ weekly/);
     await accounts
       .getByRole("button", { name: "Verborgen modellen bekijken", exact: true })
       .click();

@@ -33,6 +33,10 @@ import type {
   OmniRouteComboRemovalResult,
   OmniRouteComboUpdatePrepared,
   OmniRouteComboUpdateHistory,
+  OmniRouteTokenLimitsReport,
+  OmniRouteTokenLimitPrepared,
+  OmniRouteTokenLimitResult,
+  OmniRouteTokenResetInterval,
   OmniRouteComboUpdateResult,
   OmniRouteComboActivationPrepared,
   OmniRouteComboActivationResult,
@@ -1104,6 +1108,31 @@ export const confirmOmniRouteComboUpdate = (
   write<OmniRouteComboUpdateResult>(
     "POST",
     `/omniroute/combos/${enc(id)}/update/confirm`,
+    { sessionId, confirmationId, approve },
+  );
+export const getOmniRouteTokenLimits = (id: string) =>
+  read<OmniRouteTokenLimitsReport>(
+    `/omniroute/accounts/keys/${enc(id)}/token-limits`,
+  );
+export const prepareOmniRouteTokenLimit = (
+  id: string,
+  tokenLimit: number,
+  resetInterval: OmniRouteTokenResetInterval,
+) =>
+  write<OmniRouteTokenLimitPrepared>(
+    "POST",
+    `/omniroute/accounts/keys/${enc(id)}/token-limits/prepare`,
+    { tokenLimit, resetInterval, acknowledgeGlobalEffect: true },
+  );
+export const confirmOmniRouteTokenLimit = (
+  id: string,
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteTokenLimitResult>(
+    "POST",
+    `/omniroute/accounts/keys/${enc(id)}/token-limits/confirm`,
     { sessionId, confirmationId, approve },
   );
 

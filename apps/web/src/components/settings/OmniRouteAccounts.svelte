@@ -6,6 +6,7 @@
   import OmniRouteAccountActivation from "./OmniRouteAccountActivation.svelte";
   import OmniRouteComboActivation from "./OmniRouteComboActivation.svelte";
   import OmniRouteKeyActivation from "./OmniRouteKeyActivation.svelte";
+  import OmniRouteKeyTokenLimits from "./OmniRouteKeyTokenLimits.svelte";
   import OmniRouteKeyModelAccess from "./OmniRouteKeyModelAccess.svelte";
   import OmniRouteComboCreate from "./OmniRouteComboCreate.svelte";
   import OmniRouteComboRemoval from "./OmniRouteComboRemoval.svelte";
@@ -245,6 +246,14 @@
                     ? `${status} ${result.historyWarning}`
                     : status;
                   await loadApiKeys();
+                }}
+              />
+              <OmniRouteKeyTokenLimits
+                id={key.id}
+                done={(result) => {
+                  notice = result.auditWarning
+                    ? `Tokenlimiet opgeslagen en gecontroleerd. ${result.auditWarning}`
+                    : "Tokenlimiet opgeslagen en gecontroleerd.";
                 }}
               />
             {/if}
