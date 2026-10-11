@@ -23,6 +23,7 @@ import { WeatherDepartureAlertService } from "./weather-departure-alert.service.
 
 /** Home-screen data: this machine, the side panels, the unasked-for alerts, and the health of everything. */
 @Module({
+import { NtfyPushService } from "./ntfy-push.service.js";
   imports: [
     ProxmoxModule,
     PlanningModule,
@@ -49,5 +50,9 @@ import { WeatherDepartureAlertService } from "./weather-departure-alert.service.
     NodeRedFlowSource,
   ],
   exports: [HostMetricsService, OverviewService, IntegrationsHealth],
+    DataBackupService,
+    SpeechPresenceService,
+    WeatherDepartureAlertService,
+    NtfyPushService,
 })
 export class DashboardModule {}

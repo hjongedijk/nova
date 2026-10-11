@@ -33,6 +33,9 @@ services:
       - ./omniroute-data:/omniroute:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      NTFY_URL: ${NTFY_URL:-}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
     depends_on: [omniroute, mqtt, qdrant]
     networks: [nova]
 

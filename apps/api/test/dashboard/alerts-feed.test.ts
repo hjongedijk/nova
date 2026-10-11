@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { InfrastructureEvent } from "@nova/contracts";
 import type { PlanningService } from "../../src/planning/planning.service.js";
 import type { SpeechPresenceService } from "../../src/dashboard/speech-presence.service.js";
+import type { NtfyPushService } from "../../src/dashboard/ntfy-push.service.js";
 import { AlertsFeed } from "../../src/dashboard/alerts-feed.service.js";
 
 const event: InfrastructureEvent = {
@@ -37,5 +38,26 @@ describe("AlertsFeed presence delivery", () => {
     );
     feed.record(event);
     expect(feed.recent().events[0]).not.toHaveProperty("speakAllowed");
+  });
+
+  it("sends only critical alerts to the optional phone push service", () => {
+    const ntfy = {
+      notify: vi.fn(async () => undefined),
+    } as unknown as NtfyPushService;
+    const feed = new AlertsFeed(
+      { onEvent: () => () => undefined } as unknown as PlanningService,
+      undefined,
+      undefined,
+      ntfy,
+    );
+    feed.record(event);
+    feed.record({
+      ...event,
+      payload: { ...event.payload, title: "Kritiek", severity: "critical" },
+    });
+    expect(ntfy.notify).toHaveBeenCalledTimes(1);
+    expect(ntfy.notify).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Kritiek", severity: "critical" }),
+    );
   });
 });

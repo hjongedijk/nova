@@ -155,3 +155,9 @@ export class NovaConfig {
     return path.join(this.dataDir, name);
   }
 }
+  /** Optional private ntfy topic; push delivery is disabled unless all three values exist. */
+  readonly ntfy = {
+    url: text("NTFY_URL"),
+    topic: text("NTFY_TOPIC"),
+    token: text("NTFY_TOKEN"),
+  };

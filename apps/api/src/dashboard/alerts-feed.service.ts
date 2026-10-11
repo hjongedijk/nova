@@ -13,6 +13,7 @@ import { sanitize } from "../core/security/sanitize.js";
 import { WindowsPcService } from "../integrations/windows/windows-pc.service.js";
 import { PlanningService } from "../planning/planning.service.js";
 import { SpeechPresenceService } from "./speech-presence.service.js";
+import { NtfyPushService } from "./ntfy-push.service.js";
 
 const SEVERITIES = new Set(["info", "warning", "critical"]);
 const MAX_EVENTS = 50;
@@ -73,6 +74,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     private readonly planning: PlanningService,
     @Optional() private readonly windows?: WindowsPcService,
     @Optional() private readonly presence?: SpeechPresenceService,
+    @Optional() private readonly ntfy?: NtfyPushService,
   ) {}
 
   onModuleInit(): void {
@@ -95,6 +97,8 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     if (this.feed.length > MAX_EVENTS) this.feed.shift();
     if (this.windows?.configured)
       void this.windows.notifyHelper(stored).catch(() => undefined);
+    if (stored.kind === "alert" && stored.severity === "critical")
+      void this.ntfy?.notify(stored).catch(() => undefined);
     return stored;
   }
 
