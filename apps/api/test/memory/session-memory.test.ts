@@ -23,6 +23,28 @@ afterEach(() => {
 });
 
 describe("conversation continuity", () => {
+  it("redacts configured credentials before saving conversation history", () => {
+    const session = memory();
+    const previous = process.env.NOVA_TEST_MEMORY_TOKEN;
+    process.env.NOVA_TEST_MEMORY_TOKEN = "private-memory-fixture-token";
+    try {
+      session.add(
+        "private-chat",
+        "user",
+        "The token is private-memory-fixture-token",
+      );
+      const raw = fs.readFileSync(
+        path.join(directories[0]!, "memory.json"),
+        "utf8",
+      );
+      expect(raw).not.toContain("private-memory-fixture-token");
+      expect(raw).toContain("[redacted]");
+    } finally {
+      if (previous === undefined) delete process.env.NOVA_TEST_MEMORY_TOKEN;
+      else process.env.NOVA_TEST_MEMORY_TOKEN = previous;
+    }
+  });
+
   it("keeps the earlier topic and answer beside short follow-up references", () => {
     const session = memory();
     session.add("same-chat", "user", "Welke afspraak staat er morgen?");
