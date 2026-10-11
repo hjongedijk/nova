@@ -1,6 +1,14 @@
 import { HttpException } from "@nestjs/common";
 import { Test, type TestingModule } from "@nestjs/testing";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { CoreModule } from "../../src/core/core.module.js";
@@ -94,6 +102,50 @@ describe("Home Assistant", () => {
       musicAssistant: true,
       error: null,
     });
+  });
+
+  it("reads only permitted Home Assistant todo entities using the response API", async () => {
+    const entity = {
+      entity_id: "todo.groceries",
+      domain: "todo",
+      friendly_name: "Groceries",
+      attributes: {},
+      state: "1",
+    } as (typeof home.entities)[number];
+    home.entities.push(entity);
+    home.services.push({
+      domain: "todo",
+      services: { get_items: {} },
+    } as (typeof home.services)[number]);
+    const request = vi.spyOn(home, "request").mockResolvedValue({
+      "todo.groceries": {
+        items: [{ uid: "item-1", summary: "Apples", status: "needs_action" }],
+      },
+    });
+    await expect(home.todoItems("todo.groceries")).resolves.toEqual([
+      { uid: "item-1", summary: "Apples", status: "needs_action" },
+    ]);
+    expect(request).toHaveBeenCalledWith(
+      "/api/services/todo/get_items?return_response",
+      "POST",
+      { entity_id: "todo.groceries", status: "needs_action" },
+    );
+    home.setAccessPolicy({
+      mode: "allowlist",
+      areaIds: [],
+      deviceIds: [],
+      entityIds: [],
+    });
+    await expect(home.todoItems("todo.groceries")).rejects.toThrow(
+      /niet toegestaan/,
+    );
+    home.entities = home.entities.filter(
+      (candidate) => candidate.entity_id !== "todo.groceries",
+    );
+    home.services = home.services.filter(
+      (candidate) => candidate.domain !== "todo",
+    );
+    request.mockRestore();
   });
 
   it("enforces Home Assistant area and device allowlists on lookup, state, registry and service paths", async () => {

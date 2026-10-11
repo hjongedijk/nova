@@ -23,6 +23,15 @@ let events: InfrastructureEvent[];
 let proxmox: { configured: boolean; resources: () => Promise<unknown[]> };
 let calendarEvents: CalendarEvent[];
 let auditEntries: AuditEntry[];
+let home: {
+  configured: boolean;
+  sync: () => Promise<
+    { domain: string; entity_id: string; friendly_name: string }[]
+  >;
+  visibleEntities: () => { entity_id: string }[];
+  service: (...args: unknown[]) => Promise<unknown>;
+  todoItems: (entityId: string) => Promise<unknown[]>;
+};
 const run = (name: string, args: Record<string, unknown> = {}) =>
   source.execute(name, args);
 
@@ -47,6 +56,7 @@ function boot() {
     {
       read: () => auditEntries,
     } as unknown as import("../../src/core/audit/audit.service.js").AuditService,
+    home as unknown as import("../../src/home/home-assistant.service.js").HomeAssistantService,
   );
   events = [];
   planning.onEvent((e) => events.push(e));
@@ -57,6 +67,13 @@ beforeEach(() => {
   proxmox = { configured: false, resources: async () => [] };
   calendarEvents = [];
   auditEntries = [];
+  home = {
+    configured: false,
+    sync: async () => [],
+    visibleEntities: () => [],
+    service: async () => undefined,
+    todoItems: async () => [],
+  };
   boot();
 });
 afterEach(() => {
@@ -206,6 +223,44 @@ describe("tools", () => {
     ).toBe(false);
     const cleared = await run("list_clear", { list: "boodschappen" });
     expect((cleared.result as { cleared: number }).cleared).toBe(1);
+  });
+
+  it("uses visible Home Assistant todo entities as the synchronized list", async () => {
+    const entity = {
+      domain: "todo",
+      entity_id: "todo.boodschappen",
+      friendly_name: "Boodschappen",
+    };
+    home.configured = true;
+    home.sync = async () => [entity];
+    home.visibleEntities = () => [entity];
+    const service = vi.fn(async () => undefined);
+    home.service = service;
+    home.todoItems = async () => [
+      { uid: "ha-1", summary: "Melk", status: "needs_action" },
+    ];
+
+    expect(
+      (await run("list_add", { list: "Boodschappen", item: "Brood" })).result,
+    ).toMatchObject({ synchronized: true, added: true });
+    expect(service).toHaveBeenCalledWith("todo", "add_item", {
+      entity_id: "todo.boodschappen",
+      item: "Brood",
+    });
+    expect(
+      (await run("list_show", { list: "boodschappen" })).result,
+    ).toMatchObject({
+      synchronized: true,
+      untrusted: true,
+      items: [{ id: "ha-1", text: "Melk" }],
+    });
+    expect(
+      (await run("list_remove", { list: "Boodschappen", item: "Melk" })).result,
+    ).toMatchObject({ synchronized: true, removed: "Melk" });
+    expect(service).toHaveBeenLastCalledWith("todo", "remove_item", {
+      entity_id: "todo.boodschappen",
+      item: "ha-1",
+    });
   });
 });
 

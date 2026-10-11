@@ -15,6 +15,7 @@ import { describeTimer, PlanningService } from "./planning.service.js";
 import { CalDavService } from "./caldav.service.js";
 import { AuditService, type AuditEntry } from "../core/audit/audit.service.js";
 import { calendarDateKey, eventsTomorrow } from "./calendar-day.js";
+import { HomeAssistantService } from "../home/home-assistant.service.js";
 
 const str = (min: number, max: number) => ({
   type: "string",
@@ -82,6 +83,7 @@ export class PlanningSource implements ToolSource {
     private readonly config: NovaConfig,
     private readonly calendar: CalDavService,
     private readonly audit: AuditService,
+    private readonly home: HomeAssistantService,
   ) {}
 
   definitions(): ToolDefinition[] {
@@ -221,14 +223,92 @@ export class PlanningSource implements ToolSource {
       }
       case "timer_cancel":
         return this.planning.cancelTimer(a);
-      case "list_add":
-        return this.planning.addItem(list, item);
-      case "list_show":
-        return this.planning.showList(list || undefined);
-      case "list_remove":
-        return this.planning.removeItem(list, item);
-      case "list_clear":
-        return this.planning.clearList(list);
+      case "list_add": {
+        const todo = await this.todoList(list);
+        if (!todo) return this.planning.addItem(list, item);
+        await this.home.service("todo", "add_item", {
+          entity_id: todo.entity_id,
+          item: item.trim(),
+        });
+        return { list: todo.friendly_name, added: true, synchronized: true };
+      }
+      case "list_show": {
+        if (list) {
+          const todo = await this.todoList(list);
+          if (!todo) return this.planning.showList(list);
+          return this.showTodoList(todo);
+        }
+        if (!this.home.configured) return this.planning.showList();
+        const entities = await this.home.sync();
+        const todoLists = await Promise.all(
+          entities
+            .filter((entity) => entity.domain === "todo")
+            .filter((entity) =>
+              this.home
+                .visibleEntities()
+                .some((visible) => visible.entity_id === entity.entity_id),
+            )
+            .slice(0, 10)
+            .map((entity) => this.showTodoList(entity)),
+        );
+        const local = this.planning.lists();
+        return {
+          lists: [
+            ...Object.entries(local).map(([name, items]) => ({
+              list: name,
+              items,
+            })),
+            ...todoLists,
+          ],
+          synchronized: todoLists.length > 0,
+        };
+      }
+      case "list_remove": {
+        const todo = await this.todoList(list);
+        if (!todo) return this.planning.removeItem(list, item);
+        const result = await this.showTodoList(todo);
+        const needle = item.trim().toLocaleLowerCase();
+        const matches = result.items.filter(
+          (entry) =>
+            entry.id === item || entry.text.toLocaleLowerCase() === needle,
+        );
+        if (matches.length !== 1)
+          throw new Error(
+            matches.length
+              ? "Meerdere Home Assistant-items passen; noem de volledige tekst."
+              : result.truncated
+                ? "Dit item staat mogelijk verderop in de lijst; vraag eerst om de volledige lijst."
+                : "Dit item staat niet op de lijst.",
+          );
+        await this.home.service("todo", "remove_item", {
+          entity_id: todo.entity_id,
+          item: matches[0]!.id,
+        });
+        return {
+          list: todo.friendly_name,
+          removed: matches[0]!.text,
+          synchronized: true,
+        };
+      }
+      case "list_clear": {
+        const todo = await this.todoList(list);
+        if (!todo) return this.planning.clearList(list);
+        const result = await this.showTodoList(todo);
+        if (result.truncated)
+          throw new Error(
+            "Deze Home Assistant-lijst is te groot om veilig in één keer te wissen.",
+          );
+        for (const entry of result.items)
+          await this.home.service("todo", "remove_item", {
+            entity_id: todo.entity_id,
+            item: entry.id,
+          });
+        return {
+          list: todo.friendly_name,
+          cleared: result.items.length,
+          synchronized: true,
+        };
+      }
       case "calendar_events":
         return {
           configured: this.calendar.configured,
@@ -252,6 +332,67 @@ export class PlanningSource implements ToolSource {
       default:
         return this.briefing();
     }
+  }
+
+  private async todoList(name: string) {
+    if (!this.home.configured) return null;
+    const entities = await this.home.sync();
+    const needle = name.trim().toLocaleLowerCase();
+    const matches = entities.filter(
+      (entity) =>
+        entity.domain === "todo" &&
+        this.home
+          .visibleEntities()
+          .some((visible) => visible.entity_id === entity.entity_id) &&
+        (entity.entity_id.toLocaleLowerCase() === needle ||
+          entity.friendly_name.toLocaleLowerCase() === needle ||
+          entity.entity_id.slice(5).replaceAll("_", " ") === needle),
+    );
+    if (matches.length > 1)
+      throw new Error(
+        "Meerdere Home Assistant-lijsten passen; noem de volledige naam.",
+      );
+    return matches[0] ?? null;
+  }
+
+  private async showTodoList(entity: {
+    entity_id: string;
+    friendly_name: string;
+  }) {
+    const items = await this.home.todoItems(entity.entity_id);
+    const safeItems = items.flatMap((value) => {
+      if (!value || typeof value !== "object") return [];
+      const item = value as {
+        uid?: unknown;
+        summary?: unknown;
+        status?: unknown;
+      };
+      if (
+        typeof item.uid !== "string" ||
+        item.uid.length > 120 ||
+        typeof item.summary !== "string" ||
+        !item.summary.trim() ||
+        item.summary.length > 300
+      )
+        return [];
+      return [
+        {
+          id: item.uid,
+          text: item.summary,
+          ...(item.status === "needs_action" || item.status === "completed"
+            ? { status: item.status }
+            : {}),
+        },
+      ];
+    });
+    return {
+      list: entity.friendly_name,
+      entityId: entity.entity_id,
+      items: safeItems.slice(0, 30),
+      truncated: safeItems.length > 30,
+      synchronized: true,
+      untrusted: true,
+    };
   }
 
   private async briefing(now = new Date()) {

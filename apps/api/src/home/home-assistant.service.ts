@@ -513,6 +513,32 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  async todoItems(entityId: string): Promise<unknown[]> {
+    const entity = this.visibleEntities().find(
+      (candidate) =>
+        candidate.entity_id === entityId && candidate.domain === "todo",
+    );
+    if (!entity)
+      throw new Error("Deze Home Assistant-lijst is niet toegestaan in NOVA.");
+    if (!this.hasService("todo", "get_items"))
+      throw new Error(
+        "Home Assistant ondersteunt geen todo.get_items-service.",
+      );
+    const response = await this.request<Record<string, unknown>>(
+      "/api/services/todo/get_items?return_response",
+      "POST",
+      { entity_id: entityId, status: "needs_action" },
+    );
+    const list = response?.[entityId];
+    if (
+      !list ||
+      typeof list !== "object" ||
+      !Array.isArray((list as { items?: unknown }).items)
+    )
+      throw new Error("Home Assistant gaf geen geldige takenlijst terug.");
+    return (list as { items: unknown[] }).items;
+  }
+
   async state(entityId: string, signal?: AbortSignal): Promise<HaState> {
     if (!this.visibleEntities().some((entity) => entity.entity_id === entityId))
       throw new Error(
