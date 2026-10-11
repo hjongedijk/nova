@@ -85,6 +85,16 @@ describe("multi-step research", () => {
   });
 });
 
+describe("natural-language timers", () => {
+  it("requires live tool handling and resolves clock times in the configured local timezone", () => {
+    expect(requiresLiveData("Zet een timer over tien minuten.")).toBe(true);
+    expect(requiresLiveData("Maak morgen om zeven uur een wekker.")).toBe(true);
+    expect(SYSTEM_PROMPT).toContain('"morgen om zeven"');
+    expect(SYSTEM_PROMPT).toContain("explicit UTC offset");
+    expect(SYSTEM_PROMPT).toContain("Set multiple timers independently");
+  });
+});
+
 describe("private notes", () => {
   it("saves only by explicit request and keeps note text out of long-term memory", () => {
     expect(SYSTEM_PROMPT).toContain(

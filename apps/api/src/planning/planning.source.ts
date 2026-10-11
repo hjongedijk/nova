@@ -91,7 +91,7 @@ export class PlanningSource implements ToolSource {
       {
         name: "timer_set",
         description:
-          'Set a timer or reminder. Give seconds from now (for example 600 for ten minutes) or an absolute time in ISO 8601 with offset in "at" (call system_time first to know the current time). Optional label says what it is for. When it fires, NOVA tells the user out loud.',
+          'Set a timer or reminder from ordinary language. For a relative request such as "over tien minuten" or "in 10 minutes", convert the exact duration to seconds. For a clock time such as "morgen om zeven", call system_time, use its configured local timezone and an ISO 8601 timestamp with the correct explicit offset in "at"; clarify if the intended time is ambiguous or has already passed. Optional label says what it is for. Multiple timers may run at once. When it fires, NOVA tells the user out loud.',
         parameters: schema(
           { seconds: integer(1, 604800), at: str(10, 40), label: str(1, 60) },
           [],
