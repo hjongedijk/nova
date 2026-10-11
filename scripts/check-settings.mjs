@@ -76,6 +76,8 @@ const overview = {
   pinRequired: false,
   standingApprovals: [],
 };
+const initialOverviewWidgets = structuredClone(overview.widgets);
+const initialOverviewSidebar = structuredClone(overview.sidebar);
 const initialServices = [
   {
     id: "omniroute",
@@ -221,6 +223,8 @@ try {
     [1280, 2],
     [390, 1],
   ]) {
+    overview.widgets = structuredClone(initialOverviewWidgets);
+    overview.sidebar = structuredClone(initialOverviewSidebar);
     overview.skills[0] = {
       ...overview.skills[0],
       version: 2,
@@ -2534,6 +2538,17 @@ try {
               before: "Oude notitie",
               after: "Vergeet de planten niet.",
             },
+            {
+              id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+              at: "2026-10-09T10:00:00.000Z",
+              before: "",
+              after: "Vergeet de planten niet.",
+              createdSnapshot: {
+                title: "Mijn notitie",
+                enabled: true,
+                text: "Vergeet de planten niet.",
+              },
+            },
           ],
         };
       } else if (
@@ -2552,6 +2567,19 @@ try {
             enabled: true,
           },
         };
+      } else if (
+        endpoint ===
+        "/settings/widgets/notitie/history/eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee/rollback"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        noteHistoryWrites++;
+        overview.widgets = overview.widgets.filter(
+          (widget) => widget.id !== "notitie",
+        );
+        overview.sidebar = overview.sidebar.filter(
+          (item) => item.id !== "w:notitie",
+        );
+        data = { ok: true, removed: true };
       } else if (endpoint === "/settings/widgets/aantal/display-history") {
         assert.equal(request.headers()["x-nova-admin"], "1");
         widgetDisplayHistoryReads++;
@@ -3214,12 +3242,27 @@ try {
     await page.waitForFunction(
       () => document.querySelector("#wText")?.value === "Oude notitie",
     );
+    await page
+      .getByRole("button", {
+        name: "Aangemaakte notitie verwijderen",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("button", {
+        name: "Nogmaals klikken om terug te zetten",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByText("De ongewijzigde, aangemaakte notitie is verwijderd.")
+      .waitFor();
+    await page.locator("#wText").waitFor({ state: "detached" });
     assert.equal(noteHistoryReads, 2);
-    assert.equal(noteHistoryWrites, 1);
-    await page.getByRole("button", { name: "Annuleren", exact: true }).click();
+    assert.equal(noteHistoryWrites, 2);
     await page
       .getByRole("button", { name: "Bewerken", exact: true })
-      .nth(1)
+      .first()
       .click();
     await page.getByText("Geschiedenis weergave", { exact: true }).click();
     await page.getByRole("button", { name: "Geschiedenis laden" }).click();
@@ -5603,7 +5646,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note and value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP secret entry with cleared password field and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
+    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP secret entry with cleared password field and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();
