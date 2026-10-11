@@ -1,11 +1,21 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { Widget, WidgetInput, WidgetType } from "@nova/contracts";
+  import type {
+    Widget,
+    WidgetDisplayRevision,
+    WidgetInput,
+    WidgetType,
+  } from "@nova/contracts";
   import {
     createWidget,
     deleteWidget,
     previewWidget,
     updateWidget,
+    getNoteWidgetHistory,
+    rollbackNoteWidget,
+    getWidgetDisplayHistory,
+    rollbackWidgetDisplay,
+    type NoteWidgetRevision,
   } from "#lib/api/settings.ts";
   import Button from "#components/ui/Button.svelte";
   import Field from "#components/ui/Field.svelte";
@@ -69,6 +79,90 @@
 
   let preview = $state<string | null>(null);
   let sure = $state(false);
+  let noteRevisions = $state<NoteWidgetRevision[]>([]);
+  let historyLoaded = $state(false);
+  let historyTruncated = $state(false);
+  let rollbackId = $state("");
+  let displayRevisions = $state<WidgetDisplayRevision[]>([]);
+  let displayHistoryLoaded = $state(false);
+  let displayHistoryTruncated = $state(false);
+  let displayRollbackId = $state("");
+
+  async function loadHistory(): Promise<void> {
+    if (!widget || type !== "note") return;
+    try {
+      const result = await getNoteWidgetHistory(widget.id);
+      noteRevisions = result.revisions;
+      historyTruncated = result.truncated;
+      historyLoaded = true;
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  async function rollbackNote(revision: NoteWidgetRevision): Promise<void> {
+    if (!widget) return;
+    if (rollbackId !== revision.id) {
+      rollbackId = revision.id;
+      return;
+    }
+    try {
+      const result = await rollbackNoteWidget(widget.id, revision.id);
+      if (result.widget.type === "note") text = result.widget.text;
+      rollbackId = "";
+      await loadHistory();
+      await afterChange(result.historyWarning ?? "De notitie is teruggezet.");
+    } catch (error) {
+      rollbackId = "";
+      fail(error);
+    }
+  }
+
+  async function loadDisplayHistory(): Promise<void> {
+    if (!widget || (type !== "value" && type !== "list")) return;
+    try {
+      const result = await getWidgetDisplayHistory(widget.id);
+      displayRevisions = result.revisions;
+      displayHistoryTruncated = result.truncated;
+      displayHistoryLoaded = true;
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  function describeDisplay(revision: WidgetDisplayRevision, before: boolean) {
+    const value = before ? revision.before : revision.after;
+    return value.type === "value"
+      ? `${value.title}${value.unit ? ` (${value.unit})` : ""}`
+      : `${value.title}${value.itemPath ? ` — ${value.itemPath}` : ""} — maximaal ${value.max}`;
+  }
+
+  async function rollbackDisplay(revision: WidgetDisplayRevision) {
+    if (!widget) return;
+    if (displayRollbackId !== revision.id) {
+      displayRollbackId = revision.id;
+      return;
+    }
+    try {
+      const result = await rollbackWidgetDisplay(widget.id, revision.id);
+      if (result.widget.type === "value") {
+        title = result.widget.title;
+        unit = result.widget.unit;
+      } else if (result.widget.type === "list") {
+        title = result.widget.title;
+        itemPath = result.widget.itemPath;
+        max = String(result.widget.max);
+      }
+      displayRollbackId = "";
+      await loadDisplayHistory();
+      await afterChange(
+        result.historyWarning ?? "De paneelweergave is teruggezet.",
+      );
+    } catch (error) {
+      displayRollbackId = "";
+      fail(error);
+    }
+  }
 
   function read(): WidgetInput {
     const body: WidgetInput = { type, title, enabled: w.enabled !== false };
@@ -113,10 +207,13 @@
 
   async function save(): Promise<void> {
     try {
-      if (widget) await updateWidget(widget.id, read());
-      else await createWidget(read());
+      const result = widget
+        ? await updateWidget(widget.id, read())
+        : await createWidget(read());
       settings.editingWidget = null;
-      await afterChange(`“${title.trim()}” staat in de zijbalk.`);
+      await afterChange(
+        result.historyWarning ?? `“${title.trim()}” staat in de zijbalk.`,
+      );
     } catch (error) {
       fail(error);
     }
@@ -129,9 +226,11 @@
       return;
     }
     try {
-      await deleteWidget(widget.id);
+      const result = await deleteWidget(widget.id);
       settings.editingWidget = null;
-      await afterChange(`“${widget.title}” is verwijderd.`);
+      await afterChange(
+        result.historyWarning ?? `“${widget.title}” is verwijderd.`,
+      );
     } catch (error) {
       fail(error);
     }
@@ -155,10 +254,62 @@
   <Field label="Tekst" id="wText">
     <textarea id="wText" rows="4" maxlength="1000" bind:value={text}></textarea>
   </Field>
+  {#if widget}
+    <details>
+      <summary>Notitiegeschiedenis</summary>
+      {#if !historyLoaded}
+        <Button onclick={loadHistory}>Geschiedenis laden</Button>
+      {:else if noteRevisions.length === 0}
+        <p class="hint">Nog geen eerdere notitiewijzigingen.</p>
+      {:else}
+        {#if historyTruncated}
+          <p class="hint">Alleen de 50 recentste wijzigingen zijn bewaard.</p>
+        {/if}
+        {#each noteRevisions as revision (revision.id)}
+          <article>
+            <small>{new Date(revision.at).toLocaleString("nl-NL")}</small>
+            <p><strong>Van:</strong> {revision.before}</p>
+            <p><strong>Naar:</strong> {revision.after}</p>
+            <Button onclick={() => rollbackNote(revision)}>
+              {rollbackId === revision.id
+                ? "Nogmaals klikken om terug te zetten"
+                : "Terugzetten"}
+            </Button>
+          </article>
+        {/each}
+      {/if}
+    </details>
+  {/if}
 {/if}
 
 {#if type === "value" || type === "list"}
   <div>
+    {#if widget}
+      <details>
+        <summary>Geschiedenis weergave</summary>
+        {#if !displayHistoryLoaded}
+          <Button onclick={loadDisplayHistory}>Geschiedenis laden</Button>
+        {:else if displayRevisions.length === 0}
+          <p class="hint">Nog geen eerdere wijzigingen aan de weergave.</p>
+        {:else}
+          {#if displayHistoryTruncated}
+            <p class="hint">Alleen de 50 recentste wijzigingen zijn bewaard.</p>
+          {/if}
+          {#each displayRevisions as revision (revision.id)}
+            <article>
+              <small>{new Date(revision.at).toLocaleString("nl-NL")}</small>
+              <p><strong>Van:</strong> {describeDisplay(revision, true)}</p>
+              <p><strong>Naar:</strong> {describeDisplay(revision, false)}</p>
+              <Button onclick={() => rollbackDisplay(revision)}>
+                {displayRollbackId === revision.id
+                  ? "Nogmaals klikken om terug te zetten"
+                  : "Terugzetten"}
+              </Button>
+            </article>
+          {/each}
+        {/if}
+      </details>
+    {/if}
     <Field
       label="Webadres"
       id="wUrl"

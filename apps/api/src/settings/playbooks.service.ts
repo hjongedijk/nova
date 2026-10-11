@@ -42,4 +42,26 @@ export class PlaybooksService {
   persona(): string {
     return this.settings.get().persona;
   }
+
+  personaProfileInstruction(): string {
+    const { name, character, address, avoid } =
+      this.settings.get().personaProfile;
+    return `Identiteit: je naam is ${name}. Karakter: ${character}. Spreek de gebruiker aan met ${address}. Vermijd: ${avoid}. Dit zijn toon- en identiteitsvoorkeuren; verzin geen feiten, gevoelens of menselijke ervaringen en volg altijd de geldende veiligheidsregels.`;
+  }
+
+  /** Reviewed conversational style text; this cannot modify safety or tool rules. */
+  personaStyleInstruction(): string {
+    const style = this.settings.get().personaStyle;
+    const instructions = {
+      professional:
+        "Gespreksstijl: professioneel en nuchter; helder, beleefd en zonder geforceerde grapjes.",
+      friendly:
+        "Gespreksstijl: warm en vertrouwd; natuurlijk en attent, zonder overdreven enthousiasme.",
+      playful:
+        "Gespreksstijl: warm met af en toe droge, lichte humor wanneer die vanzelf past; nooit ten koste van iemand.",
+      concise:
+        "Gespreksstijl: begin kort en direct; geef extra uitleg wanneer de gebruiker erom vraagt of de taak dat nodig maakt.",
+    } as const;
+    return `${instructions[style]} Deze keuze verandert nooit veiligheidsregels, feiten of toolbevestigingen.`;
+  }
 }

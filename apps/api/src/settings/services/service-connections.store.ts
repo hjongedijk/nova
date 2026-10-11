@@ -17,8 +17,16 @@ import {
   displayUrl,
   normalizeConnection,
   readConnections,
+  type ConnectionFile,
   type ConnectionValues,
 } from "../../core/config/service-connections.js";
+
+export type BackupConnections = Record<
+  string,
+  Record<string, string | boolean>
+>;
+const backupField = (field: { key: string; kind: string }) =>
+  field.kind !== "secret" && field.key !== "username";
 
 @Injectable()
 export class ServiceConnectionsStore {
@@ -65,6 +73,181 @@ export class ServiceConnectionsStore {
         })),
       };
     });
+  }
+
+  /** Export connection destinations and harmless options; credential values stay local. */
+  backupValues(): BackupConnections {
+    return Object.fromEntries(
+      CONNECTIONS.map((spec) => {
+        const values = this.effective(spec.id);
+        return [
+          spec.id,
+          Object.fromEntries(
+            spec.fields
+              .filter(backupField)
+              .map((field) => [
+                field.key,
+                field.kind === "url"
+                  ? displayUrl(String(values[field.key] ?? ""))
+                  : (values[field.key] ?? ""),
+              ]),
+          ),
+        ];
+      }),
+    );
+  }
+
+  /** Validate a full exported connection map and preserve destination credentials. */
+  prepareBackup(
+    value: unknown,
+    mode: "merge" | "replace",
+  ): {
+    next: ConnectionFile;
+    changes: {
+      service: string;
+      before: Record<string, string | boolean>;
+      after: Record<string, string | boolean>;
+    }[];
+  } {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new ValidationError(["De back-up bevat ongeldige koppelingen."]);
+    const input = value as Record<string, unknown>;
+    if (Object.keys(input).length !== CONNECTIONS.length)
+      throw new ValidationError(["De back-up mist koppelingen."]);
+    const incoming = new Map<string, ConnectionValues>();
+    for (const spec of CONNECTIONS) {
+      const raw = input[spec.id];
+      if (!raw || typeof raw !== "object" || Array.isArray(raw))
+        throw new ValidationError(["De back-up bevat ongeldige koppelingen."]);
+      const fields = raw as Record<string, unknown>;
+      const publicFields = spec.fields.filter(backupField);
+      if (
+        Object.keys(fields).length !== publicFields.length ||
+        publicFields.some((field) => !Object.hasOwn(fields, field.key))
+      )
+        throw new ValidationError([
+          "De back-up bevat onvolledige of geheime koppelingsvelden.",
+        ]);
+      const normalized = normalizeConnection(spec.id, fields);
+      if (Object.keys(normalized).length !== publicFields.length)
+        throw new ValidationError([
+          "Geheime koppelingsvelden mogen niet in een back-up staan.",
+        ]);
+      incoming.set(spec.id, normalized);
+    }
+
+    const current = readConnections(this.config.dataDir);
+    const changes: {
+      service: string;
+      before: Record<string, string | boolean>;
+      after: Record<string, string | boolean>;
+    }[] = [];
+    const nextServices: Record<string, ConnectionValues> =
+      mode === "merge" ? structuredClone(current.services) : {};
+    for (const spec of CONNECTIONS) {
+      const oldStored = current.services[spec.id] ?? {};
+      const keptCredentials = Object.fromEntries(
+        spec.fields
+          .filter(
+            (field) => field.kind === "secret" || field.key === "username",
+          )
+          .flatMap((field) =>
+            oldStored[field.key] === undefined
+              ? []
+              : [[field.key, oldStored[field.key]!]],
+          ),
+      );
+      const before = this.effective(spec.id);
+      const overrides = nextServices[spec.id] ?? {};
+      const merged = {
+        ...overrides,
+        ...keptCredentials,
+        ...incoming.get(spec.id),
+      };
+      const after = { ...this.running[spec.id], ...merged };
+      const publicValues = (values: ConnectionValues) =>
+        this.publicValues(spec.id, values);
+      const publicBefore = publicValues(before);
+      const publicAfter = publicValues(after);
+      if (JSON.stringify(publicBefore) !== JSON.stringify(publicAfter)) {
+        changes.push({
+          service: spec.id,
+          before: publicBefore,
+          after: publicAfter,
+        });
+        current.history.push({
+          id: crypto.randomUUID(),
+          service: spec.id,
+          at: new Date().toISOString(),
+          before: publicValues(before),
+          after: publicValues(after),
+          secretChanges: [],
+        });
+      }
+      nextServices[spec.id] = merged;
+    }
+    const next: ConnectionFile = {
+      version: 1,
+      services: nextServices,
+      history: current.history.slice(-100),
+    };
+    return { next, changes };
+  }
+
+  /** A private detached copy for transactional import recovery. */
+  snapshot(): ConnectionFile {
+    return structuredClone(readConnections(this.config.dataDir));
+  }
+
+  restoreSnapshot(snapshot: ConnectionFile): void {
+    if (
+      snapshot?.version !== 1 ||
+      !snapshot.services ||
+      typeof snapshot.services !== "object" ||
+      Array.isArray(snapshot.services) ||
+      !Array.isArray(snapshot.history)
+    )
+      throw new ValidationError([
+        "Herstelbestand voor koppelingen is ongeldig.",
+      ]);
+    const services = Object.fromEntries(
+      Object.entries(snapshot.services).map(([id, values]) => [
+        id,
+        normalizeConnection(id, values),
+      ]),
+    );
+    const file = connectionFile(this.config.dataDir);
+    const temporary = `${file}.${process.pid}.tmp`;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    try {
+      fs.writeFileSync(
+        temporary,
+        JSON.stringify(
+          { version: 1, services, history: snapshot.history.slice(-100) },
+          null,
+          2,
+        ),
+        {
+          mode: 0o600,
+        },
+      );
+      fs.chmodSync(temporary, 0o600);
+      const fd = fs.openSync(temporary, "r");
+      try {
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.renameSync(temporary, file);
+      const directory = fs.openSync(path.dirname(file), "r");
+      try {
+        fs.fsyncSync(directory);
+      } finally {
+        fs.closeSync(directory);
+      }
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
   }
 
   candidate(

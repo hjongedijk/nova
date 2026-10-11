@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   Param,
   Post,
@@ -24,11 +25,20 @@ function body(value: unknown, fields: string[]): Record<string, unknown> {
 @UseGuards(SettingsGuard)
 export class NativeSkillModesController {
   constructor(private readonly modes: NativeSkillModesService) {}
+  @Get(":id/history")
+  history(@Param("id") id: string) {
+    return this.modes.history(id);
+  }
   @Post(":id/prepare")
   @HttpCode(200)
   prepare(@Param("id") id: string, @Body() value: unknown) {
-    const input = body(value, ["mode"]);
-    return this.modes.prepare(id, input.mode);
+    const input = body(value, ["mode", "acknowledgeGlobal"]);
+    if (
+      input.acknowledgeGlobal !== undefined &&
+      typeof input.acknowledgeGlobal !== "boolean"
+    )
+      throw new ValidationError(["Ongeldige invoer."]);
+    return this.modes.prepare(id, input.mode, input.acknowledgeGlobal === true);
   }
   @Post(":id/confirm")
   @HttpCode(200)
@@ -45,6 +55,22 @@ export class NativeSkillModesController {
       input.sessionId,
       input.confirmationId,
       input.approve,
+    );
+  }
+  @Post(":id/rollback/prepare")
+  @HttpCode(200)
+  prepareRollback(@Param("id") id: string, @Body() value: unknown) {
+    const input = body(value, ["revisionId", "acknowledgeGlobal"]);
+    if (
+      typeof input.revisionId !== "string" ||
+      (input.acknowledgeGlobal !== undefined &&
+        typeof input.acknowledgeGlobal !== "boolean")
+    )
+      throw new ValidationError(["Ongeldige skillgeschiedenisactie."]);
+    return this.modes.prepareRollback(
+      id,
+      input.revisionId,
+      input.acknowledgeGlobal === true,
     );
   }
 }

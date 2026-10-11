@@ -1,6 +1,13 @@
 /** Navigation and search share one catalogue. IDs are stable deep links. */
 export const SECTIONS = [
   {
+    id: "setup",
+    name: "Installatie",
+    detail: "Controleer NOVA stap voor stap na een nieuwe installatie.",
+    keywords:
+      "installatie starten instellen onboarding sleutel account stem verbinding",
+  },
+  {
     id: "general",
     name: "Algemeen",
     detail: "Beginscherm, snelle opdrachten en zijbalk.",
@@ -23,6 +30,12 @@ export const SECTIONS = [
     name: "Modellen",
     detail: "Gratis AI en de geverifieerde OmniRoute-verbinding.",
     keywords: "provider account route combo model gateway limieten",
+  },
+  {
+    id: "code",
+    name: "Codeprojecten",
+    detail: "Maak een lokaal project aan en kies welk project actief is.",
+    keywords: "code werkruimte workspace projecten aanmaken openen",
   },
   {
     id: "abilities",

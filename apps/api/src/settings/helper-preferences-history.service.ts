@@ -12,6 +12,11 @@ import { NovaConfig } from "../core/config/nova-config.js";
 import { normalizeHelperPreferences } from "./settings-validation.js";
 import { SettingsStore } from "./store/settings.store.js";
 
+export interface HelperPreferenceMutationOrigin {
+  sessionId: string;
+  confirmation: "confirmed_tool";
+}
+
 const normalize = (value: unknown): HelperPreferences =>
   normalizeHelperPreferences(
     value && typeof value === "object" && !Array.isArray(value)
@@ -94,6 +99,7 @@ export class HelperPreferencesHistory {
     before: HelperPreferences,
     after: HelperPreferences,
     revertedFrom?: string,
+    origin?: HelperPreferenceMutationOrigin,
   ): void {
     this.lastWarning = undefined;
     if (isDeepStrictEqual(before, after)) return;
@@ -113,10 +119,10 @@ export class HelperPreferencesHistory {
     }
     try {
       this.audit.record({
-        sessionId: "settings",
+        sessionId: origin?.sessionId ?? "settings",
         tool: "settings_change",
-        risk: "SAFE",
-        confirmation: "admin_ui",
+        risk: origin ? "CONFIRM" : "SAFE",
+        confirmation: origin?.confirmation ?? "admin_ui",
         arguments: { what: "helper_preferences", revision: revision.id },
         result: { ok: true },
       });

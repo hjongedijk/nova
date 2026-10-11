@@ -15,6 +15,7 @@ import { ValidationError } from "../../src/core/errors/validation.error.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
 import { NativeSkillModesController } from "../../src/settings/native-skill-modes.controller.js";
 import { NativeSkillModesService } from "../../src/settings/native-skill-modes.service.js";
+import { NativeSkillRemoval } from "../../src/settings/native-skill-removal.service.js";
 import { ADMIN, createApp } from "./helpers.js";
 
 const gateway = "http://fixture.invalid/v1";
@@ -58,6 +59,7 @@ function fixture() {
     omniUrl: gateway,
     verifiedOmniUrl: gateway,
     omniDatabase: database,
+    dataFile: (name: string) => path.join(dir, name),
   };
   const record = vi.fn((entry: AuditRecord) => ({
     ...entry,
@@ -70,7 +72,7 @@ function fixture() {
   confirmations.now = () => now;
   const scope = vi.fn(() => "nova-owner");
   const configured = vi.fn(() => true);
-  const update = (column: string, value: string | number) => {
+  const update = (column: string, value: string | number, id = "skill-1") => {
     if (
       ![
         "api_key_id",
@@ -83,24 +85,29 @@ function fixture() {
       ].includes(column)
     )
       throw new Error("Invalid fixture column");
-    db.prepare(`UPDATE skills SET ${column}=? WHERE id='skill-1'`).run(value);
+    db.prepare(`UPDATE skills SET ${column}=? WHERE id=?`).run(value, id);
   };
   const request = vi.fn(
     async (
-      _endpoint: string,
-      options: { method: string; body: { mode: NativeSkillMode } },
+      endpoint: string,
+      options: { method: string; body?: { mode?: NativeSkillMode } },
     ) => {
       db.exec("BEGIN");
       try {
-        update("mode", options.body.mode);
-        update("enabled", options.body.mode === "off" ? 0 : 1);
-        update("updated_at", "revision-2");
+        const id = decodeURIComponent(endpoint.split("/").at(-1) ?? "");
+        if (options.method === "DELETE")
+          db.prepare("DELETE FROM skills WHERE id=?").run(id);
+        else {
+          update("mode", options.body?.mode ?? "auto", id);
+          update("enabled", options.body?.mode === "off" ? 0 : 1, id);
+          update("updated_at", "revision-2", id);
+        }
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
         throw error;
       }
-      return { mode: options.body.mode };
+      return options.method === "DELETE" ? {} : { mode: options.body?.mode };
     },
   );
   const management = {
@@ -118,25 +125,29 @@ function fixture() {
     confirmations,
     audit,
   );
-  const prepare = (mode: NativeSkillMode = "off") => {
-    const result = service.prepare("skill-1", mode);
+  const prepare = (
+    mode: NativeSkillMode = "off",
+    id = "skill-1",
+    acknowledgeGlobal = false,
+  ) => {
+    const result = service.prepare(id, mode, acknowledgeGlobal);
     expect(result.ok).toBe(true);
     if (!result.action) throw new Error("Missing fixture confirmation");
     return result.action;
   };
-  const approve = (action: ReturnType<typeof prepare>, approved = true) =>
-    service.confirm(
-      "skill-1",
-      action.sessionId,
-      action.confirmationId,
-      approved,
-    );
+  const approve = (
+    action: ReturnType<typeof prepare>,
+    approved = true,
+    id = "skill-1",
+  ) => service.confirm(id, action.sessionId, action.confirmationId, approved);
   return {
     db,
     config,
     record,
     confirmations,
     service,
+    management: management as unknown as OmniRouteManagement,
+    audit,
     prepare,
     approve,
     update,
@@ -150,6 +161,124 @@ function fixture() {
 }
 
 describe("native skill mode approvals", () => {
+  it("records secret-free mode history and rolls back the latest change only", async () => {
+    const f = fixture();
+    const action = f.prepare("off");
+    expect(await f.approve(action)).toMatchObject({ ok: true, verified: true });
+    const history = f.service.history("skill-1");
+    expect(history.revisions).toHaveLength(1);
+    expect(history.revisions[0]).toMatchObject({
+      before: "auto",
+      after: "off",
+      scope: "nova",
+    });
+    const historyFile = path.join(
+      path.dirname(f.config.omniDatabase),
+      "native-skill-mode-history.json",
+    );
+    expect(fs.statSync(historyFile).mode & 0o777).toBe(0o600);
+    const stored = fs.readFileSync(historyFile, "utf8");
+    expect(stored).not.toContain("fixture-handler");
+    expect(stored).not.toContain("object");
+
+    const rollback = f.service.prepareRollback(
+      "skill-1",
+      history.revisions[0]!.id,
+    );
+    expect(rollback).toMatchObject({ ok: true, scope: "nova" });
+    expect(rollback.action?.risk).toBe("DANGEROUS");
+    const result = await f.approve(rollback.action!);
+    expect(result).toMatchObject({ ok: true, verified: true, mode: "auto" });
+    const after = f.service.history("skill-1");
+    expect(after.revisions).toHaveLength(2);
+    expect(after.revisions[0]).toMatchObject({
+      before: "off",
+      after: "auto",
+      revertedFrom: history.revisions[0]!.id,
+    });
+  });
+
+  it("rejects stale or older native skill mode history", async () => {
+    const f = fixture();
+    const first = f.prepare("off");
+    await f.approve(first);
+    const older = f.service.history("skill-1").revisions[0]!;
+    const second = f.prepare("on");
+    await f.approve(second);
+    expect(f.service.prepareRollback("skill-1", older.id)).toMatchObject({
+      ok: false,
+      error: "Herstel alleen de nieuwste skillwijziging.",
+    });
+    const latest = f.service.history("skill-1").revisions[0]!;
+    f.update("mode", "auto");
+    f.update("enabled", 1);
+    f.update("updated_at", "external-change");
+    expect(f.service.prepareRollback("skill-1", latest.id)).toMatchObject({
+      ok: false,
+      error: "De skill is ondertussen gewijzigd. Laad de geschiedenis opnieuw.",
+    });
+  });
+
+  it("requires client-wide acknowledgement and dangerous confirmation when restoring a shared skill", async () => {
+    const f = fixture();
+    const action = f.prepare("off", "system", true);
+    expect(await f.approve(action, true, "system")).toMatchObject({
+      ok: true,
+      verified: true,
+    });
+    const revision = f.service.history("system").revisions[0]!;
+    expect(f.service.prepareRollback("system", revision.id)).toMatchObject({
+      ok: false,
+      error: "Bevestig eerst dat de wijziging alle gateway-clients raakt.",
+    });
+    const rollback = f.service.prepareRollback("system", revision.id, true);
+    expect(rollback.action?.risk).toBe("DANGEROUS");
+    expect(await f.approve(rollback.action!, true, "system")).toMatchObject({
+      ok: true,
+      verified: true,
+      mode: "auto",
+    });
+    expect(f.service.history("system").revisions[0]?.scope).toBe("global");
+  });
+
+  it("requires explicit global-impact acknowledgement and DANGEROUS confirmation for shared skills", async () => {
+    const f = fixture();
+    expect(f.service.prepare("system", "off")).toMatchObject({
+      ok: false,
+      error: "Bevestig eerst dat de wijziging alle gateway-clients raakt.",
+    });
+    expect(f.request).not.toHaveBeenCalled();
+    const prepared = f.service.prepare("system", "off", true);
+    expect(prepared).toMatchObject({
+      ok: true,
+      scope: "global",
+      name: "Fixture skill",
+    });
+    expect(prepared.action).toMatchObject({
+      tool: "native_skill_mode",
+      risk: "DANGEROUS",
+      allowAlways: false,
+      args: { id: "system", mode: "off" },
+    });
+    const action = prepared.action!;
+    expect(
+      f.db.prepare("SELECT mode FROM skills WHERE id='system'").get(),
+    ).toEqual({ mode: "auto" });
+    expect(await f.approve(action, true, "system")).toEqual({
+      ok: true,
+      verified: true,
+      mode: "off",
+      enabled: false,
+    });
+    expect(f.request).toHaveBeenCalledWith("/api/skills/system", {
+      method: "PUT",
+      body: { mode: "off" },
+    });
+    expect(
+      f.db.prepare("SELECT mode FROM skills WHERE id='system'").get(),
+    ).toEqual({ mode: "off" });
+  });
+
   it("prepares a 60-second, unique session-bound approval without writing or standing consent", async () => {
     const f = fixture();
     const before = f.db.prepare("SELECT * FROM skills").all();
@@ -406,6 +535,76 @@ describe("native skill mode approvals", () => {
   });
 });
 
+describe("native skill removal approvals", () => {
+  it("allows preparing removal only for a NOVA-owned skill", () => {
+    const f = fixture();
+    const removal = new NativeSkillRemoval(
+      f.config as NovaConfig,
+      f.management,
+      f.confirmations,
+      f.audit,
+    );
+    const own = removal.prepare("skill-1");
+    expect(own).toMatchObject({
+      ok: true,
+      name: "Fixture skill",
+      action: { risk: "DANGEROUS", tool: "native_skill_remove" },
+    });
+    expect(removal.prepare("system")).toMatchObject({ ok: false });
+    expect(removal.prepare("foreign")).toMatchObject({ ok: false });
+    expect(f.request).not.toHaveBeenCalled();
+  });
+
+  it("deletes only after fresh approval and independently verifies SQLite removal", async () => {
+    const f = fixture();
+    const removal = new NativeSkillRemoval(
+      f.config as NovaConfig,
+      f.management,
+      f.confirmations,
+      f.audit,
+    );
+    const prepared = removal.prepare("skill-1");
+    if (!prepared.action) throw new Error("Missing removal confirmation");
+    expect(f.request).not.toHaveBeenCalled();
+    await expect(
+      removal.confirm(
+        "skill-1",
+        prepared.action.sessionId,
+        prepared.action.confirmationId,
+        true,
+      ),
+    ).resolves.toMatchObject({ ok: true, verified: true });
+    expect(f.request).toHaveBeenCalledWith("/api/skills/skill-1", {
+      method: "DELETE",
+    });
+    expect(
+      f.db.prepare("SELECT id FROM skills WHERE id=?").get("skill-1"),
+    ).toBeUndefined();
+  });
+
+  it("rejects stale revisions before calling OmniRoute", async () => {
+    const f = fixture();
+    const removal = new NativeSkillRemoval(
+      f.config as NovaConfig,
+      f.management,
+      f.confirmations,
+      f.audit,
+    );
+    const prepared = removal.prepare("skill-1");
+    if (!prepared.action) throw new Error("Missing removal confirmation");
+    f.update("name", "Changed after prepare");
+    await expect(
+      removal.confirm(
+        "skill-1",
+        prepared.action.sessionId,
+        prepared.action.confirmationId,
+        true,
+      ),
+    ).resolves.toMatchObject({ ok: false });
+    expect(f.request).not.toHaveBeenCalled();
+  });
+});
+
 describe("native skill mode validation and API guard", () => {
   it.each(["always", "ON", "", null, 1, {}])(
     "rejects unknown mode %j",
@@ -440,7 +639,12 @@ describe("native skill mode validation and API guard", () => {
   });
 
   it("rejects extra fields, malformed bodies and standing approval requests before delegation", () => {
-    const service = { prepare: vi.fn(), confirm: vi.fn() };
+    const service = {
+      prepare: vi.fn(),
+      prepareRollback: vi.fn(),
+      confirm: vi.fn(),
+      history: vi.fn(),
+    };
     const controller = new NativeSkillModesController(
       service as unknown as NativeSkillModesService,
     );
@@ -458,20 +662,32 @@ describe("native skill mode validation and API guard", () => {
       expect(() => controller.confirm("skill-1", body)).toThrow(
         ValidationError,
       );
+    for (const body of [null, [], {}, { revisionId: "bad", extra: true }])
+      expect(() => controller.prepareRollback("skill-1", body)).toThrow(
+        ValidationError,
+      );
     expect(service.prepare).not.toHaveBeenCalled();
+    expect(service.prepareRollback).not.toHaveBeenCalled();
     expect(service.confirm).not.toHaveBeenCalled();
   });
 
-  it("requires PIN and admin header on both POST routes before service delegation", async () => {
+  it("requires PIN and admin header on every history and mutation route", async () => {
     const nova = await createApp({ env: { NOVA_ADMIN_PIN: "4321" } });
     const service = nova.app.get(NativeSkillModesService);
     const prepare = vi.spyOn(service, "prepare").mockReturnValue({ ok: true });
     const confirm = vi
       .spyOn(service, "confirm")
       .mockResolvedValue({ ok: true });
+    const prepareRollback = vi
+      .spyOn(service, "prepareRollback")
+      .mockReturnValue({ ok: true });
+    const history = vi
+      .spyOn(service, "history")
+      .mockReturnValue({ revisions: [], truncated: false });
     try {
       for (const [route, body] of [
         ["prepare", { mode: "off" }],
+        ["rollback/prepare", { revisionId: crypto.randomUUID() }],
         [
           "confirm",
           {
@@ -499,8 +715,20 @@ describe("native skill mode validation and API guard", () => {
             .status,
         ).toBe(403);
         expect(prepare).not.toHaveBeenCalled();
+        expect(prepareRollback).not.toHaveBeenCalled();
         expect(confirm).not.toHaveBeenCalled();
       }
+      const historyRoute =
+        "/api/settings/omniroute/native/skills/skill-1/history";
+      expect((await nova.api.get(historyRoute).set(ADMIN)).status).toBe(401);
+      expect(
+        (await nova.api.get(historyRoute).set(ADMIN).set("x-nova-pin", "wrong"))
+          .status,
+      ).toBe(401);
+      expect(
+        (await nova.api.get(historyRoute).set("x-nova-pin", "4321")).status,
+      ).toBe(200);
+      expect(history).toHaveBeenCalledWith("skill-1");
       expect(
         (
           await nova.api
@@ -510,6 +738,26 @@ describe("native skill mode validation and API guard", () => {
             .send({ mode: "off" })
         ).status,
       ).toBe(200);
+      expect(
+        (await nova.api.get(historyRoute).set(ADMIN).set("x-nova-pin", "4321"))
+          .status,
+      ).toBe(200);
+      expect(
+        (
+          await nova.api
+            .post(
+              "/api/settings/omniroute/native/skills/skill-1/rollback/prepare",
+            )
+            .set(ADMIN)
+            .set("x-nova-pin", "4321")
+            .send({ revisionId: crypto.randomUUID(), acknowledgeGlobal: false })
+        ).status,
+      ).toBe(200);
+      expect(prepareRollback).toHaveBeenCalledWith(
+        "skill-1",
+        expect.any(String),
+        false,
+      );
       const body = {
         sessionId: `settings-native:${crypto.randomUUID()}`,
         confirmationId: crypto.randomUUID(),
@@ -524,7 +772,7 @@ describe("native skill mode validation and API guard", () => {
             .send(body)
         ).status,
       ).toBe(200);
-      expect(prepare).toHaveBeenCalledWith("skill-1", "off");
+      expect(prepare).toHaveBeenCalledWith("skill-1", "off", false);
       expect(confirm).toHaveBeenCalledWith(
         "skill-1",
         body.sessionId,
@@ -533,7 +781,9 @@ describe("native skill mode validation and API guard", () => {
       );
     } finally {
       prepare.mockRestore();
+      prepareRollback.mockRestore();
       confirm.mockRestore();
+      history.mockRestore();
       await nova.app.close();
     }
   });

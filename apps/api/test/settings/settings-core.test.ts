@@ -23,6 +23,7 @@ const dir = config.dataDir;
 const store = new SettingsStore(config);
 beforeEach(() => {
   fs.rmSync(path.join(dir, "settings.json"), { force: true });
+  fs.rmSync(path.join(dir, "persona.md"), { force: true });
   store.reset();
 });
 
@@ -39,6 +40,43 @@ describe("the store", () => {
     expect(
       fs.readdirSync(dir).filter((name) => name.endsWith(".tmp")),
     ).toHaveLength(0);
+    expect(fs.readFileSync(path.join(dir, "persona.md"), "utf8")).toBe(
+      "Wees kort.",
+    );
+    expect(fs.statSync(path.join(dir, "persona.md")).mode & 0o777).toBe(0o600);
+  });
+
+  it("migrates existing settings persona without losing it", () => {
+    fs.writeFileSync(
+      path.join(dir, "settings.json"),
+      JSON.stringify({ persona: "Spreek me aan met Harm." }),
+    );
+    expect(store.get().persona).toBe("Spreek me aan met Harm.");
+    expect(fs.readFileSync(path.join(dir, "persona.md"), "utf8")).toBe(
+      "Spreek me aan met Harm.",
+    );
+  });
+
+  it("uses an existing persona file and refuses to follow a persona symlink", () => {
+    fs.writeFileSync(
+      path.join(dir, "settings.json"),
+      JSON.stringify({ persona: "legacy" }),
+    );
+    fs.writeFileSync(path.join(dir, "persona.md"), "Nieuwe eigen regels.");
+    expect(store.get().persona).toBe("Nieuwe eigen regels.");
+
+    store.reset();
+    fs.rmSync(path.join(dir, "persona.md"));
+    const protectedFile = path.join(dir, "persona-secret.txt");
+    fs.writeFileSync(protectedFile, "keep this");
+    fs.symlinkSync(protectedFile, path.join(dir, "persona.md"));
+    expect(store.get().persona).toBe("legacy");
+    expect(() =>
+      store.update((settings) => void (settings.persona = "changed")),
+    ).toThrow(/symlink/);
+    expect(fs.readFileSync(protectedFile, "utf8")).toBe("keep this");
+    fs.rmSync(path.join(dir, "persona.md"));
+    fs.rmSync(protectedFile);
   });
 
   it("sets a damaged settings file aside, not silently overwritten", () => {

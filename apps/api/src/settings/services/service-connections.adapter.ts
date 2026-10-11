@@ -13,10 +13,27 @@ import {
 @Injectable()
 export class ServiceConnectionsAdapter {
   constructor(private readonly config: NovaConfig) {}
-  private readonly last = new Map<string, ServiceConnectionTest>();
-  status(id: string): ServiceConnectionTest | null {
+  private readonly last = new Map<
+    string,
+    { fingerprint: string; report: ServiceConnectionTest }
+  >();
+  private fingerprint(values: ConnectionValues): string {
+    const stable = Object.fromEntries(
+      Object.entries(values).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    );
+    return crypto
+      .createHash("sha256")
+      .update(JSON.stringify(stable))
+      .digest("hex");
+  }
+  status(id: string, values: ConnectionValues): ServiceConnectionTest | null {
     connectionSpec(id);
-    return this.last.get(id) ?? null;
+    const previous = this.last.get(id);
+    return previous?.fingerprint === this.fingerprint(values)
+      ? previous.report
+      : null;
   }
 
   async qdrantOverview(values: ConnectionValues) {
@@ -71,6 +88,8 @@ export class ServiceConnectionsAdapter {
                 points_count?: unknown;
                 indexed_vectors_count?: unknown;
                 segments_count?: unknown;
+                disk_data_size?: unknown;
+                ram_data_size?: unknown;
                 status?: unknown;
               };
             }>(`${base}/collections/${encodeURIComponent(name)}`, {
@@ -99,6 +118,14 @@ export class ServiceConnectionsAdapter {
                 response.status >= 200 && response.status < 300
                   ? count(result?.segments_count)
                   : null,
+              diskBytes:
+                response.status >= 200 && response.status < 300
+                  ? count(result?.disk_data_size)
+                  : null,
+              ramBytes:
+                response.status >= 200 && response.status < 300
+                  ? count(result?.ram_data_size)
+                  : null,
               status:
                 response.status >= 200 &&
                 response.status < 300 &&
@@ -114,6 +141,8 @@ export class ServiceConnectionsAdapter {
               points: null,
               indexedVectors: null,
               segments: null,
+              diskBytes: null,
+              ramBytes: null,
               status: "unknown",
             };
           }
@@ -142,9 +171,10 @@ export class ServiceConnectionsAdapter {
   ): Promise<ServiceConnectionTest> {
     connectionSpec(id);
     const checkedAt = new Date().toISOString();
+    const fingerprint = this.fingerprint(values);
     const finish = (result: Omit<ServiceConnectionTest, "checkedAt">) => {
       const report = { ...result, checkedAt };
-      this.last.set(id, report);
+      this.last.set(id, { fingerprint, report });
       return report;
     };
     const base = String(values.url ?? "").replace(/\/$/, "");

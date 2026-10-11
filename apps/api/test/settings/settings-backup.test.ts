@@ -12,6 +12,10 @@ import {
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { ValidationError } from "../../src/core/errors/validation.error.js";
 import { SettingsBackupService } from "../../src/settings/settings-backup.service.js";
+import type {
+  NodeRedManagement,
+  NodeRedFlowSnapshot,
+} from "../../src/settings/node-red-management.service.js";
 import { SettingsStore } from "../../src/settings/store/settings.store.js";
 import type { WallpaperPort } from "../../src/settings/wallpaper.port.js";
 import { ADMIN, createApp, playbook, webhook } from "./helpers.js";
@@ -61,7 +65,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function fixture() {
+function fixture(nodeRed?: NodeRedManagement) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-settings-backup-"));
   const filename = path.join(dir, "settings.json");
   cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -97,7 +101,9 @@ function fixture() {
     confirmations,
     audit,
     planning as never,
+    undefined,
     config,
+    nodeRed,
   );
   cleanups.push(() => backup.onModuleDestroy());
   const prepare = (body: unknown = requestBody()) => {
@@ -149,6 +155,127 @@ function fixture() {
 }
 
 describe("settings backup private approvals", () => {
+  it("previews and imports Node-RED flows against the captured revision", async () => {
+    let snapshot: NodeRedFlowSnapshot = {
+      revision: "rev-1",
+      flows: [{ id: "tab-old", type: "tab", label: "Old" }],
+    };
+    const nodeRed = {
+      flowSnapshot: vi.fn(async () => structuredClone(snapshot)),
+      writeFlowSnapshot: vi.fn(async (expected: string, flows: unknown) => {
+        if (snapshot.revision !== expected)
+          return { ok: false, error: "stale" };
+        snapshot = {
+          revision: "rev-2",
+          flows: structuredClone(flows) as Record<string, unknown>[],
+        };
+        return { ok: true, revision: snapshot.revision };
+      }),
+    } as unknown as NodeRedManagement;
+    const f = fixture(nodeRed);
+    const body = {
+      ...requestBody(),
+      data: {
+        ...incoming(),
+        nodeRedFlows: [{ id: "tab-new", type: "tab", label: "New" }],
+      },
+    };
+    const prepared = f.backup.prepareWithNodeRed(body, snapshot);
+    expect(prepared.summary).toMatchObject({
+      nodeRedFlowsChanged: true,
+      incomingFlows: 1,
+      totalFlows: 1,
+      removedFlows: 1,
+    });
+    const result = await f.backup.confirmWithNodeRed({
+      sessionId: prepared.action.sessionId,
+      confirmationId: prepared.action.confirmationId,
+      approve: true,
+    });
+    expect(result).toMatchObject({ ok: true, importedFlows: 1 });
+    expect(snapshot.flows).toEqual(body.data.nodeRedFlows);
+  });
+
+  it("refuses stale Node-RED revisions without changing local settings", async () => {
+    let snapshot: NodeRedFlowSnapshot = {
+      revision: "rev-1",
+      flows: [{ id: "tab-old", type: "tab", label: "Old" }],
+    };
+    const nodeRed = {
+      flowSnapshot: vi.fn(async () => structuredClone(snapshot)),
+      writeFlowSnapshot: vi.fn(async () => ({ ok: false, error: "stale" })),
+    } as unknown as NodeRedManagement;
+    const f = fixture(nodeRed);
+    const body = {
+      ...requestBody(),
+      data: {
+        ...incoming(),
+        nodeRedFlows: [{ id: "tab-new", type: "tab", label: "New" }],
+      },
+    };
+    const prepared = f.backup.prepareWithNodeRed(body, snapshot);
+    snapshot = { revision: "rev-2", flows: [{ id: "tab-other", type: "tab" }] };
+    const before = f.store.get();
+    const result = await f.backup.confirmWithNodeRed({
+      sessionId: prepared.action.sessionId,
+      confirmationId: prepared.action.confirmationId,
+      approve: true,
+    });
+    expect(result).toMatchObject({ ok: false });
+    expect(f.store.get()).toEqual(before);
+    expect(nodeRed.writeFlowSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("compensates an interrupted Node-RED import before restoring local stores", async () => {
+    const previousFlows = [{ id: "tab-old", type: "tab", label: "Old" }];
+    const targetFlows = [{ id: "tab-new", type: "tab", label: "New" }];
+    let snapshot: NodeRedFlowSnapshot = {
+      revision: "rev-2",
+      flows: targetFlows,
+    };
+    const nodeRed = {
+      flowSnapshot: vi.fn(async () => structuredClone(snapshot)),
+      writeFlowSnapshot: vi.fn(async (expected: string, flows: unknown) => {
+        if (snapshot.revision !== expected) return { ok: false };
+        snapshot = {
+          revision: "rev-3",
+          flows: structuredClone(flows) as Record<string, unknown>[],
+        };
+        return { ok: true, revision: snapshot.revision };
+      }),
+    } as unknown as NodeRedManagement;
+    const f = fixture(nodeRed);
+    const previousSettings = f.store.get();
+    const previousLists = f.getLists();
+    f.store.update((next) => {
+      next.persona = "Partially imported";
+    });
+    const payload = {
+      previousSettings,
+      previousLists,
+      previousNodeRedFlows: previousFlows,
+      targetNodeRedFlows: targetFlows,
+      nodeRedRevision: "rev-1",
+    };
+    fs.writeFileSync(
+      f.journalFile,
+      JSON.stringify({
+        version: 3,
+        ...payload,
+        digest: crypto
+          .createHash("sha256")
+          .update(JSON.stringify(payload))
+          .digest("hex"),
+      }),
+      { mode: 0o600 },
+    );
+
+    await f.backup.onModuleInit();
+
+    expect(snapshot.flows).toEqual(previousFlows);
+    expect(f.store.get()).toEqual(previousSettings);
+    expect(fs.existsSync(f.journalFile)).toBe(false);
+  });
   it("previews helper changes without writes and restores the entire preference configuration after confirmation", () => {
     const f = fixture();
     const before = f.bytes();
@@ -220,6 +347,7 @@ describe("settings backup private approvals", () => {
       incomingLists: 0,
       totalLists: 0,
       removedLists: 0,
+      changedConnections: 0,
     });
     expect(first.action).toMatchObject({
       tool: "settings_import",
@@ -234,15 +362,19 @@ describe("settings backup private approvals", () => {
         incomingLists: 0,
         totalLists: 0,
         removedLists: 0,
+        changedConnections: 0,
+        modelRolesChanged: false,
         removedSkills: 1,
         removedWidgets: 0,
       },
     });
     expect(Object.keys(first.action!.args).sort()).toEqual([
+      "changedConnections",
       "incomingLists",
       "incomingSkills",
       "incomingWidgets",
       "mode",
+      "modelRolesChanged",
       "removedLists",
       "removedSkills",
       "removedWidgets",
@@ -273,6 +405,8 @@ describe("settings backup private approvals", () => {
       ok: true,
       imported: 1,
       importedLists: 0,
+      importedFlows: 0,
+      changedConnections: 0,
       missingSecrets: [],
     });
     expect(f.store.get()).toMatchObject({
@@ -397,7 +531,7 @@ describe("settings backup private approvals", () => {
     expect(fs.existsSync(f.journalFile)).toBe(false);
   });
 
-  it("recovers the prior settings and lists from a durable journal at startup", () => {
+  it("recovers the prior settings and lists from a durable journal at startup", async () => {
     const f = fixture();
     const previousSettings = f.store.get();
     f.store.update((next) => {
@@ -435,7 +569,7 @@ describe("settings backup private approvals", () => {
       { mode: 0o600 },
     );
 
-    f.backup.onModuleInit();
+    await f.backup.onModuleInit();
 
     expect(f.store.get()).toEqual(previousSettings);
     expect(f.getLists()).toEqual(previousLists);
@@ -481,6 +615,8 @@ describe("settings backup private approvals", () => {
       cancelled: true,
       imported: 0,
       importedLists: 0,
+      importedFlows: 0,
+      changedConnections: 0,
       missingSecrets: [],
     });
     expect(f.confirm(prepared)).toMatchObject({ ok: false });

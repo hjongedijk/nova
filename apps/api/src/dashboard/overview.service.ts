@@ -165,19 +165,22 @@ export class OverviewService {
     const timers = settle(Promise.resolve(this.planning.timers()));
     const lists = settle(Promise.resolve(this.planning.lists()));
     const alerts = settle(Promise.resolve(this.checks.alerts()));
+    const visibleHomeEntities = entities ? this.home.visibleEntities() : null;
     return sanitize({
       at: new Date().toISOString(),
       proxmox:
         guests || storage
           ? { guests: guests ?? [], storage: storage ?? [] }
           : null,
-      weather: entities ? { ...weatherFrom(entities), forecast } : null,
-      sun: entities ? sunFrom(entities) : null,
+      weather: visibleHomeEntities
+        ? { ...weatherFrom(visibleHomeEntities), forecast }
+        : null,
+      sun: visibleHomeEntities ? sunFrom(visibleHomeEntities) : null,
       news,
       timers: await timers,
       lists: await lists,
       alerts: await alerts,
-      home: entities ? homeSummary(entities) : null,
+      home: visibleHomeEntities ? homeSummary(visibleHomeEntities) : null,
       air,
       markets,
       iss,

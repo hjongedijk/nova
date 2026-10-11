@@ -13,6 +13,9 @@ import { SettingsGuard } from "../settings.guard.js";
 import { MqttService } from "../../core/mqtt/mqtt.service.js";
 import { ServiceConnectionsStore } from "./service-connections.store.js";
 import { ServiceConnectionsAdapter } from "./service-connections.adapter.js";
+import { SemanticMemoryService } from "../../memory/semantic-memory.service.js";
+import { AuditService } from "../../core/audit/audit.service.js";
+import { ServiceConnectionsHistory } from "./service-connections-history.service.js";
 
 type Change = { values?: unknown; clearSecrets?: unknown } | undefined;
 @Controller("settings/services")
@@ -22,6 +25,9 @@ export class ServiceConnectionsController {
     private readonly store: ServiceConnectionsStore,
     private readonly adapters: ServiceConnectionsAdapter,
     private readonly mqtt: MqttService,
+    private readonly memory: SemanticMemoryService,
+    private readonly audit: AuditService,
+    private readonly rollbackHistory: ServiceConnectionsHistory,
   ) {}
 
   @Get() list() {
@@ -33,11 +39,102 @@ export class ServiceConnectionsController {
   @Get("mqtt/overview") mqttOverview() {
     return this.mqtt.overview();
   }
-  @Get("qdrant/overview") qdrantOverview() {
-    return this.adapters.qdrantOverview(this.store.effective("qdrant"));
+  @Get("qdrant/overview") async qdrantOverview() {
+    const [overview, health] = await Promise.all([
+      this.adapters.qdrantOverview(this.store.effective("qdrant")),
+      this.memory.qdrantHealth(),
+    ]);
+    return { ...overview, activeMemoryCollection: health.collection ?? null };
+  }
+  @Post("qdrant/maintenance")
+  @HttpCode(200)
+  qdrantMaintenance() {
+    return this.memory.qdrant.maintain();
+  }
+  @Post("qdrant/reindex")
+  @HttpCode(200)
+  async qdrantReindex() {
+    try {
+      this.audit.record({
+        sessionId: "settings",
+        tool: "settings_qdrant_reindex",
+        risk: "DANGEROUS",
+        confirmation: "admin_ui",
+        arguments: { what: "qdrant_reindex" },
+        phase: "attempt",
+      });
+    } catch {
+      return {
+        ok: false,
+        error: "Auditlog niet beschikbaar; herindexeren gestopt.",
+      };
+    }
+    const result = await this.memory.reindexQdrant();
+    const points = "points" in result ? (result.points ?? 0) : 0;
+    try {
+      this.audit.record({
+        sessionId: "settings",
+        tool: "settings_qdrant_reindex",
+        risk: "DANGEROUS",
+        confirmation: "admin_ui",
+        arguments: { what: "qdrant_reindex", points },
+        result: { ok: result.ok },
+        phase: result.ok ? "verified" : "failed",
+      });
+    } catch {
+      // The attempt is already durable; do not hide the reindex result.
+    }
+    return result;
+  }
+  @Get("qdrant/index-history")
+  async qdrantIndexHistory() {
+    const [health, revisions] = await Promise.all([
+      this.memory.qdrantHealth(),
+      this.memory.qdrantIndexHistory(),
+    ]);
+    return {
+      activeCollection: health.collection ?? null,
+      revisions,
+    };
+  }
+  @Post("qdrant/index-history/:id/rollback")
+  @HttpCode(200)
+  async rollbackQdrantIndex(@Param("id") id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      return { ok: false, error: "Ongeldige indexwijziging." };
+    try {
+      this.audit.record({
+        sessionId: "settings",
+        tool: "settings_qdrant_index_rollback",
+        risk: "DANGEROUS",
+        confirmation: "admin_ui",
+        arguments: { revision: id },
+        phase: "attempt",
+      });
+    } catch {
+      return {
+        ok: false,
+        error: "Auditlog niet beschikbaar; herstel gestopt.",
+      };
+    }
+    const result = await this.memory.rollbackQdrantIndex(id);
+    try {
+      this.audit.record({
+        sessionId: "settings",
+        tool: "settings_qdrant_index_rollback",
+        risk: "DANGEROUS",
+        confirmation: "admin_ui",
+        arguments: { revision: id },
+        result: { ok: result.ok },
+        phase: result.ok ? "verified" : "failed",
+      });
+    } catch {
+      // The attempt is already durable; return the actual restoration result.
+    }
+    return result;
   }
   @Get(":id/status") status(@Param("id") id: string) {
-    return { test: this.adapters.status(id) };
+    return { test: this.adapters.status(id, this.store.effective(id)) };
   }
   @Put(":id") save(@Param("id") id: string, @Body() body: Change) {
     const services = this.store.save(id, body?.values, body?.clearSecrets);
@@ -57,18 +154,34 @@ export class ServiceConnectionsController {
       this.store.candidate(id, body?.values ?? {}, body?.clearSecrets),
     );
   }
-  @Post("history/:revision/rollback")
+  @Post("history/:revision/prepare-rollback")
   @HttpCode(200)
-  rollback(@Param("revision") revision: string) {
+  prepareRollback(@Param("revision") revision: string) {
     if (!/^[0-9a-f-]{36}$/i.test(revision))
       throw new ValidationError(["Ongeldige wijziging."]);
-    const services = this.store.rollback(revision);
-    return {
-      ok: true,
-      services,
-      ...(this.store.auditWarning
-        ? { auditWarning: this.store.auditWarning }
-        : {}),
-    };
+    return this.rollbackHistory.prepareRollback(revision);
+  }
+  @Post("history/confirm-rollback")
+  @HttpCode(200)
+  confirmRollback(@Body() body: unknown) {
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    const value = body as Record<string, unknown>;
+    if (
+      Object.keys(value).some(
+        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
+      ) ||
+      typeof value.sessionId !== "string" ||
+      !/^settings-service-history:[0-9a-f-]{36}$/i.test(value.sessionId) ||
+      typeof value.confirmationId !== "string" ||
+      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
+      typeof value.approve !== "boolean"
+    )
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    return this.rollbackHistory.confirm(
+      value.sessionId,
+      value.confirmationId,
+      value.approve,
+    );
   }
 }

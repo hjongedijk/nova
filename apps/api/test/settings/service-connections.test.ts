@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
@@ -6,6 +7,7 @@ import mqtt from "mqtt";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuditService } from "../../src/core/audit/audit.service.js";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
+import { SemanticMemoryService } from "../../src/memory/semantic-memory.service.js";
 import { ServiceConnectionsStore } from "../../src/settings/services/service-connections.store.js";
 import { ServiceConnectionsAdapter } from "../../src/settings/services/service-connections.adapter.js";
 import { ADMIN, createApp, json, service, type TestApp } from "./helpers.js";
@@ -47,6 +49,203 @@ const persisted = () =>
   JSON.parse(fs.readFileSync(path.join(directory, "services.json"), "utf8"));
 
 describe("service connection management", () => {
+  it("archives eligible Qdrant memories only from the PIN-protected settings route", async () => {
+    const memory = nova.app.get(SemanticMemoryService);
+    const maintain = vi.fn(async () => ({
+      ok: true,
+      scanned: 12,
+      archived: 3,
+      more: false,
+    }));
+    memory.useBackends({ qdrant: { maintain } as never });
+
+    const denied = await nova.api
+      .post("/api/settings/services/qdrant/maintenance")
+      .send({});
+    expect(denied.status).toBe(403);
+
+    const result = await request("post", "/qdrant/maintenance", {});
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({
+      ok: true,
+      scanned: 12,
+      archived: 3,
+      more: false,
+    });
+    expect(maintain).toHaveBeenCalledOnce();
+  });
+
+  it("backs up service addresses without exporting or replacing destination secrets", async () => {
+    const source = await request("put", "/home-assistant", {
+      values: {
+        url: "http://source.invalid:8123",
+        token: "source-private-token",
+      },
+    });
+    expect(source.status).toBe(200);
+    await request("put", "/mqtt", {
+      values: { username: "source-user" },
+    });
+    const exported = await nova.api.get("/api/settings/export").set(ADMIN);
+    expect(exported.status).toBe(200);
+    expect(exported.body.connections["home-assistant"]).toMatchObject({
+      url: "http://source.invalid:8123",
+    });
+    expect(exported.body.connections["home-assistant"]).not.toHaveProperty(
+      "token",
+    );
+    expect(JSON.stringify(exported.body.connections)).not.toContain(
+      "source-private-token",
+    );
+    expect(exported.body.connections.mqtt).not.toHaveProperty("username");
+
+    const destination = await request("put", "/home-assistant", {
+      values: {
+        url: "http://destination.invalid:8123",
+        token: "destination-private-token",
+      },
+    });
+    await request("put", "/mqtt", {
+      values: { username: "destination-user" },
+    });
+    expect(destination.status).toBe(200);
+    const prepared = await nova.api
+      .post("/api/settings/import/prepare")
+      .set(ADMIN)
+      .send({
+        data: exported.body,
+        mode: "replace",
+        acknowledgeEffects: true,
+      });
+    expect(prepared.status).toBe(200);
+    expect(prepared.body.summary).toMatchObject({
+      connectionsChanged: true,
+      changedConnections: 1,
+      connectionChanges: [
+        {
+          service: "home-assistant",
+          before: { url: "http://destination.invalid:8123" },
+          after: { url: "http://source.invalid:8123" },
+        },
+      ],
+    });
+    expect(JSON.stringify(prepared.body)).not.toContain(
+      "destination-private-token",
+    );
+    const { sessionId, confirmationId } = prepared.body.action;
+    const result = await nova.api
+      .post("/api/settings/import")
+      .set(ADMIN)
+      .send({ sessionId, confirmationId, approve: true });
+    expect(result.body).toMatchObject({ ok: true, changedConnections: 1 });
+    expect(persisted().services["home-assistant"]).toMatchObject({
+      url: "http://source.invalid:8123",
+      token: "destination-private-token",
+    });
+    expect(persisted().services.mqtt.username).toBe("destination-user");
+    expect(
+      fs.statSync(path.join(directory, "services.json")).mode & 0o777,
+    ).toBe(0o600);
+  });
+
+  it("rolls settings, lists and service destinations back after a partial multi-file import", async () => {
+    await request("put", "/home-assistant", {
+      values: {
+        url: "http://source.invalid:8123",
+        token: "source-private-token",
+      },
+    });
+    const exported = await nova.api.get("/api/settings/export").set(ADMIN);
+    await request("put", "/home-assistant", {
+      values: {
+        url: "http://destination.invalid:8123",
+        token: "destination-private-token",
+      },
+    });
+    const previousPersona = nova.store.get().persona;
+    const serviceStore = nova.app.get(ServiceConnectionsStore);
+    vi.spyOn(serviceStore, "restoreSnapshot").mockImplementationOnce(() => {
+      throw new Error("fixture interrupted service file write");
+    });
+    const prepared = await nova.api
+      .post("/api/settings/import/prepare")
+      .set(ADMIN)
+      .send({
+        data: exported.body,
+        mode: "replace",
+        acknowledgeEffects: true,
+      });
+    const { sessionId, confirmationId } = prepared.body.action;
+    const result = await nova.api
+      .post("/api/settings/import")
+      .set(ADMIN)
+      .send({ sessionId, confirmationId, approve: true });
+    expect(result.body).toMatchObject({ ok: false });
+    expect(nova.store.get().persona).toBe(previousPersona);
+    expect(persisted().services["home-assistant"]).toMatchObject({
+      url: "http://destination.invalid:8123",
+      token: "destination-private-token",
+    });
+    expect(
+      fs.existsSync(path.join(directory, "settings-import-transaction.json")),
+    ).toBe(false);
+  });
+
+  it("preserves service settings when importing older v1 files without connections", async () => {
+    await request("put", "/home-assistant", {
+      values: {
+        url: "http://destination.invalid:8123",
+        token: "destination-private-token",
+      },
+    });
+    const exported = await nova.api.get("/api/settings/export").set(ADMIN);
+    delete exported.body.connections;
+    const prepared = await nova.api
+      .post("/api/settings/import/prepare")
+      .set(ADMIN)
+      .send({
+        data: exported.body,
+        mode: "replace",
+        acknowledgeEffects: true,
+      });
+    expect(prepared.status).toBe(200);
+    expect(prepared.body.summary.changedConnections).toBe(0);
+    const { sessionId, confirmationId } = prepared.body.action;
+    expect(
+      (
+        await nova.api
+          .post("/api/settings/import")
+          .set(ADMIN)
+          .send({ sessionId, confirmationId, approve: true })
+      ).body.ok,
+    ).toBe(true);
+    expect(persisted().services["home-assistant"]).toMatchObject({
+      url: "http://destination.invalid:8123",
+      token: "destination-private-token",
+    });
+  });
+
+  it("rejects any credential field in imported service settings before writing", async () => {
+    const exported = await nova.api.get("/api/settings/export").set(ADMIN);
+    const data = structuredClone(exported.body);
+    data.connections.qdrant.apiKey = "forbidden-imported-secret";
+    const before = fs.existsSync(path.join(directory, "services.json"))
+      ? fs.readFileSync(path.join(directory, "services.json"))
+      : undefined;
+    const response = await nova.api
+      .post("/api/settings/import/prepare")
+      .set(ADMIN)
+      .send({ data, mode: "replace", acknowledgeEffects: true });
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(response.body)).not.toContain(
+      "forbidden-imported-secret",
+    );
+    const after = fs.existsSync(path.join(directory, "services.json"))
+      ? fs.readFileSync(path.join(directory, "services.json"))
+      : undefined;
+    expect(after).toEqual(before);
+  });
+
   it("guards reads with PIN and writes/probes/rollback with the admin header", async () => {
     expect(
       (await request("put", "/home-assistant", { values: {} }, {})).status,
@@ -59,7 +258,7 @@ describe("service connection management", () => {
       (
         await request(
           "post",
-          "/history/00000000-0000-0000-0000-000000000000/rollback",
+          "/history/00000000-0000-0000-0000-000000000000/prepare-rollback",
           {},
           {},
         )
@@ -274,12 +473,23 @@ describe("service connection management", () => {
     expect(reboot.freeOnly).toBe(true);
   });
 
-  it("rolls back non-secret changes but refuses secret revisions", async () => {
+  it("requires fresh dangerous confirmation to roll back and refuses secret revisions", async () => {
     await request("put", "/home-assistant", {
       values: { url: "http://changed.invalid:8123" },
     });
     const changed = (await request("get", "/history")).body.revisions[0];
-    const undone = await request("post", `/history/${changed.id}/rollback`, {});
+    const prepared = await request(
+      "post",
+      `/history/${changed.id}/prepare-rollback`,
+      {},
+    );
+    expect(prepared.status).toBe(200);
+    expect(prepared.body.action.risk).toBe("DANGEROUS");
+    const undone = await request("post", "/history/confirm-rollback", {
+      sessionId: prepared.body.action.sessionId,
+      confirmationId: prepared.body.action.confirmationId,
+      approve: true,
+    });
     expect(undone.status).toBe(200);
     expect(
       home(undone.body).fields.find((field) => field.key === "url")?.value,
@@ -293,10 +503,73 @@ describe("service connection management", () => {
     });
     const secret = (await request("get", "/history")).body.revisions[0];
     expect(
-      (await request("post", `/history/${secret.id}/rollback`, {})).status,
+      (await request("post", `/history/${secret.id}/prepare-rollback`, {}))
+        .status,
     ).toBe(400);
     expect(persisted().services["home-assistant"].token).toBe(
       "rollback-secret",
+    );
+  });
+
+  it("rejects rollback confirmation after a competing connection change", async () => {
+    await request("put", "/home-assistant", {
+      values: { url: "http://first.invalid:8123" },
+    });
+    const revision = (await request("get", "/history")).body.revisions[0];
+    const prepared = await request(
+      "post",
+      `/history/${revision.id}/prepare-rollback`,
+      {},
+    );
+    await request("put", "/home-assistant", {
+      values: { url: "http://competing.invalid:8123" },
+    });
+    const result = await request("post", "/history/confirm-rollback", {
+      sessionId: prepared.body.action.sessionId,
+      confirmationId: prepared.body.action.confirmationId,
+      approve: true,
+    });
+    expect(result.body.ok).toBe(false);
+    expect(
+      home({ services: (await request("get")).body.services }).fields.find(
+        (field) => field.key === "url",
+      )?.value,
+    ).toBe("http://competing.invalid:8123");
+  });
+
+  it("binds confirmation to public fields only and preserves later secret updates", async () => {
+    await request("put", "/home-assistant", {
+      values: { token: "secret-before-prepare" },
+    });
+    await request("put", "/home-assistant", {
+      values: { url: "http://rollback-target.invalid:8123" },
+    });
+    const revision = (await request("get", "/history")).body.revisions[0];
+    const prepared = await request(
+      "post",
+      `/history/${revision.id}/prepare-rollback`,
+      {},
+    );
+    const effective = nova.app
+      .get(ServiceConnectionsStore)
+      .effective("home-assistant");
+    expect(prepared.body.action.args.current).not.toBe(
+      crypto
+        .createHash("sha256")
+        .update(JSON.stringify(effective))
+        .digest("hex"),
+    );
+    await request("put", "/home-assistant", {
+      values: { token: "secret-updated-after-prepare" },
+    });
+    const result = await request("post", "/history/confirm-rollback", {
+      sessionId: prepared.body.action.sessionId,
+      confirmationId: prepared.body.action.confirmationId,
+      approve: true,
+    });
+    expect(result.body.ok).toBe(true);
+    expect(persisted().services["home-assistant"].token).toBe(
+      "secret-updated-after-prepare",
     );
   });
 
@@ -360,8 +633,8 @@ describe("service connection management", () => {
     await request("put", "/qdrant", {
       values: { collection: "new_collection" },
     });
-    const rolled = await request("post", `/history/${first.id}/rollback`, {});
-    expect(rolled.status).toBe(200);
+    const rolled = nova.app.get(ServiceConnectionsStore).rollback(first.id);
+    expect(rolled).toBeTruthy();
     const effective = nova.app.get(ServiceConnectionsStore).effective("qdrant");
     expect(effective.url).toBe(config.qdrantUrl);
     expect(effective.collection).toBe("new_collection");
@@ -379,8 +652,9 @@ describe("service connection management", () => {
       path.join(directory, "services.json"),
       "utf8",
     );
-    const rolled = await request("post", `/history/${first.id}/rollback`, {});
-    expect(rolled.status).toBe(400);
+    expect(() =>
+      nova.app.get(ServiceConnectionsStore).rollback(first.id),
+    ).toThrow();
     expect(fs.readFileSync(path.join(directory, "services.json"), "utf8")).toBe(
       before,
     );
@@ -460,6 +734,8 @@ describe("read-only connection probes", () => {
             points_count: 12,
             indexed_vectors_count: 10,
             segments_count: 2,
+            disk_data_size: 4567,
+            ram_data_size: 1234,
             status: "green",
             secret: "private-detail",
           },
@@ -484,6 +760,8 @@ describe("read-only connection probes", () => {
             points: 12,
             indexedVectors: 10,
             segments: 2,
+            diskBytes: 4567,
+            ramBytes: 1234,
             status: "green",
           },
           {
@@ -491,6 +769,8 @@ describe("read-only connection probes", () => {
             points: 12,
             indexedVectors: 10,
             segments: 2,
+            diskBytes: 4567,
+            ramBytes: 1234,
             status: "green",
           },
         ],
@@ -539,6 +819,12 @@ describe("read-only connection probes", () => {
         .set(ADMIN);
       expect(result.status).toBe(200);
       expect(result.body.collections).toHaveLength(20);
+      expect(
+        result.body.collections.every(
+          (item: { diskBytes: unknown; ramBytes: unknown }) =>
+            item.diskBytes === null && item.ramBytes === null,
+        ),
+      ).toBe(true);
       expect(result.body.truncated).toBe(true);
       expect(fake.seen).toHaveLength(21);
       expect(
@@ -637,7 +923,7 @@ describe("read-only connection probes", () => {
         const status = await bound.api
           .get(`/api/settings/services/${id}/status`)
           .set(ADMIN);
-        expect(status.body.test).toEqual(response.body);
+        expect(status.body.test).toBeNull();
         expect(
           JSON.stringify([response.body, status.body, nova.audits]),
         ).not.toMatch(/probe-private|body-private/);
@@ -789,8 +1075,19 @@ describe("read-only connection probes", () => {
     expect(end).toHaveBeenCalledExactlyOnceWith(true);
     expect(publish).not.toHaveBeenCalled();
     expect(subscribe).not.toHaveBeenCalled();
-    expect(JSON.stringify(adapter.status("mqtt"))).not.toContain(
-      "mqtt-private",
-    );
+    const matchingStatus = adapter.status("mqtt", {
+      url: "mqtt://fixture.invalid",
+      username: "fixture-user",
+      password: "mqtt-private",
+    });
+    expect(matchingStatus?.ok).toBe(true);
+    expect(
+      adapter.status("mqtt", {
+        url: "mqtt://changed.invalid",
+        username: "fixture-user",
+        password: "mqtt-private",
+      }),
+    ).toBeNull();
+    expect(JSON.stringify(matchingStatus)).not.toContain("mqtt-private");
   });
 });

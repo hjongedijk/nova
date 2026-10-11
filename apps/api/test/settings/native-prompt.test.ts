@@ -80,6 +80,7 @@ function fixture(initial: string | undefined = JSON.stringify(oldPrompt)) {
     omniUrl: "http://fixture.invalid/v1",
     verifiedOmniUrl: "http://fixture.invalid/v1",
     omniDatabase: database,
+    dataFile: (name: string) => path.join(dir, name),
   };
   const record = vi.fn((entry: AuditRecord) => ({
     ...entry,
@@ -221,6 +222,64 @@ describe("native prompt replacement", () => {
         expect(audit).not.toContain(text);
     },
   );
+
+  it("stores only new secret-free prompt revisions with private file permissions", async () => {
+    const f = fixture(
+      JSON.stringify({
+        enabled: false,
+        prefixPrompt: "Bearer legacy-secret",
+        suffixPrompt: "",
+      }),
+    );
+    const first = f.prepare();
+    expect((await f.approve(first)).verified).toBe(true);
+    expect(f.service.history().revisions).toEqual([]);
+    const nextPrompt = { ...replacement, prefixPrompt: "Clean next version" };
+    const second = f.prepare(nextPrompt);
+    expect((await f.approve(second)).verified).toBe(true);
+    const history = f.service.history();
+    expect(history.revisions).toHaveLength(1);
+    expect(history.revisions[0]).toMatchObject({
+      before: replacement,
+      after: nextPrompt,
+    });
+    expect(
+      fs.statSync(
+        path.join(
+          path.dirname(f.config.omniDatabase),
+          "native-prompt-history.json",
+        ),
+      ).mode & 0o777,
+    ).toBe(0o600);
+    expect(JSON.stringify(history)).not.toContain("legacy-secret");
+  });
+
+  it("limits imported history entries to the newest twenty", () => {
+    const f = fixture();
+    const file = path.join(
+      path.dirname(f.config.omniDatabase),
+      "native-prompt-history.json",
+    );
+    const entries = Array.from({ length: 25 }, (_, index) => ({
+      id: crypto.randomUUID(),
+      at: new Date(1000 + index).toISOString(),
+      before: {
+        enabled: false,
+        prefixPrompt: `before ${index}`,
+        suffixPrompt: "",
+      },
+      after: {
+        enabled: true,
+        prefixPrompt: `after ${index}`,
+        suffixPrompt: "",
+      },
+    }));
+    fs.writeFileSync(file, JSON.stringify(entries));
+    const history = f.service.history();
+    expect(history.revisions).toHaveLength(20);
+    expect(history.revisions[0]!.after.prefixPrompt).toBe("after 24");
+    expect(history.truncated).toBe(true);
+  });
 
   it("cancels once without writes or exposing old or proposed prompt contents", async () => {
     const f = fixture();

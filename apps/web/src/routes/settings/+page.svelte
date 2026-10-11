@@ -1,6 +1,9 @@
 <script lang="ts">
   import ToolUsage from "#components/settings/ToolUsage.svelte";
+  import WorkspaceProjects from "#components/settings/WorkspaceProjects.svelte";
+  import McpStatus from "#components/settings/McpStatus.svelte";
   import FreePolicyWizard from "#components/settings/FreePolicyWizard.svelte";
+  import InstallationWizard from "#components/settings/InstallationWizard.svelte";
   import OmniRouteAccounts from "#components/settings/OmniRouteAccounts.svelte";
   import { onMount, untrack } from "svelte";
   import { page } from "$app/state";
@@ -157,7 +160,8 @@
         </form>
       {:else if settings.data}
         {#key section}
-          {#if section === "general"}
+          {#if section === "setup"}<InstallationWizard />
+          {:else if section === "general"}
             <h2>Snelle opdrachten</h2>
             <QuickActionsEditor />
             <h2>Zijbalk en informatiepanelen</h2>
@@ -176,6 +180,7 @@
               <summary>Alle gereedschappen en hun risico</summary><ToolsList />
             </details>
           {:else if section === "skills"}<SkillsTab />
+          {:else if section === "code"}<WorkspaceProjects />
           {:else if section === "models"}
             <ConnectionsSection ids={["omniroute"]} />
             <ModelMetrics />
@@ -197,6 +202,7 @@
                 "pangolin",
               ]}
             />
+            <McpStatus />
             <AdminDialog embedded initialView="integrations" />
           {:else if section === "devices"}<ConnectionsSection
               ids={["windows"]}
@@ -221,8 +227,10 @@
             <section class="settings-notice">
               <h2>Node-RED</h2>
               <p>
-                Flowbeheer volgt na de Node-RED-koppeling in fase C. Bestaande
-                automatiseringen blijven werken.
+                Onder Koppelingen kun je de Node-RED-verbinding controleren en
+                de flowlijst alleen-lezen bekijken. Flows starten, wijzigen en
+                importeren volgt later; bestaande automatiseringen blijven
+                werken.
               </p>
               <a href="/settings?section=connections"
                 >Bekijk de verbindingsstatus</a

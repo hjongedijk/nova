@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
 import { NativeGatewayController } from "../../src/settings/native-gateway.controller.js";
+import { NativeMemorySettingsService } from "../../src/settings/native-memory-settings.service.js";
+import { NativeMemoryRecordsService } from "../../src/settings/native-memory-records.service.js";
 import { createApp } from "./helpers.js";
 
 const ERROR = "OmniRoute-beheer is niet beschikbaar. Controleer de koppeling.";
@@ -17,11 +19,35 @@ function fixture({ configured = true, verified = true } = {}) {
     get scope() {
       return scope();
     },
-    request: vi.fn(async (endpoint: string): Promise<unknown> =>
-      endpoint === "/api/skills?page=1&limit=200"
-        ? { data: [], totalPages: 1 }
-        : { enabled: false, prefixPrompt: "", suffixPrompt: "" },
-    ),
+    request: vi.fn(async (endpoint: string): Promise<unknown> => {
+      if (endpoint === "/api/skills?page=1&limit=200")
+        return { data: [], totalPages: 1 };
+      if (endpoint.startsWith("/api/memory?"))
+        return {
+          data: [
+            {
+              id: "owned-memory",
+              apiKeyId: "nova-owner",
+              content: "NOVA private fact",
+              createdAt: "2026-10-11T10:00:00.000Z",
+              metadata: { application: "jarvis", jarvis: { key: "hidden" } },
+            },
+            {
+              id: "other-app-memory",
+              apiKeyId: "nova-owner",
+              content: "other app data",
+              metadata: { application: "other" },
+            },
+            {
+              id: "other-owner-memory",
+              apiKeyId: "other-owner",
+              content: "other client secret",
+              metadata: { application: "jarvis" },
+            },
+          ],
+        };
+      return { enabled: false, prefixPrompt: "", suffixPrompt: "" };
+    }),
     skills: vi.fn(async (): Promise<unknown> => ({ skills: [] })),
   };
   const controller = new NativeGatewayController(
@@ -30,6 +56,14 @@ function fixture({ configured = true, verified = true } = {}) {
       verifiedOmniUrl: verified ? gateway : "http://other-gateway.invalid/v1",
     } as NovaConfig,
     management as unknown as OmniRouteManagement,
+    {
+      status: vi.fn(async () => ({
+        enabled: false,
+        backend: "sqlite",
+        maxTokens: 1000,
+      })),
+    } as unknown as NativeMemorySettingsService,
+    {} as NativeMemoryRecordsService,
   );
   return { controller, management, scope, configuration };
 }
@@ -59,6 +93,27 @@ function expectUnavailable(result: unknown) {
 }
 
 describe("native gateway read-only report", () => {
+  it("lists only NOVA-owned native memory records on explicit request", async () => {
+    const { controller, management } = fixture();
+    const result = await controller.memoryRecords();
+    expect(result).toEqual({
+      memories: [
+        {
+          id: "owned-memory",
+          text: "NOVA private fact",
+          created_at: "2026-10-11T10:00:00.000Z",
+        },
+      ],
+      next: null,
+    });
+    expect(management.request).toHaveBeenCalledWith(
+      "/api/memory?apiKeyId=nova-owner&limit=50&offset=0",
+    );
+    expect(JSON.stringify(result)).not.toContain("hidden");
+    expect(JSON.stringify(result)).not.toContain("other-owner");
+    expect(JSON.stringify(result)).not.toContain("other app data");
+  });
+
   it("requests only the fixed runtime, catalog and prompt endpoints", async () => {
     const { controller, management, scope } = fixture();
     expect(await controller.report()).toEqual({
@@ -67,6 +122,7 @@ describe("native gateway read-only report", () => {
       skills: [],
       documentation: [],
       prompt: { enabled: false, prefixCharacters: 0, suffixCharacters: 0 },
+      memory: { enabled: false, backend: "sqlite", maxTokens: 1000 },
     });
     expect(scope).toHaveBeenCalledTimes(1);
     expect(management.request.mock.calls).toEqual([
@@ -393,6 +449,7 @@ describe("native gateway API guard", () => {
       for (const route of [
         "/api/settings/omniroute/native",
         "/api/settings/omniroute/native/documentation/native-only-guide",
+        "/api/settings/omniroute/native/memories",
       ]) {
         const denied = await nova.api.get(route);
         expect(denied.status).toBe(401);
@@ -400,6 +457,22 @@ describe("native gateway API guard", () => {
         expect(
           (await nova.api.get(route).set("x-nova-pin", "wrong")).status,
         ).toBe(401);
+      }
+      for (const route of [
+        "/api/settings/omniroute/native/memories/delete/prepare",
+        "/api/settings/omniroute/native/memories/delete-many/prepare",
+        "/api/settings/omniroute/native/memories/delete/confirm",
+        "/api/settings/omniroute/native/memories/delete-many/confirm",
+        "/api/settings/omniroute/native/memories/update/prepare",
+        "/api/settings/omniroute/native/memories/update/confirm",
+      ]) {
+        const denied = await nova.api.post(route).send({});
+        expect(denied.status).toBe(401);
+        expect(denied.body).toMatchObject({ pinRequired: true });
+        expect(
+          (await nova.api.post(route).set("x-nova-pin", "4321").send({}))
+            .status,
+        ).toBe(403);
       }
       expect(scope).not.toHaveBeenCalled();
       expect(request).not.toHaveBeenCalled();
@@ -419,6 +492,14 @@ describe("native gateway API guard", () => {
       expect(document.body).toMatchObject({
         available: true,
         documentation: "Native-only documentation",
+      });
+      const memories = await nova.api
+        .get("/api/settings/omniroute/native/memories")
+        .set("x-nova-pin", "4321");
+      expect(memories.status).toBe(200);
+      expect(memories.body).toMatchObject({
+        memories: [],
+        error: "NOVA-geheugenrecords konden niet veilig worden geladen.",
       });
       request.mockClear();
       skills.mockClear();

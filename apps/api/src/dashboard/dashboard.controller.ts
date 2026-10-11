@@ -20,6 +20,7 @@ import { AlertsFeed } from "./alerts-feed.service.js";
 import { HostMetricsService } from "./host-metrics.service.js";
 import { IntegrationsHealth } from "./integrations-health.service.js";
 import { OverviewService } from "./overview.service.js";
+import { NodeRedHealth } from "./node-red-health.service.js";
 
 const reachable = async (url: string, headers: Record<string, string> = {}) => {
   try {
@@ -43,6 +44,7 @@ export class DashboardController {
     private readonly memory: SessionMemoryService,
     private readonly routing: RoutingService,
     private readonly tools: ToolsService,
+    private readonly nodeRedHealth: NodeRedHealth,
   ) {}
 
   /** GET /api/system: this machine's load, memory, disk, network and a short history. */
@@ -80,14 +82,20 @@ export class DashboardController {
   /** GET /api/health: everything at a glance, for the status line and the admin screens. */
   @Get("health")
   async health() {
-    const [nodeRed, omniroute, integrations] = await Promise.all([
-      reachable(`${this.config.nodeRedUrl}/`),
+    const [nodeRedReport, omniroute, integrations] = await Promise.all([
+      this.nodeRedHealth.report(),
       reachable(`${this.config.omniUrl}/models`, {
         authorization: `Bearer ${this.config.omniKey}`,
       }),
       this.integrations.report(),
     ]);
-    this.state.update("nodeRed", { connected: nodeRed });
+    const nodeRed = nodeRedReport.online;
+    this.state.update("nodeRed", {
+      connected: nodeRed,
+      flowCount: nodeRedReport.flowCount,
+      lastError: nodeRedReport.lastError,
+      lastErrorAvailable: nodeRedReport.lastErrorAvailable,
+    });
     this.state.update("mqtt", { connected: this.mqtt.connected });
     this.state.update("omniroute", { online: omniroute });
     this.state.update("tts", { connected: true });
@@ -117,7 +125,7 @@ export class DashboardController {
           configured: Boolean(this.config.omniKey),
           online: omniroute,
         },
-        nodeRed: { online: nodeRed },
+        nodeRed: nodeRedReport,
         mqtt: { online: this.mqtt.connected },
         tts: { online: true },
         memory: { online: this.memory.isHealthy },

@@ -1,8 +1,18 @@
-import type { HelperPreferences } from "@nova/contracts";
+import type {
+  HelperPreferences,
+  ModelRolePreferences,
+  PersonaProfile,
+  PersonaStyleId,
+} from "@nova/contracts";
 import { Injectable } from "@nestjs/common";
 import fs from "node:fs";
 import path from "node:path";
 import { NovaConfig } from "../../core/config/nova-config.js";
+import {
+  normalizePersona,
+  normalizePersonaProfile,
+  normalizePersonaStyle,
+} from "../settings-validation.js";
 
 export interface HelperChoice {
   mode: "wallpaper" | "helper" | "both";
@@ -35,6 +45,8 @@ export interface NovaSettings {
   helperPreferences: HelperPreferences;
   version: 1;
   persona: string;
+  personaStyle: PersonaStyleId;
+  personaProfile: PersonaProfile;
   quickActions: QuickAction[] | null;
   toolOverrides: Record<string, ToolOverride>;
   skills: Record<string, unknown>[];
@@ -42,7 +54,17 @@ export interface NovaSettings {
   sidebar: { items: Record<string, unknown>[] } | null;
   /** What the Windows PC shows: the wallpaper (default), the helper overlay, or both. */
   helper: HelperChoice;
+  modelRoles: ModelRolePreferences;
 }
+
+const defaultModelRoles: ModelRolePreferences = {
+  conversation: { preferred: [], fallback: null },
+  code: { preferred: [], fallback: null },
+  planning: { preferred: [], fallback: null },
+  summary: { preferred: [], fallback: null },
+  vision: { preferred: [], fallback: null },
+  embedding: { preferred: [], fallback: null },
+};
 
 export const DEFAULT_QUICK_ACTIONS: QuickAction[] = [
   {
@@ -72,12 +94,20 @@ const blank = (): NovaSettings => ({
     },
   },
   persona: "",
+  personaStyle: "friendly",
+  personaProfile: {
+    name: "NOVA",
+    character: "warm, nieuwsgierig en met af en toe droge humor",
+    address: "je/jij",
+    avoid: "doen alsof ik een mens ben of gevoelens en ervaringen verzinnen",
+  },
   quickActions: null,
   toolOverrides: {},
   skills: [],
   widgets: [],
   sidebar: null,
   helper: { mode: "wallpaper", display: 0 },
+  modelRoles: defaultModelRoles,
 });
 
 /**
@@ -88,9 +118,62 @@ const blank = (): NovaSettings => ({
 export class SettingsStore {
   private cache: NovaSettings | null = null;
   private readonly file: string;
+  private readonly personaFile: string;
 
   constructor(config: NovaConfig) {
     this.file = config.dataFile("settings.json");
+    this.personaFile = config.dataFile("persona.md");
+  }
+
+  private personaFromFile(fallback: string): string {
+    let descriptor: number;
+    try {
+      descriptor = fs.openSync(
+        this.personaFile,
+        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        this.writePersonaFile(fallback);
+        return fallback;
+      }
+      if ((error as NodeJS.ErrnoException).code === "ELOOP") return fallback;
+      throw error;
+    }
+    try {
+      if (!fs.fstatSync(descriptor).isFile()) return fallback;
+      const value = fs.readFileSync(descriptor, "utf8");
+      try {
+        return normalizePersona(value);
+      } catch {
+        const damaged = `${this.personaFile}.damaged-${Date.now()}`;
+        fs.closeSync(descriptor);
+        descriptor = -1;
+        fs.renameSync(this.personaFile, damaged);
+        this.writePersonaFile(fallback);
+        return fallback;
+      }
+    } finally {
+      if (descriptor >= 0) fs.closeSync(descriptor);
+    }
+  }
+
+  private writePersonaFile(value: string): void {
+    fs.mkdirSync(path.dirname(this.personaFile), { recursive: true });
+    try {
+      if (fs.lstatSync(this.personaFile).isSymbolicLink())
+        throw new Error("persona.md may not be a symlink");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const temporary = `${this.personaFile}.${process.pid}.tmp`;
+    try {
+      fs.writeFileSync(temporary, value, { mode: 0o600 });
+      fs.chmodSync(temporary, 0o600);
+      fs.renameSync(temporary, this.personaFile);
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
   }
 
   private load(): NovaSettings {
@@ -112,10 +195,20 @@ export class SettingsStore {
       }
       this.cache = blank();
     }
+    this.cache.persona = this.personaFromFile(this.cache.persona);
+    this.cache.personaProfile = normalizePersonaProfile(
+      this.cache.personaProfile,
+    );
     this.cache.toolOverrides ||= {};
     this.cache.skills ||= [];
     this.cache.widgets ||= [];
     this.cache.helper = { ...blank().helper, ...this.cache.helper };
+    this.cache.modelRoles = { ...defaultModelRoles, ...this.cache.modelRoles };
+    try {
+      this.cache.personaStyle = normalizePersonaStyle(this.cache.personaStyle);
+    } catch {
+      this.cache.personaStyle = "friendly";
+    }
     return this.cache;
   }
 
@@ -145,12 +238,24 @@ export class SettingsStore {
 
   /** Change a copy, then save it. A change that throws leaves the saved settings alone. */
   update(change: (next: NovaSettings) => void): NovaSettings {
-    const next = structuredClone(this.load());
+    const current = this.load();
+    const next = structuredClone(current);
     change(next);
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const temporary = `${this.file}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(next, null, 1), { mode: 0o600 });
-    fs.renameSync(temporary, this.file);
+    const personaChanged = next.persona !== current.persona;
+    if (personaChanged) this.writePersonaFile(next.persona);
+    try {
+      fs.writeFileSync(temporary, JSON.stringify(next, null, 1), {
+        mode: 0o600,
+      });
+      fs.renameSync(temporary, this.file);
+    } catch (error) {
+      if (personaChanged) this.writePersonaFile(current.persona);
+      throw error;
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
     this.cache = next;
     return structuredClone(next);
   }

@@ -99,19 +99,25 @@
   }
 
   async function rollbackContent(skill: Skill, revision: string) {
-    if (
-      skill.type !== "instruction" ||
-      !window.confirm(
-        "Deze instructies herstellen? NOVA voert de vaardigheid niet uit.",
-      )
-    )
-      return;
+    const item = contentHistories[skill.id]?.revisions.find(
+      (entry) => entry.id === revision,
+    );
+    if (skill.type !== "instruction" || !item) return;
+    const prompt = item.before
+      ? "Deze versie van de instructievaardigheid herstellen? NOVA voert de vaardigheid niet zelf uit."
+      : "De nieuw aangemaakte instructievaardigheid verwijderen? De private versiegeschiedenis wordt ook gewist.";
+    if (!window.confirm(prompt)) return;
     historyBusy = skill.id;
     try {
-      await rollbackInstructionSkillContent(skill.id, revision);
+      const result = await rollbackInstructionSkillContent(skill.id, revision);
       delete histories[skill.id];
       delete contentHistories[skill.id];
-      await afterChange(`Instructies van “${skill.name}” hersteld.`);
+      await afterChange(
+        result.historyWarning ??
+          (result.removed
+            ? `Aangemaakte vaardigheid “${skill.name}” verwijderd.`
+            : `Wijzigingen aan “${skill.name}” hersteld.`),
+      );
       const updated = settings.data?.skills.find(
         (item) => item.id === skill.id,
       );
@@ -229,7 +235,7 @@
             </div>
           {/if}
           {#if skill.type === "instruction" && contentHistories[skill.id]?.currentVersion === skill.version}
-            <h4>Inhoudsgeschiedenis</h4>
+            <h4>Wijzigingsgeschiedenis</h4>
             {#each contentHistories[skill.id]!.revisions as revision (revision.id)}
               <details>
                 <summary
@@ -237,13 +243,51 @@
                     .after.version}</summary
                 >
                 <p><strong>Voor</strong></p>
-                <pre>{revision.before.instructions}</pre>
+                {#if revision.before}
+                  {#if revision.before.name !== undefined}
+                    <p>
+                      {revision.before.name} · {revision.before.enabled
+                        ? "aan"
+                        : "uit"}
+                    </p>
+                    <p>{revision.before.description}</p>
+                    {#if revision.before.examples?.length}
+                      <ul>
+                        {#each revision.before.examples as example (example)}<li
+                          >
+                            {example}
+                          </li>{/each}
+                      </ul>
+                    {/if}
+                  {/if}
+                {:else}
+                  <p>Nieuw aangemaakt</p>
+                {/if}
+                {#if revision.before}<pre>{revision.before
+                      .instructions}</pre>{/if}
                 <p><strong>Na</strong></p>
+                {#if revision.after.name !== undefined}
+                  <p>
+                    {revision.after.name} · {revision.after.enabled
+                      ? "aan"
+                      : "uit"}
+                  </p>
+                  <p>{revision.after.description}</p>
+                  {#if revision.after.examples?.length}
+                    <ul>
+                      {#each revision.after.examples as example (example)}<li>
+                          {example}
+                        </li>{/each}
+                    </ul>
+                  {/if}
+                {/if}
                 <pre>{revision.after.instructions}</pre>
                 <Button
                   disabled={historyBusy === skill.id}
                   onclick={() => rollbackContent(skill, revision.id)}
-                  >Herstel deze versie</Button
+                  >{revision.before
+                    ? "Herstel deze versie"
+                    : "Verwijder aangemaakte vaardigheid"}</Button
                 >
               </details>
             {/each}

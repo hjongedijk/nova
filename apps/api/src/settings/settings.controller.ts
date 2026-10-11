@@ -1,12 +1,21 @@
 import { SettingsBackupService } from "./settings-backup.service.js";
 import { MAX_BACKUP_BYTES } from "./backup-plan.js";
 import { HelperPreferencesHistory } from "./helper-preferences-history.service.js";
+import { HelperModeHistory } from "./helper-mode-history.service.js";
+import { HelperHotkeyHistory } from "./helper-hotkey-history.service.js";
 import { ToolSwitchHistory } from "./tool-switch-history.service.js";
 import { SidebarHistory } from "./sidebar-history.service.js";
 import { PersonaHistoryService } from "./persona-history.service.js";
 import { InstructionSkillHistory } from "./instruction-skill-history.service.js";
 import { QuickActionsHistory } from "./quick-actions-history.service.js";
 import { ToolDescriptionHistoryService } from "./tool-description-history.service.js";
+import { NoteWidgetHistory } from "./note-widget-history.service.js";
+import { WidgetDisplayHistory } from "./widget-display-history.service.js";
+import { WallpaperHistory } from "./wallpaper-history.service.js";
+import {
+  NodeRedManagement,
+  projectNodeRedFlowRuns,
+} from "./node-red-management.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
@@ -14,6 +23,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  HttpException,
   Inject,
   NotFoundException,
   Optional,
@@ -36,8 +46,10 @@ import type {
   ToolOverride,
   Widget,
   HelperState,
+  HelperSettings,
   WallpaperState,
 } from "@nova/contracts";
+import crypto from "node:crypto";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
@@ -70,6 +82,14 @@ import {
 import { SettingsStore } from "./store/settings.store.js";
 import { WALLPAPER_PORT, type WallpaperPort } from "./wallpaper.port.js";
 import { fetchWidget, normalizeWidget } from "./widgets/widgets.js";
+import { HomeAssistantService } from "../home/home-assistant.service.js";
+import { ProxmoxService } from "../proxmox/proxmox.service.js";
+import { TermixService } from "../integrations/termix/termix.service.js";
+import { PangolinService } from "../integrations/pangolin/pangolin.service.js";
+import { ManagedTargetsAccessStore } from "./managed-targets-access.store.js";
+import { ManagedTargetsAccessHistory } from "./managed-targets-access-history.service.js";
+import { HomeAssistantAccessHistory } from "./home-assistant-access-history.service.js";
+import { PersonaPreferencesHistoryService } from "./persona-preferences-history.service.js";
 
 const MAX_WIDGETS = 20;
 
@@ -98,12 +118,26 @@ export class SettingsController {
     private readonly mutations: SettingsMutationsService,
     private readonly backups: SettingsBackupService,
     private readonly helperHistory: HelperPreferencesHistory,
+    private readonly helperModeHistory: HelperModeHistory,
+    private readonly helperHotkeyHistory: HelperHotkeyHistory,
     private readonly toolHistory: ToolSwitchHistory,
     private readonly sidebarHistory: SidebarHistory,
     private readonly personaHistory: PersonaHistoryService,
+    private readonly personaPreferencesHistory: PersonaPreferencesHistoryService,
     private readonly instructionSkillHistory: InstructionSkillHistory,
     private readonly quickActionsHistory: QuickActionsHistory,
     private readonly toolDescriptionHistory: ToolDescriptionHistoryService,
+    private readonly noteWidgetHistory: NoteWidgetHistory,
+    private readonly widgetDisplayHistory: WidgetDisplayHistory,
+    private readonly wallpaperHistory: WallpaperHistory,
+    private readonly nodeRedManagement: NodeRedManagement,
+    private readonly homeAssistant: HomeAssistantService,
+    private readonly proxmox: ProxmoxService,
+    private readonly termix: TermixService,
+    private readonly pangolin: PangolinService,
+    private readonly managedTargets: ManagedTargetsAccessStore,
+    private readonly managedTargetsHistory: ManagedTargetsAccessHistory,
+    private readonly homeAccessHistory: HomeAssistantAccessHistory,
     @Optional()
     @Inject(WALLPAPER_PORT)
     private readonly wallpaper?: WallpaperPort,
@@ -127,6 +161,306 @@ export class SettingsController {
     return this.publicConfig.get();
   }
 
+  /** PIN-protected, on-demand names-only inventory. This does not enforce an access allowlist. */
+  @Get("home-assistant/inventory")
+  async homeAssistantInventory() {
+    try {
+      await this.homeAssistant.sync();
+    } catch (error) {
+      throw new HttpException(
+        { error: sanitize((error as Error).message) },
+        503,
+      );
+    }
+    return {
+      syncedAt: this.homeAssistant.syncedAt,
+      areas: this.homeAssistant.areas
+        .slice(0, 100)
+        .map(({ area_id, name }) => ({ id: area_id, name })),
+      devices: this.homeAssistant.devices.slice(0, 500).map((device) => ({
+        id: device.id,
+        name: device.name_by_user || device.name || device.id,
+        areaId: device.area_id || null,
+      })),
+      entities: this.homeAssistant.entities.slice(0, 1000).map((entity) => ({
+        id: entity.entity_id,
+        name: entity.friendly_name || entity.entity_id,
+        domain: entity.domain,
+        areaId: entity.area_id || null,
+        deviceId: entity.device_id || null,
+      })),
+    };
+  }
+
+  @Get("home-assistant/access")
+  homeAssistantAccess() {
+    return this.homeAssistant.accessPolicy();
+  }
+
+  @Put("home-assistant/access")
+  async setHomeAssistantAccess(@Body() body: unknown) {
+    try {
+      await this.homeAssistant.sync();
+      const before = this.homeAssistant.accessPolicy();
+      const policy = this.homeAssistant.setAccessPolicy(body);
+      this.homeAccessHistory.record(before, policy);
+      this.log("home_assistant_access", {
+        mode: policy.mode,
+        areas: policy.areaIds.length,
+        devices: policy.deviceIds.length,
+        entities: policy.entityIds.length,
+      });
+      return {
+        ok: true,
+        policy,
+        ...(this.homeAccessHistory.lastWarning
+          ? { historyWarning: this.homeAccessHistory.lastWarning }
+          : {}),
+      };
+    } catch (error) {
+      throw new ValidationError([
+        error instanceof Error
+          ? error.message
+          : "Home Assistant-toegang kon niet worden opgeslagen.",
+      ]);
+    }
+  }
+
+  @Get("home-assistant/access/history")
+  homeAssistantAccessHistory() {
+    return this.homeAccessHistory.list();
+  }
+
+  @Post("home-assistant/access/history/:id/prepare-rollback")
+  @HttpCode(200)
+  prepareHomeAssistantAccessRollback(@Param("id") id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige wijziging."]);
+    return this.homeAccessHistory.prepareRollback(id);
+  }
+
+  @Post("home-assistant/access/history/confirm-rollback")
+  @HttpCode(200)
+  confirmHomeAssistantAccessRollback(@Body() body: unknown) {
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).some(
+        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
+      )
+    )
+      throw new ValidationError([
+        "Controleer de wijziging en bevestig opnieuw.",
+      ]);
+    const value = body as Record<string, unknown>;
+    if (
+      typeof value.sessionId !== "string" ||
+      !/^settings-ha-access-history:[0-9a-f-]{36}$/i.test(value.sessionId) ||
+      typeof value.confirmationId !== "string" ||
+      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
+      typeof value.approve !== "boolean"
+    )
+      throw new ValidationError([
+        "Controleer de wijziging en bevestig opnieuw.",
+      ]);
+    return this.homeAccessHistory.confirm(
+      value.sessionId,
+      value.confirmationId,
+      value.approve,
+    );
+  }
+
+  /** PIN-protected on-demand target names; informational only, not an access allowlist. */
+  @Get("managed-targets/inventory")
+  async managedTargetInventory() {
+    const genericError = { error: "Overzicht niet beschikbaar." };
+    const object = (value: unknown): Record<string, unknown> =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+    const nameRows = (value: unknown, keys: string[]) => {
+      if (!Array.isArray(value)) return [];
+      return value.slice(0, 200).flatMap((item) => {
+        const row = object(item);
+        const name = keys
+          .map((key) => row[key])
+          .find((entry) => typeof entry === "string" && entry.length > 0);
+        const id = row.id ?? row.vmid ?? row.node;
+        return typeof name === "string"
+          ? [
+              {
+                ...(typeof id === "string" || typeof id === "number"
+                  ? { id: String(id).slice(0, 100) }
+                  : {}),
+                name: sanitize(name).slice(0, 200),
+              },
+            ]
+          : [];
+      });
+    };
+    const [proxmox, termix, pangolin] = await Promise.all([
+      (async () => {
+        if (!this.proxmox.configured)
+          return { configured: false, nodes: [], guests: [] };
+        try {
+          const [nodes, guests] = await Promise.all([
+            this.proxmox.rawNodes(),
+            this.proxmox.resources("vm"),
+          ]);
+          return {
+            configured: true,
+            nodes: nameRows(nodes, ["node", "name"]),
+            guests: guests.slice(0, 200).flatMap((guest) =>
+              typeof guest.node === "string" &&
+              Number.isSafeInteger(guest.vmid) &&
+              typeof guest.name === "string"
+                ? [
+                    {
+                      id: `${guest.node}/${guest.vmid}`,
+                      name: sanitize(guest.name).slice(0, 200),
+                    },
+                  ]
+                : [],
+            ),
+          };
+        } catch {
+          return { configured: true, ...genericError, nodes: [], guests: [] };
+        }
+      })(),
+      (async () => {
+        if (!this.termix.configured) return { configured: false, hosts: [] };
+        try {
+          const hosts = await this.termix.listHosts();
+          return { configured: true, hosts: nameRows(hosts, ["name"]) };
+        } catch {
+          return { configured: true, ...genericError, hosts: [] };
+        }
+      })(),
+      (async () => {
+        if (!this.pangolin.configured)
+          return { configured: false, sites: [], resources: [] };
+        try {
+          const [sites, resources] = await Promise.all([
+            this.pangolin.listTargets("pangolin_sites"),
+            this.pangolin.listTargets("pangolin_resources"),
+          ]);
+          const list = (result: unknown, key: string) => {
+            const data = object(result);
+            return nameRows(data[key], ["name", "label"]);
+          };
+          return {
+            configured: true,
+            sites: list(sites, "sites"),
+            resources: list(resources, "resources"),
+          };
+        } catch {
+          return {
+            configured: true,
+            ...genericError,
+            sites: [],
+            resources: [],
+          };
+        }
+      })(),
+    ]);
+    return { checkedAt: new Date().toISOString(), proxmox, termix, pangolin };
+  }
+
+  @Get("managed-targets/access")
+  managedTargetsAccess() {
+    return this.managedTargets.get();
+  }
+
+  @Get("managed-targets/access/history")
+  managedTargetsAccessHistory() {
+    return this.managedTargetsHistory.list();
+  }
+
+  @Post("managed-targets/access/history/:id/prepare-rollback")
+  @HttpCode(200)
+  prepareManagedTargetsAccessRollback(@Param("id") id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige wijziging."]);
+    return this.managedTargetsHistory.prepareRollback(id);
+  }
+
+  @Post("managed-targets/access/history/confirm-rollback")
+  @HttpCode(200)
+  confirmManagedTargetsAccessRollback(@Body() body: unknown) {
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    const input = body as Record<string, unknown>;
+    if (
+      Object.keys(input).some(
+        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
+      ) ||
+      typeof input.sessionId !== "string" ||
+      typeof input.confirmationId !== "string" ||
+      typeof input.approve !== "boolean"
+    )
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    return this.managedTargetsHistory.confirm(
+      input.sessionId,
+      input.confirmationId,
+      input.approve,
+    );
+  }
+
+  @Put("managed-targets/access")
+  async setManagedTargetsAccess(@Body() body: unknown) {
+    const inventory = await this.managedTargetInventory();
+    const value = inventory as Record<string, unknown>;
+    const rows = (service: string, key: string) => {
+      const data = value[service] as Record<string, unknown> | undefined;
+      const items = data?.[key];
+      return new Set(
+        Array.isArray(items)
+          ? items.flatMap((item) =>
+              item &&
+              typeof item === "object" &&
+              typeof (item as { id?: unknown }).id === "string"
+                ? [(item as { id: string }).id]
+                : [],
+            )
+          : [],
+      );
+    };
+    const current = this.managedTargets.get();
+    const known: Record<string, Set<string>> = {
+      proxmoxNodeIds: rows("proxmox", "nodes"),
+      proxmoxGuestIds: rows("proxmox", "guests"),
+      termixHostIds: rows("termix", "hosts"),
+      pangolinSiteIds: rows("pangolin", "sites"),
+      pangolinResourceIds: rows("pangolin", "resources"),
+    };
+    for (const key of [
+      "proxmoxNodeIds",
+      "proxmoxGuestIds",
+      "termixHostIds",
+      "pangolinSiteIds",
+      "pangolinResourceIds",
+    ] as const)
+      current[key].forEach((id) => known[key]!.add(id));
+    const policy = this.managedTargets.set(body, known);
+    this.managedTargetsHistory.record(current, policy);
+    this.log("managed_targets_access", {
+      mode: policy.mode,
+      proxmoxNodes: policy.proxmoxNodeIds.length,
+      proxmoxGuests: policy.proxmoxGuestIds.length,
+      termixHosts: policy.termixHostIds.length,
+      pangolinSites: policy.pangolinSiteIds.length,
+      pangolinResources: policy.pangolinResourceIds.length,
+    });
+    return {
+      ok: true,
+      policy,
+      ...(this.managedTargetsHistory.lastWarning
+        ? { historyWarning: this.managedTargetsHistory.lastWarning }
+        : {}),
+    };
+  }
+
   @Get()
   overview(): SettingsOverview {
     this.settings.backupBeforeSettingsPage();
@@ -134,6 +468,8 @@ export class SettingsController {
     const tools = this.tools.list();
     return {
       persona: settings.persona,
+      personaStyle: settings.personaStyle,
+      personaProfile: settings.personaProfile,
       standingApprovals: settings.standingApprovals.map(
         ({ id, tool, scope, createdAt }) => ({ id, tool, scope, createdAt }),
       ),
@@ -153,6 +489,29 @@ export class SettingsController {
   @Put("persona")
   setPersona(@Body() body: Body_) {
     return this.mutations.setPersona(body?.text);
+  }
+
+  @Put("persona/style")
+  setPersonaStyle(@Body() body: Body_) {
+    return this.mutations.setPersonaStyle(body?.style);
+  }
+
+  @Put("persona/profile")
+  setPersonaProfile(@Body() body: Body_) {
+    return this.mutations.setPersonaProfile(body?.profile);
+  }
+
+  @Get("persona/preferences/history")
+  personaPreferencesHistoryList() {
+    return this.personaPreferencesHistory.list();
+  }
+
+  @Post("persona/preferences/history/:id/rollback")
+  @HttpCode(200)
+  rollbackPersonaPreferences(@Param("id") id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige profielwijziging."]);
+    return this.personaPreferencesHistory.rollback(id);
   }
 
   @Get("persona/history")
@@ -377,7 +736,7 @@ export class SettingsController {
   }
 
   @Delete("skills/:id")
-  remove(@Param("id") id: string): { ok: true } {
+  remove(@Param("id") id: string): { ok: true; historyWarning?: string } {
     const existing = skillsOf(this.settings.get()).find(
       (item) => item.id === id,
     );
@@ -388,8 +747,17 @@ export class SettingsController {
       );
       delete settings.toolOverrides[toolNameFor(existing)];
     });
+    let historyWarning: string | undefined;
+    if (existing.type === "instruction") {
+      try {
+        this.instructionSkillHistory.forget(existing.id);
+      } catch {
+        historyWarning =
+          "De vaardigheid is verwijderd, maar de private wijzigingsgeschiedenis kon niet worden gewist.";
+      }
+    }
     this.log("skill-deleted", { skill: existing.id });
-    return { ok: true };
+    return { ok: true, ...(historyWarning ? { historyWarning } : {}) };
   }
 
   /** Try a draft before saving it. A webhook really runs; an instruction only reports whether it would be picked. */
@@ -544,9 +912,20 @@ export class SettingsController {
       if (settings.widgets.length >= MAX_WIDGETS)
         throw new ValidationError([`Maximaal ${MAX_WIDGETS} panelen.`]);
       widget = normalizeWidget(body, {
-        takenIds: widgetsOf(settings).map((item) => item.id),
+        takenIds: widgetsOf(settings).map((item) => slugify(item.title)),
         skillIds: this.webhookIds(settings),
       });
+      // A deleted widget must never reclaim an old private-history namespace,
+      // even when pruning its history file fails.
+      if (
+        widget.type === "note" ||
+        widget.type === "value" ||
+        widget.type === "list"
+      )
+        widget = {
+          ...widget,
+          id: `${widget.id.slice(0, 15)}_${crypto.randomBytes(12).toString("hex")}`,
+        };
       settings.widgets.push(widget as never);
     });
     this.log("widget_created", { id: widget.id, type: widget.type });
@@ -571,23 +950,86 @@ export class SettingsController {
   updateWidget(
     @Param("id") id: string,
     @Body() body: unknown,
-  ): { widget: Widget } {
+  ): { widget: Widget; historyWarning?: string } {
     let widget!: Widget;
+    let beforeNote: string | undefined;
+    let beforeDisplay: Widget | undefined;
+    this.noteWidgetHistory.lastWarning = undefined;
+    this.widgetDisplayHistory.lastWarning = undefined;
     this.settings.update((settings) => {
       const index = widgetsOf(settings).findIndex((item) => item.id === id);
       if (index < 0) throw new ValidationError(["Dit paneel bestaat niet."]);
+      const previous = widgetsOf(settings)[index];
+      beforeDisplay = previous;
+      if (previous?.type === "note") beforeNote = previous.text;
       widget = normalizeWidget(body, {
-        existing: widgetsOf(settings)[index],
+        existing: previous,
         skillIds: this.webhookIds(settings),
       });
       settings.widgets[index] = widget as never;
     });
+    if (beforeNote !== undefined && widget.type === "note")
+      this.noteWidgetHistory.record(id, beforeNote, widget.text);
+    if (
+      beforeDisplay &&
+      (beforeDisplay.type === "value" || beforeDisplay.type === "list") &&
+      widget.type === beforeDisplay.type
+    )
+      this.widgetDisplayHistory.record(id, beforeDisplay, widget);
     this.log("widget_updated", { id: widget.id });
-    return { widget };
+    return {
+      widget,
+      ...(this.noteWidgetHistory.lastWarning
+        ? { historyWarning: this.noteWidgetHistory.lastWarning }
+        : this.widgetDisplayHistory.lastWarning
+          ? { historyWarning: this.widgetDisplayHistory.lastWarning }
+          : {}),
+    };
+  }
+
+  @Get("widgets/:id/history")
+  noteWidgetHistoryList(@Param("id") id: string) {
+    const widget = widgetsOf(this.settings.get()).find(
+      (item) => item.id === id,
+    );
+    if (!widget || widget.type !== "note")
+      throw new ValidationError(["Deze notitie bestaat niet."]);
+    return this.noteWidgetHistory.list(id);
+  }
+
+  @Post("widgets/:id/history/:revision/rollback")
+  @HttpCode(200)
+  noteWidgetHistoryRollback(
+    @Param("id") id: string,
+    @Param("revision") revision: string,
+  ) {
+    return this.noteWidgetHistory.rollback(id, revision);
+  }
+
+  @Get("widgets/:id/display-history")
+  widgetDisplayHistoryList(@Param("id") id: string) {
+    const widget = widgetsOf(this.settings.get()).find(
+      (item) => item.id === id,
+    );
+    if (!widget || (widget.type !== "value" && widget.type !== "list"))
+      throw new ValidationError(["Dit waarde- of lijstpaneel bestaat niet."]);
+    return this.widgetDisplayHistory.list(id);
+  }
+
+  @Post("widgets/:id/display-history/:revision/rollback")
+  @HttpCode(200)
+  widgetDisplayHistoryRollback(
+    @Param("id") id: string,
+    @Param("revision") revision: string,
+  ) {
+    return this.widgetDisplayHistory.rollback(id, revision);
   }
 
   @Delete("widgets/:id")
-  deleteWidget(@Param("id") id: string): { ok: true } {
+  deleteWidget(@Param("id") id: string): { ok: true; historyWarning?: string } {
+    const existing = widgetsOf(this.settings.get()).find(
+      (item) => item.id === id,
+    );
     this.settings.update((settings) => {
       const before = settings.widgets.length;
       settings.widgets = widgetsOf(settings).filter(
@@ -600,8 +1042,25 @@ export class SettingsController {
           (item) => item.id !== `w:${id}`,
         );
     });
+    let historyWarning: string | undefined;
+    if (existing?.type === "note") {
+      try {
+        this.noteWidgetHistory.forget(id);
+      } catch {
+        historyWarning =
+          "De notitie is verwijderd, maar de oude wijzigingsgeschiedenis kon niet worden gewist.";
+      }
+    }
+    if (existing?.type === "value" || existing?.type === "list") {
+      try {
+        this.widgetDisplayHistory.forget(id);
+      } catch {
+        historyWarning =
+          "Het paneel is verwijderd, maar de oude wijzigingsgeschiedenis kon niet worden gewist.";
+      }
+    }
     this.log("widget_deleted", { id });
-    return { ok: true };
+    return { ok: true, ...(historyWarning ? { historyWarning } : {}) };
   }
 
   @Put("sidebar")
@@ -659,10 +1118,101 @@ export class SettingsController {
       throw new ValidationError(["Kies een beeldscherm."]);
     if (!this.wallpaper?.configured)
       throw new ValidationError(["Er is geen Windows-agent ingesteld."]);
+    const current = await this.wallpaper.displays();
+    if (!current.ok) throw new ValidationError([current.error]);
+    const affected =
+      display === 0
+        ? current.displays
+        : current.displays.filter((screen) => screen.index === display);
+    if (!affected.length)
+      throw new ValidationError(["Dit beeldscherm bestaat niet meer."]);
+    const before = affected.map((screen) => ({
+      display: screen.index,
+      mode: screen.mode,
+    }));
     const outcome = await this.wallpaper.setWallpaper(display, mode);
     if (!outcome.ok) throw new ValidationError([outcome.error]);
+    for (const item of before)
+      this.wallpaperHistory.record(item.display, item.mode, mode);
     this.log("wallpaper", { display, mode });
-    return { available: true, displays: outcome.displays };
+    return {
+      available: true,
+      displays: outcome.displays,
+      ...(this.wallpaperHistory.lastWarning
+        ? { historyWarning: this.wallpaperHistory.lastWarning }
+        : {}),
+    };
+  }
+
+  @Get("wallpaper/history")
+  wallpaperHistoryList() {
+    return this.wallpaperHistory.list();
+  }
+
+  @Post("wallpaper/history/:id/rollback")
+  @HttpCode(200)
+  async rollbackWallpaper(@Param("id") id: string): Promise<WallpaperState> {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige wijziging."]);
+    const revision = this.wallpaperHistory.find(id);
+    if (!revision)
+      throw new ValidationError(["Deze wijziging is niet meer beschikbaar."]);
+    if (!this.wallpaper?.configured)
+      throw new ValidationError(["Er is geen Windows-agent ingesteld."]);
+    const current = await this.wallpaper.displays();
+    if (!current.ok) throw new ValidationError([current.error]);
+    const screen = current.displays.find(
+      (item) => item.index === revision.display,
+    );
+    if (!screen || screen.mode !== revision.after)
+      throw new ValidationError([
+        "Dit beeldscherm is daarna gewijzigd. Terugdraaien is afgebroken.",
+      ]);
+    const outcome = await this.wallpaper.setWallpaper(
+      revision.display,
+      revision.before,
+    );
+    if (!outcome.ok) throw new ValidationError([outcome.error]);
+    this.wallpaperHistory.record(
+      revision.display,
+      revision.after,
+      revision.before,
+      id,
+    );
+    return {
+      available: true,
+      displays: outcome.displays,
+      ...(this.wallpaperHistory.lastWarning
+        ? { historyWarning: this.wallpaperHistory.lastWarning }
+        : {}),
+    };
+  }
+
+  @Get("node-red/flows")
+  async listNodeRedFlows() {
+    const inventory = await this.nodeRedManagement.listFlows();
+    const flowTools = this.tools
+      .list()
+      .filter((tool) => tool.enabled)
+      .map((tool) => tool.name);
+    return {
+      ...inventory,
+      flows: projectNodeRedFlowRuns(inventory.flows, this.audit.read(500)).map(
+        (flow) => ({
+          ...flow,
+          runnableFlowId: flowTools.includes("node_red_flow")
+            ? this.nodeRedManagement.runnableFlowId(flow.id)
+            : null,
+          manageable:
+            flowTools.includes("node_red_flow_state") &&
+            this.nodeRedManagement.canSetFlowEnabled(flow.id),
+          templates: flowTools.includes("node_red_flow_create")
+            ? this.nodeRedManagement.availableTemplates(flow.id)
+            : [],
+        }),
+      ),
+      editorUrl: this.nodeRedManagement.editorUrl(),
+    };
   }
 
   /* ---------- the helper overlay on the Windows PC ---------- */
@@ -689,16 +1239,28 @@ export class SettingsController {
       throw new ValidationError(["Kies achtergrond, helper of beide."]);
     if (!Number.isInteger(display) || display < 0 || display > 8)
       throw new ValidationError(["Kies een beeldscherm."]);
+    const before = this.settings.get().helper;
+    const after: HelperSettings = { mode, display };
     this.settings.update((next) => {
       next.helper = { mode, display };
     });
+    this.helperModeHistory.record(before, after);
     this.log("helper", { mode, display });
+    return this.applyHelperMode(after, this.helperModeHistory.lastWarning);
+  }
+
+  private async applyHelperMode(
+    settings: HelperSettings,
+    historyWarning?: string,
+  ): Promise<HelperState> {
+    const { mode, display } = settings;
     if (!this.wallpaper?.configured)
       return {
         settings: { mode, display },
         desktop: { available: false, reason: "no-agent" },
         applied: false,
         error: "Er is geen Windows-agent ingesteld.",
+        ...(historyWarning ? { historyWarning } : {}),
       };
     const outcome = await this.wallpaper.setMode(mode, display);
     if (!outcome.ok)
@@ -707,6 +1269,7 @@ export class SettingsController {
         desktop: await this.getWallpaper(),
         applied: false,
         error: outcome.error,
+        ...(historyWarning ? { historyWarning } : {}),
       };
     return {
       settings: { mode, display },
@@ -719,7 +1282,23 @@ export class SettingsController {
           : {}),
       },
       applied: true,
+      ...(historyWarning ? { historyWarning } : {}),
     };
+  }
+
+  @Get("helper/history")
+  getHelperModeHistory() {
+    return this.helperModeHistory.list();
+  }
+
+  @Post("helper/history/:id/rollback")
+  @HttpCode(200)
+  async rollbackHelperMode(@Param("id") id: string): Promise<HelperState> {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige wijziging."]);
+    const restored = this.helperModeHistory.rollback(id);
+    this.log("helper_mode_rollback", { revision: id });
+    return this.applyHelperMode(restored.settings, restored.auditWarning);
   }
 
   /**
@@ -836,6 +1415,20 @@ export class SettingsController {
           error: "Er is geen Windows-agent ingesteld.",
         };
   }
+
+  @Get("windows/helper-debug")
+  helperDebug() {
+    return this.wallpaper?.helperDebug
+      ? this.wallpaper.helperDebug()
+      : {
+          available: false,
+          helper: null,
+          view: null,
+          display: null,
+          checkedAt: null,
+          error: "Er is geen Windows-agent ingesteld.",
+        };
+  }
   @Put("helper/hotkeys")
   async saveHelperHotkeys(@Body() body: Body_) {
     const input = body?.hotkeys;
@@ -848,10 +1441,33 @@ export class SettingsController {
         throw new ValidationError(["Ongeldige sneltoets."]);
       hotkeys[key] = value;
     }
-    this.log("helper_hotkeys", { hotkeys });
-    return this.wallpaper?.helperPreferences
-      ? this.wallpaper.helperPreferences(hotkeys)
-      : { ok: false, error: "Geen Windows-agent." };
+    this.log("helper_hotkeys", { fields: Object.keys(hotkeys) });
+    if (!this.wallpaper?.helperPreferences)
+      return { ok: false, error: "Geen Windows-agent." };
+    let previous:
+      | Awaited<ReturnType<NonNullable<WallpaperPort["helperPreferences"]>>>
+      | undefined;
+    try {
+      previous = await this.wallpaper.helperPreferences();
+    } catch {
+      /* Preserve saves when the read-only history snapshot is unavailable. */
+    }
+    const result = await this.wallpaper.helperPreferences(hotkeys);
+    const history = result.ok
+      ? this.helperHotkeyHistory.record(
+          previous?.preferences?.hotkeys,
+          result.preferences?.hotkeys,
+        )
+      : undefined;
+    return { ...result, ...history };
+  }
+  @Get("helper/hotkeys/history")
+  helperHotkeyHistoryList() {
+    return this.helperHotkeyHistory.list();
+  }
+  @Post("helper/hotkeys/history/:id/rollback")
+  rollbackHelperHotkeys(@Param("id") id: string) {
+    return this.helperHotkeyHistory.rollback(id, this.wallpaper);
   }
 
   /** Grants can only be created by a fresh confirmation; this endpoint only revokes. */
@@ -869,13 +1485,15 @@ export class SettingsController {
   /* ---------- backup ---------- */
 
   @Get("export")
-  exportSettings(): SettingsBackup {
+  async exportSettings(): Promise<SettingsBackup> {
     const settings = this.settings.get();
     const backup: SettingsBackup = {
       format: "nova-settings",
       version: 1,
       exportedAt: new Date().toISOString(),
       persona: settings.persona,
+      personaStyle: settings.personaStyle,
+      personaProfile: settings.personaProfile,
       quickActions: settings.quickActions,
       toolOverrides: settings.toolOverrides,
       // Secret header values are never exported; their names are, so they can be filled in again.
@@ -886,8 +1504,17 @@ export class SettingsController {
       helperPreferences: normalizeHelperPreferences({
         ...settings.helperPreferences,
       }),
+      modelRoles: settings.modelRoles,
       lists: this.backups.exportLists(),
+      connections: this.backups.exportConnections(),
     };
+    if (this.config.nodeRedAdminToken.length >= 32) {
+      const snapshot = await this.nodeRedManagement.flowSnapshot();
+      backup.nodeRedFlows = snapshot.flows;
+      backup.nodeRedFlowsIncluded = true;
+    } else {
+      backup.nodeRedFlowsIncluded = false;
+    }
     if (Buffer.byteLength(JSON.stringify(backup), "utf8") > MAX_BACKUP_BYTES)
       throw new ValidationError([
         "De instellingen zijn te groot voor een back-up van 1 MB.",
@@ -897,13 +1524,26 @@ export class SettingsController {
 
   @Post("import/prepare")
   @HttpCode(200)
-  prepareImport(@Body() body: unknown) {
+  async prepareImport(@Body() body: unknown) {
+    if (
+      body &&
+      typeof body === "object" &&
+      !Array.isArray(body) &&
+      "data" in body &&
+      body.data &&
+      typeof body.data === "object" &&
+      !Array.isArray(body.data) &&
+      "nodeRedFlows" in body.data
+    ) {
+      const snapshot = await this.nodeRedManagement.flowSnapshot();
+      return this.backups.prepareWithNodeRed(body, snapshot);
+    }
     return this.backups.prepare(body);
   }
 
   @Post("import")
   @HttpCode(200)
-  importSettings(@Body() body: unknown) {
-    return this.backups.confirm(body);
+  async importSettings(@Body() body: unknown) {
+    return this.backups.confirmWithNodeRed(body);
   }
 }

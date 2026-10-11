@@ -2,6 +2,7 @@ import type {
   HelperMode,
   WallpaperDisplay,
   WallpaperMode,
+  WindowsHelperDebugStatus,
   WindowsAgentStatus,
 } from "@nova/contracts";
 
@@ -22,6 +23,7 @@ export type WallpaperOutcome =
  */
 export interface WallpaperPort {
   agentStatus?(): Promise<WindowsAgentStatus>;
+  helperDebug?(): Promise<WindowsHelperDebugStatus>;
   helperPreferences?(hotkeys?: Record<string, string>): Promise<{
     ok: boolean;
     preferences?: {

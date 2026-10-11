@@ -42,6 +42,13 @@ function current(): NovaSettings {
   return {
     version: 1,
     persona: "Bestaande regels",
+    personaStyle: "friendly",
+    personaProfile: {
+      name: "NOVA",
+      character: "warm, nieuwsgierig en met af en toe droge humor",
+      address: "je/jij",
+      avoid: "doen alsof ik een mens ben of gevoelens en ervaringen verzinnen",
+    },
     quickActions: [{ label: "Status", prompt: "Geef de status" }],
     toolOverrides: { echo: { enabled: false } },
     skills: [],
@@ -57,6 +64,14 @@ function current(): NovaSettings {
       },
     ],
     helper: { mode: "helper", display: 2 },
+    modelRoles: {
+      conversation: { preferred: [], fallback: null },
+      code: { preferred: [], fallback: null },
+      planning: { preferred: [], fallback: null },
+      summary: { preferred: [], fallback: null },
+      vision: { preferred: [], fallback: null },
+      embedding: { preferred: [], fallback: null },
+    },
     helperPreferences: {
       autohide: true,
       contrast: false,
@@ -236,6 +251,7 @@ describe("bounded private settings backup plan", () => {
     expect(result.summary).toMatchObject({
       helperChanged: false,
       helperPreferencesChanged: false,
+      modelRolesChanged: false,
     });
     expect(result.next.helperPreferences).toEqual(normalized.helperPreferences);
   });
@@ -385,22 +401,58 @@ describe("bounded private settings backup plan", () => {
       incomingLists: 0,
       totalLists: 0,
       removedLists: 0,
+      incomingFlows: 0,
+      totalFlows: 0,
+      removedFlows: 0,
       replacedSkills: 0,
       removedSkills: 0,
       removedWidgets: 0,
       personaChanged: false,
+      personaProfileChanged: false,
+      personaStyleChanged: false,
       quickActionsChanged: false,
       toolOverridesChanged: false,
       sidebarChanged: false,
       helperChanged: false,
       helperPreferencesChanged: false,
+      modelRolesChanged: false,
       listsChanged: false,
+      nodeRedFlowsChanged: false,
+      connectionsChanged: false,
+      changedConnections: 0,
+      connectionChanges: [],
       missingSecrets: [],
     });
     expect(state).toEqual(before);
     expect(data).toEqual(rawBefore);
     next.helper.display = 0;
     expect(state.helper.display).toBe(2);
+  });
+  it("restores model-role preferences but keeps legacy backups compatible", () => {
+    const state = current();
+    const roles = structuredClone(state.modelRoles);
+    roles.code = {
+      preferred: ["provider/model-free"],
+      fallback: "fallback/model-free",
+    };
+    const { next, summary } = buildBackupPlan(
+      backup({ modelRoles: roles }),
+      "merge",
+      state,
+    );
+    expect(next.modelRoles).toEqual(roles);
+    expect(summary.modelRolesChanged).toBe(true);
+    const legacy = buildBackupPlan(backup(), "replace", state);
+    expect(legacy.next.modelRoles).toEqual(state.modelRoles);
+    expect(legacy.summary.modelRolesChanged).toBe(false);
+  });
+  it("rejects secret-shaped model-role backup fields", () => {
+    const state = current();
+    const roles = structuredClone(state.modelRoles);
+    roles.vision.preferred = ["api_key=private-secret"];
+    expect(() =>
+      buildBackupPlan(backup({ modelRoles: roles }), "merge", state),
+    ).toThrow();
   });
   it("replaces lists with an explicit removal summary and keeps omitted persona/actions/sidebar", () => {
     const state = current();
@@ -800,6 +852,7 @@ describe("bounded private settings backup plan", () => {
     );
     expect(summary).toMatchObject({
       personaChanged: true,
+      personaStyleChanged: false,
       quickActionsChanged: true,
       toolOverridesChanged: true,
       sidebarChanged: false,
@@ -818,5 +871,48 @@ describe("bounded private settings backup plan", () => {
     } catch (error) {
       expect((error as Error).message).not.toContain("raw-private-token");
     }
+  });
+
+  it("imports only reviewed persona styles and reports the change", () => {
+    const { next, summary } = buildBackupPlan(
+      backup({ personaStyle: "playful" }),
+      "merge",
+      current(),
+    );
+    expect(next.personaStyle).toBe("playful");
+    expect(summary.personaStyleChanged).toBe(true);
+    expect(() =>
+      buildBackupPlan(
+        backup({ personaStyle: "unrestricted" }),
+        "merge",
+        current(),
+      ),
+    ).toThrow(/ongeldige vaardigheden, panelen of instellingen/i);
+  });
+
+  it("imports a bounded structured persona profile and preserves it in legacy backups", () => {
+    const profile = {
+      name: "Nova",
+      character: "warm en nieuwsgierig",
+      address: "je/jij",
+      avoid: "valse menselijke ervaringen",
+    };
+    const { next, summary } = buildBackupPlan(
+      backup({ personaProfile: profile }),
+      "merge",
+      current(),
+    );
+    expect(next.personaProfile).toEqual(profile);
+    expect(summary.personaProfileChanged).toBe(true);
+    expect(
+      buildBackupPlan(backup(), "merge", current()).next.personaProfile,
+    ).toEqual(current().personaProfile);
+    expect(() =>
+      buildBackupPlan(
+        backup({ personaProfile: { ...profile, unsupported: "value" } }),
+        "merge",
+        current(),
+      ),
+    ).toThrow();
   });
 });

@@ -34,6 +34,7 @@ const mutations = [
   ["settings_persona_set", { text: "Antwoord kort." }],
   ["settings_instruction_create", instructionArgs],
   ["settings_skill_toggle", { id: "filmavond", enabled: false }],
+  ["settings_helper_preference_set", { setting: "contrast", enabled: true }],
 ] as const;
 
 beforeAll(async () => {
@@ -84,7 +85,7 @@ function settingsBytes() {
 }
 
 describe("personal settings through the actual tool confirmation pipeline", () => {
-  it("offers exactly four personal settings tools with actions and extensions disabled", () => {
+  it("offers exactly five personal settings tools with actions and extensions disabled", () => {
     expect(
       nova.tools.list().filter((tool) => tool.source === "settings"),
     ).toEqual([
@@ -247,6 +248,51 @@ describe("personal settings through the actual tool confirmation pipeline", () =
     }
   });
 
+  it("changes only the requested helper preference with fresh confirmation and private history", async () => {
+    const result = await approve("settings_helper_preference_set", {
+      setting: "contrast",
+      enabled: true,
+    });
+    expect(result).toMatchObject({ ok: true, verified: true });
+    expect(nova.store.get().helperPreferences).toMatchObject({
+      contrast: true,
+    });
+    const history = await nova.api
+      .get("/api/settings/helper/preferences/history")
+      .set(ADMIN);
+    expect(history.body.revisions[0].after).toMatchObject({ contrast: true });
+    expect(nova.audits).toContainEqual(
+      expect.objectContaining({
+        sessionId: expect.stringMatching(/^settings-chat-/),
+        tool: "settings_change",
+        risk: "CONFIRM",
+        confirmation: "confirmed_tool",
+        arguments: expect.objectContaining({ what: "helper_preferences" }),
+      }),
+    );
+  });
+
+  it("toggles only cue suppression inside the existing quiet-hours schedule", async () => {
+    nova.store.update((next) => {
+      next.helperPreferences.cues.quiet = {
+        enabled: false,
+        start: "22:30",
+        end: "07:15",
+      };
+    });
+    expect(
+      await approve("settings_helper_preference_set", {
+        setting: "quietHours",
+        enabled: true,
+      }),
+    ).toMatchObject({ ok: true, verified: true });
+    expect(nova.store.get().helperPreferences.cues.quiet).toEqual({
+      enabled: true,
+      start: "22:30",
+      end: "07:15",
+    });
+  });
+
   it.each(mutations)(
     "%s never creates a grant when explicitly approved with Always",
     async (name, args) => {
@@ -297,7 +343,7 @@ describe("personal settings through the actual tool confirmation pipeline", () =
     },
   );
 
-  it.each(["persona", "skills"])(
+  it.each(["persona", "skills", "appearance"])(
     "requires a new confirmation after the settings screen changes %s",
     async (field) => {
       const id = session();
@@ -313,10 +359,18 @@ describe("personal settings through the actual tool confirmation pipeline", () =
               .put("/api/settings/persona")
               .set(ADMIN)
               .send({ text: "Screen rules." })
-          : await nova.api
-              .post("/api/settings/skills")
-              .set(ADMIN)
-              .send(playbook({ name: "Ochtend" }));
+          : field === "skills"
+            ? await nova.api
+                .post("/api/settings/skills")
+                .set(ADMIN)
+                .send(playbook({ name: "Ochtend" }))
+            : await nova.api
+                .put("/api/settings/helper/preferences")
+                .set(ADMIN)
+                .send({
+                  ...nova.store.get().helperPreferences,
+                  contrast: true,
+                });
       expect(response.status).toBeLessThan(300);
       const before = settingsBytes();
       const renewed = await nova.tools.execute(
@@ -343,6 +397,7 @@ describe("settings chat cannot change integrations or persist invalid personal c
       .map((tool) => tool.function.name)
       .filter((name) => name.startsWith("settings_"));
     expect(names.sort()).toEqual([
+      "settings_helper_preference_set",
       "settings_instruction_create",
       "settings_persona_set",
       "settings_skill_toggle",
@@ -442,6 +497,8 @@ describe("settings chat cannot change integrations or persist invalid personal c
     ],
     ["settings_skill_toggle", { id: "missing", enabled: false }],
     ["settings_skill_toggle", { id: "filmavond", enabled: "invalid" }],
+    ["settings_helper_preference_set", { setting: "contrast", enabled: "yes" }],
+    ["settings_helper_preference_set", { setting: "secret", enabled: true }],
   ])("%s refuses invalid input without writing", async (name, args) => {
     const before = settingsBytes();
     const update = vi.spyOn(nova.store, "update");

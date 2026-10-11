@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   afterAll,
@@ -10,7 +11,13 @@ import {
   vi,
 } from "vitest";
 import { DEFAULT_QUICK_ACTIONS } from "../../src/settings/store/settings.store.js";
+import { NovaConfig } from "../../src/core/config/nova-config.js";
+import { HomeAssistantService } from "../../src/home/home-assistant.service.js";
+import { ProxmoxService } from "../../src/proxmox/proxmox.service.js";
+import { TermixService } from "../../src/integrations/termix/termix.service.js";
+import { PangolinService } from "../../src/integrations/pangolin/pangolin.service.js";
 import { JarvisStateStore } from "../../src/planning/jarvis-state.store.js";
+import { WorkspaceProjects } from "../../src/settings/workspace-projects.service.js";
 import type { WallpaperPort } from "../../src/settings/wallpaper.port.js";
 import {
   ADMIN,
@@ -45,6 +52,10 @@ beforeAll(async () => {
 afterAll(() => nova.app.close());
 beforeEach(() => {
   fs.rmSync(path.join(nova.store["file" as never] as string), { force: true });
+  fs.rmSync(
+    nova.app.get(NovaConfig).dataFile("instruction-skill-history.json"),
+    { force: true },
+  );
   nova.store.reset();
   nova.audits.length = 0;
 });
@@ -90,6 +101,409 @@ const call = async (
 };
 
 describe("the settings API", () => {
+  it("protects code workspace browsing and returns only the selected project's files", async () => {
+    const projects = nova.app.get(WorkspaceProjects);
+    projects.create({ name: "Code UI" });
+    const filePath = path.join(
+      projects.projectDirectory("code-ui"),
+      "hello.ts",
+    );
+    fs.writeFileSync(filePath, "export const hello = true;");
+    const treePath = "/api/settings/workspace/code/tree";
+    const pinned = await createApp({ env: { NOVA_ADMIN_PIN: "4321" } });
+    try {
+      expect((await pinned.api.get(treePath).set(ADMIN)).status).toBe(401);
+    } finally {
+      await pinned.app.close();
+    }
+    const tree = await nova.api.get(treePath).set(ADMIN);
+    expect(tree.status).toBe(200);
+    expect(tree.body.files).toEqual([{ path: "hello.ts", bytes: 26 }]);
+    const file = await nova.api
+      .get("/api/settings/workspace/code/file")
+      .query({ path: "hello.ts" })
+      .set(ADMIN);
+    expect(file.status).toBe(200);
+    expect(file.body.content).toContain("export const hello = true;");
+    expect(
+      (
+        await nova.api
+          .get("/api/settings/workspace/code/file")
+          .query({ path: "../outside" })
+          .set(ADMIN)
+      ).status,
+    ).toBe(400);
+  });
+
+  it("protects stack status and validates bounded restart actions", async () => {
+    const statusPath = "/api/settings/stack-control/services";
+    const preparePath = "/api/settings/stack-control/restart/prepare";
+    expect(
+      (await nova.api.post(preparePath).send({ service: "nova" })).status,
+    ).toBe(403);
+    expect((await nova.api.get(statusPath).set(ADMIN)).status).toBe(200);
+    expect(
+      (
+        await nova.api
+          .post(preparePath)
+          .set(ADMIN)
+          .send({ service: "docker", command: "rm -rf /" })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await nova.api
+          .post("/api/settings/stack-control/restart/confirm")
+          .set(ADMIN)
+          .send({
+            sessionId: "anything",
+            confirmationId: "anything",
+            approve: true,
+          })
+      ).status,
+    ).toBe(400);
+  });
+
+  it("returns only bounded target names from configured infrastructure services", async () => {
+    const proxmox = nova.app.get(ProxmoxService);
+    const termix = nova.app.get(TermixService);
+    const pangolin = nova.app.get(PangolinService);
+    vi.spyOn(proxmox, "configured", "get").mockReturnValue(true);
+    vi.spyOn(proxmox, "rawNodes").mockResolvedValue([{ node: "pve-node" }]);
+    vi.spyOn(proxmox, "resources").mockResolvedValue([
+      { node: "pve-node", vmid: 101, name: "guest-one", type: "qemu" },
+    ]);
+    vi.spyOn(termix, "configured", "get").mockReturnValue(true);
+    vi.spyOn(termix, "listHosts").mockResolvedValue([
+      { id: 7, name: "nas", ip: "10.0.0.4", username: "secret" },
+    ]);
+    vi.spyOn(pangolin, "configured", "get").mockReturnValue(true);
+    vi.spyOn(pangolin, "listTargets").mockImplementation(async (name) =>
+      name === "pangolin_sites"
+        ? { sites: [{ id: "site-1", name: "tunnel", online: true }] }
+        : {
+            resources: [
+              { id: "resource-1", name: "app", domain: "private.test" },
+            ],
+          },
+    );
+
+    const response = await nova.api
+      .get("/api/settings/managed-targets/inventory")
+      .set(ADMIN);
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      proxmox: {
+        nodes: [{ id: "pve-node", name: "pve-node" }],
+        guests: [{ id: "pve-node/101", name: "guest-one" }],
+      },
+      termix: { hosts: [{ id: "7", name: "nas" }] },
+      pangolin: {
+        sites: [{ id: "site-1", name: "tunnel" }],
+        resources: [{ id: "resource-1", name: "app" }],
+      },
+    });
+    expect(JSON.stringify(response.body)).not.toMatch(
+      /secret|10\.0\.0\.4|private\.test|online/,
+    );
+    const access = await nova.api
+      .put("/api/settings/managed-targets/access")
+      .set(ADMIN)
+      .send({
+        mode: "allowlist",
+        proxmoxNodeIds: ["pve-node"],
+        proxmoxGuestIds: [],
+        termixHostIds: ["7"],
+        pangolinSiteIds: ["site-1"],
+        pangolinResourceIds: ["resource-1"],
+      });
+    expect(access.status).toBe(200);
+    expect(access.body.policy).toMatchObject({
+      mode: "allowlist",
+      proxmoxNodeIds: ["pve-node"],
+      termixHostIds: ["7"],
+      pangolinSiteIds: ["site-1"],
+      pangolinResourceIds: ["resource-1"],
+    });
+    const invalid = await nova.api
+      .put("/api/settings/managed-targets/access")
+      .set(ADMIN)
+      .send({
+        mode: "allowlist",
+        proxmoxNodeIds: ["not-in-inventory"],
+        proxmoxGuestIds: [],
+        termixHostIds: [],
+        pangolinSiteIds: [],
+        pangolinResourceIds: [],
+      });
+    expect(invalid.status).toBe(400);
+  });
+
+  it("returns only a bounded Home Assistant names inventory on request", async () => {
+    const home = nova.app.get(HomeAssistantService);
+    home.syncedAt = new Date().toISOString();
+    home.areas = [{ area_id: "living", name: "Woonkamer" }];
+    home.devices = [{ id: "device-1", name: "Lamp", area_id: "living" }];
+    home.entities = [
+      {
+        entity_id: "light.living",
+        state: "on",
+        attributes: { secret: "hidden" },
+        friendly_name: "Plafondlamp",
+        domain: "light",
+        area_id: "living",
+        device_id: "device-1",
+        aliases: [],
+        capabilities: ["secret"],
+      },
+    ] as never;
+    const response = await nova.api.get(
+      "/api/settings/home-assistant/inventory",
+    );
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      areas: [{ id: "living", name: "Woonkamer" }],
+      devices: [{ id: "device-1", name: "Lamp", areaId: "living" }],
+      entities: [
+        {
+          id: "light.living",
+          name: "Plafondlamp",
+          domain: "light",
+          areaId: "living",
+          deviceId: "device-1",
+        },
+      ],
+    });
+    expect(JSON.stringify(response.body)).not.toContain("hidden");
+    home.syncedAt = null;
+    const unavailable = await nova.api.get(
+      "/api/settings/home-assistant/inventory",
+    );
+    expect(unavailable.status).toBe(503);
+  });
+
+  it("keeps private bounded history for existing note text and checks rollback conflicts", async () => {
+    const created = await call("post", "/widgets", {
+      type: "note",
+      title: "Persoonlijke notitie",
+      text: "Eerste versie",
+    });
+    const widgetId = (created.widget as { id: string }).id;
+    expect(
+      (
+        await call("post", "/widgets", {
+          type: "note",
+          title: "Persoonlijke notitie",
+          text: "Geen tweede notitie",
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call("put", `/widgets/${widgetId}`, {
+          type: "note",
+          title: "Persoonlijke notitie",
+          text: "Tweede versie",
+        })
+      ).status,
+    ).toBe(200);
+    const history = await call("get", `/widgets/${widgetId}/history`);
+    expect(history.revisions).toMatchObject([
+      { before: "Eerste versie", after: "Tweede versie" },
+    ]);
+    const historyPath = path.join(
+      path.dirname(nova.store["file" as never] as string),
+      "note-widget-history.json",
+    );
+    expect(fs.statSync(historyPath).mode & 0o777).toBe(0o600);
+    expect(JSON.stringify(nova.audits)).not.toContain("Eerste versie");
+    const revision = (history.revisions as { id: string }[])[0]!.id;
+    expect(
+      (await call("post", `/widgets/${widgetId}/history/${revision}/rollback`))
+        .status,
+    ).toBe(200);
+    expect(
+      nova.store.get().widgets.find((item) => item.id === widgetId),
+    ).toMatchObject({ text: "Eerste versie" });
+
+    await call("put", `/widgets/${widgetId}`, {
+      type: "note",
+      title: "Persoonlijke notitie",
+      text: "Derde versie",
+    });
+    expect(
+      (await call("post", `/widgets/${widgetId}/history/${revision}/rollback`))
+        .status,
+    ).toBe(409);
+    expect((await call("delete", `/widgets/${widgetId}`)).status).toBe(200);
+    const recreated = await call("post", "/widgets", {
+      type: "note",
+      title: "Persoonlijke notitie",
+      text: "Nieuwe notitie",
+    });
+    const recreatedId = (recreated.widget as { id: string }).id;
+    expect(recreatedId).not.toBe(widgetId);
+    expect(
+      (await call("get", `/widgets/${recreatedId}/history`)).revisions,
+    ).toEqual([]);
+    const secretUpdate = await call("put", `/widgets/${recreatedId}`, {
+      type: "note",
+      title: "Persoonlijke notitie",
+      text: "api_key: nooit-bewaren",
+    });
+    expect(secretUpdate.historyWarning).toMatch(/geheim/i);
+    expect(
+      JSON.stringify(await call("get", `/widgets/${recreatedId}/history`)),
+    ).not.toContain("nooit-bewaren");
+    const urlCredentialUpdate = await call("put", `/widgets/${recreatedId}`, {
+      type: "note",
+      title: "Persoonlijke notitie",
+      text: "Link https://user:pass@example.test/private",
+    });
+    expect(urlCredentialUpdate.historyWarning).toMatch(/geheim/i);
+    expect(
+      JSON.stringify(await call("get", `/widgets/${recreatedId}/history`)),
+    ).not.toContain("user:pass");
+    const sshCredentialUpdate = await call("put", `/widgets/${recreatedId}`, {
+      type: "note",
+      title: "Persoonlijke notitie",
+      text: "Host ssh://operator:private@server.example:22",
+    });
+    expect(sshCredentialUpdate.historyWarning).toMatch(/geheim/i);
+    expect(
+      JSON.stringify(await call("get", `/widgets/${recreatedId}/history`)),
+    ).not.toContain("operator:private");
+  });
+
+  it("tracks only safe value-widget display fields and preserves current data source on rollback", async () => {
+    const created = await call("post", "/widgets", {
+      type: "value",
+      title: "Temperatuur",
+      source: { url: "https://example.test/first.json", extract: "value" },
+      refreshMinutes: 15,
+      unit: "°C",
+    });
+    expect(created.status).toBe(201);
+    const widgetId = (created.widget as { id: string }).id;
+    await call("put", `/widgets/${widgetId}`, {
+      type: "value",
+      title: "Buiten",
+      source: { url: "https://example.test/second.json", extract: "current" },
+      refreshMinutes: 30,
+      unit: "°F",
+    });
+    const history = await call("get", `/widgets/${widgetId}/display-history`);
+    expect(history.revisions).toMatchObject([
+      {
+        before: { type: "value", title: "Temperatuur", unit: "°C" },
+        after: { type: "value", title: "Buiten", unit: "°F" },
+      },
+    ]);
+    const historyPath = path.join(
+      path.dirname(nova.store["file" as never] as string),
+      "widget-display-history.json",
+    );
+    expect(fs.statSync(historyPath).mode & 0o777).toBe(0o600);
+    const revision = (history.revisions as { id: string }[])[0]!.id;
+    expect(
+      (
+        await call(
+          "post",
+          `/widgets/${widgetId}/display-history/${revision}/rollback`,
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      nova.store.get().widgets.find((item) => item.id === widgetId),
+    ).toMatchObject({
+      title: "Temperatuur",
+      unit: "°C",
+      source: { url: "https://example.test/second.json", extract: "current" },
+      refreshMinutes: 30,
+    });
+    expect(fs.readFileSync(historyPath, "utf8")).not.toContain("example.test");
+  });
+
+  it("skips secret-shaped widget display history and rejects stale widget rollback", async () => {
+    const created = await call("post", "/widgets", {
+      type: "list",
+      title: "Nieuws",
+      source: { url: "https://example.test/news.json", extract: "items" },
+      refreshMinutes: 15,
+      itemPath: "title",
+      max: 5,
+    });
+    const widgetId = (created.widget as { id: string }).id;
+    await call("put", `/widgets/${widgetId}`, {
+      type: "list",
+      title: "Ander nieuws",
+      source: { url: "https://example.test/news.json", extract: "items" },
+      refreshMinutes: 15,
+      itemPath: "name",
+      max: 8,
+    });
+    const history = await call("get", `/widgets/${widgetId}/display-history`);
+    const revision = (history.revisions as { id: string }[])[0]!.id;
+    await call("put", `/widgets/${widgetId}`, {
+      type: "list",
+      title: "Derde titel",
+      source: { url: "https://example.test/news.json", extract: "items" },
+      refreshMinutes: 15,
+      itemPath: "name",
+      max: 8,
+    });
+    expect(
+      (
+        await call(
+          "post",
+          `/widgets/${widgetId}/display-history/${revision}/rollback`,
+        )
+      ).status,
+    ).toBe(409);
+    const secret = await call("put", `/widgets/${widgetId}`, {
+      type: "list",
+      title: "api_key: dummy",
+      source: { url: "https://example.test/news.json", extract: "items" },
+      refreshMinutes: 15,
+      itemPath: "name",
+      max: 8,
+    });
+    expect(secret.historyWarning).toMatch(/onveilige|geheim/i);
+    expect(
+      fs.readFileSync(
+        path.join(
+          path.dirname(nova.store["file" as never] as string),
+          "widget-display-history.json",
+        ),
+        "utf8",
+      ),
+    ).not.toContain("dummy");
+  });
+
+  it("never reuses value/list widget IDs after deletion", async () => {
+    const body = {
+      type: "value",
+      title: "Herbruikbare titel",
+      source: { url: "https://example.test/value.json", extract: "value" },
+      refreshMinutes: 15,
+      unit: "°C",
+    };
+    const first = await call("post", "/widgets", body);
+    const firstId = (first.widget as { id: string }).id;
+    await call("put", `/widgets/${firstId}`, { ...body, unit: "°F" });
+    expect(
+      (await call("get", `/widgets/${firstId}/display-history`)).revisions,
+    ).toHaveLength(1);
+    expect((await call("delete", `/widgets/${firstId}`)).status).toBe(200);
+
+    const second = await call("post", "/widgets", body);
+    const secondId = (second.widget as { id: string }).id;
+    expect(secondId).not.toBe(firstId);
+    expect(
+      (await call("get", `/widgets/${secondId}/display-history`)).revisions,
+    ).toEqual([]);
+  });
+
   it("needs the admin header for writes, and reads the home screen without it", async () => {
     expect((await call("put", "/persona", { text: "x" }, {})).status).toBe(403);
     expect((await call("post", "/skills", playbook(), {})).status).toBe(403);
@@ -97,6 +511,394 @@ describe("the settings API", () => {
     const pub = await call("get", "/public", undefined, {});
     expect(pub.status).toBe(200);
     expect(pub.quickActions).toEqual(DEFAULT_QUICK_ACTIONS);
+  });
+
+  it("protects MCP activity behind the settings PIN and rejects invalid IDs", async () => {
+    const pinned = await createApp({ env: { NOVA_ADMIN_PIN: "4321" } });
+    try {
+      const endpoint = "/api/settings/mcp/servers/echo/activity";
+      expect((await pinned.api.get(endpoint)).status).toBe(401);
+      expect(
+        (await pinned.api.get("/api/settings/mcp/servers/echo/history")).status,
+      ).toBe(401);
+      expect(
+        (await pinned.api.get(endpoint).set("x-nova-pin", "4321")).status,
+      ).toBe(200);
+      expect(
+        (
+          await pinned.api
+            .get("/api/settings/mcp/servers/%2F/activity")
+            .set("x-nova-pin", "4321")
+        ).status,
+      ).toBe(400);
+      const test = "/api/settings/mcp/servers/echo/test";
+      expect((await pinned.api.post(test)).status).toBe(401);
+      expect(
+        (
+          await pinned.api
+            .post(test)
+            .set("x-nova-pin", "4321")
+            .set("x-nova-admin", "1")
+        ).body,
+      ).toMatchObject({ ok: false, toolCount: 0 });
+    } finally {
+      await pinned.app.close();
+    }
+  });
+
+  it("protects MCP catalog management and accepts only reviewed server IDs", async () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nova-mcp-catalog-api-"),
+    );
+    const configPath = path.join(directory, "mcp-servers.json");
+    fs.writeFileSync(configPath, JSON.stringify({ servers: {} }), {
+      mode: 0o600,
+    });
+    const pinned = await createApp({
+      env: { NOVA_DATA_DIR: directory, NOVA_ADMIN_PIN: "4321" },
+    });
+    try {
+      const catalog = "/api/settings/mcp/servers/catalog";
+      expect((await pinned.api.get(catalog)).status).toBe(401);
+      const listed = await pinned.api.get(catalog).set("x-nova-pin", "4321");
+      expect(listed.status).toBe(200);
+      expect(
+        listed.body.available.map((entry: { id: string }) => entry.id).sort(),
+      ).toEqual(["arxiv", "context7", "filesystem", "sequential-thinking"]);
+      expect(JSON.stringify(listed.body)).not.toMatch(/"command"|"args"|"env"/);
+
+      const preparePath = "/api/settings/mcp/servers/context7/prepare-catalog";
+      expect(
+        (
+          await pinned.api
+            .post(preparePath)
+            .set("x-nova-pin", "4321")
+            .set("x-nova-admin", "1")
+            .send({ operation: "add", command: "untrusted-command" })
+        ).status,
+      ).toBe(400);
+      const prepared = await pinned.api
+        .post(preparePath)
+        .set("x-nova-pin", "4321")
+        .set("x-nova-admin", "1")
+        .send({ operation: "add" });
+      expect(prepared.body).toMatchObject({
+        ok: true,
+        action: { risk: "DANGEROUS" },
+      });
+      const added = await pinned.api
+        .post("/api/settings/mcp/servers/confirm-catalog")
+        .set("x-nova-pin", "4321")
+        .set("x-nova-admin", "1")
+        .send({
+          sessionId: prepared.body.action.sessionId,
+          confirmationId: prepared.body.action.confirmationId,
+          approve: true,
+        });
+      expect(added.body).toMatchObject({
+        ok: true,
+        verified: true,
+        server: "context7",
+        operation: "add",
+      });
+      const saved = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+        servers: Record<string, { enabled: boolean } | undefined>;
+      };
+      expect(saved.servers.context7?.enabled).toBe(false);
+    } finally {
+      await pinned.app.close();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("protects per-key model-access history behind the settings PIN", async () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nova-key-model-history-api-"),
+    );
+    const pinned = await createApp({
+      env: { NOVA_DATA_DIR: directory, NOVA_ADMIN_PIN: "4321" },
+    });
+    try {
+      const endpoint =
+        "/api/settings/omniroute/accounts/keys/client/model-access/history";
+      expect((await pinned.api.get(endpoint)).status).toBe(401);
+      expect(
+        (await pinned.api.get(endpoint).set("x-nova-pin", "4321")).body,
+      ).toEqual({ revisions: [], truncated: false });
+      const badRollback = await pinned.api
+        .post(
+          "/api/settings/omniroute/accounts/keys/client/model-access/prepare-rollback",
+        )
+        .set("x-nova-pin", "4321")
+        .set("x-nova-admin", "1")
+        .send({ revisionId: "invalid", acknowledgeGlobalEffect: true });
+      expect(badRollback.status).toBe(200);
+      expect(badRollback.body).toMatchObject({ ok: false });
+    } finally {
+      await pinned.app.close();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("toggles NOVA-owned MCP servers only after fresh dangerous confirmation", async () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nova-mcp-settings-"),
+    );
+    const fixture = path.resolve(
+      process.cwd(),
+      "test/fixtures/mcp-echo-server.mjs",
+    );
+    fs.writeFileSync(
+      path.join(directory, "mcp-servers.json"),
+      JSON.stringify({
+        servers: {
+          echo: {
+            command: process.execPath,
+            args: [fixture],
+            env: { PRIVATE_TOKEN: "mcp-private-fixture-token" },
+            risk: "CONFIRM",
+            enabled: false,
+          },
+        },
+      }),
+      { mode: 0o600 },
+    );
+    const pinned = await createApp({
+      env: { NOVA_DATA_DIR: directory, NOVA_ADMIN_PIN: "4321" },
+    });
+    const api = (method: "get" | "post", route: string, body?: object) =>
+      pinned.api[method](`/api/settings/mcp${route}`)
+        .set({ "x-nova-admin": "1", "x-nova-pin": "4321" })
+        .send(body);
+    try {
+      const denied = await pinned.api
+        .post("/api/settings/mcp/servers/echo/prepare-toggle")
+        .set({ "x-nova-admin": "1" })
+        .send({ enabled: true });
+      expect(denied.status).toBe(401);
+
+      const prepared = await api("post", "/servers/echo/prepare-toggle", {
+        enabled: true,
+      });
+      expect(prepared.body.action.risk).toBe("DANGEROUS");
+      expect(JSON.stringify(prepared.body)).not.toContain(
+        "mcp-private-fixture-token",
+      );
+      const enabled = await api("post", "/servers/confirm-toggle", {
+        sessionId: prepared.body.action.sessionId,
+        confirmationId: prepared.body.action.confirmationId,
+        approve: true,
+      });
+      expect(enabled.body).toMatchObject({
+        ok: true,
+        server: "echo",
+        enabled: true,
+      });
+      expect((await api("get", "/servers")).body.servers[0]).toMatchObject({
+        id: "echo",
+        enabled: true,
+        connected: true,
+      });
+
+      const riskChange = await api(
+        "post",
+        "/servers/echo/tools/write_note/prepare-risk",
+        { risk: "SAFE" },
+      );
+      expect(riskChange.body.action.risk).toBe("DANGEROUS");
+      expect(JSON.stringify(riskChange.body)).not.toContain(
+        "mcp-private-fixture-token",
+      );
+      const riskSaved = await api("post", "/servers/confirm-tool-risk", {
+        sessionId: riskChange.body.action.sessionId,
+        confirmationId: riskChange.body.action.confirmationId,
+        approve: true,
+      });
+      expect(riskSaved.body).toMatchObject({
+        ok: true,
+        server: "echo",
+        tool: "write_note",
+        risk: "SAFE",
+      });
+      expect((await api("get", "/servers")).body.servers[0].tools).toEqual(
+        expect.arrayContaining([
+          { name: "echo", risk: "CONFIRM" },
+          { name: "write_note", risk: "SAFE" },
+        ]),
+      );
+
+      const staleRisk = await api(
+        "post",
+        "/servers/echo/tools/write_note/prepare-risk",
+        { risk: "DANGEROUS" },
+      );
+      const staleDisable = await api("post", "/servers/echo/prepare-toggle", {
+        enabled: false,
+      });
+      const configPath = path.join(directory, "mcp-servers.json");
+      const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      config.servers.echo.env.PRIVATE_TOKEN = "rotated-after-prepare";
+      fs.writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
+      const staleRiskResult = await api("post", "/servers/confirm-tool-risk", {
+        sessionId: staleRisk.body.action.sessionId,
+        confirmationId: staleRisk.body.action.confirmationId,
+        approve: true,
+      });
+      expect(staleRiskResult.body.ok).toBe(false);
+      const staleResult = await api("post", "/servers/confirm-toggle", {
+        sessionId: staleDisable.body.action.sessionId,
+        confirmationId: staleDisable.body.action.confirmationId,
+        approve: true,
+      });
+      expect(staleResult.body.ok).toBe(false);
+      expect((await api("get", "/servers")).body.servers[0].connected).toBe(
+        true,
+      );
+
+      const disable = await api("post", "/servers/echo/prepare-toggle", {
+        enabled: false,
+      });
+      const disabled = await api("post", "/servers/confirm-toggle", {
+        sessionId: disable.body.action.sessionId,
+        confirmationId: disable.body.action.confirmationId,
+        approve: true,
+      });
+      expect(disabled.body).toMatchObject({ ok: true, enabled: false });
+      expect((await api("get", "/servers")).body.servers[0]).toMatchObject({
+        enabled: false,
+        connected: false,
+        toolCount: 0,
+      });
+      const history = await api("get", "/servers/echo/history");
+      expect(history.body.revisions).toHaveLength(3);
+      expect(history.body.revisions[0]).toMatchObject({
+        server: "echo",
+        change: { kind: "enabled", before: true, after: false },
+      });
+      expect(JSON.stringify(history.body)).not.toContain(
+        "rotated-after-prepare",
+      );
+      const historyPath = path.join(directory, "mcp-settings-history.json");
+      expect(fs.statSync(historyPath).mode & 0o777).toBe(0o600);
+      const tamperedHistory = JSON.parse(fs.readFileSync(historyPath, "utf8"));
+      tamperedHistory[0].env = { PRIVATE_TOKEN: "history-file-secret" };
+      fs.writeFileSync(historyPath, JSON.stringify(tamperedHistory), {
+        mode: 0o600,
+      });
+      const sanitizedHistory = await api("get", "/servers/echo/history");
+      expect(JSON.stringify(sanitizedHistory.body)).not.toContain(
+        "history-file-secret",
+      );
+      const staleRollbackPrepared = await api(
+        "post",
+        `/servers/echo/history/${history.body.revisions[0].id}/prepare-rollback`,
+        {},
+      );
+      const changedConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      changedConfig.servers.echo.env.PRIVATE_TOKEN = "changed-before-rollback";
+      fs.writeFileSync(configPath, JSON.stringify(changedConfig), {
+        mode: 0o600,
+      });
+      const staleRollback = await api("post", "/servers/confirm-toggle", {
+        sessionId: staleRollbackPrepared.body.action.sessionId,
+        confirmationId: staleRollbackPrepared.body.action.confirmationId,
+        approve: true,
+      });
+      expect(staleRollback.body.ok).toBe(false);
+      const rollbackPrepared = await api(
+        "post",
+        `/servers/echo/history/${history.body.revisions[0].id}/prepare-rollback`,
+        {},
+      );
+      expect(rollbackPrepared.body.action.risk).toBe("DANGEROUS");
+      const rollbackResult = await api("post", "/servers/confirm-toggle", {
+        sessionId: rollbackPrepared.body.action.sessionId,
+        confirmationId: rollbackPrepared.body.action.confirmationId,
+        approve: true,
+      });
+      expect(rollbackResult.body).toMatchObject({ ok: true, enabled: true });
+      expect((await api("get", "/servers")).body.servers[0]).toMatchObject({
+        enabled: true,
+        connected: true,
+      });
+      expect(
+        (await api("get", "/servers/echo/history")).body.revisions,
+      ).toHaveLength(4);
+      const riskRevision = sanitizedHistory.body.revisions.find(
+        (revision: { change: { kind: string } }) =>
+          revision.change.kind === "tool-risk",
+      );
+      const riskRollbackPrepared = await api(
+        "post",
+        `/servers/echo/history/${riskRevision.id}/prepare-rollback`,
+        {},
+      );
+      expect(riskRollbackPrepared.body.action.risk).toBe("DANGEROUS");
+      const riskRollbackResult = await api(
+        "post",
+        "/servers/confirm-tool-risk",
+        {
+          sessionId: riskRollbackPrepared.body.action.sessionId,
+          confirmationId: riskRollbackPrepared.body.action.confirmationId,
+          approve: true,
+        },
+      );
+      expect(riskRollbackResult.body).toMatchObject({
+        ok: true,
+        risk: "CONFIRM",
+      });
+      expect(
+        (await api("get", "/servers/echo/history")).body.revisions,
+      ).toHaveLength(5);
+      expect(
+        JSON.parse(fs.readFileSync(configPath, "utf8")).servers.echo.env
+          .PRIVATE_TOKEN,
+      ).toBe("changed-before-rollback");
+      expect(
+        JSON.parse(fs.readFileSync(configPath, "utf8")).servers.echo.toolRisks,
+      ).toEqual({ write_note: "CONFIRM" });
+    } finally {
+      await pinned.app.close();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an MCP config reached through a symlink outside the NOVA data root", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nova-mcp-root-"));
+    const external = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nova-mcp-external-"),
+    );
+    fs.writeFileSync(
+      path.join(external, "mcp-servers.json"),
+      JSON.stringify({
+        servers: {
+          echo: { command: "unused", risk: "CONFIRM", enabled: false },
+        },
+      }),
+    );
+    fs.symlinkSync(external, path.join(directory, "linked"), "dir");
+    const pinned = await createApp({
+      env: {
+        NOVA_DATA_DIR: directory,
+        JARVIS_MCP_CONFIG: path.join(directory, "linked", "mcp-servers.json"),
+      },
+    });
+    try {
+      const result = await pinned.api
+        .post("/api/settings/mcp/servers/echo/prepare-toggle")
+        .set(ADMIN)
+        .send({ enabled: true });
+      expect(result.status).toBe(400);
+      expect(
+        JSON.parse(
+          fs.readFileSync(path.join(external, "mcp-servers.json"), "utf8"),
+        ).servers.echo.enabled,
+      ).toBe(false);
+    } finally {
+      await pinned.app.close();
+      fs.rmSync(directory, { recursive: true, force: true });
+      fs.rmSync(external, { recursive: true, force: true });
+    }
   });
 
   it("protects everything except the public list when a PIN is set", async () => {
@@ -246,6 +1048,9 @@ describe("the settings API", () => {
     expect((await call("post", "/skills", playbook())).status).toBe(400);
     const changed = await call("put", "/skills/filmavond", {
       ...created.skill,
+      name: "Filmavond gewijzigd",
+      description: "Bijgewerkte omschrijving voor de avond.",
+      examples: ["filmavond met rustig licht"],
       instructions: "Nieuwe stappen.",
       enabled: false,
     });
@@ -273,11 +1078,72 @@ describe("the settings API", () => {
     });
     expect(JSON.stringify(history)).not.toContain("Nieuwe stappen.");
     nova.audits.splice(-2);
+    const contentHistory = await call(
+      "get",
+      "/skills/filmavond/content-history",
+    );
+    expect(contentHistory).toMatchObject({
+      status: 200,
+      revisions: [
+        {
+          before: {
+            name: "Filmavond",
+            enabled: true,
+            instructions: playbook().instructions,
+          },
+          after: {
+            name: "Filmavond gewijzigd",
+            description: "Bijgewerkte omschrijving voor de avond.",
+            examples: ["filmavond met rustig licht"],
+            enabled: false,
+            instructions: "Nieuwe stappen.",
+          },
+        },
+        {
+          before: null,
+          after: {
+            name: "Filmavond",
+            enabled: true,
+            instructions: playbook().instructions,
+          },
+        },
+      ],
+    });
+    expect(JSON.stringify(contentHistory)).not.toContain("PRIVATE_TOKEN");
+    const historyPath = nova.app
+      .get(NovaConfig)
+      .dataFile("instruction-skill-history.json");
+    expect(fs.statSync(historyPath).mode & 0o777).toBe(0o600);
+    const revision = contentHistory.revisions[0];
+    const restored = await call(
+      "post",
+      `/skills/filmavond/content-history/${revision.id}/rollback`,
+    );
+    expect(restored).toMatchObject({
+      status: 200,
+      skill: {
+        name: "Filmavond",
+        enabled: true,
+        instructions: playbook().instructions,
+      },
+    });
+    await call("put", "/skills/filmavond", {
+      ...restored.skill,
+      description: "Een latere wijziging maakt oude rollback ongeldig.",
+    });
+    expect(
+      (
+        await call(
+          "post",
+          `/skills/filmavond/content-history/${revision.id}/rollback`,
+        )
+      ).status,
+    ).toBe(404);
     const overview = await call("get", "/");
     expect(
       overview.skills.find((item: { id: string }) => item.id === "filmavond")
         .instructions,
-    ).toBe("Nieuwe stappen.");
+    ).toBe(playbook().instructions);
     expect((await call("put", "/skills/bestaatniet", playbook())).status).toBe(
       404,
     );
@@ -288,12 +1154,21 @@ describe("the settings API", () => {
     expect(bad.status).toBe(400);
     expect(bad.error).toMatch(/Schrijf de instructies/);
     expect((await call("delete", "/skills/filmavond")).status).toBe(200);
+    expect(fs.readFileSync(historyPath, "utf8")).not.toContain(
+      "Nieuwe stappen.",
+    );
     const gone = await call("delete", "/skills/filmavond");
     expect(gone.status).toBe(404);
     expect(gone.error).toBe("Die vaardigheid bestaat niet.");
     expect(
       nova.audits.map((item) => (item.arguments as { what: string }).what),
-    ).toEqual(["skill-created", "skill-updated", "skill-deleted"]);
+    ).toEqual([
+      "skill-created",
+      "skill-updated",
+      "instruction_skill_rollback",
+      "skill-updated",
+      "skill-deleted",
+    ]);
     expect(
       nova.audits.every(
         (item) =>
@@ -302,6 +1177,76 @@ describe("the settings API", () => {
           item.confirmation === "admin_ui",
       ),
     ).toBe(true);
+  });
+
+  it("can remove a newly created instruction skill through its private history", async () => {
+    const created = await call(
+      "post",
+      "/skills",
+      playbook({
+        name: "Tijdelijke hulp",
+        instructions: "Een korte tijdelijke instructie.",
+      }),
+    );
+    expect(created.status).toBe(201);
+    const history = await call(
+      "get",
+      "/skills/tijdelijke_hulp/content-history",
+    );
+    expect(history).toMatchObject({
+      status: 200,
+      revisions: [
+        {
+          before: null,
+          after: { instructions: "Een korte tijdelijke instructie." },
+        },
+      ],
+    });
+    const revision = history.revisions[0];
+    const rollback = await call(
+      "post",
+      `/skills/tijdelijke_hulp/content-history/${revision.id}/rollback`,
+    );
+    expect(rollback).toMatchObject({ status: 200, removed: true });
+    expect((await call("get", "/")).skills).not.toContainEqual(
+      expect.objectContaining({ id: "tijdelijke_hulp" }),
+    );
+    expect(
+      fs.readFileSync(
+        nova.app.get(NovaConfig).dataFile("instruction-skill-history.json"),
+        "utf8",
+      ),
+    ).not.toContain("Een korte tijdelijke instructie.");
+  });
+
+  it("skips instruction history snapshots when sanitization would alter them", async () => {
+    const secretSkill = await call(
+      "post",
+      "/skills",
+      playbook({
+        name: "Private instructie",
+        instructions: "Gebruik api_key: this-is-a-private-fixture-value.",
+      }),
+    );
+    expect(secretSkill.status).toBe(201);
+    const changed = await call("put", "/skills/private_instructie", {
+      ...secretSkill.skill,
+      description: "Aangepaste omschrijving.",
+    });
+    expect(changed.status).toBe(200);
+    const history = await call(
+      "get",
+      "/skills/private_instructie/content-history",
+    );
+    expect(history).toMatchObject({ status: 200, revisions: [] });
+    expect(JSON.stringify(history)).not.toContain(
+      "this-is-a-private-fixture-value",
+    );
+    expect(
+      fs.existsSync(
+        nova.app.get(NovaConfig).dataFile("instruction-skill-history.json"),
+      ),
+    ).toBe(false);
   });
 
   it("offers an enabled webhook skill to the model at once", async () => {
@@ -416,6 +1361,37 @@ describe("the settings API", () => {
         .status,
     ).toBe(200);
     expect((await call("get", "/")).persona).toBe("Spreek me aan met Harm.");
+    expect(
+      (await call("put", "/persona/style", { style: "playful" })).personaStyle,
+    ).toBe("playful");
+    expect((await call("get", "/")).personaStyle).toBe("playful");
+    const profile = {
+      name: "Nova",
+      character: "warm en nieuwsgierig",
+      address: "je/jij",
+      avoid: "valse menselijke ervaringen",
+    };
+    expect(
+      (await call("put", "/persona/profile", { profile })).personaProfile,
+    ).toEqual(profile);
+    expect((await call("get", "/")).personaProfile).toEqual(profile);
+    expect(
+      (
+        await call("put", "/persona/profile", {
+          profile: { ...profile, extra: "ignored?" },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call("put", "/persona/profile", {
+          profile: { ...profile, name: "x".repeat(41) },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await call("put", "/persona/style", { style: "unrestricted" })).status,
+    ).toBe(400);
     expect(
       (await call("put", "/persona", { text: "x".repeat(2001) })).status,
     ).toBe(400);
@@ -801,11 +1777,16 @@ describe("the settings API", () => {
       expect(Object.keys(exported).sort()).toEqual(
         [
           "exportedAt",
+          "connections",
           "format",
           "helper",
           "helperPreferences",
           "lists",
+          "modelRoles",
+          "nodeRedFlowsIncluded",
           "persona",
+          "personaProfile",
+          "personaStyle",
           "quickActions",
           "sidebar",
           "skills",
@@ -1004,6 +1985,30 @@ describe("the wallpaper screen", () => {
       expect(set.displays[1].mode).toBe("sphere");
       expect(set.displays[0].mode).toBe("off");
       expect(sets.at(-1)).toEqual({ display: 2, mode: "sphere" });
+      const revisions = await wallpaper.api
+        .get("/api/settings/wallpaper/history")
+        .set(ADMIN);
+      expect(revisions.body.revisions[0]).toMatchObject({
+        display: 2,
+        before: "off",
+        after: "sphere",
+      });
+      const revisionId = revisions.body.revisions[0].id as string;
+      const restored = await wallpaper.api
+        .post(`/api/settings/wallpaper/history/${revisionId}/rollback`)
+        .set(ADMIN)
+        .send({});
+      expect(restored.status).toBe(200);
+      expect(restored.body.displays[1].mode).toBe("off");
+      expect(sets.at(-1)).toEqual({ display: 2, mode: "off" });
+      expect(
+        (
+          await wallpaper.api
+            .post(`/api/settings/wallpaper/history/${revisionId}/rollback`)
+            .set(ADMIN)
+            .send({})
+        ).status,
+      ).toBe(400);
       expect((await send("post", { display: 1, mode: "zwart" })).status).toBe(
         400,
       );
@@ -1076,6 +2081,27 @@ describe("the helper overlay choice", () => {
       });
       const again = await app.api.get("/api/settings/helper").set(ADMIN);
       expect(again.body.settings).toEqual({ mode: "helper", display: 2 });
+      const history = await app.api
+        .get("/api/settings/helper/history")
+        .set(ADMIN);
+      expect(history.body.revisions).toHaveLength(1);
+      expect(history.body.revisions[0]).toMatchObject({
+        before: { mode: "wallpaper", display: 0 },
+        after: { mode: "helper", display: 2 },
+      });
+      const rollback = await app.api
+        .post(
+          `/api/settings/helper/history/${history.body.revisions[0].id}/rollback`,
+        )
+        .set(ADMIN);
+      expect(rollback.body).toMatchObject({
+        settings: { mode: "wallpaper", display: 0 },
+        applied: false,
+        error: "Er is geen Windows-agent ingesteld.",
+      });
+      expect(
+        (await app.api.get("/api/settings/helper").set(ADMIN)).body.settings,
+      ).toEqual({ mode: "wallpaper", display: 0 });
     } finally {
       await app.app.close();
     }
@@ -1118,6 +2144,66 @@ describe("the helper overlay choice", () => {
       ).toBe(true);
     } finally {
       await app.app.close();
+    }
+  });
+
+  it("rolls back helper history only when the current choice still matches", async () => {
+    const log: unknown[] = [];
+    const pin = { ...ADMIN, "x-nova-pin": "helper-history-pin" };
+    const directory = fs.mkdtempSync(path.join("/tmp", "nova-helper-mode-"));
+    const app = await createApp({
+      env: {
+        NOVA_ADMIN_PIN: "helper-history-pin",
+        NOVA_DATA_DIR: directory,
+      },
+      wallpaper: port(log, { error: null }),
+    });
+    try {
+      const save = (mode: string, display: number) =>
+        app.api.post("/api/settings/helper").set(pin).send({ mode, display });
+      expect((await app.api.get("/api/settings/helper/history")).status).toBe(
+        401,
+      );
+      await save("both", 1);
+      const firstHistory = await app.api
+        .get("/api/settings/helper/history")
+        .set(pin);
+      expect(firstHistory.body.revisions).toHaveLength(1);
+      expect(
+        fs.statSync(
+          path.join(
+            path.dirname(app.store["file" as never] as string),
+            "helper-mode-history.json",
+          ),
+        ).mode & 0o777,
+      ).toBe(0o600);
+      const firstId = firstHistory.body.revisions[0].id;
+      await save("helper", 2);
+      const stale = await app.api
+        .post(`/api/settings/helper/history/${firstId}/rollback`)
+        .set(pin);
+      expect(stale.status).toBe(404);
+
+      const currentHistory = await app.api
+        .get("/api/settings/helper/history")
+        .set(pin);
+      const currentId = currentHistory.body.revisions[0].id;
+      const rollback = await app.api
+        .post(`/api/settings/helper/history/${currentId}/rollback`)
+        .set(pin);
+      expect(rollback.body).toMatchObject({
+        settings: { mode: "both", display: 1 },
+        applied: true,
+      });
+      expect(log.at(-1)).toEqual({ mode: "both", display: 1 });
+      const afterRollback = await app.api
+        .get("/api/settings/helper/history")
+        .set(pin);
+      expect(afterRollback.body.revisions[0].revertedFrom).toBe(currentId);
+      expect(JSON.stringify(afterRollback.body)).not.toMatch(/token|secret/i);
+    } finally {
+      await app.app.close();
+      fs.rmSync(directory, { recursive: true, force: true });
     }
   });
 

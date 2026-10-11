@@ -1,9 +1,25 @@
-import { Controller, Get, Param, UseGuards } from "@nestjs/common";
-import type { NativeGatewayReport, NativeSkillDocument } from "@nova/contracts";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
+import type {
+  NativeGatewayReport,
+  NativeMemoryRecords,
+  NativeSkillDocument,
+} from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { SettingsGuard } from "./settings.guard.js";
+import { NativeMemorySettingsService } from "./native-memory-settings.service.js";
+import { NativeMemoryRecordsService } from "./native-memory-records.service.js";
+import { ValidationError } from "../core/errors/validation.error.js";
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -24,6 +40,8 @@ export class NativeGatewayController {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
+    private readonly memory: NativeMemorySettingsService,
+    private readonly memoryRecordsManager: NativeMemoryRecordsService,
   ) {}
 
   private assertGateway(): void {
@@ -43,14 +61,16 @@ export class NativeGatewayController {
       skills: [],
       documentation: [],
       prompt: { enabled: null, prefixCharacters: null, suffixCharacters: null },
+      memory: { enabled: null, backend: null, maxTokens: null },
     };
     try {
       this.assertGateway();
       const owner = this.management.scope;
-      const [runtime, catalog, prompt] = await Promise.all([
+      const [runtime, catalog, prompt, memory] = await Promise.all([
         this.management.request("/api/skills?page=1&limit=200"),
         this.management.skills(),
         this.management.request("/api/settings/system-prompt"),
+        this.memory.status(),
       ]);
       const registry = object(runtime);
       const config = object(prompt);
@@ -109,10 +129,212 @@ export class NativeGatewayController {
               ? config.suffixPrompt.length
               : null,
         },
+        memory,
       };
     } catch {
       return empty;
     }
+  }
+
+  @Get("memory")
+  memoryStatus() {
+    return this.memory.status();
+  }
+
+  @Get("memories")
+  async memoryRecords(
+    @Query("offset") rawOffset?: string,
+  ): Promise<NativeMemoryRecords> {
+    try {
+      this.assertGateway();
+      const offset = rawOffset === undefined ? 0 : Number(rawOffset);
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000)
+        throw new ValidationError(["Ongeldige geheugenpagina."]);
+      const owner = this.management.scope;
+      const query = new URLSearchParams({
+        apiKeyId: owner,
+        limit: "50",
+        offset: String(offset),
+      });
+      const response = object(
+        await this.management.request(`/api/memory?${query}`),
+      );
+      if (!Array.isArray(response.data)) throw new Error("invalid memories");
+      const rows = response.data.slice(0, 50).flatMap((raw: unknown) => {
+        const row = object(raw);
+        const metadata = object(row.metadata);
+        const id = identifier(row.id);
+        if (
+          !id ||
+          row.apiKeyId !== owner ||
+          metadata.application !== "jarvis" ||
+          typeof row.content !== "string"
+        )
+          return [];
+        return [
+          {
+            id,
+            text: text(row.content, 4000),
+            ...(typeof row.createdAt === "string"
+              ? { created_at: text(row.createdAt, 40) }
+              : {}),
+            ...(typeof row.updatedAt === "string"
+              ? { updated_at: text(row.updatedAt, 40) }
+              : {}),
+          },
+        ];
+      });
+      return {
+        memories: rows,
+        next: response.data.length === 50 ? offset + 50 : null,
+      };
+    } catch {
+      return {
+        memories: [],
+        next: null,
+        error: "NOVA-geheugenrecords konden niet veilig worden geladen.",
+      };
+    }
+  }
+
+  @Post("memories/delete/prepare")
+  @HttpCode(200)
+  prepareMemoryRecordDelete(@Body() body: unknown) {
+    this.assertGateway();
+    return this.memoryRecordsManager.prepare(body);
+  }
+
+  @Post("memories/delete-many/prepare")
+  @HttpCode(200)
+  prepareMemoryRecordsDelete(@Body() body: unknown) {
+    this.assertGateway();
+    return this.memoryRecordsManager.prepareDeleteMany(body);
+  }
+
+  @Post("memories/update/prepare")
+  @HttpCode(200)
+  prepareMemoryRecordUpdate(@Body() body: unknown) {
+    this.assertGateway();
+    return this.memoryRecordsManager.prepareUpdate(body);
+  }
+
+  @Post("memories/delete/confirm")
+  @HttpCode(200)
+  confirmMemoryRecordDelete(@Body() body: unknown) {
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    const input = body as Record<string, unknown>;
+    if (
+      Object.keys(input).some(
+        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
+      ) ||
+      typeof input.sessionId !== "string" ||
+      typeof input.confirmationId !== "string" ||
+      typeof input.approve !== "boolean"
+    )
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    return this.memoryRecordsManager.confirm(
+      input.sessionId,
+      input.confirmationId,
+      input.approve,
+    );
+  }
+
+  @Post("memories/delete-many/confirm")
+  @HttpCode(200)
+  confirmMemoryRecordsDelete(@Body() body: unknown) {
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    const input = body as Record<string, unknown>;
+    if (
+      Object.keys(input).some(
+        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
+      ) ||
+      typeof input.sessionId !== "string" ||
+      typeof input.confirmationId !== "string" ||
+      typeof input.approve !== "boolean"
+    )
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    return this.memoryRecordsManager.confirm(
+      input.sessionId,
+      input.confirmationId,
+      input.approve,
+    );
+  }
+
+  @Post("memories/update/confirm")
+  @HttpCode(200)
+  confirmMemoryRecordUpdate(@Body() body: unknown) {
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    const input = body as Record<string, unknown>;
+    if (
+      Object.keys(input).some(
+        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
+      ) ||
+      typeof input.sessionId !== "string" ||
+      typeof input.confirmationId !== "string" ||
+      typeof input.approve !== "boolean"
+    )
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    return this.memoryRecordsManager.confirm(
+      input.sessionId,
+      input.confirmationId,
+      input.approve,
+    );
+  }
+
+  @Get("memory/history")
+  memoryHistory() {
+    return this.memory.history();
+  }
+
+  @Post("memory/prepare")
+  @HttpCode(200)
+  prepareMemory(@Body() body: unknown) {
+    return this.memory.prepare(body);
+  }
+
+  @Post("memory/rollback/prepare")
+  @HttpCode(200)
+  prepareMemoryRollback(@Body() body: unknown) {
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      throw new ValidationError(["Ongeldige geschiedenisactie."]);
+    const input = body as Record<string, unknown>;
+    if (
+      Object.keys(input).some(
+        (key) => !["revisionId", "acknowledgeGlobal"].includes(key),
+      ) ||
+      typeof input.revisionId !== "string" ||
+      typeof input.acknowledgeGlobal !== "boolean"
+    )
+      throw new ValidationError(["Ongeldige geschiedenisactie."]);
+    return this.memory.prepareRollback(
+      input.revisionId,
+      input.acknowledgeGlobal,
+    );
+  }
+
+  @Post("memory/confirm")
+  @HttpCode(200)
+  confirmMemory(@Body() body: unknown) {
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    const input = body as Record<string, unknown>;
+    if (
+      Object.keys(input).some(
+        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
+      ) ||
+      typeof input.sessionId !== "string" ||
+      typeof input.confirmationId !== "string" ||
+      typeof input.approve !== "boolean"
+    )
+      throw new ValidationError(["Ongeldige bevestiging."]);
+    return this.memory.confirm(
+      input.sessionId,
+      input.confirmationId,
+      input.approve,
+    );
   }
 
   @Get("documentation/:id")

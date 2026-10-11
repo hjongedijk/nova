@@ -1,11 +1,19 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { WindowsAgentStatus } from "@nova/contracts";
+  import type {
+    HelperHotkeyHistory,
+    HelperHotkeyRevision,
+    WindowsAgentStatus,
+    WindowsHelperDebugStatus,
+  } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
   import {
     getHelperHotkeys,
     saveHelperHotkeys,
     getWindowsAgentStatus,
+    getWindowsHelperDebug,
+    getHelperHotkeyHistory,
+    rollbackHelperHotkeys,
   } from "#lib/api/settings.ts";
   const keys = [
     { id: "open", label: "Openen" },
@@ -14,10 +22,15 @@
     { id: "desktop", label: "Bureaublad" },
   ];
   let status = $state<WindowsAgentStatus | null>(null);
+  let helperDebug = $state<WindowsHelperDebugStatus | null>(null);
+  let debugBusy = $state(false);
   let hotkeys = $state<Record<string, string>>({});
   let busy = $state(false);
   let ready = $state(false);
   let note = $state("");
+  let history = $state<HelperHotkeyHistory | null>(null);
+  let historyError = $state("");
+  let pendingRollback = $state<HelperHotkeyRevision | null>(null);
   const warnings = (value: unknown): string =>
     Array.isArray(value)
       ? value
@@ -75,6 +88,7 @@
         hotkeys = { ...result.preferences.hotkeys };
         note =
           warnings(result.preferences.warnings) ||
+          result.historyWarning ||
           "Sneltoetsen opgeslagen op de Windows-pc.";
       } else
         note =
@@ -84,6 +98,60 @@
         "Sneltoetsen zijn niet opgeslagen. Controleer de verbinding of de beheer-PIN.";
     } finally {
       busy = false;
+    }
+  }
+  async function measureHelper() {
+    debugBusy = true;
+    helperDebug = null;
+    try {
+      helperDebug = await getWindowsHelperDebug();
+    } catch {
+      helperDebug = {
+        available: false,
+        helper: null,
+        view: null,
+        display: null,
+        checkedAt: null,
+        error:
+          "De helpermeting kon niet worden geladen. Controleer de beheer-PIN.",
+      };
+    } finally {
+      debugBusy = false;
+    }
+  }
+  async function loadHistory() {
+    historyError = "";
+    try {
+      history = await getHelperHotkeyHistory();
+    } catch {
+      historyError = "De sneltoetsgeschiedenis kon niet worden geladen.";
+    }
+  }
+  async function restore(revision: HelperHotkeyRevision) {
+    busy = true;
+    historyError = "";
+    try {
+      const result = await rollbackHelperHotkeys(revision.id);
+      if (!result.ok || !result.hotkeys) {
+        historyError =
+          result.error || "Herstel is niet bevestigd door de Windows-pc.";
+        return;
+      }
+      hotkeys = { ...result.hotkeys };
+      note = [
+        "Sneltoetsen zijn op de Windows-pc hersteld en gecontroleerd.",
+        warnings(result.warnings),
+        result.historyWarning,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      await loadHistory();
+    } catch {
+      historyError =
+        "Herstel kon niet worden gecontroleerd. Vernieuw de pc-status.";
+    } finally {
+      busy = false;
+      pendingRollback = null;
     }
   }
   onMount(() => {
@@ -127,6 +195,27 @@
             : status.display}
       </dd>
     </dl>
+    <details>
+      <summary>Helpervenster meten</summary>
+      <p>
+        Open de helper op de Windows-pc en laad de actuele venster-, scherm-,
+        DPI- en stijlmeting.
+      </p>
+      <Button onclick={measureHelper} disabled={busy || debugBusy}>
+        {debugBusy ? "Meting laden…" : "Meet helpervenster"}
+      </Button>
+      {#if helperDebug?.available}
+        <p>
+          Helperweergave: {helperDebug.view ?? "onbekend"} · scherm: {helperDebug.display ??
+            "onbekend"} · gemeten: {helperDebug.checkedAt
+            ? new Date(helperDebug.checkedAt).toLocaleString()
+            : "onbekend"}
+        </p>
+        <pre aria-label="Helpervenstermeting">{helperDebug.helper}</pre>
+      {:else if helperDebug?.error}
+        <p role="status">{helperDebug.error}</p>
+      {/if}
+    </details>
   {:else if status}<p>{status.error}</p>{/if}
   <details>
     <summary>Sneltoetsen op de Windows-pc</summary>
@@ -147,6 +236,57 @@
         <Button type="submit">Sneltoetsen opslaan</Button>
       </fieldset>
     </form>
+  </details>
+  <details>
+    <summary>Wijzigingsgeschiedenis sneltoetsen</summary>
+    <Button onclick={loadHistory} disabled={busy}>Laad sneltoetshistorie</Button
+    >
+    {#if historyError}<p role="status">{historyError}</p>{/if}
+    {#if history}
+      {#if history.truncated}<p>
+          Alleen de 50 nieuwste wijzigingen worden getoond.
+        </p>{/if}
+      {#if !history.revisions.length}<p>
+          Nog geen sneltoetswijzigingen opgeslagen.
+        </p>{/if}
+      <ul>
+        {#each history.revisions.slice().reverse() as revision (revision.id)}
+          <li>
+            <time datetime={revision.at}
+              >{new Date(revision.at).toLocaleString()}</time
+            >
+            <p>
+              Van: {revision.before.open} · {revision.before.speak} · {revision
+                .before.mute} · {revision.before.desktop}
+            </p>
+            <p>
+              Naar: {revision.after.open} · {revision.after.speak} · {revision
+                .after.mute} · {revision.after.desktop}
+            </p>
+            {#if pendingRollback?.id === revision.id}
+              <div role="group" aria-label="Sneltoetsen herstellen bevestigen">
+                <p>
+                  Dit vervangt de huidige sneltoetsen op de Windows-pc. NOVA
+                  controleert eerst of ze sinds deze wijziging niet zijn
+                  aangepast.
+                </p>
+                <Button onclick={() => restore(revision)} disabled={busy}
+                  >Herstel en controleer op pc</Button
+                >
+                <Button onclick={() => (pendingRollback = null)} disabled={busy}
+                  >Annuleer herstel</Button
+                >
+              </div>
+            {:else}
+              <Button
+                onclick={() => (pendingRollback = revision)}
+                disabled={busy}>Herstel deze sneltoetsen</Button
+              >
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
   </details>
   {#if note}<p role="status">{note}</p>{/if}
 </section>

@@ -12,12 +12,16 @@ import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { SettingsStore } from "./store/settings.store.js";
-import { normalizeSkill, type StoredSkill } from "./skills/skills.js";
+import {
+  normalizeSkill,
+  toolNameFor,
+  type StoredSkill,
+} from "./skills/skills.js";
 
 const MAX_REVISIONS = 40;
-const cleanContent = (
+const cleanSnapshot = (
   value: unknown,
-): { version: number; instructions: string } | null => {
+): InstructionSkillContentRevision["before"] | null => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   if (
@@ -26,10 +30,36 @@ const cleanContent = (
     row.instructions.length > 4000
   )
     return null;
-  return sanitize({ version: row.version, instructions: row.instructions }) as {
-    version: number;
-    instructions: string;
+  const snapshot: InstructionSkillContentRevision["before"] = {
+    version: row.version as number,
+    instructions: row.instructions,
   };
+  const hasMetadata = ["name", "description", "examples", "enabled"].some(
+    (key) => Object.hasOwn(row, key),
+  );
+  if (hasMetadata) {
+    if (
+      typeof row.name !== "string" ||
+      row.name.length > 60 ||
+      typeof row.description !== "string" ||
+      row.description.length > 300 ||
+      !Array.isArray(row.examples) ||
+      row.examples.length > 8 ||
+      row.examples.some(
+        (item) => typeof item !== "string" || item.length > 120,
+      ) ||
+      typeof row.enabled !== "boolean"
+    )
+      return null;
+    snapshot.name = row.name;
+    snapshot.description = row.description;
+    snapshot.examples = row.examples as string[];
+    snapshot.enabled = row.enabled;
+  }
+  const safe = sanitize(snapshot);
+  // Never persist a lossy redaction that would later be restored as real config.
+  if (!isDeepStrictEqual(safe, snapshot)) return null;
+  return safe;
 };
 
 /** Private, bounded history for instruction text; webhook configuration is never stored here. */
@@ -54,15 +84,15 @@ export class InstructionSkillHistory {
           if (!item || typeof item !== "object" || Array.isArray(item))
             return [];
           const row = item as Record<string, unknown>;
-          const before = cleanContent(row.before);
-          const after = cleanContent(row.after);
+          const before = row.before === null ? null : cleanSnapshot(row.before);
+          const after = cleanSnapshot(row.after);
           if (
             typeof row.id !== "string" ||
             !/^[0-9a-f-]{36}$/i.test(row.id) ||
             typeof row.at !== "string" ||
             !Number.isFinite(Date.parse(row.at)) ||
             typeof row.skillId !== "string" ||
-            !before ||
+            (row.before !== null && !before) ||
             !after
           )
             return [];
@@ -100,8 +130,19 @@ export class InstructionSkillHistory {
 
   record(before: StoredSkill, after: StoredSkill): void {
     if (before.type !== "instruction" || after.type !== "instruction") return;
-    const safeBefore = cleanContent(before);
-    const safeAfter = cleanContent(after);
+    const project = (skill: StoredSkill) =>
+      skill.type === "instruction"
+        ? {
+            version: skill.version,
+            instructions: skill.instructions,
+            name: skill.name,
+            description: skill.description,
+            examples: skill.examples,
+            enabled: skill.enabled,
+          }
+        : null;
+    const safeBefore = cleanSnapshot(project(before));
+    const safeAfter = cleanSnapshot(project(after));
     if (!safeBefore || !safeAfter || isDeepStrictEqual(safeBefore, safeAfter))
       return;
     try {
@@ -118,6 +159,39 @@ export class InstructionSkillHistory {
     } catch {
       /* History failure must not undo a successful settings save. */
     }
+  }
+
+  recordCreated(skill: StoredSkill): void {
+    if (skill.type !== "instruction") return;
+    const after = cleanSnapshot({
+      version: skill.version,
+      instructions: skill.instructions,
+      name: skill.name,
+      description: skill.description,
+      examples: skill.examples,
+      enabled: skill.enabled,
+    });
+    if (!after) return;
+    try {
+      this.write([
+        ...this.read(),
+        {
+          id: crypto.randomUUID(),
+          skillId: skill.id,
+          at: new Date().toISOString(),
+          before: null,
+          after,
+        },
+      ]);
+    } catch {
+      /* History failure must not undo a successful skill save. */
+    }
+  }
+
+  forget(id: string): void {
+    const rows = this.read();
+    const remaining = rows.filter((row) => row.skillId !== id);
+    if (remaining.length !== rows.length) this.write(remaining);
   }
 
   list(id: string): InstructionSkillContentHistory {
@@ -137,7 +211,12 @@ export class InstructionSkillHistory {
   rollback(
     id: string,
     revisionId: string,
-  ): { ok: true; skill: InstructionSkill } {
+  ): {
+    ok: true;
+    skill?: InstructionSkill;
+    removed?: true;
+    historyWarning?: string;
+  } {
     const revision = this.read().find(
       (r) => r.id === revisionId && r.skillId === id,
     );
@@ -149,7 +228,7 @@ export class InstructionSkillHistory {
     if (
       !current ||
       current.type !== "instruction" ||
-      current.instructions !== revision.after.instructions
+      !this.matches(current, revision.after)
     )
       throw new NotFoundException(
         "De vaardigheid is daarna gewijzigd. Terugdraaien is afgebroken.",
@@ -161,18 +240,23 @@ export class InstructionSkillHistory {
       if (
         !latest ||
         latest.type !== "instruction" ||
-        latest.instructions !== revision.after.instructions
+        !this.matches(latest, revision.after)
       )
         throw new NotFoundException(
           "De vaardigheid is intussen gewijzigd. Terugdraaien is afgebroken.",
         );
-      const restored = normalizeSkill(
-        { ...latest, instructions: revision.before.instructions },
-        { existing: latest },
-      );
-      state.skills = state.skills.map((s) =>
-        (s as StoredSkill).id === id ? (restored as never) : s,
-      );
+      if (revision.before === null) {
+        state.skills = state.skills.filter((s) => (s as StoredSkill).id !== id);
+        delete state.toolOverrides[toolNameFor(latest)];
+      } else {
+        const restored = normalizeSkill(
+          { ...latest, ...revision.before },
+          { existing: latest },
+        );
+        state.skills = state.skills.map((s) =>
+          (s as StoredSkill).id === id ? (restored as never) : s,
+        );
+      }
     });
     this.audit.record({
       sessionId: "settings",
@@ -189,7 +273,45 @@ export class InstructionSkillHistory {
     const skill = (this.settings.get().skills as unknown as StoredSkill[]).find(
       (s) => s.id === id,
     )!;
+    if (revision.before === null) {
+      let historyWarning: string | undefined;
+      try {
+        this.forget(id);
+      } catch {
+        historyWarning =
+          "De vaardigheid is verwijderd, maar de private geschiedenis kon niet worden gewist.";
+      }
+      return {
+        ok: true,
+        removed: true,
+        ...(historyWarning ? { historyWarning } : {}),
+      };
+    }
     this.record(current, skill);
     return { ok: true, skill: skill as InstructionSkill };
+  }
+
+  private matches(
+    skill: StoredSkill,
+    snapshot: InstructionSkillContentRevision["after"],
+  ): boolean {
+    if (skill.type !== "instruction") return false;
+    if (skill.instructions !== snapshot.instructions) return false;
+    if (snapshot.name === undefined) return true; // version-one history entry
+    if (skill.version !== snapshot.version) return false;
+    return isDeepStrictEqual(
+      {
+        name: skill.name,
+        description: skill.description,
+        examples: skill.examples,
+        enabled: skill.enabled,
+      },
+      {
+        name: snapshot.name,
+        description: snapshot.description,
+        examples: snapshot.examples,
+        enabled: snapshot.enabled,
+      },
+    );
   }
 }

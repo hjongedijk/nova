@@ -1,5 +1,6 @@
 import type { PendingConfirmation } from "./chat.js";
 import type { Risk, ToolInfo } from "./tools.js";
+import type { ModelRolePreferences } from "./model-roles.js";
 
 /* ---------- skills ---------- */
 
@@ -112,13 +113,33 @@ export interface InstructionSkillContentRevision {
   id: string;
   skillId: string;
   at: string;
-  before: { version: number; instructions: string };
-  after: { version: number; instructions: string };
+  before: {
+    version: number;
+    instructions: string;
+    name?: string;
+    description?: string;
+    examples?: string[];
+    enabled?: boolean;
+  } | null;
+  after: {
+    version: number;
+    instructions: string;
+    name?: string;
+    description?: string;
+    examples?: string[];
+    enabled?: boolean;
+  };
 }
 export interface InstructionSkillContentHistory {
   currentVersion: number;
   revisions: InstructionSkillContentRevision[];
   truncated: boolean;
+}
+export interface InstructionSkillContentRollbackResult {
+  ok: true;
+  skill?: InstructionSkill;
+  removed?: true;
+  historyWarning?: string;
 }
 
 /** POST /settings/skills/test */
@@ -217,6 +238,22 @@ export interface ListWidget extends WidgetBase {
 /** A panel as the settings screen has it (with the address of its data source). */
 export type Widget = NoteWidget | ButtonsWidget | ValueWidget | ListWidget;
 
+export type WidgetDisplaySnapshot =
+  | { type: "value"; title: string; unit: string }
+  | { type: "list"; title: string; itemPath: string; max: number };
+export interface WidgetDisplayRevision {
+  id: string;
+  at: string;
+  widgetId: string;
+  before: WidgetDisplaySnapshot;
+  after: WidgetDisplaySnapshot;
+  revertedFrom?: string;
+}
+export interface WidgetDisplayHistory {
+  revisions: WidgetDisplayRevision[];
+  truncated: boolean;
+}
+
 /** A panel as the home screen has it: the address of a data source stays on the server. */
 export type PublicWidget =
   | NoteWidget
@@ -277,6 +314,9 @@ export type MaxPages = Record<SidebarColumn, number>;
 
 /* ---------- abilities, persona, quick actions ---------- */
 
+export type PersonaStyleId =
+  "professional" | "friendly" | "playful" | "concise";
+
 export interface Ability {
   id: string;
   name: string;
@@ -327,6 +367,8 @@ export interface SettingsOverview {
     createdAt: number;
   }[];
   persona: string;
+  personaStyle: PersonaStyleId;
+  personaProfile: PersonaProfile;
   quickActions: QuickAction[];
   quickActionsAreDefault: boolean;
   skills: Skill[];
@@ -337,6 +379,35 @@ export interface SettingsOverview {
   abilities: Ability[];
   tools: ToolInfo[];
   pinRequired: boolean;
+}
+
+/** User-editable identity cues for the conversation role only. */
+export interface PersonaProfile {
+  name: string;
+  character: string;
+  address: string;
+  avoid: string;
+}
+
+export interface PersonaPreferencesSnapshot {
+  style: PersonaStyleId;
+  profile: PersonaProfile;
+}
+export interface PersonaPreferencesRevision {
+  id: string;
+  at: string;
+  before: PersonaPreferencesSnapshot;
+  after: PersonaPreferencesSnapshot;
+  revertedFrom?: string;
+}
+export interface PersonaPreferencesHistory {
+  revisions: PersonaPreferencesRevision[];
+  truncated: boolean;
+}
+export interface PersonaPreferencesRollbackResult {
+  ok: true;
+  snapshot: PersonaPreferencesSnapshot;
+  auditWarning?: string;
 }
 
 /** GET /settings/public: no PIN needed. */
@@ -354,12 +425,24 @@ export interface SettingsBackup {
   /** Optional to retain compatibility with earlier version-one exports. */
   helper?: { mode: HelperMode; display: number };
   helperPreferences?: HelperPreferences;
+  /** Optional in older v1 files; model IDs are rechecked against free policy before use. */
+  modelRoles?: ModelRolePreferences;
+  /** Optional in older v1 files. Flow definitions only; credentials are never exported. */
+  nodeRedFlows?: Record<string, unknown>[];
+  /** False means Node-RED access was not configured when this backup was created. */
+  nodeRedFlowsIncluded?: boolean;
   /** Optional in older v1 files. Contains named user lists, not timers or alerts. */
   lists?: Record<string, SettingsBackupListItem[]>;
+  /** Optional in older v1 files. Excludes credentials and preserves those on import. */
+  connections?: Record<string, Record<string, string | boolean>>;
   format: "nova-settings";
   version: 1;
   exportedAt: string;
   persona: string;
+  /** Optional for compatibility with older version-one backups. */
+  personaStyle?: PersonaStyleId;
+  /** Optional in older v1 files. */
+  personaProfile?: PersonaProfile;
   quickActions: QuickAction[] | null;
   toolOverrides: Record<string, ToolOverride>;
   skills: Skill[];
@@ -373,18 +456,76 @@ export interface SettingsBackupListItem {
   addedAt: string;
 }
 
+/** Home Assistant entities are allowed by selected area, device, or entity ID. */
+export interface HomeAssistantAccessPolicy {
+  mode: "all" | "allowlist";
+  areaIds: string[];
+  deviceIds: string[];
+  entityIds: string[];
+}
+
+export interface HomeAssistantAccessRevision {
+  id: string;
+  at: string;
+  before: HomeAssistantAccessPolicy;
+  after: HomeAssistantAccessPolicy;
+  revertedFrom?: string;
+}
+
+export interface HomeAssistantAccessHistory {
+  revisions: HomeAssistantAccessRevision[];
+  truncated: boolean;
+}
+
+/** Allowlist for infrastructure targets exposed to NOVA's tools. */
+export interface ManagedTargetsAccessPolicy {
+  mode: "all" | "allowlist";
+  proxmoxNodeIds: string[];
+  /** Stable node/vmid pair, formatted as `<node>/<vmid>`. */
+  proxmoxGuestIds: string[];
+  termixHostIds: string[];
+  pangolinSiteIds: string[];
+  pangolinResourceIds: string[];
+}
+
+export interface ManagedTargetsAccessRevision {
+  id: string;
+  at: string;
+  before: ManagedTargetsAccessPolicy;
+  after: ManagedTargetsAccessPolicy;
+  revertedFrom?: string;
+}
+
+export interface ManagedTargetsAccessHistory {
+  revisions: ManagedTargetsAccessRevision[];
+  truncated: boolean;
+}
+
 export interface ImportResult {
   ok: true;
   imported: number;
   importedLists: number;
+  importedFlows: number;
+  changedConnections: number;
   missingSecrets: MissingSecret[];
 }
 
 export interface SettingsImportSummary {
+  connectionsChanged: boolean;
+  changedConnections: number;
+  connectionChanges: {
+    service: string;
+    before: Record<string, string | boolean>;
+    after: Record<string, string | boolean>;
+  }[];
   helperChanged: boolean;
   helperPreferencesChanged: boolean;
+  modelRolesChanged: boolean;
   listsChanged: boolean;
+  nodeRedFlowsChanged: boolean;
   personaChanged: boolean;
+  personaProfileChanged: boolean;
+  personaStyleChanged: boolean;
   quickActionsChanged: boolean;
   toolOverridesChanged: boolean;
   sidebarChanged: boolean;
@@ -396,6 +537,9 @@ export interface SettingsImportSummary {
   incomingLists: number;
   totalLists: number;
   removedLists: number;
+  incomingFlows: number;
+  totalFlows: number;
+  removedFlows: number;
   replacedSkills: number;
   removedSkills: number;
   removedWidgets: number;
@@ -436,6 +580,7 @@ export type WallpaperState =
   | {
       available: true;
       displays: WallpaperDisplay[];
+      historyWarning?: string;
       /** What the agent is running now (absent on an agent that predates the helper). */
       mode?: HelperMode;
       helperDisplay?: number;
@@ -444,6 +589,7 @@ export type WallpaperState =
       available: false;
       reason: "no-agent" | "old-agent" | "unreachable";
       error?: string;
+      historyWarning?: string;
     };
 
 /** The helper choice as saved in NOVA, next to what the agent on the PC reports. */
@@ -453,6 +599,7 @@ export interface HelperState {
   /** False when the choice was saved but the agent could not apply it (PC off, agent too old). */
   applied?: boolean;
   error?: string;
+  historyWarning?: string;
 }
 
 /** Private settings projection of /v1/status; excludes user, host and process details. */
@@ -463,6 +610,16 @@ export interface WindowsAgentStatus {
   paused: boolean | null;
   mode: HelperMode | null;
   display: number | null;
+  error?: string;
+}
+
+/** Read-only live window measurement returned by the Windows helper agent. */
+export interface WindowsHelperDebugStatus {
+  available: boolean;
+  helper: string | null;
+  view: string | null;
+  display: number | null;
+  checkedAt: string | null;
   error?: string;
 }
 
@@ -529,17 +686,139 @@ export interface MqttOverview {
   recent: MqttRecentMessage[];
 }
 
+export interface McpServerStatus {
+  servers: Array<{
+    id: string;
+    description?: string;
+    rights?: string;
+    howToDisable?: string;
+    enabled: boolean;
+    connected: boolean;
+    toolCount: number;
+    defaultRisk: Risk;
+    tools: Array<{ name: string; risk: Risk }>;
+  }>;
+}
+
+export interface McpServerCatalog {
+  installed: string[];
+  available: { id: string; description: string; rights: string; risk: Risk }[];
+}
+
+export interface McpServerActivity {
+  events: Array<{
+    at: string;
+    kind:
+      | "connected"
+      | "connection_failed"
+      | "disconnected"
+      | "connection_tested"
+      | "connection_test_failed"
+      | "tool_succeeded"
+      | "tool_failed";
+    tool?: string;
+  }>;
+  truncated: boolean;
+}
+
+export interface McpSettingRevision {
+  id: string;
+  at: string;
+  server: string;
+  change:
+    | { kind: "enabled"; before: boolean; after: boolean }
+    | {
+        kind: "tool-risk";
+        tool: string;
+        before: Risk;
+        after: Risk;
+      };
+}
+
+export interface McpSettingHistory {
+  revisions: McpSettingRevision[];
+  truncated: boolean;
+}
+
 export interface QdrantOverview {
   ok: boolean;
   message: string;
   truncated: boolean;
+  activeMemoryCollection?: string | null;
   collections: {
     name: string;
     points: number | null;
     indexedVectors: number | null;
     segments: number | null;
+    diskBytes: number | null;
+    ramBytes: number | null;
     status: string;
   }[];
+}
+
+export interface WorkspaceProject {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface WorkspaceProjectsReport {
+  version: 1;
+  activeId: string | null;
+  projects: WorkspaceProject[];
+  historyWarning?: string;
+}
+
+export interface WorkspaceProjectSelectionHistory {
+  revisions: {
+    id: string;
+    at: string;
+    beforeId: string | null;
+    afterId: string | null;
+  }[];
+  truncated: boolean;
+}
+
+export interface WorkspaceProjectSelectionPrepared {
+  ok: boolean;
+  error?: string;
+  fromName?: string;
+  toName?: string;
+  action?: PendingConfirmation;
+}
+
+export interface WorkspaceProjectSelectionResult {
+  ok: boolean;
+  verified?: boolean;
+  error?: string;
+  auditWarning?: string;
+  historyWarning?: string;
+}
+
+export interface QdrantIndexHistory {
+  activeCollection: string | null;
+  revisions: { id: string; at: string; points: number; current: boolean }[];
+}
+
+export interface ManagedTargetInventory {
+  checkedAt: string;
+  proxmox: {
+    configured: boolean;
+    error?: string;
+    nodes: { id?: string; name: string }[];
+    guests: { id?: string; name: string }[];
+  };
+  termix: {
+    configured: boolean;
+    error?: string;
+    hosts: { id?: string; name: string }[];
+  };
+  pangolin: {
+    configured: boolean;
+    error?: string;
+    sites: { id?: string; name: string }[];
+    resources: { id?: string; name: string }[];
+  };
 }
 
 export interface ServiceConnectionWrite {
@@ -558,6 +837,48 @@ export interface ServiceRestartResult {
   error?: string;
   scheduled?: boolean;
 }
+export type StackServiceId =
+  | "nova"
+  | "node-red"
+  | "omniroute"
+  | "mqtt"
+  | "qdrant"
+  | "home-assistant"
+  | "stack-control";
+export interface StackServiceStatus {
+  id: StackServiceId;
+  label: string;
+  state:
+    | "running"
+    | "exited"
+    | "created"
+    | "restarting"
+    | "paused"
+    | "dead"
+    | "missing"
+    | "unknown";
+  health: "healthy" | "unhealthy" | "starting" | null;
+  canRestart: boolean;
+  revision: string;
+  startedAt?: string | null;
+}
+export interface StackControlStatus {
+  available: boolean;
+  reason?: string;
+  services: StackServiceStatus[];
+}
+export interface StackRestartPrepared {
+  ok: boolean;
+  service?: StackServiceId;
+  label?: string;
+  action?: PendingConfirmation;
+  error?: string;
+}
+export interface StackRestartResult {
+  ok: boolean;
+  service?: StackServiceId;
+  error?: string;
+}
 export interface HelperPreferenceRevision {
   id: string;
   at: string;
@@ -573,6 +894,69 @@ export interface HelperPreferenceRollbackResult {
   ok: true;
   preferences: HelperPreferences;
   auditWarning?: string;
+}
+export interface HelperModeRevision {
+  id: string;
+  at: string;
+  before: HelperSettings;
+  after: HelperSettings;
+  revertedFrom?: string;
+}
+export interface HelperModeHistory {
+  revisions: HelperModeRevision[];
+  truncated: boolean;
+}
+export interface WallpaperRevision {
+  id: string;
+  at: string;
+  display: number;
+  before: WallpaperMode;
+  after: WallpaperMode;
+  revertedFrom?: string;
+}
+export interface WallpaperHistory {
+  revisions: WallpaperRevision[];
+  truncated: boolean;
+}
+export interface NodeRedFlowInventory {
+  revision: string | null;
+  flows: {
+    id: string;
+    label: string;
+    disabled: boolean;
+    nodeCount: number;
+    lastRun: string | null;
+    lastError: string | null;
+    runnableFlowId: string | null;
+    manageable: boolean;
+    templates: string[];
+  }[];
+  truncated: boolean;
+  editorUrl: string | null;
+}
+export interface HelperHotkeys extends Record<string, string> {
+  open: string;
+  speak: string;
+  mute: string;
+  desktop: string;
+}
+export interface HelperHotkeyRevision {
+  id: string;
+  at: string;
+  before: HelperHotkeys;
+  after: HelperHotkeys;
+  revertedFrom?: string;
+}
+export interface HelperHotkeyHistory {
+  revisions: HelperHotkeyRevision[];
+  truncated: boolean;
+}
+export interface HelperHotkeyRollbackResult {
+  ok: boolean;
+  error?: string;
+  hotkeys?: HelperHotkeys;
+  warnings?: string[];
+  historyWarning?: string;
 }
 export interface PersonaRevision {
   id: string;

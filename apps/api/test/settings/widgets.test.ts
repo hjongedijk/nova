@@ -186,23 +186,24 @@ describe("the panels API", () => {
         ).status,
       ).toBe(400);
       const pub = await call("get", "/settings/public", undefined, {});
-      expect(pub.widgets[0].id).toBe("aantal");
+      const widgetId = pub.widgets[0].id as string;
+      expect(widgetId).toMatch(/^aantal_[0-9a-f]{24}$/);
       expect(JSON.stringify(pub)).not.toContain(String(sourcePort));
       expect(
-        pub.sidebar.some((item: { id: string }) => item.id === "w:aantal"),
+        pub.sidebar.some((item: { id: string }) => item.id === `w:${widgetId}`),
       ).toBe(true);
       const data = await call("get", "/widgets/data", undefined, {});
-      expect(data.aantal.value).toBe(12);
-      expect(data.aantal.kind).toBe("value");
+      expect(data[widgetId].value).toBe(12);
+      expect(data[widgetId].kind).toBe("value");
       await call("put", "/settings/sidebar", {
-        items: [{ id: "w:aantal", column: "left", page: 1 }],
+        items: [{ id: `w:${widgetId}`, column: "left", page: 1 }],
       });
       expect(
         (await call("get", "/settings/public", undefined, {})).sidebar[0].id,
-      ).toBe("w:aantal");
-      expect((await call("delete", "/settings/widgets/aantal")).status).toBe(
-        200,
-      );
+      ).toBe(`w:${widgetId}`);
+      expect(
+        (await call("delete", `/settings/widgets/${widgetId}`)).status,
+      ).toBe(200);
       const after = await call("get", "/settings/public", undefined, {});
       expect(
         after.sidebar.some((item: { id: string }) => item.id === "w:aantal"),

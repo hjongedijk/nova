@@ -4,6 +4,8 @@ import { sanitize } from "../core/security/sanitize.js";
 import {
   normalizeHelperPreferences as rawNormalizeHelperPreferences,
   normalizePersona as rawnormalizePersona,
+  normalizePersonaStyle as rawNormalizePersonaStyle,
+  normalizePersonaProfile as rawNormalizePersonaProfile,
   normalizeQuickActions as rawnormalizeQuickActions,
   normalizeSidebar as rawnormalizeSidebar,
   normalizeToolOverride as rawnormalizeToolOverride,
@@ -15,6 +17,7 @@ import {
 } from "./skills/skills.js";
 import type { NovaSettings } from "./store/settings.store.js";
 import { normalizeWidget as rawNormalizeWidget } from "./widgets/widgets.js";
+import { normalizeNodeRedBackupFlows } from "./node-red-management.service.js";
 
 function checked<A extends unknown[], R>(
   normalizer: (...args: A) => R,
@@ -32,6 +35,8 @@ function checked<A extends unknown[], R>(
   };
 }
 const normalizePersona = checked(rawnormalizePersona);
+const normalizePersonaStyle = checked(rawNormalizePersonaStyle);
+const normalizePersonaProfile = checked(rawNormalizePersonaProfile);
 const normalizeQuickActions = checked(rawnormalizeQuickActions);
 const normalizeSidebar = checked(rawnormalizeSidebar);
 const normalizeToolOverride = checked(rawnormalizeToolOverride);
@@ -53,6 +58,8 @@ const fields = [
   "version",
   "exportedAt",
   "persona",
+  "personaStyle",
+  "personaProfile",
   "quickActions",
   "toolOverrides",
   "skills",
@@ -60,7 +67,11 @@ const fields = [
   "sidebar",
   "helper",
   "helperPreferences",
+  "modelRoles",
+  "nodeRedFlows",
+  "nodeRedFlowsIncluded",
   "lists",
+  "connections",
 ];
 
 export interface BackupPlanSummary {
@@ -72,16 +83,30 @@ export interface BackupPlanSummary {
   incomingLists: number;
   totalLists: number;
   removedLists: number;
+  incomingFlows: number;
+  totalFlows: number;
+  removedFlows: number;
   replacedSkills: number;
   removedSkills: number;
   removedWidgets: number;
   personaChanged: boolean;
+  personaStyleChanged: boolean;
+  personaProfileChanged: boolean;
   quickActionsChanged: boolean;
   toolOverridesChanged: boolean;
   sidebarChanged: boolean;
   helperChanged: boolean;
   helperPreferencesChanged: boolean;
+  modelRolesChanged: boolean;
   listsChanged: boolean;
+  nodeRedFlowsChanged: boolean;
+  connectionsChanged: boolean;
+  changedConnections: number;
+  connectionChanges: {
+    service: string;
+    before: Record<string, string | boolean>;
+    after: Record<string, string | boolean>;
+  }[];
   missingSecrets: { skill: string; headers: string[] }[];
 }
 
@@ -212,15 +237,57 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
   });
 }
 
+function modelRoles(value: unknown): NovaSettings["modelRoles"] {
+  const body = object(value);
+  const roles = [
+    "conversation",
+    "code",
+    "planning",
+    "summary",
+    "vision",
+    "embedding",
+  ] as const;
+  exactKeys(body, [...roles]);
+  const result = {} as NovaSettings["modelRoles"];
+  for (const role of roles) {
+    const row = object(body[role]);
+    exactKeys(row, ["preferred", "fallback"]);
+    if (
+      !Array.isArray(row.preferred) ||
+      row.preferred.length > 5 ||
+      row.preferred.some(
+        (item) =>
+          typeof item !== "string" ||
+          !/^[A-Za-z0-9_.:/-]{1,200}$/.test(item) ||
+          sanitize(item) !== item,
+      ) ||
+      new Set(row.preferred).size !== row.preferred.length ||
+      (row.fallback !== null &&
+        (typeof row.fallback !== "string" ||
+          !/^[A-Za-z0-9_.:/-]{1,200}$/.test(row.fallback) ||
+          sanitize(row.fallback) !== row.fallback ||
+          row.preferred.includes(row.fallback)))
+    )
+      fail("De modelrollen bevatten ongeldige voorkeuren.");
+    result[role] = {
+      preferred: [...row.preferred] as string[],
+      fallback: row.fallback as string | null,
+    };
+  }
+  return result;
+}
+
 /** A private detached candidate. Callers must expose only the summary before confirmation. */
 export function buildBackupPlan(
   data: unknown,
   mode: unknown,
   current: NovaSettings,
   currentLists: Record<string, SettingsBackupListItem[]> = {},
+  currentNodeRedFlows: Record<string, unknown>[] = [],
 ): {
   next: NovaSettings;
   nextLists: Record<string, SettingsBackupListItem[]>;
+  nextNodeRedFlows: Record<string, unknown>[];
   summary: BackupPlanSummary;
 } {
   const raw = object(data);
@@ -290,6 +357,53 @@ export function buildBackupPlan(
   }
   if (Object.keys(nextLists).length > MAX_LISTS)
     fail("Samenvoegen levert meer dan 100 lijsten op.");
+  const hasNodeRedFlows = Object.hasOwn(input, "nodeRedFlows");
+  if (
+    Object.hasOwn(input, "nodeRedFlowsIncluded") &&
+    typeof input.nodeRedFlowsIncluded !== "boolean"
+  )
+    fail("De Node-RED-backupstatus is ongeldig.");
+  if (
+    (input.nodeRedFlowsIncluded === true && !hasNodeRedFlows) ||
+    (input.nodeRedFlowsIncluded === false && hasNodeRedFlows)
+  )
+    fail("De Node-RED-backupstatus komt niet overeen met de flowgegevens.");
+  let incomingFlows: Record<string, unknown>[] = [];
+  if (hasNodeRedFlows) {
+    try {
+      incomingFlows = normalizeNodeRedBackupFlows(input.nodeRedFlows);
+    } catch {
+      fail(
+        "De back-up bevat ongeldige flows of mogelijk geheime Node-RED-velden.",
+      );
+    }
+  }
+  const nextNodeRedFlows = structuredClone(
+    mode === "replace" && hasNodeRedFlows ? incomingFlows : currentNodeRedFlows,
+  );
+  if (mode === "merge" && hasNodeRedFlows) {
+    const indexes = new Map(
+      nextNodeRedFlows.map((node, index) => [String(node.id), index]),
+    );
+    for (const node of incomingFlows) {
+      const index = indexes.get(String(node.id));
+      if (index === undefined) {
+        indexes.set(String(node.id), nextNodeRedFlows.length);
+        nextNodeRedFlows.push(node);
+      } else nextNodeRedFlows[index] = node;
+    }
+  }
+  const flowTabs = (flows: Record<string, unknown>[]) =>
+    flows.filter((node) => node.type === "tab");
+  const incomingFlowIds = new Set(
+    flowTabs(incomingFlows).map((node) => String(node.id)),
+  );
+  const removedFlows =
+    mode === "replace" && hasNodeRedFlows
+      ? flowTabs(currentNodeRedFlows).filter(
+          (node) => !incomingFlowIds.has(String(node.id)),
+        ).length
+      : 0;
   const skills = new Map(mode === "merge" ? oldSkills : []);
   const seenSkills = new Set<string>();
   const missingSecrets: BackupPlanSummary["missingSecrets"] = [];
@@ -428,6 +542,24 @@ export function buildBackupPlan(
   );
   if (Object.hasOwn(input, "persona"))
     next.persona = normalizePersona(input.persona);
+  if (Object.hasOwn(input, "personaStyle"))
+    next.personaStyle = normalizePersonaStyle(input.personaStyle);
+  if (Object.hasOwn(input, "personaProfile")) {
+    const profile = object(input.personaProfile);
+    exactKeys(profile, ["name", "character", "address", "avoid"]);
+    const limits = { name: 40, character: 300, address: 40, avoid: 300 };
+    if (
+      Object.keys(limits).some(
+        (key) =>
+          typeof profile[key] !== "string" ||
+          (profile[key] as string).trim().length >
+            limits[key as keyof typeof limits],
+      ) ||
+      !(profile.name as string).trim()
+    )
+      fail("De NOVA-profielvelden in de back-up zijn ongeldig.");
+    next.personaProfile = normalizePersonaProfile(profile);
+  }
   if (Object.hasOwn(input, "quickActions"))
     next.quickActions =
       input.quickActions === null
@@ -485,6 +617,8 @@ export function buildBackupPlan(
   }
   if (Object.hasOwn(input, "helperPreferences"))
     next.helperPreferences = helperPreferences(input.helperPreferences);
+  if (Object.hasOwn(input, "modelRoles"))
+    next.modelRoles = modelRoles(input.modelRoles);
   const privateValues = [...new Set(secretValues)];
   const assertPublicText = (value: string): void => {
     if (
@@ -515,12 +649,19 @@ export function buildBackupPlan(
     ),
     widgets: next.widgets,
     persona: next.persona,
+    personaStyle: next.personaStyle,
+    personaProfile: next.personaProfile,
     quickActions: next.quickActions,
     toolOverrides: next.toolOverrides,
     sidebar: next.sidebar,
     helper: next.helper,
     helperPreferences: next.helperPreferences,
+    modelRoles: next.modelRoles,
+    ...(hasNodeRedFlows ? { nodeRedFlows: nextNodeRedFlows } : {}),
     ...(listsProvided ? { lists: nextLists } : {}),
+    ...(Object.hasOwn(input, "connections")
+      ? { connections: input.connections }
+      : {}),
   });
   const safeSummary = (value: string): string => {
     let clean = sanitize(value);
@@ -531,6 +672,7 @@ export function buildBackupPlan(
   return {
     next,
     nextLists,
+    nextNodeRedFlows,
     summary: {
       mode,
       incomingSkills: incoming.length,
@@ -545,6 +687,9 @@ export function buildBackupPlan(
               (name) => !Object.hasOwn(importedLists, name),
             ).length
           : 0,
+      incomingFlows: flowTabs(incomingFlows).length,
+      totalFlows: flowTabs(nextNodeRedFlows).length,
+      removedFlows,
       replacedSkills: [...seenSkills].filter((id) => oldSkills.has(id)).length,
       removedSkills:
         mode === "replace"
@@ -555,6 +700,10 @@ export function buildBackupPlan(
           ? [...oldWidgets.keys()].filter((id) => !seenWidgets.has(id)).length
           : 0,
       personaChanged: next.persona !== current.persona,
+      personaStyleChanged: next.personaStyle !== current.personaStyle,
+      personaProfileChanged:
+        JSON.stringify(next.personaProfile) !==
+        JSON.stringify(current.personaProfile),
       quickActionsChanged:
         JSON.stringify(next.quickActions) !==
         JSON.stringify(current.quickActions),
@@ -568,7 +717,16 @@ export function buildBackupPlan(
       helperPreferencesChanged:
         JSON.stringify(next.helperPreferences) !==
         JSON.stringify(current.helperPreferences),
+      modelRolesChanged:
+        JSON.stringify(next.modelRoles) !== JSON.stringify(current.modelRoles),
       listsChanged: JSON.stringify(nextLists) !== JSON.stringify(oldLists),
+      nodeRedFlowsChanged:
+        hasNodeRedFlows &&
+        JSON.stringify(nextNodeRedFlows) !==
+          JSON.stringify(currentNodeRedFlows),
+      connectionsChanged: false,
+      changedConnections: 0,
+      connectionChanges: [],
       missingSecrets: missingSecrets.map(({ skill, headers }) => ({
         skill: safeSummary(skill),
         headers: headers.map(safeSummary),

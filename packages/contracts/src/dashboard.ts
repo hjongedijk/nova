@@ -115,6 +115,10 @@ export interface OverviewResponse {
 export interface DashboardServiceHealth {
   online?: boolean;
   configured?: boolean;
+  flowCount?: number | null;
+  lastError?: string | null;
+  lastErrorAvailable?: boolean;
+  lastErrorFlowId?: string | null;
 }
 
 /** The part of a Proxmox/other state entry that GET /api/health lists under `state`. */

@@ -1,10 +1,14 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import type { NativePromptPrepared } from "@nova/contracts";
+  import type {
+    NativePromptHistory,
+    NativePromptPrepared,
+  } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
   import {
     prepareNativePrompt,
     confirmNativePrompt,
+    getNativePromptHistory,
   } from "#lib/api/settings.ts";
   let {
     initialEnabled,
@@ -21,6 +25,7 @@
   let busy = $state(false);
   let error = $state("");
   let notice = $state("");
+  let history = $state<NativePromptHistory | null>(null);
   let pending = $state<NativePromptPrepared | null>(null);
   let expired = $state(false);
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -29,6 +34,26 @@
     editing = true;
     error = "";
     notice = "";
+    void loadHistory();
+  }
+  async function loadHistory() {
+    try {
+      history = await getNativePromptHistory();
+    } catch {
+      history = null;
+    }
+  }
+  function restore(value: {
+    enabled: boolean;
+    prefixPrompt: string;
+    suffixPrompt: string;
+  }) {
+    enabled = value.enabled;
+    prefix = value.prefixPrompt;
+    suffix = value.suffixPrompt;
+    acknowledged = false;
+    notice =
+      "Versie als concept geladen. Controleer beide velden en bevestig de vervanging apart.";
   }
   async function prepare() {
     if (!acknowledged) return;
@@ -80,6 +105,7 @@
         editing = false;
         prefix = "";
         suffix = "";
+        await loadHistory();
       } else notice = "Promptvervanging geannuleerd.";
     } catch {
       error =
@@ -105,6 +131,30 @@
       Lege velden wissen de bestaande inhoud. Plaats geen geheimen in een
       prompt.
     </p>
+    {#if history?.revisions.length}
+      <details>
+        <summary>Eerdere veilige versies ({history.revisions.length})</summary>
+        {#if history.truncated}<p>
+            Oudere versies zijn niet meer beschikbaar.
+          </p>{/if}
+        <ul>
+          {#each history.revisions as revision (revision.id)}
+            <li>
+              {new Date(revision.at).toLocaleString("nl-NL")} · {revision.after
+                .enabled
+                ? "aan"
+                : "uit"} · {revision.after.prefixPrompt.length}+{revision.after
+                .suffixPrompt.length} tekens
+              <Button
+                onclick={() => restore(revision.before)}
+                disabled={busy || !!pending}
+                >Laad vorige versie als concept</Button
+              >
+            </li>
+          {/each}
+        </ul>
+      </details>
+    {/if}
     <fieldset disabled={busy || !!pending}>
       <label class="check"
         ><input type="checkbox" bind:checked={enabled} /> Extra gateway-prompt inschakelen</label

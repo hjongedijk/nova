@@ -17,13 +17,16 @@ import { HostMetricsService } from "./host-metrics.service.js";
 import { IntegrationsHealth } from "./integrations-health.service.js";
 import { OverviewService } from "./overview.service.js";
 import { SystemSource } from "./system.source.js";
+import { NodeRedHealth } from "./node-red-health.service.js";
+import { NodeRedEventsController } from "./node-red-events.controller.js";
 import { NodeRedFlowSource } from "./node-red-flow.source.js";
+import { DataBackupService } from "./data-backup.service.js";
 import { SpeechPresenceService } from "./speech-presence.service.js";
 import { WeatherDepartureAlertService } from "./weather-departure-alert.service.js";
+import { NtfyPushService } from "./ntfy-push.service.js";
 
 /** Home-screen data: this machine, the side panels, the unasked-for alerts, and the health of everything. */
 @Module({
-import { NtfyPushService } from "./ntfy-push.service.js";
   imports: [
     ProxmoxModule,
     PlanningModule,
@@ -38,21 +41,20 @@ import { NtfyPushService } from "./ntfy-push.service.js";
     WindowsModule,
     BrowserAgentModule,
   ],
-  controllers: [DashboardController],
+  controllers: [DashboardController, NodeRedEventsController],
   providers: [
     HostMetricsService,
     OverviewService,
     AlertsFeed,
     IntegrationsHealth,
-    SpeechPresenceService,
-    WeatherDepartureAlertService,
     SystemSource,
+    NodeRedHealth,
     NodeRedFlowSource,
-  ],
-  exports: [HostMetricsService, OverviewService, IntegrationsHealth],
     DataBackupService,
     SpeechPresenceService,
     WeatherDepartureAlertService,
     NtfyPushService,
+  ],
+  exports: [HostMetricsService, OverviewService, IntegrationsHealth],
 })
 export class DashboardModule {}

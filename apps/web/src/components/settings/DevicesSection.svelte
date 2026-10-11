@@ -1,5 +1,7 @@
 <script lang="ts">
   import type {
+    HelperModeHistory,
+    WallpaperHistory,
     HelperMode,
     HelperSettings,
     WallpaperMode,
@@ -7,9 +9,13 @@
   } from "@nova/contracts";
   import {
     getHelper,
+    getHelperModeHistory,
     getWallpaper,
+    getWallpaperHistory,
+    rollbackHelperModeRevision,
     setHelper,
     setWallpaper,
+    rollbackWallpaper,
   } from "#lib/api/settings.ts";
   import { IS_IOS, IS_MOBILE } from "#lib/stores/device.ts";
   import { secureBase } from "#lib/stores/shell.svelte.ts";
@@ -34,6 +40,8 @@
   let wallpaper = $state<WallpaperState | null>(null);
   // The picker being applied (its screen number), so only that one is locked.
   let applying = $state<number | null>(null);
+  let wallpaperHistory = $state<WallpaperHistory | null>(null);
+  let wallpaperHistoryBusy = $state(false);
 
   $effect(() => {
     getWallpaper().then(
@@ -64,6 +72,8 @@
   // Wat NOVA onthoudt (ook als de pc uit staat) en wat de pc nu doet.
   let helper = $state<HelperSettings>({ mode: "wallpaper", display: 0 });
   let helperBusy = $state(false);
+  let helperHistory = $state<HelperModeHistory | null>(null);
+  let helperHistoryBusy = $state(false);
 
   $effect(() => {
     getHelper().then(
@@ -81,7 +91,8 @@
       const result = await setHelper(next.mode, next.display);
       helper = result.settings;
       wallpaper = result.desktop;
-      if (result.applied)
+      if (result.historyWarning) say(result.historyWarning, "bad");
+      else if (result.applied)
         say(
           next.mode === "wallpaper"
             ? "NOVA staat als achtergrond."
@@ -100,17 +111,52 @@
     }
   }
 
+  async function loadHelperHistory(): Promise<void> {
+    helperHistoryBusy = true;
+    try {
+      helperHistory = await getHelperModeHistory();
+    } catch (error) {
+      fail(error);
+    } finally {
+      helperHistoryBusy = false;
+    }
+  }
+
+  async function rollbackHelperHistory(id: string): Promise<void> {
+    if (!window.confirm("Deze helperkeuze terugzetten?")) return;
+    helperBusy = true;
+    try {
+      const result = await rollbackHelperModeRevision(id);
+      helper = result.settings;
+      wallpaper = result.desktop;
+      await loadHelperHistory();
+      say(
+        result.historyWarning ??
+          (result.applied
+            ? "Helperkeuze teruggezet en toegepast."
+            : `Helperkeuze opgeslagen, maar niet op de pc toegepast: ${result.error ?? "geen verbinding"}.`),
+        result.historyWarning ? "bad" : result.applied ? "ok" : undefined,
+      );
+    } catch (error) {
+      fail(error);
+    } finally {
+      helperBusy = false;
+    }
+  }
+
   async function apply(display: number, mode: WallpaperMode): Promise<void> {
     applying = display;
     say("Even geduld, het venster wordt achter je bureaublad gezet…");
     try {
       wallpaper = await setWallpaper(display, mode);
-      say(
-        mode === "off"
-          ? "De achtergrond is uitgezet."
-          : "NOVA staat achter je bureaublad.",
-        "ok",
-      );
+      if (wallpaper.historyWarning) say(wallpaper.historyWarning, "bad");
+      else
+        say(
+          mode === "off"
+            ? "De achtergrond is uitgezet."
+            : "NOVA staat achter je bureaublad.",
+          "ok",
+        );
     } catch (error) {
       fail(error);
     } finally {
@@ -118,10 +164,38 @@
     }
   }
 
+  async function loadWallpaperHistory(): Promise<void> {
+    wallpaperHistoryBusy = true;
+    try {
+      wallpaperHistory = await getWallpaperHistory();
+    } catch (error) {
+      fail(error);
+    } finally {
+      wallpaperHistoryBusy = false;
+    }
+  }
+
+  async function restoreWallpaper(id: string): Promise<void> {
+    if (!window.confirm("Deze achtergrondkeuze terugzetten?")) return;
+    wallpaperHistoryBusy = true;
+    try {
+      wallpaper = await rollbackWallpaper(id);
+      await loadWallpaperHistory();
+      say(
+        wallpaper.historyWarning ?? "Achtergrondkeuze teruggezet.",
+        wallpaper.historyWarning ? "bad" : "ok",
+      );
+    } catch (error) {
+      fail(error);
+    } finally {
+      wallpaperHistoryBusy = false;
+    }
+  }
+
   function why(data: Extract<WallpaperState, { available: false }>): string {
     return {
       "no-agent":
-        "NOVA heeft nog geen verbinding met je Windows-pc. Installeer de Windows-agent uit de map integrations/windows-agent en zet WINDOWS_AGENT_URL en WINDOWS_AGENT_TOKEN in .env.",
+        "NOVA heeft nog geen verbinding met je Windows-pc. Installeer de Windows-agent uit de map agents/windows en zet WINDOWS_AGENT_URL en WINDOWS_AGENT_TOKEN in .env.",
       "old-agent":
         "De Windows-agent op je pc is nog oud. Download jarvis-agent.ps1, zet hem in de map van de agent op je pc (bijvoorbeeld C:\\JarvisAgent) en start daarna de taak JarvisAgent opnieuw.",
       unreachable: `NOVA bereikt de Windows-agent niet${data.error ? `: ${data.error}` : "."}`,
@@ -227,6 +301,37 @@
       </select>
     </div>
   {/if}
+  <section class="helper-history" aria-label="Helpergeschiedenis">
+    <h4>Wijzigingsgeschiedenis</h4>
+    <Button disabled={helperHistoryBusy} onclick={loadHelperHistory}
+      >{helperHistoryBusy
+        ? "Geschiedenis laden…"
+        : "Geschiedenis laden"}</Button
+    >
+    {#if helperHistory}
+      {#if helperHistory.revisions.length}
+        <ol>
+          {#each helperHistory.revisions as revision (revision.id)}
+            <li>
+              <span>
+                {new Date(revision.at).toLocaleString("nl-NL")}: {revision
+                  .before.mode}, scherm {revision.before.display}
+                → {revision.after.mode}, scherm {revision.after.display}
+              </span>
+              <Button
+                disabled={helperBusy}
+                onclick={() => rollbackHelperHistory(revision.id)}
+                >Terugzetten</Button
+              >
+            </li>
+          {/each}
+        </ol>
+      {:else}<p>Geen wijzigingen opgeslagen.</p>{/if}
+      {#if helperHistory.truncated}<small
+          >Alleen de nieuwste 50 wijzigingen getoond.</small
+        >{/if}
+    {/if}
+  </section>
 
   <h3>NOVA als bureaublad-achtergrond</h3>
   <p class="hint">
@@ -285,15 +390,49 @@
       </ul>
     {/if}
   </div>
+  <section class="helper-history" aria-label="Achtergrondgeschiedenis">
+    <h4>Wijzigingsgeschiedenis</h4>
+    <Button disabled={wallpaperHistoryBusy} onclick={loadWallpaperHistory}
+      >{wallpaperHistoryBusy
+        ? "Geschiedenis laden…"
+        : "Geschiedenis laden"}</Button
+    >
+    {#if wallpaperHistory}
+      {#if wallpaperHistory.revisions.length}
+        <ol>
+          {#each wallpaperHistory.revisions as revision (revision.id)}
+            <li>
+              <span
+                >{new Date(revision.at).toLocaleString("nl-NL")}: beeldscherm {revision.display},
+                {revision.before} → {revision.after}</span
+              >
+              <Button
+                disabled={wallpaperHistoryBusy}
+                onclick={() => restoreWallpaper(revision.id)}
+                >Terugzetten</Button
+              >
+            </li>
+          {/each}
+        </ol>
+      {:else}<p>Geen wijzigingen opgeslagen.</p>{/if}
+      {#if wallpaperHistory.truncated}<small
+          >Alleen de nieuwste 50 wijzigingen getoond.</small
+        >{/if}
+    {/if}
+  </section>
   <div class="set-toolbar">
+    <Button href="/windows-agent/nova-agent.ps1" download="nova-agent.ps1"
+      >Download de NOVA-agent</Button
+    >
     <Button href="/windows-agent/jarvis-agent.ps1" download="jarvis-agent.ps1"
-      >Download de nieuwste Windows-agent</Button
+      >Download voor bestaande installatie</Button
     >
   </div>
   <p class="hint">
-    Een nieuwere agent installeren: overschrijf jarvis-agent.ps1 in de map van
-    de agent op je pc (bijvoorbeeld C:\JarvisAgent) en start de taak JarvisAgent
-    opnieuw in Taakplanner.
+    Nieuwe installatie: gebruik nova-agent.ps1 en install.ps1. Bij een bestaande
+    installatie kun je via de tweede download de huidige implementatie opslaan
+    als jarvis-agent.ps1; vervang daarmee het oude bestand en start de taak
+    JarvisAgent opnieuw in Taakplanner.
   </p>
 </section>
 

@@ -1,4 +1,11 @@
-import { Body, Controller, HttpCode, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  UseGuards,
+} from "@nestjs/common";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { SettingsGuard } from "./settings.guard.js";
 import { NativePromptService } from "./native-prompt.service.js";
@@ -6,6 +13,9 @@ import { NativePromptService } from "./native-prompt.service.js";
 @UseGuards(SettingsGuard)
 export class NativePromptController {
   constructor(private readonly prompt: NativePromptService) {}
+  @Get("history") history() {
+    return this.prompt.history();
+  }
   @Post("prepare") @HttpCode(200) prepare(@Body() body: unknown) {
     return this.prompt.prepare(body);
   }

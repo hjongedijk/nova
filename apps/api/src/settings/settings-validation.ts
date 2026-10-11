@@ -5,8 +5,39 @@ import type {
   QuickAction,
   SidebarItem,
   ToolOverride,
+  PersonaStyleId,
+  PersonaProfile,
 } from "@nova/contracts";
 import { ValidationError } from "../core/errors/validation.error.js";
+
+const PERSONA_STYLE_IDS: PersonaStyleId[] = [
+  "professional",
+  "friendly",
+  "playful",
+  "concise",
+];
+
+export function normalizePersonaProfile(value: unknown): PersonaProfile {
+  const defaults: PersonaProfile = {
+    name: "NOVA",
+    character: "warm, nieuwsgierig en met af en toe droge humor",
+    address: "je/jij",
+    avoid: "doen alsof ik een mens ben of gevoelens en ervaringen verzinnen",
+  };
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return defaults;
+  const input = value as Record<string, unknown>;
+  const clean = (key: keyof PersonaProfile, max: number) =>
+    typeof input[key] === "string"
+      ? input[key].trim().slice(0, max)
+      : defaults[key];
+  return {
+    name: clean("name", 40) || defaults.name,
+    character: clean("character", 300),
+    address: clean("address", 40),
+    avoid: clean("avoid", 300),
+  };
+}
 
 /** Trimmed text with Dutch validation messages. */
 export function cleanText(
@@ -31,6 +62,12 @@ export function cleanText(
 
 export const normalizePersona = (value: unknown): string =>
   cleanText(value, "De eigen regels", { max: 2000 });
+
+export const normalizePersonaStyle = (value: unknown): PersonaStyleId => {
+  if (PERSONA_STYLE_IDS.includes(value as PersonaStyleId))
+    return value as PersonaStyleId;
+  throw new ValidationError(["Kies een geldige gespreksstijl."]);
+};
 
 export function normalizeQuickActions(items: unknown): QuickAction[] {
   if (!Array.isArray(items))

@@ -74,8 +74,12 @@
       );
       if (!result.ok) return say(result.error, "bad");
       if (!approve) return say("Import geannuleerd.", "ok");
+      const connectionMessage =
+        result.changedConnections === 1
+          ? "1 servicekoppeling gewijzigd."
+          : `${result.changedConnections} servicekoppelingen gewijzigd.`;
       await afterChange(
-        `${result.imported} vaardigheden en ${result.importedLists ?? 0} lijsten geïmporteerd.${result.missingSecrets.length ? ` Vul de geheime headers opnieuw in bij: ${result.missingSecrets.map((item) => item.skill).join(", ")}.` : ""}${result.auditWarning ? ` ${result.auditWarning}` : ""}`,
+        `${result.imported} vaardigheden, ${result.importedLists ?? 0} lijsten en ${result.importedFlows ?? 0} Node-RED-flows geïmporteerd; ${connectionMessage}${result.missingSecrets.length ? ` Geheime headers van vaardigheden die niet overeenkomen moet je opnieuw invullen bij: ${result.missingSecrets.map((item) => item.skill).join(", ")}.` : ""}${result.changedConnections ? " Herstart de betrokken services voordat je ze gebruikt." : ""}${result.auditWarning ? ` ${result.auditWarning}` : ""}`,
       );
     } catch {
       say(
@@ -96,8 +100,12 @@
   <p class="hint">
     Een bestand met je vaardigheden, aanpassingen aan gereedschappen, eigen
     regels, snelle opdrachten, helperinstellingen en je boodschappen- en
-    takenlijsten. Actieve timers en meldingen worden niet overgezet. Geheime
-    waarden zitten er bewust niet in; die vul je na het importeren opnieuw in.
+    takenlijsten. Ook serviceadressen en veilige opties worden opgenomen.
+    Actieve timers en meldingen worden niet overgezet. Servicegeheimen blijven
+    lokaal op de doelinstallatie en worden nooit geëxporteerd of vervangen.
+    OmniRoute-provideraccounts, API-sleutels en routebeleid zijn geen onderdeel
+    van dit bestand. Node-RED-flowlogica wordt meegenomen als lokale
+    beheertoegang is ingesteld; credentials worden altijd weggelaten.
   </p>
   <Button onclick={download}>Back-up downloaden</Button>
   <h3>Importeren</h3>
@@ -129,9 +137,12 @@
     </select>
   </Field>
   <p>
-    Maximaal 1 MB. NOVA controleert het bestand vóór de import. Services, flows,
-    actieve timers, meldingen, geheimen en permanente toestemmingen zitten niet
-    in deze back-up.
+    Maximaal 1 MB. NOVA controleert het bestand vóór de import. Serviceadressen
+    veranderen pas na bevestiging en vereisen daarna een herstart. Geheime
+    servicewaarden en permanente toestemmingen zitten niet in de back-up;
+    bestaande servicegeheimen blijven op deze installatie staan. Flowimport
+    vereist Node-RED-beheertoegang; credentials worden nooit meegenomen. Actieve
+    timers en meldingen blijven buiten de back-up.
   </p>
   {#if pending}
     <div
@@ -158,6 +169,16 @@
           Eigen regels: {pending.summary.personaChanged
             ? "wijzigen"
             : "blijven gelijk"}
+        </li>
+        <li>
+          Gespreksstijl: {pending.summary.personaStyleChanged
+            ? "wijzigen"
+            : "blijft gelijk"}
+        </li>
+        <li>
+          NOVA-profiel: {pending.summary.personaProfileChanged
+            ? "wijzigen"
+            : "blijft gelijk"}
         </li>
         <li>
           Snelle opdrachten: {pending.summary.quickActionsChanged
@@ -190,7 +211,37 @@
             ? "wijzigen"
             : "blijven gelijk"}
         </li>
+        <li>
+          Modelrollen: {pending.summary.modelRolesChanged
+            ? "wijzigen"
+            : "blijven gelijk"}
+        </li>
+        <li>
+          Node-RED-flows: {pending.summary.nodeRedFlowsChanged
+            ? `${pending.summary.incomingFlows} inkomend; ${pending.summary.totalFlows} na import; ${pending.summary.removedFlows} verwijderd`
+            : "blijven gelijk"}
+        </li>
+        <li>
+          Servicekoppelingen: {pending.summary.changedConnections
+            ? `${pending.summary.changedConnections} wijzigen`
+            : "blijven gelijk"}
+        </li>
       </ul>
+      {#if pending.summary.connectionChanges.length}
+        <h4>Controleer adressen en opties</h4>
+        {#each pending.summary.connectionChanges as change (change.service)}
+          <details>
+            <summary>{change.service}</summary>
+            <p>Huidig: {JSON.stringify(change.before)}</p>
+            <p>Na import: {JSON.stringify(change.after)}</p>
+          </details>
+        {/each}
+        <p>
+          Bestaande geheimen blijven op deze server staan. Als je een adres
+          wijzigt, kunnen dezelfde credentials na herstart naar die bestemming
+          worden gestuurd.
+        </p>
+      {/if}
       <p>
         Geïmporteerde webhooks kunnen actief worden volgens dit bestand.
         Controleer zelf hun doelen en acties.

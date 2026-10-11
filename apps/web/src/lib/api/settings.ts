@@ -20,6 +20,10 @@ import type {
   OmniRouteActivationHistoryEntry,
   OmniRouteKeyActivationPrepareResult,
   OmniRouteKeyActivationResult,
+  OmniRouteKeyModelAccessOptions,
+  OmniRouteKeyModelAccessHistory,
+  OmniRouteKeyModelAccessPrepareResult,
+  OmniRouteKeyModelAccessResult,
   OmniRouteComboCreatePrepared,
   OmniRouteComboCreateResult,
   OmniRouteComboRemovalPrepared,
@@ -33,6 +37,7 @@ import type {
   PersonaProfile,
   MqttOverview,
   McpServerStatus,
+  McpServerCatalog,
   McpServerActivity,
   McpSettingHistory,
   Risk,
@@ -640,6 +645,35 @@ export const confirmStackServiceRestart = (
 export const getMqttOverview = () =>
   read<MqttOverview>("/services/mqtt/overview");
 export const getMcpServerStatus = () => read<McpServerStatus>("/mcp/servers");
+export const getMcpServerCatalog = () =>
+  read<McpServerCatalog>("/mcp/servers/catalog");
+export const prepareMcpServerCatalogChange = (
+  id: string,
+  operation: "add" | "remove",
+) =>
+  write<{
+    ok: boolean;
+    error?: string;
+    warning?: string;
+    action?: PendingConfirmation;
+  }>("POST", `/mcp/servers/${enc(id)}/prepare-catalog`, { operation });
+export const confirmMcpServerCatalogChange = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<{
+    ok: boolean;
+    verified?: boolean | null;
+    cancelled?: boolean;
+    server?: string;
+    operation?: "add" | "remove";
+    error?: string;
+  }>("POST", "/mcp/servers/confirm-catalog", {
+    sessionId,
+    confirmationId,
+    approve,
+  });
 export const getMcpServerActivity = (id: string) =>
   read<McpServerActivity>(`/mcp/servers/${enc(id)}/activity`);
 export const getMcpServerHistory = (id: string) =>
@@ -884,6 +918,44 @@ export const getOmniRouteAccounts = () =>
   read<OmniRouteAccountsReport>("/omniroute/accounts");
 export const getOmniRouteApiKeys = () =>
   read<OmniRouteApiKeyInventory>("/omniroute/accounts/keys");
+export const getOmniRouteKeyModelAccess = (id: string) =>
+  read<OmniRouteKeyModelAccessOptions>(
+    `/omniroute/accounts/keys/${enc(id)}/model-access`,
+  );
+export const getOmniRouteKeyModelAccessHistory = (id: string) =>
+  read<OmniRouteKeyModelAccessHistory>(
+    `/omniroute/accounts/keys/${enc(id)}/model-access/history`,
+  );
+export const prepareOmniRouteKeyModelAccessRollback = (
+  id: string,
+  revisionId: string,
+) =>
+  write<OmniRouteKeyModelAccessPrepareResult>(
+    "POST",
+    `/omniroute/accounts/keys/${enc(id)}/model-access/prepare-rollback`,
+    { revisionId, acknowledgeGlobalEffect: true },
+  );
+export const prepareOmniRouteKeyModelAccess = (
+  id: string,
+  allowedModels: string[],
+  revision: string,
+) =>
+  write<OmniRouteKeyModelAccessPrepareResult>(
+    "POST",
+    `/omniroute/accounts/keys/${enc(id)}/model-access/prepare`,
+    { allowedModels, revision, acknowledgeGlobalEffect: true },
+  );
+export const confirmOmniRouteKeyModelAccess = (
+  id: string,
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<OmniRouteKeyModelAccessResult>(
+    "POST",
+    `/omniroute/accounts/keys/${enc(id)}/model-access/confirm`,
+    { sessionId, confirmationId, approve },
+  );
 export const getOmniRouteModelVisibility = () =>
   read<OmniRouteModelVisibilityReport>("/omniroute/accounts/model-visibility");
 export const getOmniRouteUsage = () =>

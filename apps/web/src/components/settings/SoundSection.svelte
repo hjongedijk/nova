@@ -7,16 +7,86 @@
   import Button from "#components/ui/Button.svelte";
   import { setMicTest, stopMicTest, micTestRunning } from "./mic-test.ts";
   import { secureBase } from "#lib/stores/shell.svelte.ts";
+  import {
+    TTS_VOICES,
+    saveTtsProsody,
+    saveTtsVoice,
+    ttsProsody,
+    ttsVoice,
+  } from "#lib/voice/voice-preference.ts";
+  import {
+    pronunciationEntries,
+    savePronunciationEntries,
+    type PronunciationEntry,
+  } from "#lib/voice/speech-filter.ts";
+  import {
+    saveWakeSensitivity,
+    wakeSensitivity,
+    type WakeSensitivity,
+  } from "#lib/voice/wake-preference.ts";
 
   let volume = $state(Math.round(outputVolume() * 100));
   let level = $state(0);
   let testing = $state(false);
   let micNote = $state("");
+  let pronunciations = $state<PronunciationEntry[]>(pronunciationEntries());
+  let selectedVoice = $state(ttsVoice());
+  let prosody = $state(ttsProsody());
+  let sensitivity = $state<WakeSensitivity>(wakeSensitivity());
+  let pronunciationTerm = $state("");
+  let pronunciationSay = $state("");
+  let pronunciationNote = $state("");
+  const voiceExample = "Ik ben er. Wat wil je als eerste aanpakken?";
 
   function setVolume(percent: number): void {
     volume = percent;
     storage.set("novaVolume", String(percent / 100));
     if (playback.current) applyVolume(playback.current);
+  }
+
+  function chooseVoice(value: string): void {
+    selectedVoice = saveTtsVoice(value);
+  }
+
+  function adjustProsody(field: "rate" | "pitch", value: number): void {
+    prosody = saveTtsProsody(
+      field === "rate" ? value : prosody.rate,
+      field === "pitch" ? value : prosody.pitch,
+    );
+  }
+
+  function chooseWakeSensitivity(value: string): void {
+    if (value === "low" || value === "normal" || value === "high")
+      sensitivity = saveWakeSensitivity(value);
+  }
+
+  function addPronunciation(): void {
+    const term = pronunciationTerm.trim();
+    const say = pronunciationSay.trim();
+    if (!term || !say || term.length > 80 || say.length > 120) {
+      pronunciationNote = "Vul een woord in en hoe NOVA het moet uitspreken.";
+      return;
+    }
+    if (pronunciations.length >= 100) {
+      pronunciationNote = "De uitspraaklijst bevat maximaal 100 woorden.";
+      return;
+    }
+    pronunciations = [
+      ...pronunciations.filter(
+        (entry) => entry.term.toLocaleLowerCase() !== term.toLocaleLowerCase(),
+      ),
+      { term, say },
+    ];
+    savePronunciationEntries(pronunciations);
+    pronunciationTerm = "";
+    pronunciationSay = "";
+    pronunciationNote = "Uitspraak opgeslagen op dit apparaat.";
+  }
+
+  function removePronunciation(term: string): void {
+    pronunciations = pronunciations.filter((entry) => entry.term !== term);
+    savePronunciationEntries(pronunciations);
+    pronunciationNote = "Uitspraak verwijderd.";
   }
 
   async function micTest(): Promise<void> {
@@ -73,6 +143,54 @@
 
 <section>
   <div class="field">
+    <label for="ttsVoice">Stem van NOVA</label>
+    <select
+      id="ttsVoice"
+      value={selectedVoice}
+      onchange={(event) => chooseVoice(event.currentTarget.value)}
+    >
+      {#each TTS_VOICES as voice (voice.id)}
+        <option value={voice.id}>{voice.label}</option>
+      {/each}
+    </select>
+    <p class="help">
+      Deze keuze geldt voor de helper, wallpaper en PWA in deze browser.
+    </p>
+  </div>
+  <div class="field">
+    <label for="ttsRate"
+      >Spreeksnelheid ({prosody.rate > 0 ? "+" : ""}{prosody.rate}%)</label
+    >
+    <input
+      id="ttsRate"
+      type="range"
+      min="-10"
+      max="10"
+      step="1"
+      value={prosody.rate}
+      oninput={(event) =>
+        adjustProsody("rate", Number(event.currentTarget.value))}
+    />
+  </div>
+  <div class="field">
+    <label for="ttsPitch"
+      >Toonhoogte ({prosody.pitch > 0 ? "+" : ""}{prosody.pitch} Hz)</label
+    >
+    <input
+      id="ttsPitch"
+      type="range"
+      min="-5"
+      max="5"
+      step="1"
+      value={prosody.pitch}
+      oninput={(event) =>
+        adjustProsody("pitch", Number(event.currentTarget.value))}
+    />
+    <p class="help">
+      Kleine verschillen tussen zinnen maken de stem minder vlak.
+    </p>
+  </div>
+  <div class="field">
     <label for="volumeSlider">Volume van NOVA's stem</label>
     <div class="set-toolbar">
       <input
@@ -93,14 +211,28 @@
         : "Geldt voor de stem en het geluidje als NOVA gaat luisteren, op dit apparaat."}
     </p>
   </div>
-  <div class="set-toolbar">
-    <Button onclick={() => void speak("Zo klink ik nu.")}
-      >Laat de stem horen</Button
+  <div class="field">
+    <label for="wakeSensitivity">Gevoeligheid van het wake word</label>
+    <select
+      id="wakeSensitivity"
+      value={sensitivity}
+      onchange={(event) => chooseWakeSensitivity(event.currentTarget.value)}
     >
+      <option value="low">Laag — alleen “Hey NOVA”</option>
+      <option value="normal">Normaal — “NOVA” of “Hey NOVA”</option>
+      <option value="high">Hoog — ook alternatieve uitspraken</option>
+    </select>
+    <p class="help">Deze keuze blijft alleen in deze browser.</p>
+  </div>
+  <div class="set-toolbar">
+    <Button onclick={() => void speak(voiceExample)}>Laat de stem horen</Button>
     <Button onclick={micTest}
       >{testing ? "Stop de test" : "Test je microfoon"}</Button
     >
   </div>
+  <p class="voice-example" aria-label="Voorbeeldzin van NOVA">
+    “{voiceExample}”
+  </p>
   <div class="mic-meter" aria-hidden="true">
     <i style="width: {level}%"></i>
   </div>
@@ -111,6 +243,41 @@
     Instellingen, Systeem, Geluid, Invoer, Volume. Mac: Systeeminstellingen,
     Geluid, Invoer. Telefoons regelen dit zelf.
   </p>
+  <div class="pronunciations">
+    <h3>Uitspraaklijst</h3>
+    <p class="help">
+      Geef namen of apparaten een eigen uitspraak. Deze lijst blijft alleen in
+      deze browser.
+    </p>
+    <label for="pronunciationTerm">Woord of naam</label>
+    <input
+      id="pronunciationTerm"
+      bind:value={pronunciationTerm}
+      maxlength="80"
+      autocomplete="off"
+    />
+    <label for="pronunciationSay">Spreek uit als</label>
+    <input
+      id="pronunciationSay"
+      bind:value={pronunciationSay}
+      maxlength="120"
+      autocomplete="off"
+    />
+    <Button onclick={addPronunciation}>Uitspraak toevoegen</Button>
+    {#if pronunciationNote}<p role="status">{pronunciationNote}</p>{/if}
+    {#if pronunciations.length}
+      <ul>
+        {#each pronunciations as entry (entry.term)}
+          <li>
+            <span>{entry.term} → {entry.say}</span>
+            <Button onclick={() => removePronunciation(entry.term)}
+              >Verwijderen</Button
+            >
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
 </section>
 
 <style>
@@ -130,5 +297,34 @@
     font-size: 12px;
     line-height: 1.45;
     color: var(--dim);
+  }
+  .voice-example {
+    margin: 8px 0 14px;
+    color: var(--mist);
+    font-size: 14px;
+  }
+  .pronunciations {
+    display: grid;
+    gap: 8px;
+    margin-top: 24px;
+  }
+  .pronunciations label {
+    color: var(--mist);
+    font-size: 12px;
+  }
+  .pronunciations input {
+    min-height: 42px;
+    padding: 8px;
+    border: 1px solid #30465a;
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--text);
+  }
+  .pronunciations li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-block: 5px;
   }
 </style>

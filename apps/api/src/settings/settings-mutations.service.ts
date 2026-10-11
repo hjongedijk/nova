@@ -1,10 +1,18 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import type { Skill } from "@nova/contracts";
+import type { PersonaStyleId } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
-import { normalizePersona } from "./settings-validation.js";
+import {
+  normalizePersona,
+  normalizePersonaStyle,
+  normalizePersonaProfile,
+} from "./settings-validation.js";
 import { PersonaHistoryService } from "./persona-history.service.js";
 import { InstructionSkillHistory } from "./instruction-skill-history.service.js";
+import { HelperPreferencesHistory } from "./helper-preferences-history.service.js";
+import { PersonaPreferencesHistoryService } from "./persona-preferences-history.service.js";
+import { normalizeHelperPreferences } from "./settings-validation.js";
 import {
   normalizeSkill,
   publicSkill,
@@ -27,6 +35,8 @@ export class SettingsMutationsService {
     private readonly audit: AuditService,
     private readonly personaHistory: PersonaHistoryService,
     private readonly skillHistory: InstructionSkillHistory,
+    private readonly helperHistory: HelperPreferencesHistory,
+    private readonly personaPreferencesHistory: PersonaPreferencesHistoryService,
   ) {}
 
   private log(
@@ -62,6 +72,88 @@ export class SettingsMutationsService {
     };
   }
 
+  setPersonaStyle(value: unknown): { ok: true; personaStyle: PersonaStyleId } {
+    const personaStyle = normalizePersonaStyle(value);
+    const before = {
+      style: normalizePersonaStyle(this.settings.get().personaStyle),
+      profile: normalizePersonaProfile(this.settings.get().personaProfile),
+    };
+    this.settings.update((settings) => {
+      settings.personaStyle = personaStyle;
+    });
+    this.personaPreferencesHistory.record(before, {
+      ...before,
+      style: personaStyle,
+    });
+    this.log("persona_style", { style: personaStyle });
+    return { ok: true, personaStyle };
+  }
+
+  setPersonaProfile(value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new ValidationError(["Ongeldig NOVA-profiel."]);
+    const input = value as Record<string, unknown>;
+    const fields = ["name", "character", "address", "avoid"] as const;
+    if (
+      Object.keys(input).length !== fields.length ||
+      fields.some((key) => typeof input[key] !== "string") ||
+      Object.keys(input).some(
+        (key) => !fields.includes(key as (typeof fields)[number]),
+      )
+    )
+      throw new ValidationError(["Ongeldig NOVA-profiel."]);
+    const limits = { name: 40, character: 300, address: 40, avoid: 300 };
+    if (
+      fields.some(
+        (key) => (input[key] as string).trim().length > limits[key],
+      ) ||
+      !(input.name as string).trim()
+    )
+      throw new ValidationError([
+        "Controleer de lengte en vul NOVA's naam in.",
+      ]);
+    const before = {
+      style: normalizePersonaStyle(this.settings.get().personaStyle),
+      profile: normalizePersonaProfile(this.settings.get().personaProfile),
+    };
+    const profile = normalizePersonaProfile(value);
+    this.settings.update((settings) => {
+      settings.personaProfile = profile;
+    });
+    this.personaPreferencesHistory.record(before, { ...before, profile });
+    this.log("persona_profile", { fields: Object.keys(input).length });
+    return { ok: true as const, personaProfile: profile };
+  }
+
+  setHelperPreference(
+    key: "autohide" | "contrast" | "quietHours",
+    value: boolean,
+    origin: SettingsMutationOrigin,
+  ): { ok: true; preferences: ReturnType<typeof normalizeHelperPreferences> } {
+    const before = normalizeHelperPreferences(
+      this.settings.get().helperPreferences as unknown as Record<
+        string,
+        unknown
+      >,
+    );
+    const preferences = normalizeHelperPreferences(
+      key === "quietHours"
+        ? {
+            ...before,
+            cues: {
+              ...before.cues,
+              quiet: { ...before.cues.quiet, enabled: value },
+            },
+          }
+        : { ...before, [key]: value },
+    );
+    this.settings.update((settings) => {
+      settings.helperPreferences = preferences;
+    });
+    this.helperHistory.record(before, preferences, undefined, origin);
+    return { ok: true, preferences };
+  }
+
   createSkill(
     body: unknown,
     origin?: SettingsMutationOrigin,
@@ -75,6 +167,7 @@ export class SettingsMutationsService {
     this.settings.update(
       (settings) => void settings.skills.push(skill as never),
     );
+    this.skillHistory.recordCreated(skill as StoredSkill);
     this.log(
       "skill-created",
       { skill: skill.id, type: skill.type, version: skill.version },
