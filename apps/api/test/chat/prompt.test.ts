@@ -73,6 +73,18 @@ describe("email handling", () => {
   });
 });
 
+describe("multi-step research", () => {
+  it("compares evidence and cites source links for research requests", () => {
+    expect(SYSTEM_PROMPT).toContain(
+      'For a research request such as "find the best X"',
+    );
+    expect(SYSTEM_PROMPT).toContain("search the key criteria separately");
+    expect(SYSTEM_PROMPT).toContain(
+      "Include markdown links to the pages you used",
+    );
+  });
+});
+
 describe("private notes", () => {
   it("saves only by explicit request and keeps note text out of long-term memory", () => {
     expect(SYSTEM_PROMPT).toContain(

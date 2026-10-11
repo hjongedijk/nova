@@ -13,6 +13,7 @@
 | [Private notes](notes.md)                           | Explicit note capture, local storage, search and deletion                                     |
 | [Planning lists](planning-lists.md)                 | Local lists and synchronized Home Assistant to-do entities                                    |
 | [Music and media](media-control.md)                 | Home Assistant and Music Assistant playback, volume, and confirmation rules                   |
+| [Web research](research.md)                         | Multi-step source research, citations, and uncertainty                                        |
 | [Urgent phone notifications](push-notifications.md) | Private ntfy setup and what NOVA sends to the phone                                           |
 
 Back to the [README](../README.md).

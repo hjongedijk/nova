@@ -39,7 +39,7 @@ export function worldDefinitions(): ToolDefinition[] {
     {
       name: "web_search",
       description:
-        "Search the web and return titles, links and snippets. Use it for anything current or that you do not know for certain: recent events, prices, release dates, local facts, product details. Then answer from the results, and use web_read on a result if the snippet is not enough.",
+        "Search the web and return titles, links and snippets. Use it for anything current or that you do not know for certain: recent events, prices, release dates, local facts, product details. For research and comparisons, search criteria with separate targeted queries, prefer primary sources, and use web_read on useful results when snippets are not enough. Cite URLs from returned results in the answer.",
       parameters: schema(
         {
           query: text(2, 200),
