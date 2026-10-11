@@ -79,6 +79,14 @@ describe("chat attachments", () => {
           })
           .expect(201);
         expect(response.text).toContain("Het antwoord is 391.");
+        const conversion = await request(app.getHttpServer())
+          .post(`/api/${endpoint}`)
+          .send({
+            sessionId: `local-conversion-${endpoint}`,
+            message: "Hoeveel is 10 km in miles?",
+          })
+          .expect(201);
+        expect(conversion.text).toContain("6,213712 mijl.");
         expect(model).not.toHaveBeenCalled();
       } finally {
         configured.mockReturnValue(true);

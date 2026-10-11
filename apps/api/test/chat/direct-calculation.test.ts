@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { directCalculation } from "../../src/chat/direct-calculation.js";
+import {
+  directConversion,
+  directConversionReply,
+} from "../../src/chat/direct-conversion.js";
 import { OrchestratorService } from "../../src/chat/orchestrator.service.js";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import type { RoutingService } from "../../src/routing/routing.service.js";
@@ -27,6 +31,36 @@ describe("direct calculator requests", () => {
     "Calculate 1 / 0",
   ])("leaves non-calculator question for normal chat: %s", (message) => {
     expect(directCalculation(message)).toBeNull();
+  });
+
+  it.each([
+    ["Hoeveel is 10 km in miles?", 6.213711, "mile"],
+    ["Convert 20 degrees Celsius to Fahrenheit", 68, "Fahrenheit"],
+    ["Zet 2 kg om naar pounds", 4.409245, "pound"],
+    ["Convert 2 miles to kilometers", 3.218688, "kilometer"],
+    ["Convert 1 liter to milliliters", 1000, "milliliter"],
+    ["Convert 36 km/h to mph", 22.3693629, "mile per hour"],
+    ["Convert 1 GB to MB", 1000, "megabyte"],
+    ["Convert 1 minute to seconds", 60, "second"],
+  ])("converts %s locally", (message, value, unit) => {
+    const result = directConversion(message);
+    expect(result?.value).toBeCloseTo(value as number, 5);
+    expect(result?.unit).toBe(unit);
+  });
+
+  it.each([
+    "Convert 10 meters to kilograms",
+    "How far is 10?",
+    "Convert 10 xyz to meters",
+  ])("does not guess an unsupported conversion: %s", (message) => {
+    expect(directConversion(message)).toBeNull();
+  });
+
+  it("formats conversion results for the active language", () => {
+    const result = directConversion("Hoeveel is 10 km in miles?");
+    expect(result).not.toBeNull();
+    expect(directConversionReply(result!, "nl")).toBe("6,213712 mijl.");
+    expect(directConversionReply(result!, "en")).toBe("6.213712 mile.");
   });
 
   function harness() {

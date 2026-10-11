@@ -1,8 +1,5 @@
 import { attachmentMessage } from "./attachments.js";
-import {
-  directCalculation,
-  directCalculationReply,
-} from "./direct-calculation.js";
+import { directAnswer } from "./direct-answer.js";
 import { Injectable } from "@nestjs/common";
 import type {
   ChatAttachment,
@@ -244,10 +241,9 @@ export class OrchestratorService {
       return { ...direct, model: null, usage: null };
     }
     if (!input.attachments?.length && !confirmationId) {
-      const value = directCalculation(message);
-      if (value !== null) {
+      const reply = directAnswer(message, responseLanguage);
+      if (reply !== null) {
         this.confirmations.cancel(sessionId);
-        const reply = directCalculationReply(value, responseLanguage);
         const role = modelRole ?? "conversation";
         if (stream) {
           emit("route", { role });

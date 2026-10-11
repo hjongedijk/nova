@@ -15,7 +15,7 @@ import {
   normalizeSessionId,
 } from "../memory/session-memory.service.js";
 import { ConfirmationHandler } from "./confirmation-handler.service.js";
-import { directCalculation } from "./direct-calculation.js";
+import { directAnswer } from "./direct-answer.js";
 import { OmniRouteClient } from "./omniroute-client.service.js";
 import { OrchestratorService, type Reply } from "./orchestrator.service.js";
 
@@ -161,7 +161,7 @@ export class ChatController {
     const localCalculation =
       !attachments.length &&
       !confirmationId &&
-      directCalculation(message) !== null;
+      directAnswer(message, responseLanguage) !== null;
     if (!localCalculation && !this.client.configured)
       throw new ConflictException("OmniRoute is not configured");
     if (active.has(sessionId))
@@ -213,7 +213,7 @@ export class ChatController {
     const localCalculation =
       !attachments.length &&
       !confirmationId &&
-      directCalculation(message) !== null;
+      directAnswer(message, responseLanguage) !== null;
     if (!localCalculation && !this.client.configured) {
       response.status(503).json({ error: "OmniRoute is not configured" });
       return;
