@@ -73,6 +73,17 @@ describe("email handling", () => {
   });
 });
 
+describe("private notes", () => {
+  it("saves only by explicit request and keeps note text out of long-term memory", () => {
+    expect(SYSTEM_PROMPT).toContain(
+      "Save a note or diary entry only when the user explicitly asks",
+    );
+    expect(SYSTEM_PROMPT).toContain(
+      "do not copy note text into durable memory",
+    );
+  });
+});
+
 describe("calm response to a shared mood", () => {
   it("treats mood statements as conversation, even when they mention live topics", () => {
     expect(

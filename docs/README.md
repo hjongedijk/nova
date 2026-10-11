@@ -10,6 +10,7 @@
 | [Architecture](architecture.md)                     | Components, module map, bridges, request flow, web app                                        |
 | [Development](development.md)                       | Running locally, commands, tests, adding a tool, editor setup                                 |
 | [Releasing](releasing.md)                           | Version numbers and how a tag publishes the image and agent                                   |
+| [Private notes](notes.md)                           | Explicit note capture, local storage, search and deletion                                     |
 | [Urgent phone notifications](push-notifications.md) | Private ntfy setup and what NOVA sends to the phone                                           |
 
 Back to the [README](../README.md).

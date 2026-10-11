@@ -105,6 +105,7 @@ const PERSONAL_SETTINGS_TOOLS = new Set([
   "settings_helper_preference_set",
   "settings_skills",
 ]);
+const LOCAL_PERSONAL_TOOLS = new Set(["notes_save"]);
 
 /** Read-only tools the dashboard may poll without writing to the action log. */
 const DASHBOARD_TOOLS = new Set([
@@ -120,6 +121,18 @@ function auditArgs(
   name: string,
   args: Record<string, unknown>,
 ): Record<string, unknown> {
+  if (name === "notes_save")
+    return {
+      titleCharacters:
+        typeof args.title === "string" ? [...args.title].length : 0,
+      contentBytes:
+        typeof args.content === "string" ? Buffer.byteLength(args.content) : 0,
+    };
+  if (name === "notes_search")
+    return {
+      queryCharacters:
+        typeof args.query === "string" ? [...args.query].length : 0,
+    };
   if (name === "node_red_flow")
     return {
       flow: args.flow,
@@ -138,6 +151,30 @@ function auditArgs(
   if (typeof args.content === "string")
     safe.content = { bytes: Buffer.byteLength(args.content) };
   return safe;
+}
+
+/** Keep private note bodies, titles, and search terms out of the durable action log. */
+export function noteAuditProjection(
+  name: string,
+  args: Record<string, unknown>,
+  result: ToolResult,
+): {
+  arguments: Record<string, unknown>;
+  result: Record<string, unknown>;
+} | null {
+  if (!name.startsWith("notes_")) return null;
+  const safeResult: Record<string, unknown> = { ok: result.ok };
+  const payload = result.result as
+    { id?: unknown; count?: unknown; notes?: unknown } | undefined;
+  if (name === "notes_save" && typeof payload?.id === "string")
+    safeResult.noteId = payload.id;
+  if (
+    (name === "notes_search" || name === "notes_recent") &&
+    Array.isArray(payload?.notes)
+  )
+    safeResult.count = payload.notes.length;
+  if (!result.ok) safeResult.error = "Notes operation failed";
+  return { arguments: auditArgs(name, args), result: safeResult };
 }
 
 /**
@@ -300,12 +337,13 @@ export class ToolsService implements OnModuleInit {
       );
       const privateMemory =
         name === "memory_remember" ? memoryAuditProjection(args, clean) : null;
+      const privateNote = noteAuditProjection(name, args, clean);
       this.audit.record({
         sessionId,
         tool: name,
         arguments: codeTool(name)
           ? auditArgs(name, args)
-          : (privateMemory?.arguments ?? args),
+          : (privateMemory?.arguments ?? privateNote?.arguments ?? args),
         risk,
         confirmation,
         result:
@@ -318,7 +356,7 @@ export class ToolsService implements OnModuleInit {
                   ? { status: clean.status }
                   : {}),
               }
-            : (privateMemory?.result ?? clean),
+            : (privateMemory?.result ?? privateNote?.result ?? clean),
         verification: clean.verified ?? null,
         durationMs: Date.now() - started,
       });
@@ -401,6 +439,7 @@ export class ToolsService implements OnModuleInit {
       if (
         risk !== "READ_ONLY" &&
         !name.startsWith("memory_") &&
+        !LOCAL_PERSONAL_TOOLS.has(name) &&
         !(
           tool.source.source === "settings" && PERSONAL_SETTINGS_TOOLS.has(name)
         ) &&

@@ -16,6 +16,7 @@ import { SettingsStore } from "../../src/settings/store/settings.store.js";
 import { ToolsModule } from "../../src/tools/tools.module.js";
 import {
   memoryAuditProjection,
+  noteAuditProjection,
   ToolsService,
 } from "../../src/tools/tools.service.js";
 import {
@@ -507,5 +508,31 @@ describe("memory audit projection", () => {
       arguments: { type: "PERSON", text: "[redacted]" },
       result: { ok: true, stored: true },
     });
+  });
+});
+
+describe("note audit projection", () => {
+  it("omits note titles, contents, and search text from durable action logs", () => {
+    const body = "The diary says: a private family detail.";
+    const projected = noteAuditProjection(
+      "notes_save",
+      { title: "Family diary", content: body },
+      { ok: true, result: { id: "opaque-id", title: "Family diary" } },
+    );
+    expect(projected).toEqual({
+      arguments: {
+        titleCharacters: 12,
+        contentBytes: Buffer.byteLength(body),
+      },
+      result: { ok: true, noteId: "opaque-id" },
+    });
+    expect(JSON.stringify(projected)).not.toContain(body);
+    expect(JSON.stringify(projected)).not.toContain("Family diary");
+    const search = noteAuditProjection(
+      "notes_search",
+      { query: "a private family detail" },
+      { ok: true, result: { count: 1, notes: [{ excerpt: body }] } },
+    );
+    expect(JSON.stringify(search)).not.toContain("private family detail");
   });
 });

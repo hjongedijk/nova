@@ -18,6 +18,7 @@ import { TermixModule } from "./integrations/termix/termix.module.js";
 import { WindowsModule } from "./integrations/windows/windows.module.js";
 import { WorldModule } from "./integrations/world/world.module.js";
 import { MemoryModule } from "./memory/memory.module.js";
+import { NotesModule } from "./notes/notes.module.js";
 import { PlanningModule } from "./planning/planning.module.js";
 import { ProxmoxModule } from "./proxmox/proxmox.module.js";
 import { RoutingModule } from "./routing/routing.module.js";
@@ -39,6 +40,7 @@ const config = new NovaConfig();
     ToolsModule,
     ConfirmationsModule,
     MemoryModule,
+    NotesModule,
     RoutingModule,
     SettingsModule,
     ChatModule,
