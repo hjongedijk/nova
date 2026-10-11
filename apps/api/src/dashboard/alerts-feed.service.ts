@@ -12,6 +12,7 @@ import type {
 import { sanitize } from "../core/security/sanitize.js";
 import { WindowsPcService } from "../integrations/windows/windows-pc.service.js";
 import { PlanningService } from "../planning/planning.service.js";
+import { SpeechPresenceService } from "./speech-presence.service.js";
 
 const SEVERITIES = new Set(["info", "warning", "critical"]);
 const MAX_EVENTS = 50;
@@ -71,6 +72,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly planning: PlanningService,
     @Optional() private readonly windows?: WindowsPcService,
+    @Optional() private readonly presence?: SpeechPresenceService,
   ) {}
 
   onModuleInit(): void {
@@ -84,7 +86,11 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   record(event: InfrastructureEvent): FeedEvent | null {
     const entry = toFeedEvent(event);
     if (!entry) return null;
-    const stored: FeedEvent = { seq: ++this.sequence, ...entry };
+    const stored: FeedEvent = {
+      seq: ++this.sequence,
+      ...entry,
+      ...(this.presence?.maySpeak() === false ? { speakAllowed: false } : {}),
+    };
     this.feed.push(stored);
     if (this.feed.length > MAX_EVENTS) this.feed.shift();
     if (this.windows?.configured)

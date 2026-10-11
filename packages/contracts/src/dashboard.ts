@@ -49,6 +49,8 @@ export interface FeedEvent {
   label?: string;
   key?: string;
   at: string;
+  /** False when cached presence signals establish there is nobody available to hear it. */
+  speakAllowed?: boolean;
 }
 
 /** GET /api/alerts?since=N */

@@ -17,6 +17,8 @@ import { HostMetricsService } from "./host-metrics.service.js";
 import { IntegrationsHealth } from "./integrations-health.service.js";
 import { OverviewService } from "./overview.service.js";
 import { SystemSource } from "./system.source.js";
+import { SpeechPresenceService } from "./speech-presence.service.js";
+import { WeatherDepartureAlertService } from "./weather-departure-alert.service.js";
 
 /** Home-screen data: this machine, the side panels, the unasked-for alerts, and the health of everything. */
 @Module({
@@ -40,6 +42,8 @@ import { SystemSource } from "./system.source.js";
     OverviewService,
     AlertsFeed,
     IntegrationsHealth,
+    SpeechPresenceService,
+    WeatherDepartureAlertService,
     SystemSource,
   ],
   exports: [HostMetricsService, OverviewService, IntegrationsHealth],

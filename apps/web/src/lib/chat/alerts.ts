@@ -9,8 +9,9 @@ import { chatEvents } from "./events.ts";
 import { showStage } from "./stage.ts";
 
 /** NOVA speaks up by itself, but never over a conversation. */
-function announce(text: string): void {
-  if (!shell.voiceAlerts || chat.busy || playback.current) return;
+function announce(text: string, speakAllowed = true): void {
+  if (!speakAllowed || !shell.voiceAlerts || chat.busy || playback.current)
+    return;
   addMessage("assistant", text);
   showStage("", text, false);
   void speak(text);
@@ -36,9 +37,13 @@ async function pollAlerts(): Promise<void> {
           event.label === "timer"
             ? "Je timer is afgelopen."
             : `Je timer voor ${event.label} is afgelopen.`,
+          event.speakAllowed !== false,
         );
       else if (event.severity !== "info")
-        announce(`${event.title}.${event.detail ? ` ${event.detail}` : ""}`);
+        announce(
+          `${event.title}.${event.detail ? ` ${event.detail}` : ""}`,
+          event.speakAllowed !== false,
+        );
     }
     if (data.events.some((event) => event.kind === "timer"))
       chatEvents.emit("timer");
