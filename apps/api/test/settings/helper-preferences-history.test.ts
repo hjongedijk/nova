@@ -48,12 +48,33 @@ describe("helper preference history", () => {
         },
       }),
     ).toThrow("Ongeldige meldingsvoorkeur.");
+    expect(preferences.rituals).toEqual({
+      morning: { enabled: false, time: "08:00" },
+      evening: { enabled: false, time: "22:00" },
+      checkIn: { enabled: false, afterHours: 4 },
+    });
+    expect(() =>
+      normalize({
+        ...preferences,
+        rituals: {
+          ...preferences.rituals!,
+          morning: { enabled: true, time: "25:00" },
+        },
+      }),
+    ).toThrow("Ongeldige ritueeltijd.");
   });
 
   it("stores secret-free bounded revisions with private file permissions", () => {
     const f = fixture();
     const before = normalize(f.settings.get().helperPreferences);
-    const after = { ...before, contrast: !before.contrast };
+    const after = {
+      ...before,
+      contrast: !before.contrast,
+      rituals: {
+        ...before.rituals!,
+        morning: { enabled: true, time: "07:30" },
+      },
+    };
     f.history.record(before, after);
     const listed = f.history.list();
     expect(listed.revisions).toHaveLength(1);

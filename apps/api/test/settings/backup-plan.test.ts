@@ -82,6 +82,11 @@ function current(): NovaSettings {
         critical: "speak",
         timer: "speak",
       },
+      rituals: {
+        morning: { enabled: false, time: "08:00" },
+        evening: { enabled: false, time: "22:00" },
+        checkIn: { enabled: false, afterHours: 4 },
+      },
       cues: {
         enabled: true,
         volume: 0.35,

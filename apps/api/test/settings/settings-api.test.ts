@@ -2380,6 +2380,11 @@ describe("the helper overlay choice", () => {
         critical: "speak",
         timer: "speak",
       },
+      rituals: {
+        morning: { enabled: false, time: "08:00" },
+        evening: { enabled: false, time: "22:00" },
+        checkIn: { enabled: false, afterHours: 4 },
+      },
       cues: {
         enabled: true,
         volume: 0.35,
@@ -2397,6 +2402,11 @@ describe("the helper overlay choice", () => {
         warning: "helper",
         critical: "speak",
         timer: "speak",
+      },
+      rituals: {
+        morning: { enabled: true, time: "07:30" },
+        evening: { enabled: false, time: "22:00" },
+        checkIn: { enabled: true, afterHours: 6 },
       },
       cues: {
         enabled: true,
@@ -2438,6 +2448,20 @@ describe("the helper overlay choice", () => {
         cues: { ...preferences.cues, cues: { unknown: true } },
       },
       { ...preferences, cues: { ...preferences.cues, cues: { done: "yes" } } },
+      {
+        ...preferences,
+        rituals: {
+          ...preferences.rituals,
+          morning: { enabled: true, time: "25:00" },
+        },
+      },
+      {
+        ...preferences,
+        rituals: {
+          ...preferences.rituals,
+          checkIn: { enabled: true, afterHours: 5 },
+        },
+      },
     ];
     for (const body of invalid)
       expect((await call("put", "/helper/preferences", body)).status).toBe(400);

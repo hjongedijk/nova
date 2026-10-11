@@ -641,6 +641,11 @@ export interface HelperPreferences {
   contrast: boolean;
   shape: "orb" | "ring" | "mist";
   notifications?: NotificationModes;
+  rituals?: {
+    morning: { enabled: boolean; time: string };
+    evening: { enabled: boolean; time: string };
+    checkIn: { enabled: boolean; afterHours: number };
+  };
   cues: {
     enabled: boolean;
     volume: number;

@@ -372,6 +372,7 @@
         contrast = prefs.contrast;
         helper.shape = prefs.shape;
         if (prefs.notifications) helper.notifications = prefs.notifications;
+        if (prefs.rituals) helper.rituals = prefs.rituals;
         helper.cues = prefs.cues;
         if (prefs.wardrobe) helper.wardrobe = prefs.wardrobe;
         const today = new Date();
@@ -737,6 +738,52 @@
               </label>
             {/each}
           </fieldset>
+          <fieldset class="hp-notification-preferences">
+            <legend>Rituelen (standaard uit)</legend>
+            <label
+              ><input
+                type="checkbox"
+                bind:checked={helper.rituals.morning.enabled}
+              /> Goedemorgen</label
+            >
+            <label
+              >Om <input
+                aria-label="Goedemorgen om"
+                type="time"
+                bind:value={helper.rituals.morning.time}
+              /></label
+            >
+            <label
+              ><input
+                type="checkbox"
+                bind:checked={helper.rituals.evening.enabled}
+              /> Welterusten</label
+            >
+            <label
+              >Om <input
+                aria-label="Welterusten om"
+                type="time"
+                bind:value={helper.rituals.evening.time}
+              /></label
+            >
+            <label
+              ><input
+                type="checkbox"
+                bind:checked={helper.rituals.checkIn.enabled}
+              /> Check-in na stilte</label
+            >
+            <label
+              >Na
+              <select bind:value={helper.rituals.checkIn.afterHours}>
+                <option value={3}>3 uur</option><option value={4}>4 uur</option
+                ><option value={6}>6 uur</option>
+              </select>
+            </label>
+            <p class="hint">
+              Rituelen komen als gewone melding en volgen je meldingskeuze,
+              stille uren en aanwezigheid.
+            </p>
+          </fieldset>
           <details>
             <summary>Geluiden kiezen</summary
             >{#each HELPER_CUE_NAMES as name (name)}<label
@@ -776,6 +823,7 @@
                   contrast,
                   shape: helper.shape,
                   notifications: helper.notifications,
+                  rituals: helper.rituals,
                   wardrobe: helper.wardrobe,
                   cues: { ...helper.cues, quiet: helper.cues.quiet! },
                 });

@@ -2,6 +2,7 @@ import { SvelteDate } from "svelte/reactivity";
 import { storage } from "#lib/util/storage.ts";
 import type { OrbEvent } from "#lib/entity/orb.ts";
 import type { NotificationModes } from "@nova/contracts";
+import type { HelperPreferences } from "@nova/contracts";
 import {
   HELPER_CUE_NAMES,
   type CuePreferences,
@@ -20,6 +21,11 @@ export const helper = $state({
     critical: "speak",
     timer: "speak",
   } as NotificationModes,
+  rituals: {
+    morning: { enabled: false, time: "08:00" },
+    evening: { enabled: false, time: "22:00" },
+    checkIn: { enabled: false, afterHours: 4 },
+  } as NonNullable<HelperPreferences["rituals"]>,
   event: "greet" as OrbEvent,
   eventId: 0,
   cues: {
@@ -50,6 +56,32 @@ export function loadHelperPreferences(): void {
           helper.notifications[kind] = notifications[
             kind
           ] as (typeof helper.notifications)[typeof kind];
+    }
+    if (saved.rituals && typeof saved.rituals === "object") {
+      const rituals = saved.rituals as Record<string, unknown>;
+      for (const kind of ["morning", "evening"] as const) {
+        const value = rituals[kind];
+        if (!value || typeof value !== "object") continue;
+        const item = value as Record<string, unknown>;
+        if (
+          typeof item.enabled === "boolean" &&
+          typeof item.time === "string" &&
+          /^([01]\d|2[0-3]):[0-5]\d$/.test(item.time)
+        )
+          helper.rituals[kind] = { enabled: item.enabled, time: item.time };
+      }
+      const checkIn = rituals.checkIn;
+      if (checkIn && typeof checkIn === "object") {
+        const item = checkIn as Record<string, unknown>;
+        if (
+          typeof item.enabled === "boolean" &&
+          [3, 4, 6].includes(Number(item.afterHours))
+        )
+          helper.rituals.checkIn = {
+            enabled: item.enabled,
+            afterHours: Number(item.afterHours),
+          };
+      }
     }
     if (saved.wardrobe && typeof saved.wardrobe === "object") {
       const wardrobe = saved.wardrobe as Record<string, unknown>;
@@ -104,6 +136,7 @@ export function saveHelperPreferences(): void {
     JSON.stringify({
       shape: helper.shape,
       notifications: helper.notifications,
+      rituals: helper.rituals,
       cues: helper.cues,
       wardrobe: helper.wardrobe,
     }),

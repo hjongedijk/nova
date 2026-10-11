@@ -25,6 +25,7 @@ import { DataBackupService } from "./data-backup.service.js";
 import { SpeechPresenceService } from "./speech-presence.service.js";
 import { WeatherDepartureAlertService } from "./weather-departure-alert.service.js";
 import { NtfyPushService } from "./ntfy-push.service.js";
+import { RitualsService } from "./rituals.service.js";
 
 /** Home-screen data: this machine, the side panels, the unasked-for alerts, and the health of everything. */
 @Module({
@@ -56,6 +57,7 @@ import { NtfyPushService } from "./ntfy-push.service.js";
     SpeechPresenceService,
     WeatherDepartureAlertService,
     NtfyPushService,
+    RitualsService,
   ],
   exports: [HostMetricsService, OverviewService, IntegrationsHealth],
 })

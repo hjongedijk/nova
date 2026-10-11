@@ -201,7 +201,7 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
   exactKeys(
     body,
     ["autohide", "contrast", "shape", "cues"],
-    ["wardrobe", "notifications"],
+    ["wardrobe", "notifications", "rituals"],
   );
   const cues = object(body.cues);
   exactKeys(cues, ["enabled", "volume", "theme", "quiet"], ["cues"]);
@@ -218,6 +218,15 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
   const notifications = Object.hasOwn(body, "notifications")
     ? object(body.notifications)
     : undefined;
+  const rituals = Object.hasOwn(body, "rituals")
+    ? object(body.rituals)
+    : undefined;
+  if (rituals) {
+    exactKeys(rituals, ["morning", "evening", "checkIn"]);
+    exactKeys(object(rituals.morning), ["enabled", "time"]);
+    exactKeys(object(rituals.evening), ["enabled", "time"]);
+    exactKeys(object(rituals.checkIn), ["enabled", "afterHours"]);
+  }
   if (notifications)
     exactKeys(notifications, ["info", "warning", "critical", "timer"]);
   let wardrobe: Record<string, unknown> | undefined;
@@ -236,6 +245,7 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
     contrast: body.contrast,
     shape: body.shape,
     ...(notifications ? { notifications } : {}),
+    ...(rituals ? { rituals } : {}),
     cues: {
       enabled: cues.enabled,
       volume: cues.volume,

@@ -194,6 +194,15 @@ export class SessionMemoryService {
     return Object.keys(this.sessions);
   }
 
+  lastUserMessageAt(): string | null {
+    let latest: string | null = null;
+    for (const session of Object.values(this.sessions))
+      for (const message of session.messages)
+        if (message.role === "user" && (!latest || message.at > latest))
+          latest = message.at;
+    return latest;
+  }
+
   add(sessionId: string, role: StoredMessage["role"], content: string): void {
     if (!content || !String(content).trim()) return;
     const session = this.session(sessionId);

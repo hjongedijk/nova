@@ -215,6 +215,37 @@ export function normalizeHelperPreferences(
   const quiet = cues?.quiet as Record<string, unknown> | undefined;
   const notifications = body?.notifications as
     Record<string, unknown> | undefined;
+  const rituals = body?.rituals as Record<string, unknown> | undefined;
+  const morning = rituals?.morning as Record<string, unknown> | undefined;
+  const evening = rituals?.evening as Record<string, unknown> | undefined;
+  const checkIn = rituals?.checkIn as Record<string, unknown> | undefined;
+  if (
+    rituals !== undefined &&
+    (!rituals || typeof rituals !== "object" || Array.isArray(rituals))
+  )
+    throw new ValidationError(["Ongeldige ritueelinstellingen."]);
+  if (rituals) {
+    if (Object.keys(rituals).sort().join(",") !== "checkIn,evening,morning")
+      throw new ValidationError(["Ongeldige ritueelinstellingen."]);
+    for (const [item, field] of [
+      [morning, "time"],
+      [evening, "time"],
+      [checkIn, "afterHours"],
+    ] as const) {
+      if (!item || typeof item !== "object" || Array.isArray(item))
+        throw new ValidationError(["Ongeldige ritueelinstellingen."]);
+      const expected = ["enabled", field];
+      if (
+        Object.keys(item).length !== expected.length ||
+        Object.keys(item).some((key) => !expected.includes(key)) ||
+        typeof item.enabled !== "boolean"
+      )
+        throw new ValidationError(["Ongeldige ritueelinstellingen."]);
+    }
+  }
+  for (const item of [morning, evening, checkIn])
+    if (item && item.enabled !== undefined && typeof item.enabled !== "boolean")
+      throw new ValidationError(["Ongeldige ritueelinstellingen."]);
   if (
     typeof body?.autohide !== "boolean" ||
     typeof body.contrast !== "boolean" ||
@@ -290,6 +321,23 @@ export function normalizeHelperPreferences(
       critical: notificationMode(notifications?.critical, "speak"),
       timer: notificationMode(notifications?.timer, "speak"),
     },
+    rituals: {
+      morning: {
+        enabled:
+          typeof morning?.enabled === "boolean" ? morning.enabled : false,
+        time: ritualTime(morning?.time, "08:00"),
+      },
+      evening: {
+        enabled:
+          typeof evening?.enabled === "boolean" ? evening.enabled : false,
+        time: ritualTime(evening?.time, "22:00"),
+      },
+      checkIn: {
+        enabled:
+          typeof checkIn?.enabled === "boolean" ? checkIn.enabled : false,
+        afterHours: ritualHours(checkIn?.afterHours),
+      },
+    },
     cues: {
       enabled: cues.enabled,
       volume: cues.volume,
@@ -303,6 +351,19 @@ export function normalizeHelperPreferences(
     },
   };
   return preferences;
+}
+
+function ritualTime(value: unknown, fallback: string): string {
+  if (value === undefined) return fallback;
+  if (typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value))
+    return value;
+  throw new ValidationError(["Ongeldige ritueeltijd."]);
+}
+
+function ritualHours(value: unknown): number {
+  if (value === undefined) return 4;
+  if (typeof value === "number" && [3, 4, 6].includes(value)) return value;
+  throw new ValidationError(["Ongeldige check-inperiode."]);
 }
 
 function notificationMode(
