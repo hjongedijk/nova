@@ -1,0 +1,32 @@
+<script type="text/javascript">
+  RED.nodes.registerType("nova-event", {
+    category: "NOVA",
+    color: "#7656a8",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-exchange",
+    label: function () {
+      return this.name || "NOVA gebeurtenis";
+    },
+    paletteLabel: "NOVA gebeurtenis",
+  });
+</script>
+
+<script type="text/html" data-template-name="nova-event">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Naam</label>
+    <input type="text" id="node-input-name" placeholder="NOVA gebeurtenis" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="nova-event">
+  <p>Registreert een runtimefout als gebeurtenis bij NOVA.</p>
+  <p>
+    <code>msg.payload</code>: een tekst met foutdetail, of
+    <code>{ detail, flowId? }</code>.
+  </p>
+  <p>
+    Berichtinhoud blijft uit de audit; alleen type en ernst worden vastgelegd.
+  </p>
+</script>

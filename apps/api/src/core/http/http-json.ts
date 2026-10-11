@@ -17,6 +17,8 @@ export interface RequestJsonOptions {
   /** Send another Host header than the URL's (reverse proxies). */
   hostHeader?: string;
   timeoutMs?: number;
+  /** Refuse larger JSON responses; defaults to the client-wide 2 MiB cap. */
+  maxResponseBytes?: number;
 }
 
 /**
@@ -35,11 +37,19 @@ export function requestJson<T = unknown>(
     insecureTls = false,
     hostHeader,
     timeoutMs,
+    maxResponseBytes = 2_000_000,
   } = options;
   const url = new URL(target);
   const client = url.protocol === "https:" ? https : http;
   const payload = body === undefined ? undefined : JSON.stringify(body);
+  const responseLimit = Math.max(1, Math.min(2_000_000, maxResponseBytes));
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
     const request = client.request(
       url,
       {
@@ -69,11 +79,17 @@ export function requestJson<T = unknown>(
         let size = 0;
         response.on("data", (chunk: Buffer) => {
           size += chunk.length;
-          if (size > 2_000_000)
-            request.destroy(new Error("Response too large"));
-          else chunks.push(chunk);
+          if (size > responseLimit) {
+            fail(new Error("Response too large"));
+            response.destroy();
+            request.destroy();
+            return;
+          }
+          chunks.push(chunk);
         });
+        response.on("error", fail);
         response.on("end", () => {
+          if (settled) return;
           const text = Buffer.concat(chunks).toString("utf8");
           const data = ((): T | null => {
             try {
@@ -82,6 +98,7 @@ export function requestJson<T = unknown>(
               return null;
             }
           })();
+          settled = true;
           resolve({
             status: response.statusCode ?? 0,
             data,
@@ -93,7 +110,7 @@ export function requestJson<T = unknown>(
     request.on("timeout", () =>
       request.destroy(new Error("Request timed out")),
     );
-    request.on("error", reject);
+    request.on("error", fail);
     if (payload) request.write(payload);
     request.end();
   });

@@ -11,6 +11,8 @@ build/
 .env.*
 !.env.example
 dev-data/
+dev-data-backups/
+nova-backups/
 *.pem
 *.key
 agents/windows/agent.json

@@ -37,6 +37,12 @@
 <header>
   <h1 class="wordmark">NOVA</h1>
   <div class="head-right">
+    <button
+      type="button"
+      class="code-btn"
+      aria-expanded={shell.codeOpen}
+      onclick={() => (shell.codeOpen = !shell.codeOpen)}>Code</button
+    >
     <span class="sys-dot" aria-hidden="true"></span>
     <span
       class="wake-dot"

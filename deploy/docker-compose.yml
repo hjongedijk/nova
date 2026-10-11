@@ -1,6 +1,6 @@
 # NOVA production stack. Put this file in e.g. /opt/nova, with .env and the *-data folders next to it.
 # Update: set NOVA_VERSION in .env, then: docker compose pull && docker compose up -d
-# Once: chown -R 1000:1000 nova-data   (NOVA runs as user node)
+# Once: chown -R 1000:1000 nova-data nova-backups nodered-data
 name: nova
 
 x-restart: &restart
@@ -17,38 +17,102 @@ services:
       PORT: 8080
       HTTPS_PORT: 8443
       NOVA_DATA_DIR: /data
+      NOVA_BACKUP_DIR: /backups
       # This service has restart: unless-stopped, so NOVA may safely request a graceful restart.
       NOVA_RESTART_ENABLED: "true"
+      NOVA_STACK_CONTROL_URL: http://stack-control:8090
+      NOVA_STACK_CONTROL_TOKEN: ${NOVA_STACK_CONTROL_TOKEN:-}
       OMNIROUTE_URL: http://omniroute:20128/v1
       OMNIROUTE_DATABASE: /omniroute/storage.sqlite
       MQTT_URL: mqtt://mqtt:1883
       QDRANT_URL: http://qdrant:6333
       NODE_RED_URL: http://node-red:1880
+      NODE_RED_EVENT_TOKEN: ${NODE_RED_EVENT_TOKEN:-}
+      NODE_RED_FLOW_ALLOWLIST: ${NODE_RED_FLOW_ALLOWLIST:-[]}
+      NODE_RED_FLOW_TOKEN: ${NODE_RED_FLOW_TOKEN:-}
+      NODE_RED_ADMIN_TOKEN: ${NODE_RED_ADMIN_TOKEN:-}
+      NODE_RED_EDITOR_URL: ${NODE_RED_EDITOR_URL:-}
       HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-http://host.docker.internal:8123}
+      NTFY_URL: ${NTFY_URL:-}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
     ports:
       - "8080:8080" # http (behind a reverse proxy: only this one)
       - "8443:8443" # https with nova-data/certs (microphone and app install on the LAN)
     volumes:
       - ./nova-data:/data
+      - ./nova-backups:/backups
       - ./omniroute-data:/omniroute:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
-      NTFY_URL: ${NTFY_URL:-}
-      NTFY_TOPIC: ${NTFY_TOPIC:-}
-      NTFY_TOKEN: ${NTFY_TOKEN:-}
-    depends_on: [omniroute, mqtt, qdrant]
-    networks: [nova]
+    depends_on:
+      node-red:
+        condition: service_healthy
+      omniroute:
+        condition: service_started
+      mqtt:
+        condition: service_started
+      qdrant:
+        condition: service_started
+    networks: [nova, stack-control]
 
-  # Optional: only for your own flows; NOVA does not need it.
+  # The only component with Docker socket access. It exposes fixed, token-protected
+  # status/restart and project-sandbox routes on a private network shared only with NOVA.
+  stack-control:
+    <<: *restart
+    image: ghcr.io/${NOVA_OWNER:-hjongedijk}/nova:${NOVA_VERSION:-latest}
+    container_name: nova-stack-control
+    user: "0:0" # Docker socket access; the broker exposes only fixed operations.
+    command: ["node", "/app/stack-control/server.mjs"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 64m
+    cpus: 0.25
+    environment:
+      PORT: 8090
+      STACK_CONTROL_TOKEN: ${NOVA_STACK_CONTROL_TOKEN:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./nova-data/workspace:/workspace-host:ro
+    networks: [stack-control]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
   node-red:
     <<: *restart
     image: nodered/node-red:4.1
     container_name: nova-node-red
-    user: "0:0" # its data folder belongs to root
+    user: "1000:1000" # official Node-RED image user
     environment:
       TZ: ${TZ:-Europe/Amsterdam}
-    ports: ["1880:1880"]
-    volumes: ["./nodered-data:/data"]
+      NODE_RED_EVENT_TOKEN: ${NODE_RED_EVENT_TOKEN:-}
+      NODE_RED_FLOW_TOKEN: ${NODE_RED_FLOW_TOKEN:-}
+    volumes:
+      - ./nodered-data:/data
+      - ./nodered:/opt/nova/nodered-seed:ro
+    entrypoint: ["/bin/sh", "/opt/nova/nodered-seed/seed-entrypoint.sh"]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:1880/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
     networks: [nova]
 
   omniroute:
@@ -99,3 +163,6 @@ services:
 networks:
   nova:
     name: nova
+  stack-control:
+    name: nova-stack-control
+    internal: true

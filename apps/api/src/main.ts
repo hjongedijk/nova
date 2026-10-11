@@ -22,6 +22,10 @@ async function bootstrap() {
   app.setGlobalPrefix("api", {
     exclude: ["windows-agent/{*path}", "nova-ca.crt"],
   });
+  server.use(
+    "/api/integrations/node-red/events",
+    express.json({ limit: "4kb" }),
+  );
   app.useBodyParser("json", { limit: "42mb" });
   app.enableShutdownHooks();
   await app.init();

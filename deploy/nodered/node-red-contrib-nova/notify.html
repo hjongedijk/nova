@@ -1,0 +1,29 @@
+<script type="text/javascript">
+  RED.nodes.registerType("nova-notify", {
+    category: "NOVA",
+    color: "#7656a8",
+    defaults: { name: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-bell",
+    label: function () {
+      return this.name || "NOVA melding";
+    },
+    paletteLabel: "NOVA melding",
+  });
+</script>
+
+<script type="text/html" data-template-name="nova-notify">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Naam</label>
+    <input type="text" id="node-input-name" placeholder="NOVA melding" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="nova-notify">
+  <p>Stuurt een NOVA-alert via de begrensde, token-beveiligde event-API.</p>
+  <p><code>msg.payload</code>: <code>{ title, detail?, severity? }</code>.</p>
+  <p>
+    Configureer <code>NODE_RED_EVENT_TOKEN</code> alleen in de runtime-omgeving.
+  </p>
+</script>

@@ -20,6 +20,11 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: node scripts/check-nodered-flows.mjs
+      - run: npm test --prefix deploy/nodered/node-red-contrib-nova
+      - run: npm run test:nodered-seed
+      - run: node scripts/test-nodered-flows.mjs
+      - run: npm run test:compose-notification
       # The Windows agent cannot run here, but its syntax and embedded C# can be checked.
       - run: pwsh -NoProfile -File agents/windows/test/check.ps1
 

@@ -1,0 +1,8 @@
+{
+  "name": "nova-node-red-userdir",
+  "private": true,
+  "description": "Persistent Node-RED user directory for NOVA",
+  "dependencies": {
+    "node-red-contrib-nova": "file:/opt/nova/nodered-seed/node-red-contrib-nova"
+  }
+}

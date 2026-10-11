@@ -28,6 +28,7 @@ export const shell = $state({
   /** Info panels in the side columns (menu: "Info-panelen"). */
   panels: true,
   menuOpen: false,
+  codeOpen: false,
   /** What is typed in the composer (the wake word handler clears it when it sends a spoken command). */
   draft: "",
   /** Header status: text and tone ("ok" / "bad" / ""). */

@@ -1,27 +1,48 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import fs from "node:fs";
 import path from "node:path";
 import { applyConnectionOverrides } from "./service-connections.js";
 
 const text = (name: string, fallback = "") =>
   process.env[name]?.trim() || fallback;
+const logger = new Logger("NovaConfig");
+const warnedLegacyNames = new Set<string>();
+const setting = (name: string, oldName: string, fallback = "") => {
+  const current = text(name);
+  if (current) return current;
+  const old = text(oldName);
+  if (old && !warnedLegacyNames.has(oldName)) {
+    warnedLegacyNames.add(oldName);
+    logger.warn(`${oldName} is deprecated; use ${name}.`);
+  }
+  return old || fallback;
+};
 const url = (name: string, fallback: string) =>
   text(name, fallback).replace(/\/$/, "");
-const flag = (name: string, fallback: boolean) => {
-  const value = process.env[name]?.trim().toLowerCase();
+const flagValue = (raw: string, fallback: boolean) => {
+  const value = raw.trim().toLowerCase();
   return value ? value === "true" : fallback;
 };
-const number = (name: string, fallback: number, min: number, max: number) => {
-  const value = Number(process.env[name]);
+const flag = (name: string, fallback: boolean) =>
+  flagValue(process.env[name]?.trim() ?? "", fallback);
+const numberFrom = (
+  raw: string,
+  fallback: number,
+  min: number,
+  max: number,
+) => {
+  const value = Number(raw);
   return Number.isFinite(value) && value > 0
     ? Math.min(max, Math.max(min, value))
     : fallback;
 };
+const number = (name: string, fallback: number, min: number, max: number) =>
+  numberFrom(process.env[name] ?? "", fallback, min, max);
 
 /**
  * Everything NOVA reads from the environment, read once and typed. Internal addresses default
- * to the docker-compose service names; secrets have no default. The JARVIS_* names are kept so
- * an existing .env keeps working.
+ * to the docker-compose service names; secrets have no default. NOVA_* names take precedence;
+ * supported JARVIS_* aliases warn and remain as a migration fallback.
  */
 @Injectable()
 export class NovaConfig {
@@ -29,7 +50,10 @@ export class NovaConfig {
   readonly port = number("PORT", 3000, 1, 65535);
   readonly httpsPort = Number(process.env.HTTPS_PORT ?? 0);
   readonly dataDir = path.resolve(
-    text("NOVA_DATA_DIR") || text("JARVIS_DATA_DIR") || "../../dev-data",
+    setting("NOVA_DATA_DIR", "JARVIS_DATA_DIR", "../../dev-data"),
+  );
+  readonly backupDir = path.resolve(
+    text("NOVA_BACKUP_DIR", `${this.dataDir}-backups`),
   );
   readonly certDir = path.resolve(
     text("NOVA_CERT_DIR", path.join(this.dataDir, "certs")),
@@ -52,7 +76,16 @@ export class NovaConfig {
   readonly adminPin = text("NOVA_ADMIN_PIN");
   /** Permit a graceful process restart only when an external supervisor restarts this process. */
   readonly restartEnabled = flag("NOVA_RESTART_ENABLED", false);
-  readonly defaultLanguage = text("JARVIS_DEFAULT_LANGUAGE", "nl-NL");
+  readonly stackControlUrl = url(
+    "NOVA_STACK_CONTROL_URL",
+    "http://stack-control:8090",
+  );
+  readonly stackControlToken = text("NOVA_STACK_CONTROL_TOKEN");
+  readonly defaultLanguage = setting(
+    "NOVA_DEFAULT_LANGUAGE",
+    "JARVIS_DEFAULT_LANGUAGE",
+    "nl-NL",
+  );
   readonly timezone = text("TZ", "Europe/Amsterdam");
 
   // AI
@@ -66,29 +99,57 @@ export class NovaConfig {
     "OMNIROUTE_DATABASE",
     "/omniroute/storage.sqlite",
   );
-  readonly omniCompression = text("JARVIS_OMNIROUTE_COMPRESSION", "off");
+  readonly omniCompression = setting(
+    "NOVA_OMNIROUTE_COMPRESSION",
+    "JARVIS_OMNIROUTE_COMPRESSION",
+    "off",
+  );
   readonly freeOnly = flag("FREE_ONLY", true);
-  readonly maxToolRounds = number("JARVIS_MAX_TOOL_ITERATIONS", 8, 1, 16);
+  readonly maxToolRounds = numberFrom(
+    setting("NOVA_MAX_TOOL_ITERATIONS", "JARVIS_MAX_TOOL_ITERATIONS"),
+    8,
+    1,
+    16,
+  );
 
   // Tools and actions
-  readonly toolTimeoutMs = number("JARVIS_TOOL_TIMEOUT_MS", 30000, 1000, 60000);
-  readonly actionsEnabled = flag("JARVIS_ENABLE_ACTIONS", false);
-  readonly autoExecuteSafe = flag("JARVIS_AUTO_EXECUTE_SAFE_ACTIONS", true);
-  readonly extensionsEnabled = flag("JARVIS_EXTENSIONS", true);
+  readonly toolTimeoutMs = numberFrom(
+    setting("NOVA_TOOL_TIMEOUT_MS", "JARVIS_TOOL_TIMEOUT_MS"),
+    30000,
+    1000,
+    60000,
+  );
+  readonly actionsEnabled = flagValue(
+    setting("NOVA_ENABLE_ACTIONS", "JARVIS_ENABLE_ACTIONS"),
+    false,
+  );
+  readonly autoExecuteSafe = flagValue(
+    setting(
+      "NOVA_AUTO_EXECUTE_SAFE_ACTIONS",
+      "JARVIS_AUTO_EXECUTE_SAFE_ACTIONS",
+    ),
+    true,
+  );
+  readonly extensionsEnabled = flagValue(
+    setting("NOVA_EXTENSIONS", "JARVIS_EXTENSIONS"),
+    true,
+  );
   /** The user's own list in the data folder wins; otherwise the list shipped in the image. */
   readonly mcpConfig = ((): string => {
-    const own = text(
+    const own = setting(
+      "NOVA_MCP_CONFIG",
       "JARVIS_MCP_CONFIG",
       path.join(this.dataDir, "mcp-servers.json"),
     );
     return fs.existsSync(own) ? own : text("NOVA_MCP_DEFAULT", own);
   })();
-
   /** Fallback for "home" in the weather tools when Home Assistant has no zone.home. */
   readonly homeLocation = (() => {
-    const latitude = Number(text("JARVIS_HOME_LAT"));
-    const longitude = Number(text("JARVIS_HOME_LON"));
-    return text("JARVIS_HOME_LAT") &&
+    const latitudeValue = setting("NOVA_HOME_LAT", "JARVIS_HOME_LAT");
+    const longitudeValue = setting("NOVA_HOME_LON", "JARVIS_HOME_LON");
+    const latitude = Number(latitudeValue);
+    const longitude = Number(longitudeValue);
+    return latitudeValue &&
       Number.isFinite(latitude) &&
       Number.isFinite(longitude)
       ? { latitude, longitude }
@@ -98,10 +159,21 @@ export class NovaConfig {
   // Services
   readonly mqttUrl = text("MQTT_URL", "mqtt://mqtt:1883");
   readonly nodeRedUrl = url("NODE_RED_URL", "http://node-red:1880");
-  readonly toolSharedSecret = text("JARVIS_TOOL_SHARED_SECRET");
+  readonly nodeRedEditorUrl = text("NODE_RED_EDITOR_URL");
+  readonly nodeRedAdminToken = text("NODE_RED_ADMIN_TOKEN");
+  /** Shared only with trusted Node-RED flows that send allow-listed events. */
+  readonly nodeRedEventToken = text("NODE_RED_EVENT_TOKEN");
+  /** JSON allowlist of HTTP-in flows NOVA may trigger; entries contain no credentials. */
+  readonly nodeRedFlowAllowlist = text("NODE_RED_FLOW_ALLOWLIST");
+  /** Shared only with the allow-listed Node-RED HTTP-in flows NOVA may trigger. */
+  readonly nodeRedFlowToken = text("NODE_RED_FLOW_TOKEN");
 
   // Memory
-  readonly memoryBackend = text("JARVIS_MEMORY_BACKEND", "qdrant");
+  readonly memoryBackend = setting(
+    "NOVA_MEMORY_BACKEND",
+    "JARVIS_MEMORY_BACKEND",
+    "qdrant",
+  );
   readonly qdrantUrl = url("QDRANT_URL", "http://qdrant:6333");
   readonly qdrantCollection = text("QDRANT_COLLECTION", "jarvis_memory");
   readonly qdrantApiKey = text("QDRANT_API_KEY");
@@ -151,7 +223,7 @@ export class NovaConfig {
     insecureTls: flag("PANGOLIN_INSECURE_TLS", false),
   };
   /** Comma-separated host:port pairs the reachability check watches. */
-  readonly checkTargets = text("JARVIS_CHECK_TARGETS");
+  readonly checkTargets = setting("NOVA_CHECK_TARGETS", "JARVIS_CHECK_TARGETS");
 
   constructor() {
     applyConnectionOverrides(this);
@@ -163,9 +235,3 @@ export class NovaConfig {
     return path.join(this.dataDir, name);
   }
 }
-  /** Optional private ntfy topic; push delivery is disabled unless all three values exist. */
-  readonly ntfy = {
-    url: text("NTFY_URL"),
-    topic: text("NTFY_TOPIC"),
-    token: text("NTFY_TOKEN"),
-  };

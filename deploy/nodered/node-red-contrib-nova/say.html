@@ -1,0 +1,39 @@
+<script type="text/javascript">
+  RED.nodes.registerType("nova-say", {
+    category: "NOVA",
+    color: "#7656a8",
+    defaults: { name: { value: "" }, voice: { value: "" } },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-volume-up",
+    label: function () {
+      return this.name || "NOVA zeg";
+    },
+    paletteLabel: "NOVA zeg",
+  });
+</script>
+
+<script type="text/html" data-template-name="nova-say">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Naam</label>
+    <input type="text" id="node-input-name" placeholder="NOVA zeg" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-voice"
+      ><i class="fa fa-user"></i> Stem (optioneel)</label
+    >
+    <input type="text" id="node-input-voice" placeholder="standaardstem" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="nova-say">
+  <p>Maakt spraak via NOVA TTS. <code>msg.payload</code> bevat de tekst.</p>
+  <p>
+    De audio komt als MPEG-buffer terug in <code>msg.payload</code> en kan naar
+    een audio-uitvoernode.
+  </p>
+  <p>
+    Maximaal 2.000 teksttekens en 2 MiB audio. Dit node start zelf geen
+    luidspreker.
+  </p>
+</script>
