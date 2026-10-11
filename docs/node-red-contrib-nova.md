@@ -27,6 +27,13 @@ at the API's 4 KiB boundary and never put event content into the audit log.
 Requests time out; API errors are bounded before they reach the flow's error
 handler. TTS responses are capped at 2 MiB.
 
+The `NOVA vraag` editor has an opt-in **proactive** mode for scheduled flows.
+It uses a separate bearer-protected API route, exposes only enabled
+`READ_ONLY` tools, and rejects a tool if preparation raises its effective risk.
+It cannot receive attachments or a user's chat session. NOVA-generated
+briefing templates enable this mode and end with `NOVA melding`; ordinary ask
+nodes keep regular chat behavior unless you enable it yourself.
+
 Run `npm test --prefix deploy/nodered/node-red-contrib-nova` for node behavior.
 `node scripts/test-nodered-flows.mjs` starts an isolated Node-RED 4.1 container,
 seeds the package, imports the flows and checks the Admin API for all four

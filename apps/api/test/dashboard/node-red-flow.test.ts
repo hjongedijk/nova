@@ -380,6 +380,7 @@ describe("Node-RED flow tool", () => {
             ? "Ask NOVA for evening review"
             : "Ask NOVA for morning briefing",
         );
+        expect(added[2].proactive).toBe(true);
         expect(added[1].rules[0].to).toContain(
           evening ? "daily_briefing.activity.entries" : "ochtendbriefing",
         );

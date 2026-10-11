@@ -11,3 +11,9 @@ In the helper's settings, morning greeting, bedtime greeting, and a silence chec
 ## Repeated requests
 
 If the exact same non-secret request appears on three separate local days within a week and in the same hour, NOVA may offer to schedule or automate it. This is a one-time conversational suggestion on the third matching day; it does not create a timer, flow, or recurring action. The user must explicitly ask before NOVA sets anything up.
+
+## Scheduled Node-RED briefings
+
+NOVA-generated morning and evening briefing templates set the `NOVA vraag` node to proactive mode. That mode sends requests to the bearer-protected `/api/proactive/ask` endpoint using `NODE_RED_EVENT_TOKEN`. The endpoint gives the model only enabled `READ_ONLY` tools, and the tool executor rejects any prepared action whose effective risk is higher. It accepts no attachments, keeps no conversation history, and allows at most ten requests per minute. The fixed flow then formats the short result and sends it through `NOVA melding`. Ordinary user-created `NOVA vraag` nodes keep the regular chat route unless proactive mode is enabled.
+
+Proactive routines may read data and publish a bounded notification. They cannot approve, create, or execute a device action. If Node-RED or another external service has already accepted an action before cancellation, NOVA cannot undo it.

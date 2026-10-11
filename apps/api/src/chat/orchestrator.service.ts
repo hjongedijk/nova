@@ -101,6 +101,8 @@ export interface OrchestrateInput {
   stream?: boolean;
   emit?: Emit;
   signal?: AbortSignal;
+  /** Restricted Node-RED generated flows: expose and execute read-only tools only. */
+  readOnlyOnly?: boolean;
 }
 
 export interface Reply {
@@ -267,7 +269,7 @@ export class OrchestratorService {
           sessionId,
           null,
           false,
-          signal,
+          { signal, readOnlyOnly: input.readOnlyOnly },
         );
         const currencyReply = directCurrencyReply(
           result.ok ? result.result : null,
@@ -296,7 +298,7 @@ export class OrchestratorService {
             sessionId,
             null,
             false,
-            signal,
+            { signal, readOnlyOnly: input.readOnlyOnly },
           );
           reply = directDefinitionReply(
             result.ok ? result.result : null,
@@ -320,8 +322,16 @@ export class OrchestratorService {
       : undefined;
     emit("route", { role });
 
-    const allTools = this.tools.list().filter((tool) => tool.enabled);
-    const modelTools = this.tools.forModel({ message, role });
+    const allTools = this.tools
+      .list()
+      .filter(
+        (tool) =>
+          tool.enabled && (!input.readOnlyOnly || tool.risk === "READ_ONLY"),
+      );
+    const modelTools = this.tools.forModel(
+      { message, role },
+      input.readOnlyOnly,
+    );
     emit("tools", {
       count: modelTools.length,
       total: allTools.length,
@@ -450,7 +460,7 @@ export class OrchestratorService {
           sessionId,
           null,
           false,
-          signal,
+          { signal, readOnlyOnly: input.readOnlyOnly },
         );
         if (signal?.aborted) throw new Error("Request cancelled");
         completedSteps++;

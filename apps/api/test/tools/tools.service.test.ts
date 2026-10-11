@@ -186,12 +186,33 @@ describe("ToolsService", () => {
       "stop-session",
       null,
       false,
-      controller.signal,
+      { signal: controller.signal },
     );
     await vi.waitFor(() => expect(activeToolSignal).not.toBeNull());
     controller.abort();
     expect((await pending).error).toBe("cancelled");
     expect(activeToolSignal?.aborted).toBe(true);
+  });
+
+  it("blocks prepared actions and hides them in read-only mode", async () => {
+    const result = await tools.execute(
+      "fake_restart",
+      { vmid: 104 },
+      "proactive-session",
+      null,
+      false,
+      { readOnlyOnly: true },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: "Proactive requests may only run read-only tools",
+    });
+    expect(ran).toHaveLength(0);
+    expect(
+      tools
+        .forModel({ message: "restart", role: "conversation" }, true)
+        .map((tool) => tool.function.name),
+    ).not.toContain("fake_restart");
   });
 
   it("refuses invalid arguments with a reason, without running anything", async () => {

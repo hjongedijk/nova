@@ -556,6 +556,7 @@ export class NodeRedFlowSource implements ToolSource {
                   name: isEveningReview
                     ? "Ask NOVA for evening review"
                     : "Ask NOVA for morning briefing",
+                  proactive: true,
                   x: 620,
                   y: 120,
                   wires: [[formatId]],

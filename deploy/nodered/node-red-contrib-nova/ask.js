@@ -1,6 +1,6 @@
 "use strict";
 
-const { request } = require("./shared");
+const { eventToken, request } = require("./shared");
 
 module.exports = function registerAsk(RED) {
   function NovaAsk(config) {
@@ -14,13 +14,21 @@ module.exports = function registerAsk(RED) {
           throw new Error(
             "NOVA vraag expects 1–10000 characters in msg.payload",
           );
-        const result = await request("/api/chat", {
-          sessionId: `nova_${String(node.id)
-            .replace(/[^A-Za-z0-9_-]/g, "_")
-            .slice(0, 80)}`,
-          message,
-          inputMode: "text",
-        });
+        const proactive = config.proactive === true;
+        const result = await request(
+          proactive ? "/api/proactive/ask" : "/api/chat",
+          {
+            sessionId: `nova_${String(node.id)
+              .replace(/[^A-Za-z0-9_-]/g, "_")
+              .slice(0, 80)}`,
+            message,
+            inputMode: "text",
+            ...(proactive
+              ? { modelRole: "summary", responseLanguage: "nl" }
+              : {}),
+          },
+          proactive ? { token: eventToken() } : {},
+        );
         msg.payload = result.reply;
         msg.nova = result;
         send(msg);

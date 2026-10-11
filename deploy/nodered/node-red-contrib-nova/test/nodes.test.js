@@ -115,6 +115,33 @@ describe("node-red-contrib-nova", () => {
     assert.deepEqual(result.errors, []);
   });
 
+  it("routes proactive asks through the token-protected read-only endpoint", async () => {
+    process.env.NODE_RED_EVENT_TOKEN =
+      "fixture-event-token-that-is-32-characters";
+    installFetch(async (_url, options) => {
+      assert.equal(
+        options.headers.authorization,
+        `Bearer ${process.env.NODE_RED_EVENT_TOKEN}`,
+      );
+      assert.deepEqual(JSON.parse(options.body), {
+        sessionId: "nova_node_fixture-1",
+        message: "Geef een briefing",
+        inputMode: "text",
+        modelRole: "summary",
+        responseLanguage: "nl",
+      });
+      return Response.json({ reply: "Alles rustig" });
+    });
+    const result = await invoke(
+      "nova-ask",
+      { payload: "Geef een briefing" },
+      { proactive: true },
+    );
+    assert.equal(lastRequest.url, "http://nova:8080/api/proactive/ask");
+    assert.equal(result.sent.payload, "Alles rustig");
+    assert.deepEqual(result.errors, []);
+  });
+
   it("posts alerts using only the runtime event token", async () => {
     process.env.NODE_RED_EVENT_TOKEN =
       "fixture-event-token-that-is-32-characters";

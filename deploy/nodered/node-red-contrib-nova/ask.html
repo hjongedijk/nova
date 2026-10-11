@@ -2,7 +2,10 @@
   RED.nodes.registerType("nova-ask", {
     category: "NOVA",
     color: "#7656a8",
-    defaults: { name: { value: "" } },
+    defaults: {
+      name: { value: "" },
+      proactive: { value: false },
+    },
     inputs: 1,
     outputs: 1,
     icon: "font-awesome/fa-comment",
@@ -18,18 +21,31 @@
     <label for="node-input-name"><i class="fa fa-tag"></i> Naam</label>
     <input type="text" id="node-input-name" placeholder="NOVA vraag" />
   </div>
+  <div class="form-row">
+    <label for="node-input-proactive">
+      <i class="fa fa-shield"></i> Proactieve flow
+    </label>
+    <input
+      type="checkbox"
+      id="node-input-proactive"
+      style="display: inline-block; width: auto; vertical-align: top;"
+    />
+    <span>Beperk deze node tot alleen-lezen gereedschappen</span>
+  </div>
 </script>
 
 <script type="text/html" data-help-name="nova-ask">
   <p>
-    Stelt <code>msg.payload</code> als vraag aan NOVA via haar gewone chatroute.
+    Stelt <code>msg.payload</code> als vraag aan NOVA. Voor geplande of
+    proactieve routines schakelt u de alleen-lezen beveiliging in.
   </p>
   <p>
     Het antwoord komt in <code>msg.payload</code>; het volledige antwoord staat
     in <code>msg.nova</code>.
   </p>
   <p>
-    Toolacties blijven achter NOVA's bestaande bevestigingspoort. Dit node kan
-    die niet goedkeuren.
+    In proactieve modus gebruikt dit node een aparte token-beveiligde route die
+    uitsluitend tools met risico <code>READ_ONLY</code> kan uitvoeren. De modus
+    kan geen acties goedkeuren.
   </p>
 </script>

@@ -344,9 +344,16 @@ export class ToolsService implements OnModuleInit {
   }
 
   /** The enabled tools in the format the chat model receives. */
-  forModel(context?: { message: string; role: ModelRoleId }): ModelTool[] {
+  forModel(
+    context?: { message: string; role: ModelRoleId },
+    readOnlyOnly = false,
+  ): ModelTool[] {
     const tools = [...this.registry().values()]
-      .filter((tool) => tool.definition.enabled)
+      .filter(
+        (tool) =>
+          tool.definition.enabled &&
+          (!readOnlyOnly || tool.definition.risk === "READ_ONLY"),
+      )
       .map((tool) => ({
         type: "function" as const,
         function: {
@@ -370,7 +377,7 @@ export class ToolsService implements OnModuleInit {
     sessionId: string,
     approved: PendingConfirmation | null = null,
     always = false,
-    parentSignal?: AbortSignal,
+    options: { signal?: AbortSignal; readOnlyOnly?: boolean } = {},
   ): Promise<ToolResult> {
     const started = Date.now();
     let args: Record<string, unknown> = (rawArgs ?? {}) as Record<
@@ -486,8 +493,8 @@ export class ToolsService implements OnModuleInit {
       const timeout = AbortSignal.timeout(
         Math.min(tool.definition.timeoutMs, this.config.toolTimeoutMs),
       );
-      const signal = parentSignal
-        ? AbortSignal.any([parentSignal, timeout])
+      const signal = options.signal
+        ? AbortSignal.any([options.signal, timeout])
         : timeout;
       const call = { sessionId, signal };
       let plan: ToolPlan = { args, risk };
@@ -499,6 +506,11 @@ export class ToolsService implements OnModuleInit {
         risk = plan.risk;
         entity = plan.entity ?? null;
       }
+      if (options.readOnlyOnly && risk !== "READ_ONLY")
+        return finish({
+          ok: false,
+          error: "Proactive requests may only run read-only tools",
+        });
       if (
         risk !== "READ_ONLY" &&
         !name.startsWith("memory_") &&

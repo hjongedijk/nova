@@ -10,13 +10,13 @@ import {
   Body,
   BadRequestException,
 } from "@nestjs/common";
-import crypto from "node:crypto";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
 import { NodeRedHealth } from "./node-red-health.service.js";
 import { AppAccessPublic } from "../access/access-public.js";
+import { matchesNodeRedToken } from "./node-red-token.js";
 
 const MAX_BODY_BYTES = 4096;
 const MAX_PER_MINUTE = 60;
@@ -30,12 +30,6 @@ type IncomingEvent = {
   at?: unknown;
   flowId?: unknown;
 };
-
-function constantTimeTokenMatch(received: string, expected: string): boolean {
-  const left = Buffer.from(received);
-  const right = Buffer.from(expected);
-  return left.length === right.length && crypto.timingSafeEqual(left, right);
-}
 
 /** Authenticated, bounded ingress for plain notifications from trusted flows. */
 @Controller("integrations/node-red/events")
@@ -62,8 +56,7 @@ export class NodeRedEventsController {
       throw new ServiceUnavailableException(
         "Node-RED event ingress is not configured",
       );
-    const match = /^Bearer ([^\s]+)$/.exec(authorization ?? "");
-    if (!match || !constantTimeTokenMatch(match[1]!, expected))
+    if (!matchesNodeRedToken(authorization, expected))
       throw new UnauthorizedException();
 
     const now = Date.now();

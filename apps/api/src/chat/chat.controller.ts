@@ -4,9 +4,23 @@ import type {
   ModelRoleId,
 } from "@nova/contracts";
 import { checkAttachments } from "./attachments.js";
-import { Body, ConflictException, Controller, Post, Res } from "@nestjs/common";
+import {
+  Body,
+  ConflictException,
+  Controller,
+  Headers,
+  HttpException,
+  HttpStatus,
+  Post,
+  Res,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from "@nestjs/common";
+import crypto from "node:crypto";
 import type { Response } from "express";
 import { ValidationError } from "../core/errors/validation.error.js";
+import { AppAccessPublic } from "../access/access-public.js";
+import { NovaConfig } from "../core/config/nova-config.js";
 import { publishableConversation } from "./conversation-events.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { MqttService } from "../core/mqtt/mqtt.service.js";
@@ -20,6 +34,7 @@ import { directDefinitionQuery } from "./direct-definition.js";
 import { directCurrencyQuery } from "./direct-currency.js";
 import { OmniRouteClient } from "./omniroute-client.service.js";
 import { OrchestratorService, type Reply } from "./orchestrator.service.js";
+import { matchesNodeRedToken } from "../dashboard/node-red-token.js";
 
 interface ChatBody {
   message?: unknown;
@@ -124,12 +139,16 @@ function check(body: ChatBody): {
 
 @Controller()
 export class ChatController {
+  private proactiveWindowStartedAt = Date.now();
+  private proactiveRequests = 0;
+
   constructor(
     private readonly orchestrator: OrchestratorService,
     private readonly handler: ConfirmationHandler,
     private readonly memory: SessionMemoryService,
     private readonly client: OmniRouteClient,
     private readonly mqtt: MqttService,
+    private readonly config: NovaConfig,
   ) {}
 
   private remember(
@@ -192,6 +211,62 @@ export class ChatController {
         sessionId,
         durationMs: Date.now() - started,
       });
+    } finally {
+      active.delete(sessionId);
+    }
+  }
+
+  /** Internal endpoint for fixed scheduled Node-RED flows; read-only tools only. */
+  @Post("proactive/ask")
+  @AppAccessPublic()
+  async proactiveAsk(
+    @Headers("authorization") authorization: string | undefined,
+    @Body() body: ChatBody,
+  ): Promise<Record<string, unknown>> {
+    if (!this.config.nodeRedEventToken)
+      throw new ServiceUnavailableException(
+        "Node-RED proactive access is not configured",
+      );
+    if (!matchesNodeRedToken(authorization, this.config.nodeRedEventToken))
+      throw new UnauthorizedException();
+
+    const now = Date.now();
+    if (now - this.proactiveWindowStartedAt >= 60_000) {
+      this.proactiveWindowStartedAt = now;
+      this.proactiveRequests = 0;
+    }
+    if (this.proactiveRequests >= 10)
+      throw new HttpException(
+        "Too many proactive requests",
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    this.proactiveRequests++;
+
+    const request = check(body);
+    if (request.attachments.length)
+      throw new ValidationError([
+        "Proactive requests cannot include attachments",
+      ]);
+    const localCalculation =
+      !request.confirmationId &&
+      (directAnswer(request.message, request.responseLanguage) !== null ||
+        directCurrencyQuery(request.message, request.responseLanguage) !==
+          null ||
+        directDefinitionQuery(request.message, request.responseLanguage) !==
+          null);
+    if (!localCalculation && !this.client.configured)
+      throw new ConflictException("OmniRoute is not configured");
+    const sessionId = `proactive_${crypto.randomUUID()}`;
+    if (active.has(sessionId))
+      throw new ConflictException("Proactive request is already active");
+    active.add(sessionId);
+    try {
+      const result = await this.orchestrator.run({
+        ...request,
+        sessionId,
+        readOnlyOnly: true,
+      });
+      return sanitize({ ...result, sessionId });
     } finally {
       active.delete(sessionId);
     }
