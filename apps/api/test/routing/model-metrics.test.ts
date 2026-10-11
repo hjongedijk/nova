@@ -190,6 +190,76 @@ describe("private model measurements", () => {
       expect(JSON.stringify(await metrics.report())).not.toContain("private-");
     },
   );
+  it("uses a role model only after the routing service validates it", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          model: "fixture/model:free",
+          choices: [{ message: { role: "assistant", content: "ok" } }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const validate = vi
+      .spyOn(routing, "assertRoleModel")
+      .mockReturnValue("fixture/model:free");
+    const client = new OmniRouteClient(config, routing, metrics);
+    await client.call([{ role: "user", content: "hello" }], {
+      roleModel: { role: "conversation", modelId: "fixture/model:free" },
+    });
+    expect(validate).toHaveBeenCalledWith("conversation", "fixture/model:free");
+    expect(JSON.parse(fetcher.mock.calls[0]![1]!.body as string).model).toBe(
+      "fixture/model:free",
+    );
+
+    const deniedFetch = vi.fn();
+    vi.stubGlobal("fetch", deniedFetch);
+    validate.mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    await expect(
+      client.call([{ role: "user", content: "hello" }], {
+        roleModel: { role: "conversation", modelId: "paid/model" },
+      }),
+    ).rejects.toThrow("blocked");
+    expect(deniedFetch).not.toHaveBeenCalled();
+  });
+  it("retries a failed role model with the next verified free preference", async () => {
+    const primary = "fixture/primary:free";
+    const fallback = "fixture/fallback:free";
+    vi.spyOn(routing, "roleModels").mockReturnValue([primary, fallback]);
+    vi.spyOn(routing, "assertRoleModel").mockImplementation((_role, id) => {
+      if (![primary, fallback].includes(id)) throw new Error("not verified");
+      return id;
+    });
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            model: fallback,
+            choices: [{ message: { role: "assistant", content: "ok" } }],
+          }),
+        ),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    const answer = await new OmniRouteClient(config, routing, metrics).call(
+      [{ role: "user", content: "hello" }],
+      { roleModel: { role: "conversation", modelId: primary } },
+    );
+    expect(answer.model).toBe(fallback);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(
+      fetcher.mock.calls.map(
+        (call) => JSON.parse(call[1]!.body as string).model,
+      ),
+    ).toEqual([primary, fallback]);
+    expect(routing.assertRoleModel).toHaveBeenCalledWith(
+      "conversation",
+      fallback,
+    );
+  });
   it("preserves the last completed answer after a blocked call", async () => {
     metrics.observe("previous", null, 0);
     const fetcher = vi.fn();

@@ -7,8 +7,12 @@
   let {
     action,
     onreply,
-  }: { action: PendingConfirmation; onreply?: (reply: string) => void } =
-    $props();
+    description,
+  }: {
+    action: PendingConfirmation;
+    description?: string;
+    onreply?: (reply: string) => void;
+  } = $props();
 
   type Values = {
     temperature?: number;
@@ -23,6 +27,8 @@
     entity_ids?: string[];
     vmid?: number | string;
     id?: number | string;
+    tabId?: string;
+    label?: string;
   };
 
   const initial = (): string => {
@@ -35,17 +41,22 @@
         : null,
       values.group_members?.join(", "),
       values.message ||
+        values.label ||
         values.text ||
         values.media_id ||
         values.media_content_id,
     ]
       .filter(Boolean)
       .join("; ");
-    return `${args.service || action.tool.replaceAll("_", " ")}: ${args.entity_id || args.entity_ids?.join(", ") || args.vmid || args.id || ""}${changes ? "; " + changes : ""}. Bevestiging verloopt na 60 seconden.`;
+    return `${args.service || action.tool.replaceAll("_", " ")}: ${args.entity_id || args.entity_ids?.join(", ") || args.vmid || args.id || values.tabId || ""}${changes ? "; " + changes : ""}. Bevestiging verloopt na 60 seconden.`;
   };
 
   let label = $state(initial());
   let locked = $state(false);
+
+  $effect(() => {
+    if (description) label = description;
+  });
 
   $effect(() => {
     const timer = setTimeout(

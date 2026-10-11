@@ -4,6 +4,7 @@ import type {
   GatewayReport,
   IntegrationsReport,
   MemoryListResponse,
+  PendingConfirmation,
   ProvidersReport,
 } from "@nova/contracts";
 import { getJson, sendJson } from "./client.ts";
@@ -52,3 +53,18 @@ export const confirmAction = (
     confirmationId,
     approve,
   });
+
+export const executeAction = (
+  sessionId: string,
+  tool: string,
+  args: Record<string, unknown>,
+) =>
+  sendJson<
+    | { ok: true; [key: string]: unknown }
+    | {
+        ok: false;
+        requiresConfirmation?: true;
+        action?: PendingConfirmation;
+        error?: string;
+      }
+  >("POST", "/actions/execute", { sessionId, tool, args });
