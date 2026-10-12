@@ -41,12 +41,12 @@
       const file = files?.[0];
       if (!file) return say("Kies eerst een bestand.", "bad");
       if (file.size > 1_000_000)
-        throw new Error("De back-up is te groot (maximaal 1 MB).");
+        return say("De back-up is te groot (maximaal 1 MB).", "bad");
       let data: unknown;
       try {
         data = JSON.parse(await file.text());
       } catch {
-        throw new Error("Dit bestand is geen geldige JSON.");
+        return say("Dit bestand is geen geldige JSON.", "bad");
       }
       pending = await prepareSettingsImport(data, mode);
       expired = false;

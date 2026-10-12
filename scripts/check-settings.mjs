@@ -3380,11 +3380,16 @@ try {
         personaProfile = request.postDataJSON().profile;
         data = { ok: true, personaProfile };
       } else if (endpoint === "/settings/household-profiles") {
+        overview.householdProfiles = request.postDataJSON().profiles;
         overview.activeHouseholdProfileId =
           request.postDataJSON().activeProfileId;
+        personaProfile =
+          overview.householdProfiles.find(
+            (item) => item.id === overview.activeHouseholdProfileId,
+          )?.personaProfile ?? personaProfile;
         data = {
           ok: true,
-          householdProfiles: request.postDataJSON().profiles,
+          householdProfiles: overview.householdProfiles,
           activeHouseholdProfileId: overview.activeHouseholdProfileId,
         };
       } else if (endpoint === "/settings/household-profiles/history") {
@@ -3969,11 +3974,11 @@ try {
     await clientKey
       .getByRole("button", { name: "Tokenlimieten laden" })
       .click();
-    assert.equal(tokenLimitReads, 1);
     const tokenBudget = clientKey.getByRole("region", {
       name: "Tokenlimieten per API-sleutel",
     });
     await tokenBudget.getByLabel("Globale tokenlimiet").fill("5000");
+    assert.equal(tokenLimitReads, 1);
     await tokenBudget.getByLabel("Periode").selectOption("weekly");
     const tokenLimitImpact = page.getByLabel(
       "Ik begrijp dat dit alle clients met deze sleutel kan raken.",
@@ -5110,9 +5115,12 @@ try {
     stackRestartResult = { ok: false, error: "Containerstatus is gewijzigd." };
     await stack.getByRole("button", { name: "NOVA herstarten" }).click();
     await stack.getByRole("button", { name: "Bevestig herstart" }).click();
-    await page
-      .getByText("Containerstatus is gewijzigd.", { exact: true })
-      .waitFor();
+    await page.getByText(/That did not work|Dat is niet gelukt/).waitFor();
+    assert.equal(
+      (await stack.innerText()).includes("Containerstatus is gewijzigd."),
+      false,
+      "unexpected broker details must not appear in settings",
+    );
     assert.equal(
       (await stack.innerText()).includes(
         "NOVA herstart. De verbinding komt zo terug.",
@@ -5392,7 +5400,7 @@ try {
       .click();
     await usage.getByRole("heading", { name: "echo", exact: true }).waitFor();
     assert.equal(usageReads, 1);
-    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 2);
+    assert.equal(await usage.locator("ul > li > h3").count(), 2);
     assert.equal(
       await usage
         .getByRole("heading", { name: "never_called", exact: true })
@@ -5447,10 +5455,10 @@ try {
       exact: true,
     });
     await usageSearch.fill("builtin");
-    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 1);
+    assert.equal(await usage.locator("ul > li > h3").count(), 1);
     await usage.getByRole("heading", { name: "echo", exact: true }).waitFor();
     await usageSearch.fill("settings_persona_set");
-    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 1);
+    assert.equal(await usage.locator("ul > li > h3").count(), 1);
     await usage
       .getByRole("heading", { name: "settings_persona_set", exact: true })
       .waitFor();
@@ -5463,16 +5471,16 @@ try {
     await usage
       .getByRole("heading", { name: "never_called", exact: true })
       .waitFor();
-    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 3);
+    assert.equal(await usage.locator("ul > li > h3").count(), 3);
     await usageSearch.fill("extension");
-    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 1);
+    assert.equal(await usage.locator("ul > li > h3").count(), 1);
     assert.match(
       await usage.innerText(),
       /Laatste: geen geregistreerde aanroep. Gemiddelde duur: onbekend/,
     );
     await usageSearch.fill("");
     await unusedUsage.uncheck();
-    assert.equal(await usage.getByRole("heading", { level: 3 }).count(), 2);
+    assert.equal(await usage.locator("ul > li > h3").count(), 2);
     const usageLoadBounds = await usage
       .getByRole("button", { name: "Gebruiksstatistieken laden", exact: true })
       .boundingBox();
@@ -6065,7 +6073,7 @@ try {
     await page.getByLabel("Naam", { exact: true }).fill("Nova");
     await page.getByLabel("Aanspreekvorm").fill("je/jij");
     await page.getByRole("button", { name: "Profiel opslaan" }).click();
-    await page.getByText("NOVA's profiel is opgeslagen.").waitFor();
+    await page.getByText("Gezinsprofiel opgeslagen.").waitFor();
     assert.equal(personaProfile.name, "Nova");
     const personaPreferences = page.getByRole("region", {
       name: "Profielgeschiedenis",
