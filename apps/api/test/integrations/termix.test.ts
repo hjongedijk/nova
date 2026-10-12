@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { TermixService } from "../../src/integrations/termix/termix.service.js";
 import { call, fakeConfig, listen } from "./helpers.js";
 
@@ -58,6 +58,17 @@ describe("TermixService", () => {
     expect(
       (await service(fake.url, "bad").execute("termix_hosts", {}, call())).ok,
     ).toBe(false);
+  });
+
+  it("hides host-list transport diagnostics", async () => {
+    const termix = service(fake.url, "tmx_key");
+    vi.spyOn(termix, "listHosts").mockRejectedValueOnce(
+      new Error("private-host.local /data/private/termix.json"),
+    );
+    expect(await termix.execute("termix_hosts", {}, call())).toEqual({
+      ok: false,
+      error: "Termix host list unavailable",
+    });
   });
 
   it("runs a command through a throwaway snippet and deletes it", async () => {

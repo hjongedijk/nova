@@ -160,13 +160,10 @@ export class TermixService implements ToolSource {
       let hosts: TermixHost[];
       try {
         hosts = await this.listHosts(signal);
-      } catch (error) {
+      } catch {
         return {
           ok: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : "Termix host list unavailable",
+          error: "Termix host list unavailable",
         };
       }
       return {
