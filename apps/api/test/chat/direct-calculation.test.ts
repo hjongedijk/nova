@@ -255,7 +255,7 @@ describe("direct calculator requests", () => {
       "[Photosynthesis](https://en.wikipedia.org/wiki/Photosynthesis)",
     );
     expect(reply.model).toBeNull();
-    expect(tools.execute.mock.calls[0]?.slice(0, 3)).toEqual([
+    expect(vi.mocked(tools.execute).mock.calls[0]?.slice(0, 3)).toEqual([
       "wikipedia",
       { query: "photosynthesis", language: "en" },
       "direct-definition",
@@ -273,7 +273,7 @@ describe("direct calculator requests", () => {
     });
     expect(reply.reply).toContain("10 EUR = 11.25 USD");
     expect(reply.reply).toContain("European Central Bank (2026-10-12)");
-    expect(tools.execute.mock.calls[0]?.slice(0, 3)).toEqual([
+    expect(vi.mocked(tools.execute).mock.calls[0]?.slice(0, 3)).toEqual([
       "currency_convert",
       { amount: 10, from: "EUR", to: "USD" },
       "direct-currency",
