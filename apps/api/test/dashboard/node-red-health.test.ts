@@ -270,7 +270,7 @@ describe("Node-RED flow inventory", () => {
       projectNodeRedFlowRuns(flows, [
         project("2026-10-11T10:00:00Z", "confirmed", {
           ok: false,
-          error: "offline",
+          error: "offline at private-host?token=secret-value",
         }),
         project("2026-10-11T09:00:00Z", "pending", null),
       ]),
@@ -279,7 +279,7 @@ describe("Node-RED flow inventory", () => {
         id: "lights",
         label: "Lights",
         lastRun: "2026-10-11T10:00:00Z",
-        lastError: "offline",
+        lastError: "Flow mislukt.",
       },
     ]);
   });

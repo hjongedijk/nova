@@ -102,12 +102,7 @@ export function projectNodeRedFlowRuns<T extends { id: string }>(
         : {};
     latest.set(flowId, {
       at: entry.timestamp,
-      error:
-        result.ok === false
-          ? sanitize(
-              typeof result.error === "string" ? result.error : "Flow mislukt",
-            ).slice(0, 240)
-          : null,
+      error: result.ok === false ? "Flow mislukt." : null,
     });
   }
   return flows.map((flow) => {

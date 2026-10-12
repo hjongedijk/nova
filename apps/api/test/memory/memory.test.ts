@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { MemorySource } from "../../src/memory/memory.source.js";
+import { MemoryController } from "../../src/memory/memory.controller.js";
 import { SemanticMemoryService } from "../../src/memory/semantic-memory.service.js";
 import { memoryCandidate } from "../../src/memory/semantic/candidate.js";
 import { OmniRouteMemory } from "../../src/memory/semantic/omniroute.backend.js";
@@ -422,6 +423,28 @@ describe("QdrantMemory", () => {
       server.close();
       fs.rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe("memory API error boundary", () => {
+  it("does not return upstream diagnostics when listing memories fails", async () => {
+    const controller = new MemoryController(
+      {
+        list: async () => {
+          throw new Error("Qdrant private-host?token=secret-value");
+        },
+      } as never,
+      null as never,
+      null as never,
+      null as never,
+    );
+    const response = { status: vi.fn() };
+    const result = await controller.list(response as never);
+    expect(response.status).toHaveBeenCalledWith(503);
+    expect(result).toEqual({
+      error: "Geheugen is tijdelijk niet beschikbaar.",
+    });
+    expect(JSON.stringify(result)).not.toContain("secret-value");
   });
 });
 

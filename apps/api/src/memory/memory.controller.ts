@@ -21,7 +21,6 @@ import { sanitize } from "../core/security/sanitize.js";
 import { ToolsService } from "../tools/tools.service.js";
 import type { ToolResult } from "../tools/tool.types.js";
 import { SemanticMemoryService } from "./semantic-memory.service.js";
-import { messageOf } from "./semantic/backend.js";
 import {
   normalizeSessionId,
   SessionMemoryService,
@@ -80,9 +79,9 @@ export class MemoryController {
       return sanitize(
         await this.semantic.list(Number(limit) || 50, offset),
       ) as MemoryListResponse;
-    } catch (error) {
+    } catch {
       response.status(503);
-      return { error: sanitize(messageOf(error)) };
+      return { error: "Geheugen is tijdelijk niet beschikbaar." };
     }
   }
 
