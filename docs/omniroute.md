@@ -48,35 +48,9 @@ A catalog entry in the policy is allowed only when `classifyFreeAccess` (in `rou
 
 1. Start the stack and open the OmniRoute dashboard (port 20128, published by the compose file; restrict access to it on your network). Add your provider accounts there, and make sure each is on a genuinely free tier or has billing disabled. A "free" badge or signup credit does not prove recurring, zero-cost access.
 2. In OmniRoute, create an API key for NOVA that is restricted to the model `auto` and to your verified connections. Put it in `OMNIROUTE_API_KEY` and set `OMNIROUTE_MODEL=auto` and `OMNIROUTE_ADMIN_PASSWORD` in `.env`.
-3. Open **Instellingen → Modellen → Gratis beleid maken** to generate the policy. Load choices explicitly, select active API-key accounts and recurring free models, provide official source URLs, and confirm the account facts. The wizard requires billing and automatic top-ups to be disabled, a guaranteed hard free limit, permission under the terms, acknowledgement of changes affecting other clients, and permission to refresh candidate metadata. One account per provider and at most 20 models are supported. Alternatively, provide `free-routing-policy.json` in the data folder with the structure the code reads:
+3. Open **Instellingen → Modellen → Gratis beleid maken** to generate the policy. Load choices explicitly, select active API-key accounts and recurring free models, provide official source URLs, and confirm the account facts. The wizard requires billing and automatic top-ups to be disabled, a guaranteed hard free limit, permission under the terms, acknowledgement of changes affecting other clients, and permission to refresh candidate metadata. One account per provider and at most 20 models are supported.
 
-   ```json
-   {
-     "route": "auto",
-     "status": "OK",
-     "nativeFreeAccessPolicy": "strict",
-     "enabledModels": ["<provider>/<model>"],
-     "verifiedProviders": ["<provider>"],
-     "verifiedConnectionIds": ["<connection id>"],
-     "blockedProviders": ["<provider>"],
-     "nativeModelAllowlist": ["<provider>/<model>"],
-     "catalog": [
-       {
-         "provider": "<provider>",
-         "modelId": "<model>",
-         "freeType": "recurring-daily",
-         "billingVerified": true,
-         "hardStopGuaranteed": true,
-         "accountFreeVerified": true,
-         "nativeAutoEligible": true,
-         "tos": "ok"
-       }
-     ],
-     "providers": []
-   }
-   ```
-
-   `providers` is an inventory that is only displayed. `nativeModelAllowlist` is optional.
+For manual setup, copy [the example policy](free-routing-policy.example.json) to `nova-data/free-routing-policy.json`. Replace every `example-*` value with the exact provider, model and connection IDs shown by OmniRoute. Confirm the model's terms, recurring free allowance, disabled billing/top-ups and guaranteed hard stop before setting the evidence booleans to `true`. `enabledModels` and `nativeModelAllowlist` contain `provider/model`; the latter must exactly match OmniRoute's model visibility allowlist. `blockedProviders` lists providers to exclude, not the verified provider. The NOVA key must be active, restricted to `auto` and exactly the verified connections; OmniRoute must have strict free access, hide paid models and exclude terms-to-avoid models enabled. Keep the live policy out of Git. Check `GET /api/providers` for `ready: true`; any mismatch blocks inference. The wizard is safer for normal use because it also binds the policy to each account's current credentials.
 
 The wizard uses **operator-account evidence** for economic safety, following the existing operator-confirmed classification. Your attestations establish billing disabled, guaranteed hard stop and entitlement to recurring free access; NOVA does not independently verify the supplied source URL or account billing. Native candidate metadata is checked only for the selected account/model's reported structural availability. Cached quota verdicts do not prove billing or current credentials, and the result explicitly reports `nativeQuotaVerified: false`. A ready route does not promise remaining quota or a successful model response; native strict enforcement stays enabled.
 

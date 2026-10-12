@@ -74,8 +74,8 @@ Open `http://<nova-host>:8080` in a browser. The interface appears, but the AI w
 
 1. Open the OmniRoute dashboard at `http://<nova-host>:20128` and create the admin account as OmniRoute asks. Add your provider accounts (free tiers only).
 2. Create an API key for NOVA, restricted to the model `auto` and to your verified connections, and put it in `.env` as `OMNIROUTE_API_KEY`. Put the dashboard password in `OMNIROUTE_ADMIN_PASSWORD`.
-3. Provide the routing policy file `nova-data/free-routing-policy.json`.
-4. Recreate NOVA: `docker compose up -d nova`.
+3. Recreate NOVA so it can use the new key: `docker compose up -d nova`.
+4. Open NOVA's **Instellingen → Modellen → Gratis beleid maken**. Load the available accounts and models, select only verified recurring free options, complete the account checks, and confirm. NOVA writes the policy and checks it against OmniRoute. For a manual setup, use [the example policy](free-routing-policy.example.json) and the instructions in [OmniRoute and free routing](omniroute.md#setting-it-up).
 
 The details, including the structure of the policy file and everything NOVA checks, are in [OmniRoute and free routing](omniroute.md). Until the check passes NOVA refuses to send anything to a model and the interface says so; `GET /api/providers` shows why.
 
