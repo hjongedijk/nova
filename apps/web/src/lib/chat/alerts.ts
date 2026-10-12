@@ -1,4 +1,4 @@
-import { getAlerts } from "#lib/api/shell.ts";
+import { claimAlertSpeech, getAlerts } from "#lib/api/shell.ts";
 import { chat } from "#lib/stores/chat.svelte.ts";
 import { shell } from "#lib/stores/shell.svelte.ts";
 import { showToast } from "#lib/stores/toasts.svelte.ts";
@@ -11,7 +11,11 @@ import { helper } from "#lib/stores/helper.svelte.ts";
 import { canSpeakFeedEvent } from "#lib/voice/helper-cues.ts";
 
 /** NOVA speaks up by itself, but never over a conversation. */
-function announce(text: string, speakAllowed = true): void {
+async function announce(
+  text: string,
+  seq: number,
+  speakAllowed = true,
+): Promise<void> {
   if (
     !speakAllowed ||
     !shell.voiceAlerts ||
@@ -22,6 +26,12 @@ function announce(text: string, speakAllowed = true): void {
     )
   )
     return;
+  try {
+    if (!(await claimAlertSpeech(seq))) return;
+  } catch {
+    return;
+  }
+  if (chat.busy || chat.uiState !== "ready" || playback.current) return;
   addMessage("assistant", text);
   showStage("", text, false);
   void speak(text);
@@ -43,15 +53,17 @@ async function pollAlerts(): Promise<void> {
         detail: event.detail || undefined,
       });
       if (event.kind === "timer")
-        announce(
+        void announce(
           event.label === "timer"
             ? "Je timer is afgelopen."
             : `Je timer voor ${event.label} is afgelopen.`,
+          event.seq,
           event.speakAllowed !== false,
         );
       else if (event.speakAllowed === true || event.severity !== "info")
-        announce(
+        void announce(
           `${event.title}.${event.detail ? ` ${event.detail}` : ""}`,
+          event.seq,
           event.speakAllowed !== false,
         );
     }

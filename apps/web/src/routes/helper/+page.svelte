@@ -11,6 +11,7 @@
   import HelperDevices from "#components/helper/HelperDevices.svelte";
   import HelperConfirm from "#components/helper/HelperConfirm.svelte";
   import { requestHelperSize } from "#lib/api/helper.ts";
+  import { claimAlertSpeech } from "#lib/api/shell.ts";
   import { ApiError } from "#lib/api/client.ts";
   import { friendlyApiError } from "#lib/api/error-copy.ts";
   import {
@@ -630,17 +631,30 @@
           cuePlayer?.play("notice");
           open("notifications");
         }
-        const spoken = feedSpeechText(events);
         if (
-          spoken &&
-          canSpeakFeedEvent(
+          !canSpeakFeedEvent(
             paused,
             chat.busy || chat.uiState === "speaking" || audioLevel.speaking,
             helper.cues,
           )
-        ) {
-          void speak(spoken);
-        }
+        )
+          return;
+        void (async () => {
+          const claimed: FeedEvent[] = [];
+          for (const event of events)
+            if (event.speakAllowed && (await claimAlertSpeech(event.seq)))
+              claimed.push(event);
+          const spoken = feedSpeechText(claimed);
+          if (
+            spoken &&
+            canSpeakFeedEvent(
+              paused,
+              chat.busy || chat.uiState === "speaking" || audioLevel.speaking,
+              helper.cues,
+            )
+          )
+            void speak(spoken);
+        })().catch(() => undefined);
       }),
     ];
     return () => {

@@ -72,6 +72,7 @@ export function toFeedEvent(
 @Injectable()
 export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   private readonly feed: FeedEvent[] = [];
+  private readonly speechClaims = new WeakSet<FeedEvent>();
   private sequence = 0;
   private stop?: () => void;
   private readonly spokenEventTimes: number[] = [];
@@ -206,5 +207,14 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       latest: this.sequence,
       events: this.feed.filter((item) => item.seq > since),
     };
+  }
+
+  /** First visible client to claim a spoken event wins across browser contexts. */
+  claimSpeech(seq: number): boolean {
+    if (!Number.isSafeInteger(seq) || seq <= 0) return false;
+    const event = this.feed.find((item) => item.seq === seq);
+    if (!event?.speakAllowed || this.speechClaims.has(event)) return false;
+    this.speechClaims.add(event);
+    return true;
   }
 }

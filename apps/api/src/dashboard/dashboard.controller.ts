@@ -1,6 +1,8 @@
 import {
   Controller,
   Get,
+  Param,
+  Post,
   Query,
   ServiceUnavailableException,
 } from "@nestjs/common";
@@ -72,6 +74,12 @@ export class DashboardController {
   @Get("alerts")
   alertFeed(@Query("since") since?: string): AlertsResponse {
     return this.alerts.recent(Math.max(0, Number(since) || 0));
+  }
+
+  /** Reserve each spoken alert for exactly one open screen. */
+  @Post("alerts/:seq/claim-speech")
+  claimAlertSpeech(@Param("seq") seq: string): { claimed: boolean } {
+    return { claimed: this.alerts.claimSpeech(Number(seq)) };
   }
 
   /** GET /api/integrations */

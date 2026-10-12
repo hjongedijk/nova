@@ -9,6 +9,7 @@ Do not record credentials, personal messages or actual deployment configuration 
 - Task file: `tasks-09-10-2026.md`. Order: A → J (except J4) → K → L → B → C/J4 → D/E/F/G/H/I.
 - Current task count: 201/248; the task file has the current per-item status. `docs/new-tool-checklist.md` is linked from `docs/tools-and-safety.md`.
 - B1.2 audit fix: web speech omits voice until a browser selection exists, allowing API `TTS_VOICE`; Sound reads the server default from existing health endpoint. B3.9 choices now toggle and contradictory length choices normalize. Full web tests (95), Svelte-check, scoped lint/format and settings browser gate pass.
+- C4.1 incremental fix: API now grants one speech claim per eligible feed event; dashboard and helper request it before playback. Feed-service regressions (8), API typecheck, Svelte-check and scoped lint pass. Audible Windows playback and deferred speech after absence remain open.
 - After the Phase A checkpoint, continue J. A1.3/A1.5 and several B tasks still need actual Windows/phone/audio checks. Do not claim these hardware or live-service checks from repository tests.
 - Phase A: 37/41 complete, commit `fbcad59`. Four items remain open for Windows testing, calendar auth, or integrated PC/phone validation; see its checkpoint.
 - Latest A verification: `node scripts/check-helper.mjs` passed at 1x/2x, including views, audio-device behavior, stream cleanup, attachments, choices and confirmations. This does not replace the remaining real Windows/phone checks.

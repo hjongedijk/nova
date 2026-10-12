@@ -16,6 +16,22 @@ const event: InfrastructureEvent = {
 };
 
 describe("AlertsFeed presence delivery", () => {
+  it("allows only one screen to claim speech for an eligible event", () => {
+    const feed = new AlertsFeed({
+      onEvent: () => () => undefined,
+    } as unknown as PlanningService);
+    const first = feed.record(event)!;
+    expect(feed.claimSpeech(first.seq)).toBe(true);
+    expect(feed.claimSpeech(first.seq)).toBe(false);
+    expect(feed.claimSpeech(0)).toBe(false);
+    expect(feed.claimSpeech(first.seq + 1)).toBe(false);
+    const away = new AlertsFeed(
+      { onEvent: () => () => undefined } as unknown as PlanningService,
+      undefined,
+      { maySpeak: () => false } as SpeechPresenceService,
+    );
+    expect(away.claimSpeech(away.record(event)!.seq)).toBe(false);
+  });
   it("keeps the alert visible but marks speech unavailable when home and PC are away", () => {
     const presence = { maySpeak: () => false } as SpeechPresenceService;
     const feed = new AlertsFeed(
