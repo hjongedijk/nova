@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canSpeakFeedEvent, cueQuiet } from "./helper-cues.ts";
+import type { FeedEvent } from "@nova/contracts";
+import { canSpeakFeedEvent, cueQuiet, feedSpeechText } from "./helper-cues.ts";
 
 describe("quiet-hour schedule", () => {
   const preferences = {
@@ -51,5 +52,24 @@ describe("quiet-hour schedule", () => {
     expect(canSpeakFeedEvent(true, false, preferences, daytime)).toBe(false);
     expect(canSpeakFeedEvent(false, true, preferences, daytime)).toBe(false);
     expect(canSpeakFeedEvent(false, false, preferences, quietTime)).toBe(false);
+  });
+
+  it("speaks only events that pass the server speech policy", () => {
+    const event = (title: string, speakAllowed?: boolean): FeedEvent => ({
+      seq: 1,
+      kind: "alert",
+      severity: "info",
+      title,
+      detail: "",
+      at: "2026-10-12T08:00:00Z",
+      speakAllowed,
+    });
+    expect(
+      feedSpeechText([
+        event("Stil door beleid", false),
+        event("Stil zonder besluit"),
+        event("Mag spreken", true),
+      ]),
+    ).toBe("Mag spreken");
   });
 });

@@ -95,6 +95,15 @@ export function canSpeakFeedEvent(
   return !paused && !busy && !cueQuiet(preferences, now);
 }
 
+/** The server's speech policy applies to helper delivery too. */
+export function feedSpeechText(events: FeedEvent[]): string {
+  return events
+    .filter((event) => event.speakAllowed === true)
+    .map((event) => [event.title, event.detail].filter(Boolean).join(". "))
+    .join(". ")
+    .slice(0, 360);
+}
+
 export interface HelperCuePlayer {
   play(cue: HelperCue, now?: Date): boolean;
   stop(): void;
@@ -180,3 +189,4 @@ export function createHelperCues(
     },
   };
 }
+import type { FeedEvent } from "@nova/contracts";

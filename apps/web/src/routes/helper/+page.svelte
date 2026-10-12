@@ -53,6 +53,7 @@
     type HelperCuePlayer,
     HELPER_CUE_NAMES,
     canSpeakFeedEvent,
+    feedSpeechText,
   } from "#lib/voice/helper-cues.ts";
   import { audioContext, outputVolume, applyVolume } from "#lib/voice/audio.ts";
   import { storage } from "#lib/util/storage.ts";
@@ -558,12 +559,7 @@
         ].slice(0, 100);
         cuePlayer?.play("notice");
         open("notifications");
-        const spoken = events
-          .map((event) =>
-            [event.title, event.detail].filter(Boolean).join(". "),
-          )
-          .join(". ")
-          .slice(0, 360);
+        const spoken = feedSpeechText(events);
         if (
           spoken &&
           canSpeakFeedEvent(
