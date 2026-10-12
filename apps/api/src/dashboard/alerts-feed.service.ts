@@ -22,6 +22,7 @@ const MAX_SPOKEN_EVENTS_PER_HOUR = 5;
 const SPOKEN_EVENT_WINDOW_MS = 60 * 60_000;
 const REPEAT_WINDOW_MS = 10 * 60_000;
 const MAX_REPEAT_KEYS = 100;
+const DEFERRED_MAX_AGE_MS = 4 * 60 * 60_000;
 
 const text = (value: unknown, max: number) =>
   typeof value === "string" ? sanitize(value).slice(0, max) : "";
@@ -75,6 +76,9 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   private readonly speechClaims = new WeakSet<FeedEvent>();
   private sequence = 0;
   private stop?: () => void;
+  private stopPresence?: () => void;
+  private deferredTimer?: NodeJS.Timeout;
+  private readonly deferredWhileAway = new Map<number, number>();
   private readonly spokenEventTimes: number[] = [];
   private readonly repeats = new Map<
     string,
@@ -91,10 +95,17 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     this.stop = this.planning.onEvent((event) => this.record(event));
+    this.stopPresence = this.presence?.onSpeechAvailable(() =>
+      this.releaseDeferred(),
+    );
+    this.deferredTimer = setInterval(() => this.releaseDeferred(), 60_000);
+    this.deferredTimer.unref();
   }
 
   onModuleDestroy(): void {
     this.stop?.();
+    this.stopPresence?.();
+    if (this.deferredTimer) clearInterval(this.deferredTimer);
   }
 
   record(event: InfrastructureEvent, now = new Date()): FeedEvent | null {
@@ -166,6 +177,13 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       deliveryMode: mode,
     };
     this.feed.push(stored);
+    if (voiceEligible && !presenceAllowsSpeech) {
+      this.deferredWhileAway.set(stored.seq, timestamp);
+      if (this.deferredWhileAway.size > MAX_EVENTS)
+        this.deferredWhileAway.delete(
+          this.deferredWhileAway.keys().next().value!,
+        );
+    }
     if (this.feed.length > MAX_EVENTS) this.feed.shift();
     if (entry.kind === "alert" && entry.severity !== "critical") {
       if (this.repeats.size >= MAX_REPEAT_KEYS)
@@ -216,5 +234,57 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     if (!event?.speakAllowed || this.speechClaims.has(event)) return false;
     this.speechClaims.add(event);
     return true;
+  }
+
+  /** One bounded spoken summary when confirmed presence returns; original alerts stay visible. */
+  private releaseDeferred(now = new Date()): void {
+    if (this.presence?.maySpeak() !== true || !this.deferredWhileAway.size)
+      return;
+    const timestamp = now.getTime();
+    const current = this.settings?.get().helperPreferences.notifications;
+    const eligible: FeedEvent[] = [];
+    for (const [seq, recordedAt] of this.deferredWhileAway) {
+      const event = this.feed.find((item) => item.seq === seq);
+      if (!event || timestamp - recordedAt > DEFERRED_MAX_AGE_MS) {
+        this.deferredWhileAway.delete(seq);
+        continue;
+      }
+      const category =
+        event.kind === "timer"
+          ? "timer"
+          : event.key === "briefing"
+            ? "briefing"
+            : event.severity;
+      if (current && current[category] !== "speak") {
+        this.deferredWhileAway.delete(seq);
+        continue;
+      }
+      eligible.push(event);
+    }
+    if (!eligible.length) return;
+    while (
+      this.spokenEventTimes[0] !== undefined &&
+      timestamp - this.spokenEventTimes[0] >= SPOKEN_EVENT_WINDOW_MS
+    )
+      this.spokenEventTimes.shift();
+    if (this.spokenEventTimes.length >= MAX_SPOKEN_EVENTS_PER_HOUR) return;
+    const count = eligible.length;
+    const summary: FeedEvent = {
+      seq: ++this.sequence,
+      kind: "alert",
+      severity: "info",
+      key: "missed",
+      title: `${count} gemiste ${count === 1 ? "melding" : "meldingen"}`,
+      detail: "Bekijk ze in Meldingen.",
+      at: now.toISOString(),
+      deliveryMode: "speak",
+      speakAllowed: true,
+    };
+    this.spokenEventTimes.push(timestamp);
+    this.feed.push(summary);
+    if (this.feed.length > MAX_EVENTS) this.feed.shift();
+    this.deferredWhileAway.clear();
+    if (this.windows?.configured)
+      void this.windows.notifyHelper(summary).catch(() => undefined);
   }
 }

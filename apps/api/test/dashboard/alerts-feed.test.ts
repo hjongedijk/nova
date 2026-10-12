@@ -32,6 +32,71 @@ describe("AlertsFeed presence delivery", () => {
     );
     expect(away.claimSpeech(away.record(event)!.seq)).toBe(false);
   });
+
+  it("summarizes alerts that stayed silent while away when speech becomes available", () => {
+    let available = false;
+    let onAvailable: () => void = () => undefined;
+    const presence = {
+      maySpeak: () => available,
+      onSpeechAvailable: (listener: () => void) => {
+        onAvailable = listener;
+        return () => undefined;
+      },
+    } as unknown as SpeechPresenceService;
+    const feed = new AlertsFeed(
+      { onEvent: () => () => undefined } as unknown as PlanningService,
+      undefined,
+      presence,
+    );
+    feed.onModuleInit();
+    const first = feed.record(event)!;
+    const second = feed.record({
+      ...event,
+      payload: { ...event.payload, title: "Tweede waarschuwing" },
+    })!;
+    expect(first.speakAllowed).toBe(false);
+    expect(second.speakAllowed).toBe(false);
+    available = true;
+    onAvailable();
+    expect(feed.recent().events.at(-1)).toMatchObject({
+      title: "2 gemiste meldingen",
+      speakAllowed: true,
+    });
+    expect(feed.claimSpeech(feed.recent().latest)).toBe(true);
+    onAvailable();
+    expect(feed.recent().events).toHaveLength(3);
+    feed.onModuleDestroy();
+  });
+
+  it("does not revive old alerts or alerts switched to screen-only mode", () => {
+    let onAvailable: () => void = () => undefined;
+    const presence = {
+      maySpeak: () => false,
+      onSpeechAvailable: (listener: () => void) => {
+        onAvailable = listener;
+        return () => undefined;
+      },
+    } as unknown as SpeechPresenceService;
+    let mode: "speak" | "screen" = "speak";
+    const settings = {
+      get: () => ({ helperPreferences: { notifications: { warning: mode } } }),
+    };
+    const feed = new AlertsFeed(
+      { onEvent: () => () => undefined } as unknown as PlanningService,
+      undefined,
+      presence,
+      undefined,
+      settings as never,
+    );
+    feed.onModuleInit();
+    feed.record(event, new Date(Date.now() - 5 * 60 * 60_000));
+    feed.record({ ...event, payload: { ...event.payload, title: "Recent" } });
+    mode = "screen";
+    Object.assign(presence, { maySpeak: () => true });
+    onAvailable();
+    expect(feed.recent().events).toHaveLength(2);
+    feed.onModuleDestroy();
+  });
   it("keeps the alert visible but marks speech unavailable when home and PC are away", () => {
     const presence = { maySpeak: () => false } as SpeechPresenceService;
     const feed = new AlertsFeed(

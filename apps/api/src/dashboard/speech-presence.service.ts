@@ -20,6 +20,7 @@ export class SpeechPresenceService implements OnModuleInit, OnModuleDestroy {
   private readonly transitionListeners = new Set<
     (from: HomePresence, to: HomePresence) => void
   >();
+  private readonly speechAvailableListeners = new Set<() => void>();
 
   constructor(
     private readonly homeAssistant: HomeAssistantService,
@@ -51,6 +52,11 @@ export class SpeechPresenceService implements OnModuleInit, OnModuleDestroy {
     return () => this.transitionListeners.delete(listener);
   }
 
+  onSpeechAvailable(listener: () => void): () => void {
+    this.speechAvailableListeners.add(listener);
+    return () => this.speechAvailableListeners.delete(listener);
+  }
+
   async refresh(): Promise<void> {
     if (this.refreshing) return this.refreshing;
     this.refreshing = this.update();
@@ -62,6 +68,7 @@ export class SpeechPresenceService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async update(): Promise<void> {
+    const previousSpeech = this.maySpeak();
     const homeTask = (async () => {
       if (!this.homeAssistant.configured) {
         this.home = "unknown";
@@ -100,6 +107,14 @@ export class SpeechPresenceService implements OnModuleInit, OnModuleDestroy {
         this.helperOpen = null;
       });
     await Promise.all([homeTask, helperTask]);
+    if (previousSpeech === false && this.maySpeak() === true)
+      for (const listener of this.speechAvailableListeners) {
+        try {
+          listener();
+        } catch {
+          // An observer cannot break presence refresh.
+        }
+      }
   }
 
   private setHome(next: HomePresence): void {

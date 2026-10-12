@@ -68,4 +68,18 @@ describe("SpeechPresenceService", () => {
       ["home", "away"],
     ]);
   });
+
+  it("signals when speech becomes available after absence", async () => {
+    const states = ["not_home"];
+    const presence = service(states, false);
+    const available = vi.fn();
+    presence.onSpeechAvailable(available);
+    await presence.refresh();
+    expect(available).not.toHaveBeenCalled();
+    states[0] = "home";
+    await presence.refresh();
+    expect(available).toHaveBeenCalledTimes(1);
+    await presence.refresh();
+    expect(available).toHaveBeenCalledTimes(1);
+  });
 });
