@@ -20,6 +20,7 @@ import {
   documentAuditProjection,
   youtubeCaptionAuditProjection,
   nodeRedRoutineAuditProjection,
+  routeAuditProjection,
   ToolsService,
 } from "../../src/tools/tools.service.js";
 import {
@@ -656,6 +657,27 @@ describe("document audit projection", () => {
     expect(JSON.stringify(projected)).not.toContain(excerpt);
     expect(JSON.stringify(projected)).not.toContain("contract.pdf");
     expect(JSON.stringify(projected)).not.toContain("private contract");
+  });
+});
+
+describe("route audit projection", () => {
+  it("keeps requested cities and appointment titles out of durable actions", () => {
+    const args = {
+      summary: "Private appointment",
+      destination: "My town",
+      bufferMinutes: 15,
+    };
+    const projected = routeAuditProjection("calendar_departure", args, {
+      ok: true,
+      result: { leaveAt: "2026-10-20T10:00:00Z", route: { origin: "Home" } },
+    });
+    expect(projected).toEqual({
+      arguments: { mode: "driving-car", originProvided: false },
+      result: { ok: true },
+    });
+    expect(JSON.stringify(projected)).not.toContain("Private appointment");
+    expect(JSON.stringify(projected)).not.toContain("My town");
+    expect(routeAuditProjection("fake_read", args, { ok: true })).toBeNull();
   });
 });
 

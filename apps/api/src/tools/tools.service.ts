@@ -139,7 +139,7 @@ function auditArgs(
       queryCharacters:
         typeof args.query === "string" ? [...args.query].length : 0,
     };
-  if (name === "route_estimate")
+  if (name === "route_estimate" || name === "calendar_departure")
     return {
       mode: args.mode ?? "driving-car",
       originProvided: typeof args.origin === "string",
@@ -204,6 +204,16 @@ export function documentAuditProjection(
   if (Array.isArray(payload?.documents)) safe.count = payload.documents.length;
   if (!result.ok) safe.error = "Document operation failed";
   return { arguments: auditArgs(name, args), result: safe };
+}
+
+/** Route cities and calendar titles are private; retain only action metadata. */
+export function routeAuditProjection(
+  name: string,
+  args: Record<string, unknown>,
+  result: ToolResult,
+): { arguments: Record<string, unknown>; result: { ok: boolean } } | null {
+  if (name !== "route_estimate" && name !== "calendar_departure") return null;
+  return { arguments: auditArgs(name, args), result: { ok: result.ok } };
 }
 
 /** Own-video captions may contain private transcript text; keep only counts in the audit. */
@@ -436,10 +446,7 @@ export class ToolsService implements OnModuleInit {
       const privateDocument = documentAuditProjection(name, args, clean);
       const privateCaptions = youtubeCaptionAuditProjection(name, clean);
       const privateRoutine = nodeRedRoutineAuditProjection(name, args, clean);
-      const privateRoute =
-        name === "route_estimate"
-          ? { arguments: auditArgs(name, args), result: { ok: clean.ok } }
-          : null;
+      const privateRoute = routeAuditProjection(name, args, clean);
       this.audit.record({
         sessionId,
         tool: name,
@@ -478,7 +485,8 @@ export class ToolsService implements OnModuleInit {
         !SYSTEM_SESSIONS.has(sessionId) &&
         !codeTool(name) &&
         name !== "node_red_flow" &&
-        name !== "route_estimate"
+        name !== "route_estimate" &&
+        name !== "calendar_departure"
       )
         this.memory.rememberTool(sessionId, name, args ?? {}, clean, entity);
       this.mqtt.publish("jarvis/events/tool", {

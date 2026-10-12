@@ -28,6 +28,8 @@ import { convertCurrency, markets } from "./markets.js";
 import { newsHeadlines, parseNewsFeeds } from "./news.js";
 import { forecast } from "./weather.js";
 import { routeEstimate } from "./route.js";
+import type { CalDavService } from "../../planning/caldav.service.js";
+import { calendarEventStartInstant } from "../../planning/calendar-day.js";
 import { webRead, webSearch, wikipedia } from "./web.js";
 import { WORLD_HTTP, type HomeSource, type WorldHttp } from "./world.types.js";
 
@@ -219,9 +221,10 @@ export class WorldService {
     name: string,
     args: Record<string, unknown>,
     signal?: AbortSignal,
+    calendar?: CalDavService,
   ): Promise<WorldToolResult> {
     try {
-      return await this.run(name, args, signal);
+      return await this.run(name, args, signal, calendar);
     } catch (error) {
       const failure = error as { name?: string; message?: unknown };
       const message =
@@ -257,6 +260,7 @@ export class WorldService {
     name: string,
     args: Record<string, unknown>,
     signal?: AbortSignal,
+    calendar?: CalDavService,
   ): Promise<WorldToolResult> {
     const str = (key: string) => args[key] as string;
     switch (name) {
@@ -382,6 +386,57 @@ export class WorldService {
               "driving-car",
             signal,
           ),
+        };
+      }
+      case "calendar_departure": {
+        if (!this.routeEnabled || !calendar?.configured)
+          return { ok: false, error: "Route of agenda is niet ingesteld." };
+        const appointments = (await calendar.upcoming()).filter(
+          (event) => event.summary === str("summary"),
+        );
+        if (appointments.length !== 1)
+          return { ok: false, error: "Afspraak niet eenduidig gevonden." };
+        const appointment = appointments[0]!;
+        const start = calendarEventStartInstant(
+          appointment,
+          this.config.timezone,
+        );
+        if (!start || start.getTime() <= Date.now())
+          return {
+            ok: false,
+            error: "Afspraak heeft geen toekomstig begintijdstip.",
+          };
+        const origin = await this.placeFor(undefined, signal);
+        const destination = await this.geocode(str("destination"), signal);
+        const route = await routeEstimate(
+          this.config.openRouteServiceKey,
+          origin,
+          destination,
+          "driving-car",
+          signal,
+        );
+        const requestedBuffer = args.bufferMinutes;
+        const bufferMinutes =
+          typeof requestedBuffer === "number" &&
+          Number.isInteger(requestedBuffer) &&
+          requestedBuffer >= 0 &&
+          requestedBuffer <= 60
+            ? requestedBuffer
+            : 15;
+        const leaveAt = new Date(
+          start.getTime() - (route.durationMinutes + bufferMinutes) * 60_000,
+        );
+        return {
+          ok: true,
+          result: {
+            appointmentAt: start.toISOString(),
+            leaveAt: leaveAt.toISOString(),
+            leaveNow: leaveAt.getTime() <= Date.now(),
+            timeZone: this.config.timezone,
+            bufferMinutes,
+            route,
+            note: "Vertrekadvies zonder actuele verkeersdrukte; controleer verkeer vlak voor vertrek.",
+          },
         };
       }
       default:

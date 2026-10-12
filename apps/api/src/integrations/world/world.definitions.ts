@@ -20,6 +20,7 @@ export const WORLD_TOOL_NAMES = [
   "iss_position",
   "moon_phase",
   "route_estimate",
+  "calendar_departure",
 ] as const;
 
 export function worldDefinitions(): ToolDefinition[] {
@@ -150,6 +151,21 @@ export function worldDefinitions(): ToolDefinition[] {
           },
         },
         ["destination"],
+      ),
+      risk: "READ_ONLY",
+      timeoutMs: 20000,
+    },
+    {
+      name: "calendar_departure",
+      description:
+        "Estimate when to leave home for one exact upcoming calendar appointment. Requires its exact title from calendar_events and a destination city the user explicitly named. No street-address inference. Computes a car route without live traffic and adds a 15-minute buffer by default. This is advice, not an alarm or automatic notification.",
+      parameters: schema(
+        {
+          summary: text(1, 160),
+          destination: text(2, 100),
+          bufferMinutes: { type: "integer", minimum: 0, maximum: 60 },
+        },
+        ["summary", "destination"],
       ),
       risk: "READ_ONLY",
       timeoutMs: 20000,
