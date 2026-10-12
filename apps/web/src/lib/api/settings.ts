@@ -128,6 +128,7 @@ import type {
   HomeAssistantAccessPolicy,
   HomeAssistantAccessHistory,
   HouseholdProfileSwitchHistory,
+  HouseholdProfileDefinitionHistory,
   ManagedTargetsAccessPolicy,
   SidebarItem,
   ToolOverride,
@@ -413,6 +414,17 @@ export const rollbackHouseholdProfile = (id: string) =>
     `/household-profiles/history/${enc(id)}/rollback`,
     {},
   );
+export const getHouseholdProfileDefinitionHistory = () =>
+  read<HouseholdProfileDefinitionHistory>(
+    "/household-profiles/definitions/history",
+  );
+export const rollbackHouseholdProfileDefinition = (id: string) =>
+  write<{
+    ok: true;
+    householdProfiles: HouseholdProfile[];
+    activeHouseholdProfileId: string;
+    auditWarning?: string;
+  }>("POST", `/household-profiles/definitions/history/${enc(id)}/rollback`, {});
 export const getPersonaPreferencesHistory = () =>
   read<PersonaPreferencesHistory>("/persona/preferences/history");
 export const rollbackPersonaPreferences = (id: string) =>

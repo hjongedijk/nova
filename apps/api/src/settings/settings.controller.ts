@@ -535,6 +535,19 @@ export class SettingsController {
     return this.householdProfileHistory.rollback(id);
   }
 
+  @Get("household-profiles/definitions/history")
+  householdProfileDefinitionHistoryList() {
+    return this.householdProfileHistory.listDefinitions();
+  }
+
+  @Post("household-profiles/definitions/history/:id/rollback")
+  @HttpCode(200)
+  rollbackHouseholdProfileDefinition(@Param("id") id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+      throw new ValidationError(["Ongeldige profielwijziging."]);
+    return this.householdProfileHistory.rollbackDefinitions(id);
+  }
+
   @Get("persona/preferences/history")
   personaPreferencesHistoryList() {
     return this.personaPreferencesHistory.list();

@@ -158,6 +158,13 @@ export class SettingsMutationsService {
       beforeSettings.activeHouseholdProfileId,
       activeId,
     );
+    this.householdProfileHistory.recordDefinitions(
+      {
+        profiles: beforeSettings.householdProfiles,
+        activeProfileId: beforeSettings.activeHouseholdProfileId,
+      },
+      { profiles, activeProfileId: activeId },
+    );
     this.log("household_profiles", {
       count: profiles.length,
       preferenceCount: active.communicationPreferences.length,

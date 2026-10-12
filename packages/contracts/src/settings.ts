@@ -432,6 +432,19 @@ export interface HouseholdProfileSwitchHistory {
   truncated: boolean;
 }
 
+export interface HouseholdProfileDefinitionRevision {
+  id: string;
+  at: string;
+  beforeCount: number;
+  afterCount: number;
+  changedProfileIds: string[];
+  revertedFrom?: string;
+}
+export interface HouseholdProfileDefinitionHistory {
+  revisions: HouseholdProfileDefinitionRevision[];
+  truncated: boolean;
+}
+
 /** GET /settings/public: no PIN needed. */
 export interface PublicConfig {
   publicUrl: string;

@@ -134,4 +134,116 @@ describe("household profile switch history", () => {
       .send({});
     expect(stale.status).toBe(404);
   });
+
+  it("records and restores a change to an inactive profile without returning its text in history", async () => {
+    const changed = structuredClone(profiles);
+    changed[1]!.communicationPreferences = ["fewer_jokes"];
+    const saved = await nova.api
+      .put("/api/settings/household-profiles")
+      .set(ADMIN)
+      .send({ profiles: changed, activeProfileId: "harm" });
+    expect(saved.status).toBe(200);
+    const history = await nova.api
+      .get("/api/settings/household-profiles/definitions/history")
+      .set(ADMIN);
+    expect(history.status).toBe(200);
+    const revision = history.body.revisions[0];
+    expect(revision).toMatchObject({
+      beforeCount: 2,
+      afterCount: 2,
+      changedProfileIds: ["sam"],
+    });
+    expect(JSON.stringify(history.body)).not.toContain("Private character");
+    const file = path.join(
+      directory,
+      "household-profile-definitions-history.json",
+    );
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+
+    const restored = await nova.api
+      .post(
+        `/api/settings/household-profiles/definitions/history/${revision.id}/rollback`,
+      )
+      .set(ADMIN)
+      .send({});
+    expect(restored.status).toBe(200);
+    const settings = await nova.api.get("/api/settings").set(ADMIN);
+    expect(settings.body.householdProfiles).toEqual(profiles);
+    expect(settings.body.activeHouseholdProfileId).toBe("harm");
+  });
+
+  it("rejects stale definition rollback after a separate persona change", async () => {
+    const changed = structuredClone(profiles);
+    changed[1]!.label = "Sam bijgewerkt";
+    await nova.api
+      .put("/api/settings/household-profiles")
+      .set(ADMIN)
+      .send({ profiles: changed, activeProfileId: "harm" });
+    const history = await nova.api
+      .get("/api/settings/household-profiles/definitions/history")
+      .set(ADMIN);
+    const revision = history.body.revisions[0];
+    await nova.api
+      .put("/api/settings/persona/profile")
+      .set(ADMIN)
+      .send({
+        profile: { ...profiles[0]!.personaProfile, character: "Later changed" },
+      });
+    const stale = await nova.api
+      .post(
+        `/api/settings/household-profiles/definitions/history/${revision.id}/rollback`,
+      )
+      .set(ADMIN)
+      .send({});
+    expect(stale.status).toBe(404);
+  });
+
+  it("skips a definition snapshot containing a recognizable secret", async () => {
+    const before = await nova.api
+      .get("/api/settings/household-profiles/definitions/history")
+      .set(ADMIN);
+    const changed = structuredClone(profiles);
+    changed[1]!.personaProfile.character = "sk-ABCDEFGHIJKLMNOPQRST";
+    const saved = await nova.api
+      .put("/api/settings/household-profiles")
+      .set(ADMIN)
+      .send({ profiles: changed, activeProfileId: "harm" });
+    expect(saved.status).toBe(200);
+    const after = await nova.api
+      .get("/api/settings/household-profiles/definitions/history")
+      .set(ADMIN);
+    expect(after.body.revisions).toHaveLength(before.body.revisions.length);
+    const file = path.join(
+      directory,
+      "household-profile-definitions-history.json",
+    );
+    if (fs.existsSync(file))
+      expect(fs.readFileSync(file, "utf8")).not.toContain(
+        "ABCDEFGHIJKLMNOPQRST",
+      );
+  });
+
+  it("skips a profile snapshot with credentials in a URL", async () => {
+    const before = await nova.api
+      .get("/api/settings/household-profiles/definitions/history")
+      .set(ADMIN);
+    const changed = structuredClone(profiles);
+    changed[1]!.personaProfile.character =
+      "Open https://private-user:private-pass@example.test/calendar";
+    const saved = await nova.api
+      .put("/api/settings/household-profiles")
+      .set(ADMIN)
+      .send({ profiles: changed, activeProfileId: "harm" });
+    expect(saved.status).toBe(200);
+    const history = await nova.api
+      .get("/api/settings/household-profiles/definitions/history")
+      .set(ADMIN);
+    expect(history.body.revisions).toHaveLength(before.body.revisions.length);
+    const file = path.join(
+      directory,
+      "household-profile-definitions-history.json",
+    );
+    if (fs.existsSync(file))
+      expect(fs.readFileSync(file, "utf8")).not.toContain("private-pass");
+  });
 });
