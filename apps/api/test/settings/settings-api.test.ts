@@ -1781,7 +1781,34 @@ describe("the settings API", () => {
     expect((await call("get", "/skills/nietbestaand/runs")).runs).toEqual([]);
   });
 
+  it("returns only safe action-log fields to the browser", async () => {
+    nova.audit.record({
+      tool: "skill_filmavond",
+      risk: "SAFE",
+      arguments: { instruction: "private-input-9281" },
+      result: {
+        ok: false,
+        error: "upstream-trace-code-9281",
+        diagnostic: "private-diagnostic-9281",
+      },
+    });
+    const response = await nova.api.get("/api/audit").set(ADMIN);
+    expect(response.status).toBe(200);
+    const entry = response.body.entries[0];
+    expect(entry).toMatchObject({
+      tool: "skill_filmavond",
+      risk: "SAFE",
+      result: { ok: false, error: "Actie mislukt." },
+    });
+    expect(entry).not.toHaveProperty("arguments");
+    expect(JSON.stringify(entry)).not.toMatch(/9281/);
+  });
+
   it("proposes an improvement and saves nothing", async () => {
+    nova.audit.record({
+      tool: "skill_filmavond",
+      result: { ok: false, error: "upstream-trace-code-9281" },
+    });
     const proposal = await call("post", "/skills/improve", {
       skill: playbook(),
       goal: "duidelijker",
@@ -1791,6 +1818,8 @@ describe("the settings API", () => {
     expect(nova.store.get().skills).toHaveLength(0);
     expect((await call("post", "/skills/improve", {})).status).toBe(400);
     expect(JSON.parse(improveCalls.at(-1)!).doel).toBe("duidelijker");
+    expect(improveCalls.at(-1)).toContain("De aanroep is mislukt.");
+    expect(improveCalls.at(-1)).not.toContain("upstream-trace-code-9281");
   });
 
   it("drafts a skill from a description", async () => {

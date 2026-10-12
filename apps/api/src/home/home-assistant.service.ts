@@ -388,7 +388,8 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
         this.error = null;
         return this.entities;
       } catch (error) {
-        this.error = (error as Error).message;
+        // Health reaches the integration screen; keep upstream diagnostics out.
+        this.error = "Home Assistant is tijdelijk niet bereikbaar.";
         throw error;
       } finally {
         this.refreshing = null;

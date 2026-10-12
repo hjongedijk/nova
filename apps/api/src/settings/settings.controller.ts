@@ -918,7 +918,7 @@ export class SettingsController {
           { ok?: boolean; error?: string } | undefined;
         return {
           ok: result?.ok === true,
-          error: result?.error ?? null,
+          error: result?.error ? "De aanroep is mislukt." : null,
           arguments: entry.arguments ?? {},
         };
       });

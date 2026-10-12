@@ -740,7 +740,7 @@ describe("Home Assistant", () => {
     await home.sync(true).catch(() => undefined);
     expect(home.health()).toMatchObject({
       online: false,
-      error: expect.stringMatching(/503/),
+      error: "Home Assistant is tijdelijk niet bereikbaar.",
     });
     const result = await run(
       "ha_turn_on",

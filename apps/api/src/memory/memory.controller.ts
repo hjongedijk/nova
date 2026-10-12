@@ -10,12 +10,13 @@ import {
   Res,
 } from "@nestjs/common";
 import type {
+  AuditLogEntry,
   MemoryListResponse,
   MemorySearchResponse,
   SessionMemoryResponse,
 } from "@nova/contracts";
 import type { Response } from "express";
-import { AuditService, type AuditEntry } from "../core/audit/audit.service.js";
+import { AuditService } from "../core/audit/audit.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { ToolsService } from "../tools/tools.service.js";
@@ -40,12 +41,40 @@ export class MemoryController {
   auditLog(
     @Query("limit") limit?: string,
     @Query("sessionId") sessionId?: string,
-  ): { entries: AuditEntry[] } {
+  ): { entries: AuditLogEntry[] } {
     return {
-      entries: this.audit.read(
-        Number(limit) || 100,
-        sessionId ? normalizeSessionId(sessionId) : undefined,
-      ),
+      entries: this.audit
+        .read(
+          Number(limit) || 100,
+          sessionId ? normalizeSessionId(sessionId) : undefined,
+        )
+        .map((entry) => {
+          const result =
+            entry.result && typeof entry.result === "object"
+              ? (entry.result as Record<string, unknown>)
+              : null;
+          return {
+            id: entry.id,
+            timestamp: entry.timestamp,
+            tool: typeof entry.tool === "string" ? entry.tool : undefined,
+            risk: typeof entry.risk === "string" ? entry.risk : undefined,
+            confirmation:
+              typeof entry.confirmation === "string"
+                ? entry.confirmation
+                : undefined,
+            phase: typeof entry.phase === "string" ? entry.phase : undefined,
+            result: result
+              ? {
+                  ok: result.ok === true,
+                  accepted: result.accepted === true,
+                  verified: result.verified === true,
+                  ...(result.error || result.ok === false
+                    ? { error: "Actie mislukt." }
+                    : {}),
+                }
+              : undefined,
+          };
+        }),
     };
   }
 
