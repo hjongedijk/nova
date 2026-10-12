@@ -337,9 +337,6 @@ export class TermixService implements ToolSource {
             via: "termix",
             success: true,
             output: clip(run.data?.output),
-            ...(typeof run.data?.error === "string"
-              ? { error: clip(run.data.error) }
-              : {}),
             ...(Number.isInteger(run.data?.exitCode)
               ? { exitCode: run.data.exitCode }
               : {}),

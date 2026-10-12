@@ -164,7 +164,7 @@ describe("TermixService", () => {
           success: succeeds,
           output: "done\n",
           exitCode: 0,
-          error: succeeds ? undefined : diagnostic,
+          error: diagnostic,
           debug: diagnostic,
           credential: diagnostic,
         });
