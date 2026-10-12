@@ -1,6 +1,5 @@
 import { Controller, Get, HttpException, Query } from "@nestjs/common";
 import type { EntitiesResponse } from "@nova/contracts";
-import { sanitize } from "../core/security/sanitize.js";
 import { HomeAssistantService } from "./home-assistant.service.js";
 
 const one = (value: unknown) => (typeof value === "string" ? value : undefined);
@@ -16,9 +15,9 @@ export class HomeController {
   ): Promise<EntitiesResponse> {
     try {
       await this.home.sync();
-    } catch (error) {
+    } catch {
       throw new HttpException(
-        { error: sanitize((error as Error).message) },
+        { error: "Home Assistant is tijdelijk niet beschikbaar." },
         503,
       );
     }

@@ -771,6 +771,19 @@ describe("Home Assistant", () => {
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(HttpException);
     expect((error as HttpException).getStatus()).toBe(503);
+    const sync = vi
+      .spyOn(home, "sync")
+      .mockRejectedValueOnce(new Error("private-host?token=secret-value"));
+    const privateError = (await controller
+      .entities({})
+      .catch((caught: unknown) => caught)) as HttpException;
+    expect(privateError.getResponse()).toEqual({
+      error: "Home Assistant is tijdelijk niet beschikbaar.",
+    });
+    expect(JSON.stringify(privateError.getResponse())).not.toContain(
+      "secret-value",
+    );
+    sync.mockRestore();
     fake.setOffline(false);
     await home.sync(true);
   });

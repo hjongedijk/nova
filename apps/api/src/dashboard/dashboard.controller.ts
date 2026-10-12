@@ -12,7 +12,6 @@ import type {
 import { NovaConfig } from "../core/config/nova-config.js";
 import { MqttService } from "../core/mqtt/mqtt.service.js";
 import { StateService } from "../core/state/state.service.js";
-import { sanitize } from "../core/security/sanitize.js";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { ToolsService } from "../tools/tools.service.js";
@@ -62,8 +61,10 @@ export class DashboardController {
   async overviewData(): Promise<OverviewResponse> {
     try {
       return await this.overview.overview();
-    } catch (error) {
-      throw new ServiceUnavailableException(sanitize((error as Error).message));
+    } catch {
+      throw new ServiceUnavailableException(
+        "Overzicht is tijdelijk niet beschikbaar.",
+      );
     }
   }
 

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { DashboardController } from "../../src/dashboard/dashboard.controller.js";
 import { OverviewService } from "../../src/dashboard/overview.service.js";
 
 function fixture(options: {
@@ -45,6 +46,34 @@ function fixture(options: {
 }
 
 describe("overview calendar privacy", () => {
+  it("does not expose unexpected overview diagnostics through the API", async () => {
+    const controller = new DashboardController(
+      null as never,
+      null as never,
+      {
+        overview: async () => {
+          throw new Error("private-host?token=secret-value");
+        },
+      } as never,
+      null as never,
+      null as never,
+      null as never,
+      null as never,
+      null as never,
+      null as never,
+      null as never,
+      null as never,
+    );
+    const error = (await controller
+      .overviewData()
+      .catch((caught: unknown) => caught)) as Error & {
+      getResponse(): unknown;
+    };
+    expect(JSON.stringify(error.getResponse())).not.toContain("secret-value");
+    expect(JSON.stringify(error.getResponse())).toContain(
+      "Overzicht is tijdelijk niet beschikbaar.",
+    );
+  });
   it("does not request or expose appointments without app access enabled", async () => {
     const { service, upcoming } = fixture({
       required: false,
