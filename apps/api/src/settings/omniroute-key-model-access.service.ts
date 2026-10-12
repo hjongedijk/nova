@@ -223,7 +223,11 @@ export class OmniRouteKeyModelAccess {
       revisions: rows
         .slice(-20)
         .reverse()
-        .map(({ beforeRevision: _, afterRevision: __, ...row }) => row),
+        .map(({ beforeRevision, afterRevision, ...row }) => {
+          void beforeRevision;
+          void afterRevision;
+          return row;
+        }),
       truncated: rows.length >= MAX_HISTORY,
     };
   }

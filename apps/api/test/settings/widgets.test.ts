@@ -89,7 +89,9 @@ describe("panels", () => {
   });
 
   it("does not expose upstream diagnostics in panel data", async () => {
-    const widget = normalizeWidget(value()) as Parameters<typeof fetchWidget>[0];
+    const widget = normalizeWidget(value()) as Parameters<
+      typeof fetchWidget
+    >[0];
     const data = await fetchWidget(widget, async () => ({
       ok: false,
       error: "connect ETIMEDOUT to private-host?token=secret-value",

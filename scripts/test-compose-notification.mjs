@@ -15,7 +15,6 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const root = resolve(".");
 const temp = mkdtempSync(join(tmpdir(), "nova-compose-notification-"));
-const data = join(temp, "data");
 const token = "nova-compose-notification-test-token-0123456789";
 const helperToken = "nova-compose-helper-test-token-0123456789";
 const project = `nova-notification-${process.pid}`;

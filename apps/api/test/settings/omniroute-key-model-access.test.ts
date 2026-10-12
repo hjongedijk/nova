@@ -184,7 +184,7 @@ describe("OmniRoute key model access", () => {
     );
     if (!prepared.ok) throw new Error(prepared.error);
     expect(
-      f.request.mock.calls.filter(([_, opts]) => opts?.method === "PATCH"),
+      f.request.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
     ).toHaveLength(0);
     const action = prepared.action;
     expect(JSON.stringify(prepared)).not.toContain("secret-");
@@ -225,7 +225,7 @@ describe("OmniRoute key model access", () => {
         .mode & 0o777,
     ).toBe(0o600);
     expect(
-      f.request.mock.calls.find(([_, opts]) => opts?.method === "PATCH")?.[1]
+      f.request.mock.calls.find(([, opts]) => opts?.method === "PATCH")?.[1]
         ?.body,
     ).toEqual({
       modelAccessMode: "restricted",
@@ -250,7 +250,7 @@ describe("OmniRoute key model access", () => {
       await f.service.prepare("client", ["free/one"], "0".repeat(64), true),
     ).toMatchObject({ ok: false });
     expect(
-      f.request.mock.calls.filter(([_, opts]) => opts?.method === "PATCH"),
+      f.request.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
     ).toHaveLength(0);
   });
 
@@ -266,7 +266,7 @@ describe("OmniRoute key model access", () => {
       available: false,
     });
     expect(
-      f.request.mock.calls.filter(([_, opts]) => opts?.method === "PATCH"),
+      f.request.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
     ).toHaveLength(0);
   });
 
@@ -387,7 +387,7 @@ describe("OmniRoute key model access", () => {
     ).toMatchObject({ ok: false });
     expect(f.blocked).toHaveBeenCalledTimes(1);
     expect(
-      f.request.mock.calls.filter(([_, opts]) => opts?.method === "PATCH"),
+      f.request.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
     ).toHaveLength(1);
   });
 
