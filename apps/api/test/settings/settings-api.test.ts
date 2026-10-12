@@ -2217,6 +2217,7 @@ describe("the wallpaper screen", () => {
     }[];
     const sets: unknown[] = [];
     let failure: string | null = null;
+    let applyFailure: string | null = null;
     const port: WallpaperPort = {
       configured: true,
       displays: async () =>
@@ -2224,6 +2225,7 @@ describe("the wallpaper screen", () => {
           ? { ok: false, error: failure }
           : { ok: true, displays: structuredClone(state) as never },
       setWallpaper: async (display, mode) => {
+        if (applyFailure) return { ok: false, error: applyFailure };
         sets.push({ display, mode });
         for (const screen of state)
           if (display === 0 || display === screen.index) screen.mode = mode;
@@ -2294,6 +2296,16 @@ describe("the wallpaper screen", () => {
         available: false,
         reason: "unreachable",
       });
+      failure = "private host=internal.example password=test-secret";
+      expect(JSON.stringify(await send("get"))).not.toContain("test-secret");
+      expect(
+        JSON.stringify(await send("post", { display: 1, mode: "full" })),
+      ).not.toContain("test-secret");
+      failure = null;
+      applyFailure = "private token=test-secret";
+      expect(
+        JSON.stringify(await send("post", { display: 1, mode: "full" })),
+      ).not.toContain("test-secret");
       expect(
         wallpaper.audits.some(
           (row) => (row.arguments as { what?: string }).what === "wallpaper",
@@ -2393,13 +2405,15 @@ describe("the helper overlay choice", () => {
       expect((await post({ mode: "helper", display: 1.5 })).status).toBe(400);
       expect((await post({ mode: "helper" }, {})).status).toBe(403);
       // An agent that cannot be reached: the choice is still kept.
-      failure.error = "geen verbinding";
+      failure.error = "private host=internal.example password=test-secret";
       const down = await post({ mode: "helper", display: 0 });
       expect(down.body).toMatchObject({
         applied: false,
-        error: "geen verbinding",
+        error:
+          "De Windows-agent reageert niet zoals verwacht. Controleer de verbinding en probeer opnieuw.",
         settings: { mode: "helper", display: 0 },
       });
+      expect(JSON.stringify(down.body)).not.toContain("test-secret");
       expect(
         (await app.api.get("/api/settings/helper").set(ADMIN)).body.settings,
       ).toEqual({ mode: "helper", display: 0 });

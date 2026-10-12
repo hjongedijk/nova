@@ -94,6 +94,8 @@ import { PersonaPreferencesHistoryService } from "./persona-preferences-history.
 import { HouseholdProfileHistory } from "./household-profile-history.service.js";
 
 const MAX_WIDGETS = 20;
+const WALLPAPER_UNAVAILABLE =
+  "De Windows-agent reageert niet zoals verwacht. Controleer de verbinding en probeer opnieuw.";
 
 type Body_ = Record<string, unknown> | undefined;
 
@@ -1156,7 +1158,7 @@ export class SettingsController {
       return {
         available: false,
         reason: /oud/.test(outcome.error) ? "old-agent" : "unreachable",
-        error: outcome.error,
+        error: WALLPAPER_UNAVAILABLE,
       };
     return {
       available: true,
@@ -1180,7 +1182,7 @@ export class SettingsController {
     if (!this.wallpaper?.configured)
       throw new ValidationError(["Er is geen Windows-agent ingesteld."]);
     const current = await this.wallpaper.displays();
-    if (!current.ok) throw new ValidationError([current.error]);
+    if (!current.ok) throw new ValidationError([WALLPAPER_UNAVAILABLE]);
     const affected =
       display === 0
         ? current.displays
@@ -1192,7 +1194,7 @@ export class SettingsController {
       mode: screen.mode,
     }));
     const outcome = await this.wallpaper.setWallpaper(display, mode);
-    if (!outcome.ok) throw new ValidationError([outcome.error]);
+    if (!outcome.ok) throw new ValidationError([WALLPAPER_UNAVAILABLE]);
     for (const item of before)
       this.wallpaperHistory.record(item.display, item.mode, mode);
     this.log("wallpaper", { display, mode });
@@ -1221,7 +1223,7 @@ export class SettingsController {
     if (!this.wallpaper?.configured)
       throw new ValidationError(["Er is geen Windows-agent ingesteld."]);
     const current = await this.wallpaper.displays();
-    if (!current.ok) throw new ValidationError([current.error]);
+    if (!current.ok) throw new ValidationError([WALLPAPER_UNAVAILABLE]);
     const screen = current.displays.find(
       (item) => item.index === revision.display,
     );
@@ -1233,7 +1235,7 @@ export class SettingsController {
       revision.display,
       revision.before,
     );
-    if (!outcome.ok) throw new ValidationError([outcome.error]);
+    if (!outcome.ok) throw new ValidationError([WALLPAPER_UNAVAILABLE]);
     this.wallpaperHistory.record(
       revision.display,
       revision.after,
@@ -1329,7 +1331,7 @@ export class SettingsController {
         settings: { mode, display },
         desktop: await this.getWallpaper(),
         applied: false,
-        error: outcome.error,
+        error: WALLPAPER_UNAVAILABLE,
         ...(historyWarning ? { historyWarning } : {}),
       };
     return {
