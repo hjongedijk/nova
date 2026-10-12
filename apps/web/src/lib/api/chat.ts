@@ -2,7 +2,7 @@ import type { ChatRequest, ConfirmResult } from "@nova/contracts";
 import { sendJson } from "./client.ts";
 import {
   ttsProsodyForMood,
-  ttsVoiceForLanguage,
+  ttsVoiceForSpeech,
 } from "#lib/voice/voice-preference.ts";
 import type { AssistantMood } from "#lib/stores/chat.svelte.ts";
 import {
@@ -51,7 +51,7 @@ export async function fetchSpeech(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       text,
-      voice: ttsVoiceForLanguage(language),
+      voice: ttsVoiceForSpeech(language),
       prosody: ttsProsodyForMood(mood),
     }),
     signal,

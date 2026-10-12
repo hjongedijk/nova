@@ -26,15 +26,35 @@ export const TTS_VOICES = [
 ] as const;
 export type TtsVoiceId = (typeof TTS_VOICES)[number]["id"];
 const DEFAULT_VOICE: TtsVoiceId = "nl-NL-FennaNeural";
+let serverDefaultVoice: TtsVoiceId = DEFAULT_VOICE;
 const KEY = "novaTtsVoice";
 const RATE_KEY = "novaTtsRate";
 const PITCH_KEY = "novaTtsPitch";
 
 export function ttsVoice(): TtsVoiceId {
-  const saved = storage.get(KEY, DEFAULT_VOICE);
+  const saved = storage.get(KEY, "");
   return TTS_VOICES.some((voice) => voice.id === saved)
     ? (saved as TtsVoiceId)
-    : DEFAULT_VOICE;
+    : serverDefaultVoice;
+}
+
+/** Health supplies the configured default for settings and recognition. */
+export function setServerDefaultVoice(voice: string | undefined): void {
+  if (TTS_VOICES.some((item) => item.id === voice))
+    serverDefaultVoice = voice as TtsVoiceId;
+}
+
+/** Omit the voice for default speech so the API applies TTS_VOICE. */
+export function ttsVoiceForSpeech(
+  language?: "nl" | "en",
+): TtsVoiceId | undefined {
+  const saved = storage.get(KEY, "");
+  const explicit = TTS_VOICES.find((voice) => voice.id === saved)?.id;
+  if (!language) return explicit;
+  if (explicit && localeOf(explicit).startsWith(`${language}-`))
+    return explicit;
+  if (language === "en") return "en-GB-RyanNeural";
+  return explicit ? DEFAULT_VOICE : undefined;
 }
 
 export function saveTtsVoice(voice: string): TtsVoiceId {

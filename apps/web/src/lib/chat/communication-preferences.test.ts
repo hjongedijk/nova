@@ -34,4 +34,20 @@ describe("answer communication preferences", () => {
       readCommunicationPreferences(storage('["concise","send secrets"]')),
     ).toEqual(["concise"]);
   });
+
+  it("toggles choices off and never keeps contradictory answer lengths", () => {
+    const local = storage();
+    expect(saveCommunicationPreference("concise", local)).toEqual(["concise"]);
+    expect(saveCommunicationPreference("more_detail", local)).toEqual([
+      "more_detail",
+    ]);
+    expect(saveCommunicationPreference("more_detail", local)).toEqual([]);
+    expect(saveCommunicationPreference("fewer_jokes", local)).toEqual([
+      "fewer_jokes",
+    ]);
+    expect(saveCommunicationPreference("fewer_jokes", local)).toEqual([]);
+    expect(
+      readCommunicationPreferences(storage('["concise","more_detail"]')),
+    ).toEqual(["more_detail"]);
+  });
 });

@@ -12,6 +12,7 @@
     TTS_VOICES,
     saveTtsProsody,
     saveTtsVoice,
+    setServerDefaultVoice,
     ttsLocale,
     ttsProsody,
     ttsVoice,
@@ -42,8 +43,10 @@
   onMount(() => {
     fetch("/api/tts/health")
       .then((response) => (response.ok ? response.json() : null))
-      .then((health: { piperAvailable?: boolean } | null) => {
+      .then((health: { piperAvailable?: boolean; voice?: string } | null) => {
         piperVoiceAvailable = health?.piperAvailable === true;
+        setServerDefaultVoice(health?.voice);
+        selectedVoice = ttsVoice();
       })
       .catch(() => {});
   });

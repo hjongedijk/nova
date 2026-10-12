@@ -4,11 +4,13 @@ import { fetchSpeech } from "#lib/api/chat.ts";
 import {
   saveTtsProsody,
   saveTtsVoice,
+  setServerDefaultVoice,
   ttsLocale,
   ttsProsody,
   ttsProsodyForMood,
   ttsVoice,
   ttsVoiceForLanguage,
+  ttsVoiceForSpeech,
 } from "./voice-preference.ts";
 
 describe("TTS voice preference", () => {
@@ -62,6 +64,28 @@ describe("TTS voice preference", () => {
     expect(ttsVoiceForLanguage("nl")).toBe("nl-NL-FennaNeural");
   });
 
+  it("uses the API default until this browser explicitly chooses a voice", async () => {
+    const values = new Map<string, string>();
+    vi.spyOn(storage, "get").mockImplementation(
+      (key, fallback) => values.get(key) ?? fallback,
+    );
+    vi.spyOn(storage, "set").mockImplementation((key, value) => {
+      values.set(key, value);
+    });
+    setServerDefaultVoice("nl-NL-ColetteNeural");
+    expect(ttsVoice()).toBe("nl-NL-ColetteNeural");
+    expect(ttsVoiceForSpeech("nl")).toBeUndefined();
+    const fetchMock = vi.fn().mockResolvedValue(new Response("audio"));
+    vi.stubGlobal("fetch", fetchMock);
+    await fetchSpeech("Goedemorgen.", undefined, "neutral", "nl");
+    expect(
+      JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body)),
+    ).not.toHaveProperty("voice");
+    saveTtsVoice("nl-NL-MaartenNeural");
+    expect(ttsVoiceForSpeech("nl")).toBe("nl-NL-MaartenNeural");
+    setServerDefaultVoice("nl-NL-FennaNeural");
+  });
+
   it("persists prosody and clamps it to the supported range", () => {
     const values = new Map<string, string>();
     vi.spyOn(storage, "get").mockImplementation(
@@ -94,6 +118,9 @@ describe("TTS voice preference", () => {
   });
 
   it("sends the mood-adjusted prosody while preserving the chosen voice", async () => {
+    vi.spyOn(storage, "get").mockImplementation((key, fallback) =>
+      key === "novaTtsVoice" ? "nl-NL-FennaNeural" : fallback,
+    );
     const fetchMock = vi.fn().mockResolvedValue(new Response("audio"));
     vi.stubGlobal("fetch", fetchMock);
     await fetchSpeech("Wat fijn.", undefined, "happy");
