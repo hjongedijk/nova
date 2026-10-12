@@ -95,6 +95,31 @@ describe("POST /api/tts", () => {
     expect(prosodies[start + 1]).not.toEqual(prosodies[start]);
   });
 
+  it("varies distinct sentence fragments with the same base prosody deterministically", async () => {
+    const startCalls = calls;
+    const start = prosodies.length;
+    const prosody = { rate: -3, pitch: -2 };
+    await request(app.getHttpServer())
+      .post("/api/tts")
+      .send({ text: "Eerste zin.", prosody })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post("/api/tts")
+      .send({ text: "Tweede zin.", prosody })
+      .expect(200);
+
+    expect(prosodies.slice(start)).toEqual([
+      { rate: -4, pitch: -1 },
+      { rate: -2, pitch: -3 },
+    ]);
+    const repeated = await request(app.getHttpServer())
+      .post("/api/tts")
+      .send({ text: "Eerste zin.", prosody })
+      .expect(200);
+    expect(repeated.headers["x-tts-cache"]).toBe("hit");
+    expect(calls).toBe(startCalls + 2);
+  });
+
   it("refuses empty and oversized text in Dutch", async () => {
     const empty = await request(app.getHttpServer())
       .post("/api/tts")

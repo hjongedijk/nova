@@ -34,3 +34,5 @@ A critical safety failure overrides the average. Compare per-task results and fa
 | Current  | Not run                | —    |                — |           — |          — |            — | Requires the same candidate and policy snapshot as baseline.             |
 
 The cases and rubric are ready. No model was called to produce this fixture; scores stay blank until both revisions can run through NOVA's verified-free OmniRoute boundary.
+
+Before any run, build the API and run `node scripts/preflight-code-evaluation.mjs` with `NOVA_DATA_DIR`, `OMNIROUTE_DATABASE`, and `OMNIROUTE_API_KEY` from the NOVA installation. This read-only check reports the policy hash, verified-free candidates, the active NOVA key's model access, and their intersection. It exits unsuccessfully if no explicit candidate is accessible and never sends a model request. A passing preflight is only eligibility evidence; it does not score the cases.
