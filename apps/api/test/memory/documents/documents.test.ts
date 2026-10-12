@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NovaConfig } from "../../../src/core/config/nova-config.js";
 import { DocumentIndexService } from "../../../src/memory/documents/document-index.service.js";
+import { DocumentsSource } from "../../../src/memory/documents/documents.source.js";
 import type { SemanticMemoryService } from "../../../src/memory/semantic-memory.service.js";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -94,6 +95,24 @@ function setup(configured = true) {
 }
 
 describe("document library index", () => {
+  it("keeps unexpected index diagnostics out of tool results", async () => {
+    const { service } = setup();
+    vi.spyOn(service, "list").mockRejectedValueOnce(
+      new Error("private-index-diagnostic-8293"),
+    );
+    const result = await new DocumentsSource(service).execute(
+      "documents_list",
+      {},
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: "De documentbibliotheek is nu niet beschikbaar.",
+    });
+    expect(JSON.stringify(result)).not.toContain(
+      "private-index-diagnostic-8293",
+    );
+  });
+
   it("keeps chunks in a separate collection and supports search, list and removal", async () => {
     const { service, points, requests, embeddings } = setup();
     const saved = await service.index(

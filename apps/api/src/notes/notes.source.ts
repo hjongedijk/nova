@@ -80,9 +80,26 @@ export class NotesSource implements ToolSource {
         return { ok: true, result: this.notes.remove(String(args.id ?? "")) };
       return { ok: false, error: "Unknown notes tool" };
     } catch (error) {
+      const known = [
+        "Je notitieboek is vol; verwijder eerst oude notities.",
+        "De notitie kon niet veilig worden opgeslagen.",
+        "Zoek op minstens twee letters.",
+        "Deze notitie bestaat niet.",
+        "De notitiemap kon niet veilig worden geopend.",
+        "Je notitiemap bevat te veel bestanden.",
+        "Geef je notitie een titel.",
+        "De titel moet 1 tot 120 tekens bevatten.",
+        "De notitie bevat geen tekst.",
+        "Een notitie mag maximaal 12.000 tekens bevatten.",
+        "De notitie lijkt een geheim te bevatten en is niet opgeslagen.",
+        "Geef een zoekterm van maximaal 160 tekens.",
+      ];
+      const message = error instanceof Error ? error.message : "";
       return {
         ok: false,
-        error: String((error as Error).message || error).slice(0, 240),
+        error: known.includes(message)
+          ? message
+          : "De notitieactie is mislukt. Probeer het opnieuw.",
       };
     }
   }

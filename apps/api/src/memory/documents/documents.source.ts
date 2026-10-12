@@ -69,9 +69,18 @@ export class DocumentsSource implements ToolSource {
         };
       return { ok: false, error: "Unknown documents tool" };
     } catch (error) {
+      const known = [
+        "Een geverifieerd gratis embeddingmodel is niet ingesteld.",
+        "Zoek op 2 tot 500 tekens.",
+        "Dit document bestaat niet.",
+        "De documentindex heeft een andere embeddingsconfiguratie.",
+      ];
+      const message = error instanceof Error ? error.message : "";
       return {
         ok: false,
-        error: String((error as Error).message || error).slice(0, 240),
+        error: known.includes(message)
+          ? message
+          : "De documentbibliotheek is nu niet beschikbaar.",
       };
     }
   }

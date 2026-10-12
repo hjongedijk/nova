@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import { NotesService } from "../../src/notes/notes.service.js";
 import { NotesSource } from "../../src/notes/notes.source.js";
@@ -109,5 +109,20 @@ describe("private notes", () => {
         id: (saved.result as { id: string }).id,
       }),
     ).toMatchObject({ ok: true, result: { removed: true } });
+  });
+
+  it("keeps unexpected storage diagnostics out of tool results", async () => {
+    const { notes } = service();
+    vi.spyOn(notes, "recent").mockImplementationOnce(() => {
+      throw new Error("private-storage-diagnostic-8293");
+    });
+    const result = await new NotesSource(notes).execute("notes_recent", {});
+    expect(result).toMatchObject({
+      ok: false,
+      error: "De notitieactie is mislukt. Probeer het opnieuw.",
+    });
+    expect(JSON.stringify(result)).not.toContain(
+      "private-storage-diagnostic-8293",
+    );
   });
 });
