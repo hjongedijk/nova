@@ -1760,13 +1760,23 @@ describe("the settings API", () => {
       result: { ok: false, error: "HTTP 500" },
       arguments: { actie: "open" },
     });
+    nova.audit.record({
+      tool: "skill_garagedeur",
+      result: {
+        ok: false,
+        error: "connect failed at private-host?token=secret-value",
+      },
+      arguments: { actie: "open" },
+    });
     const runs = (await call("get", "/skills/garagedeur/runs")).runs;
     expect(
       runs.map((item: { ok: boolean; error: string }) => [item.ok, item.error]),
     ).toEqual([
+      [false, "De aanroep is mislukt."],
       [false, "HTTP 500"],
       [true, null],
     ]);
+    expect(JSON.stringify(runs)).not.toContain("secret-value");
     expect(runs[0].at).toBeTruthy();
     expect((await call("get", "/skills/nietbestaand/runs")).runs).toEqual([]);
   });

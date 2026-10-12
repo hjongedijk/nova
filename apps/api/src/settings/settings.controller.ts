@@ -827,7 +827,11 @@ export class SettingsController {
         return {
           at: entry.timestamp,
           ok: result?.ok === true,
-          error: result?.error ?? null,
+          error: result?.error
+            ? /^HTTP [45]\d\d$/.test(result.error)
+              ? result.error
+              : "De aanroep is mislukt."
+            : null,
           arguments: (entry.arguments ?? {}) as Record<string, unknown>,
         };
       });
