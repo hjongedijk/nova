@@ -56,7 +56,7 @@ jobs:
           zip -r ../nova-windows-agent.zip windows -x "windows/test/*"
       - uses: softprops/action-gh-release@v3
         with:
+          body_path: docs/release-notes/${{ github.ref_name }}.md
           files: |
             nova-windows-agent.zip
             deploy/docker-compose.yml
-          generate_release_notes: true
