@@ -94,6 +94,52 @@ describe("TermixService", () => {
     ).toBe(false);
   });
 
+  it("does not return upstream connection diagnostics from failed snippets", async () => {
+    let includeAudit = true;
+    const failed = await listen((seen, send) => {
+      if (seen.url === "/host/db/host")
+        return send(200, [{ id: 1, name: "fixture-host" }]);
+      if (seen.url === "/plugin-api/snippets" && seen.method === "POST")
+        return send(201, { id: 7 });
+      if (seen.url === "/plugin-api/snippets/execute")
+        return send(502, { error: "upstream-diagnostic-9281" });
+      if (seen.url === "/audit-logs?limit=20")
+        return send(200, {
+          logs: includeAudit
+            ? [
+                {
+                  action: "ssh_connect",
+                  details: "host 1",
+                  success: false,
+                  errorMessage: "private-host?trace=9281",
+                },
+              ]
+            : [],
+        });
+      if (seen.method === "DELETE") return send(200, {});
+      send(404, {});
+    });
+    try {
+      const termix = service(failed.url, "tmx_key");
+      for (const useAudit of [true, false]) {
+        includeAudit = useAudit;
+        const result = await termix.execute(
+          "termix_run_command",
+          { host: "fixture-host", command: "hostname" },
+          call(),
+        );
+        expect(result.ok).toBe(false);
+        expect(JSON.stringify(result)).not.toContain("9281");
+      }
+      const create = failed.requests.find(
+        (item) => item.url === "/plugin-api/snippets",
+      )!;
+      expect(JSON.parse(create.body).name).toMatch(/^nova-/);
+    } finally {
+      await failed.close();
+    }
+  });
+
   it("hides and refuses hosts outside the saved allowlist", async () => {
     const targetAccess = {
       allows: () => false,

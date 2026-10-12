@@ -68,7 +68,11 @@ export function runDirectSsh(
     );
     client.on("ready", () => {
       client.exec(command, (error, stream) => {
-        if (error) return finish({ ok: false, error: error.message });
+        if (error)
+          return finish({
+            ok: false,
+            error: "De SSH-opdracht kon niet worden gestart.",
+          });
         let output = "";
         let errors = "";
         stream.on("data", (data: Buffer) => {
@@ -103,7 +107,7 @@ export function runDirectSsh(
           ? "De sleutel van de server klopt niet met wat Termix kent; NOVA maakt geen verbinding."
           : /authentication/i.test(error.message)
             ? "De server weigerde de login uit Termix."
-            : error.message,
+            : "De SSH-verbinding is mislukt.",
       }),
     );
     client.connect({

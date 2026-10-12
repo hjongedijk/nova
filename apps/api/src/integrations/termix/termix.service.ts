@@ -228,7 +228,7 @@ export class TermixService implements ToolSource {
         ...direct,
         result: {
           ...(direct.result as object),
-          note: `Termix kon het zelf niet uitvoeren (${viaTermix.error}), dus NOVA deed het rechtstreeks over SSH.`,
+          note: "Termix kon het zelf niet uitvoeren; NOVA deed het rechtstreeks over SSH.",
         },
       };
     return {
@@ -276,7 +276,7 @@ export class TermixService implements ToolSource {
       "POST",
       "/plugin-api/snippets",
       {
-        name: `jarvis-${Date.now()}`,
+        name: `nova-${Date.now()}`,
         content: command,
         description: "Temporary NOVA command",
       },
@@ -302,8 +302,8 @@ export class TermixService implements ToolSource {
           error: reason
             ? /authentication methods failed/i.test(reason)
               ? `Termix kon niet inloggen op ${host.name}: de server weigerde de login.`
-              : `Termix kon geen verbinding maken met ${host.name}: ${reason}.`
-            : run.data?.error || `Termix execution failed (${run.status})`,
+              : `Termix kon geen verbinding maken met ${host.name}.`
+            : `Termix execution failed (${run.status})`,
         };
       }
       return {
