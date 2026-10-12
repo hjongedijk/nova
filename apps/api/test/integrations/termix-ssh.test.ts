@@ -113,8 +113,8 @@ describe("Termix direct SSH fallback", () => {
       error: "a warning\n",
       exitCode: 0,
     });
-    expect((result.result as { note: string }).note).toMatch(
-      /kon niet inloggen.*rechtstreeks over SSH/s,
+    expect((result.result as { note: string }).note).toBe(
+      "Termix kon het zelf niet uitvoeren; NOVA deed het rechtstreeks over SSH.",
     );
     expect(JSON.stringify(result)).not.toContain("termix-pw");
     expect(ran.at(-1)).toBe("uptime");
