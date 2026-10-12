@@ -73,6 +73,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_RED_EVENT_TOKEN: ${NODE_RED_EVENT_TOKEN:-}
+      OPENROUTESERVICE_API_KEY: ${OPENROUTESERVICE_API_KEY:-}
       NODE_RED_FLOW_TOKEN: ${NODE_RED_FLOW_TOKEN:-}
     ports: ["127.0.0.1:1880:1880"]
     volumes:

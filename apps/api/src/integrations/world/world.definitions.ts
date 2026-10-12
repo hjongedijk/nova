@@ -19,6 +19,7 @@ export const WORLD_TOOL_NAMES = [
   "market_rates",
   "iss_position",
   "moon_phase",
+  "route_estimate",
 ] as const;
 
 export function worldDefinitions(): ToolDefinition[] {
@@ -134,6 +135,24 @@ export function worldDefinitions(): ToolDefinition[] {
         "The current phase of the moon, how much of it is lit, and the next full and new moon.",
       parameters: schema({}, []),
       risk: "READ_ONLY",
+    },
+    {
+      name: "route_estimate",
+      description:
+        "Estimate distance and travel time between named cities, or from the user's configured home to a named city. This uses OpenRouteService road data, not live traffic. Only call when the user asks for a route or travel time. Do not call for a street address or infer a destination. Mention that duration excludes current congestion.",
+      parameters: schema(
+        {
+          destination: text(2, 100),
+          origin: text(2, 100),
+          mode: {
+            type: "string",
+            enum: ["driving-car", "cycling-regular", "foot-walking"],
+          },
+        },
+        ["destination"],
+      ),
+      risk: "READ_ONLY",
+      timeoutMs: 20000,
     },
     {
       name: "calculate",

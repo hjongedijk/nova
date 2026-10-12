@@ -169,6 +169,8 @@ export class NovaConfig {
   readonly nodeRedFlowAllowlist = text("NODE_RED_FLOW_ALLOWLIST");
   /** Shared only with the allow-listed Node-RED HTTP-in flows NOVA may trigger. */
   readonly nodeRedFlowToken = text("NODE_RED_FLOW_TOKEN");
+  /** Optional free OpenRouteService account; never sent to the browser or model. */
+  readonly openRouteServiceKey = text("OPENROUTESERVICE_API_KEY");
 
   // Memory
   readonly memoryBackend = setting(

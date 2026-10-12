@@ -139,6 +139,11 @@ function auditArgs(
       queryCharacters:
         typeof args.query === "string" ? [...args.query].length : 0,
     };
+  if (name === "route_estimate")
+    return {
+      mode: args.mode ?? "driving-car",
+      originProvided: typeof args.origin === "string",
+    };
   if (name === "node_red_flow")
     return {
       flow: args.flow,
@@ -431,6 +436,10 @@ export class ToolsService implements OnModuleInit {
       const privateDocument = documentAuditProjection(name, args, clean);
       const privateCaptions = youtubeCaptionAuditProjection(name, clean);
       const privateRoutine = nodeRedRoutineAuditProjection(name, args, clean);
+      const privateRoute =
+        name === "route_estimate"
+          ? { arguments: auditArgs(name, args), result: { ok: clean.ok } }
+          : null;
       this.audit.record({
         sessionId,
         tool: name,
@@ -441,6 +450,7 @@ export class ToolsService implements OnModuleInit {
             privateDocument?.arguments ??
             privateCaptions?.arguments ??
             privateRoutine?.arguments ??
+            privateRoute?.arguments ??
             args),
         risk,
         confirmation,
@@ -459,6 +469,7 @@ export class ToolsService implements OnModuleInit {
               privateDocument?.result ??
               privateCaptions?.result ??
               privateRoutine?.result ??
+              privateRoute?.result ??
               clean),
         verification: clean.verified ?? null,
         durationMs: Date.now() - started,
@@ -466,7 +477,8 @@ export class ToolsService implements OnModuleInit {
       if (
         !SYSTEM_SESSIONS.has(sessionId) &&
         !codeTool(name) &&
-        name !== "node_red_flow"
+        name !== "node_red_flow" &&
+        name !== "route_estimate"
       )
         this.memory.rememberTool(sessionId, name, args ?? {}, clean, entity);
       this.mqtt.publish("jarvis/events/tool", {

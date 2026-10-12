@@ -815,7 +815,7 @@ describe("WorldModule", () => {
     const source = moduleRef.get(WorldSource);
     const defs = source.definitions();
     expect(defs.map((d) => d.name).sort()).toEqual(
-      [...WORLD_TOOL_NAMES].sort(),
+      WORLD_TOOL_NAMES.filter((name) => name !== "route_estimate").sort(),
     );
     expect(defs).toHaveLength(11);
     for (const def of defs) {

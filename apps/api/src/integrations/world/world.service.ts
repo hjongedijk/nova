@@ -27,6 +27,7 @@ import {
 import { convertCurrency, markets } from "./markets.js";
 import { newsHeadlines, parseNewsFeeds } from "./news.js";
 import { forecast } from "./weather.js";
+import { routeEstimate } from "./route.js";
 import { webRead, webSearch, wikipedia } from "./web.js";
 import { WORLD_HTTP, type HomeSource, type WorldHttp } from "./world.types.js";
 
@@ -154,6 +155,10 @@ export class WorldService {
 
   health(): { configured: boolean; home: boolean } {
     return { configured: true, home: this.home() !== null };
+  }
+
+  get routeEnabled(): boolean {
+    return Boolean(this.config.openRouteServiceKey);
   }
 
   geocode(place: string, signal?: AbortSignal): Promise<WorldPlace> {
@@ -358,6 +363,27 @@ export class WorldService {
             value: calculate(str("expression")),
           },
         };
+      case "route_estimate": {
+        if (!this.routeEnabled)
+          return { ok: false, error: "Routebron is niet ingesteld." };
+        const origin = await this.placeFor(
+          args.origin as string | undefined,
+          signal,
+        );
+        const destination = await this.geocode(str("destination"), signal);
+        return {
+          ok: true,
+          result: await routeEstimate(
+            this.config.openRouteServiceKey,
+            origin,
+            destination,
+            (args.mode as
+              "driving-car" | "cycling-regular" | "foot-walking" | undefined) ??
+              "driving-car",
+            signal,
+          ),
+        };
+      }
       default:
         return { ok: false, error: "Unknown tool" };
     }

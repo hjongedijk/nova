@@ -16,7 +16,10 @@ export class WorldSource implements ToolSource {
   constructor(private readonly world: WorldService) {}
 
   definitions(): ToolDefinition[] {
-    return worldDefinitions();
+    return worldDefinitions().filter(
+      (definition) =>
+        definition.name !== "route_estimate" || this.world.routeEnabled,
+    );
   }
 
   owns(name: string): boolean {
