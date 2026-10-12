@@ -162,11 +162,26 @@ describe("BrowserAgentService", () => {
     );
     reply = () => ({
       status: 400,
+      body: {
+        ok: false,
+        error:
+          "Dat element bestaat niet meer. Lees de pagina opnieuw met browser_read.",
+      },
+    });
+    expect(
+      (await browser.execute("browser_click", { id: 1 }, call())).error,
+    ).toBe(
+      "Dat element bestaat niet meer. Lees de pagina opnieuw met browser_read.",
+    );
+    reply = () => ({
+      status: 400,
       body: { ok: false, error: "Dat element bestaat niet meer." },
     });
     expect(
       (await browser.execute("browser_click", { id: 1 }, call())).error,
-    ).toBe("Dat element bestaat niet meer.");
+    ).toBe(
+      "Dat element bestaat niet meer. Lees de pagina opnieuw met browser_read.",
+    );
     reply = () => ({
       status: 500,
       body: { ok: false, error: "private-upstream-diagnostic-8293" },

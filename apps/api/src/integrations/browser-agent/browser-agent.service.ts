@@ -266,8 +266,10 @@ export class BrowserAgentService implements ToolSource {
         error: rest.risky
           ? "Deze browseractie lijkt een aankoop, betaling of verwijdering en is geweigerd."
           : response.status === 400 &&
-              rest.error === "Dat element bestaat niet meer."
-            ? "Dat element bestaat niet meer."
+              (rest.error === "Dat element bestaat niet meer." ||
+                rest.error ===
+                  "Dat element bestaat niet meer. Lees de pagina opnieuw met browser_read.")
+            ? "Dat element bestaat niet meer. Lees de pagina opnieuw met browser_read."
             : `Browser-agent fout (${response.status})`,
         ...(rest.risky ? { risky: true } : {}),
       };
