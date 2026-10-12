@@ -2,6 +2,26 @@ import { describe, expect, it } from "vitest";
 import type { PendingConfirmation } from "@nova/contracts";
 
 describe("confirmation labels", () => {
+  it("distinguishes performed actions from verified outcomes", async () => {
+    Object.assign(globalThis, { $state: (value: unknown) => value });
+    const { actionReceipt } = await import("./cards.svelte.ts");
+    const card = {
+      id: "confirmation-1",
+      tool: "code_file_write",
+      label: "Wijzig bestand a.ts.\nBevestiging verloopt.",
+    };
+    expect(actionReceipt(card, { ok: true, verified: true })).toMatchObject({
+      requested: "Wijzig bestand a.ts.",
+      performed: "code file write: uitgevoerd",
+      verification: "Werkelijk gecontroleerd",
+    });
+    expect(actionReceipt(card, { ok: true, accepted: true }).verification).toBe(
+      "Aangenomen; voltooiing niet gecontroleerd",
+    );
+    expect(actionReceipt(card, { ok: false }).performed).toContain(
+      "niet uitgevoerd",
+    );
+  });
   it("keeps sensitive cards open for spoken or typed approval words", async () => {
     Object.assign(globalThis, { $state: (value: unknown) => value });
     const {

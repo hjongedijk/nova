@@ -10,6 +10,7 @@ export interface NovaStatus {
 export interface ConfirmResult {
   ok?: boolean;
   reply: string;
+  result?: { ok?: boolean; verified?: boolean | null; accepted?: boolean };
 }
 
 /** The SSE `connected` event that opens POST /api/chat-stream. */

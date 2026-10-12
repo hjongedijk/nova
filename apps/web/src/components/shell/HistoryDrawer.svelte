@@ -112,6 +112,7 @@
       /* the screen is cleared either way */
     }
     chat.history.length = 0;
+    chat.actionReceipts.length = 0;
     feedback = {};
     addMessage("assistant", "We beginnen opnieuw. Waar kan ik mee helpen?");
     showStage("", "", false);
@@ -200,6 +201,15 @@
           {/if}
         {/if}
       </div>
+    {/each}
+    {#each chat.actionReceipts as receipt (receipt.id)}
+      <section class="handoff-card" aria-label="Actiekaart">
+        <h3>Actiekaart</h3>
+        <p><strong>Gevraagd:</strong> {receipt.requested}</p>
+        <p><strong>Uitgevoerd:</strong> {receipt.performed}</p>
+        <p><strong>Gecontroleerd:</strong> {receipt.verification}</p>
+        <a href="/settings?section=system#actielog">Bekijk het actielog</a>
+      </section>
     {/each}
     {#if handoffOpen}
       <section class="handoff-card" aria-label="Overdracht bewaren">

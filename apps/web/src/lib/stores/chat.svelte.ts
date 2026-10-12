@@ -15,6 +15,13 @@ export interface HistoryMessage {
   text: string;
 }
 
+export interface ActionReceipt {
+  id: string;
+  requested: string;
+  performed: string;
+  verification: string;
+}
+
 /** The conversation as the screen shows it. The chat layer (lib/chat) is the only writer. */
 export const chat = $state({
   uiState: "ready" as UiState,
@@ -34,6 +41,7 @@ export const chat = $state({
   /** Confirmation cards waiting for a yes or no (settled cards leave this list). */
   confirmations: [] as PendingConfirmation[],
   history: [] as HistoryMessage[],
+  actionReceipts: [] as ActionReceipt[],
   /** Time to the first token of the last answer, in seconds. */
   latency: null as number | null,
   /** Time from sending until the browser starts playing NOVA's first sentence. */

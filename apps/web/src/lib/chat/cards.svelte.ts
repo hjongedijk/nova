@@ -1,5 +1,5 @@
-import type { PendingConfirmation } from "@nova/contracts";
-import { chat } from "#lib/stores/chat.svelte.ts";
+import type { ConfirmResult, PendingConfirmation } from "@nova/contracts";
+import { chat, type ActionReceipt } from "#lib/stores/chat.svelte.ts";
 import { confirmAction } from "#lib/api/chat.ts";
 import {
   getConversationLanguage,
@@ -26,6 +26,25 @@ export interface Card {
 
 /** Confirmation cards in the dock, oldest first. */
 export const cards = $state<Card[]>([]);
+
+export function actionReceipt(
+  card: Pick<Card, "id" | "label" | "tool">,
+  result: NonNullable<ConfirmResult["result"]>,
+): ActionReceipt {
+  return {
+    id: card.id,
+    requested: card.label.split("\n")[0]!.slice(0, 240),
+    performed: result.ok
+      ? `${card.tool?.replaceAll("_", " ") ?? "Actie"}: uitgevoerd`
+      : `${card.tool?.replaceAll("_", " ") ?? "Actie"}: niet uitgevoerd`,
+    verification:
+      result.verified === true
+        ? "Werkelijk gecontroleerd"
+        : result.accepted
+          ? "Aangenomen; voltooiing niet gecontroleerd"
+          : "Niet onafhankelijk gecontroleerd",
+  };
+}
 
 const CONFIRM_REPLY =
   /^(ja|ja graag|ja hoor|ja doe maar|jazeker|graag|doe maar|oké|oke|ok|okay|prima|akkoord|zeker|ga je gang|bevestig|yes|yes please|confirm|nee|nee hoor|nee dank je|nee bedankt|laat maar|niet doen|annuleer|cancel|no)$/;
@@ -252,6 +271,10 @@ export async function answerCard(
   card.locked = true;
   try {
     const data = await confirmAction(getSessionId(), id, approve, always);
+    if (approve && data.result) {
+      chat.actionReceipts.unshift(actionReceipt(card, data.result));
+      chat.actionReceipts.length = Math.min(chat.actionReceipts.length, 10);
+    }
     card.label = data.reply;
     chat.toolResult = data.reply;
     chat.history.push({ role: "assistant", text: data.reply });

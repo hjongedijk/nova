@@ -226,7 +226,7 @@
             <ToolSwitchHistory />
             <SidebarHistory />
             <BackupSection />
-            <h2>Actielog</h2>
+            <h2 id="actielog">Actielog</h2>
             <AdminDialog embedded initialView="audit" />
           {:else}
             <section class="settings-notice">
