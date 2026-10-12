@@ -1,7 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { requestJson } from "../core/http/http-json.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { sanitize } from "../core/security/sanitize.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
 
 export interface NodeRedHealthReport {
@@ -56,8 +55,8 @@ export class NodeRedHealth {
     return report;
   }
 
-  recordRuntimeError(message: string, flowId?: string): void {
-    this.runtimeError = sanitize(message).slice(0, 240);
+  recordRuntimeError(_message: string, flowId?: string): void {
+    this.runtimeError = "Flowfout gemeld door Node-RED.";
     this.runtimeErrorFlowId = flowId ?? null;
     if (this.cached)
       this.cached = {

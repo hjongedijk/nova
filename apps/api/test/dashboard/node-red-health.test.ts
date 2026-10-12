@@ -107,13 +107,14 @@ describe("Node-RED health summary", () => {
     });
     const health = new NodeRedHealth({ nodeRedUrl: url } as NovaConfig);
     await health.report();
-    health.recordRuntimeError("Flow failed");
+    health.recordRuntimeError("Flow failed: private-host?token=secret-value");
     await expect(health.report()).resolves.toMatchObject({
       online: true,
-      lastError: "Flow failed",
+      lastError: "Flowfout gemeld door Node-RED.",
       lastErrorAvailable: true,
       lastErrorFlowId: null,
     });
+    expect(JSON.stringify(await health.report())).not.toContain("secret-value");
   });
 
   it("alerts once when Node-RED becomes unavailable and again when it recovers", async () => {
