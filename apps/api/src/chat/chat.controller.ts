@@ -23,6 +23,7 @@ import { AppAccessPublic } from "../access/access-public.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { publishableConversation } from "./conversation-events.js";
 import { sanitize } from "../core/security/sanitize.js";
+import { FreeRoutingBlockedError } from "../routing/routing.service.js";
 import { MqttService } from "../core/mqtt/mqtt.service.js";
 import {
   SessionMemoryService,
@@ -347,7 +348,16 @@ export class ChatController {
       emit("done", { ...result, sessionId, durationMs: Date.now() - started });
     } catch (error) {
       if (!controller.signal.aborted)
-        emit("error", { error: sanitize((error as Error).message) });
+        emit("error", {
+          error:
+            error instanceof FreeRoutingBlockedError
+              ? responseLanguage === "en"
+                ? "No verified free AI route is available."
+                : "Geen geverifieerde gratis AI-route beschikbaar."
+              : responseLanguage === "en"
+                ? "That did not work. Check the settings and try again."
+                : "Dat is niet gelukt. Controleer de instellingen en probeer opnieuw.",
+        });
     } finally {
       clearInterval(heartbeat);
       active.delete(sessionId);

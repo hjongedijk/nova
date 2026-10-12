@@ -5,9 +5,13 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../../src/app.module.js";
 import { OmniRouteClient } from "../../src/chat/omniroute-client.service.js";
+import { OrchestratorService } from "../../src/chat/orchestrator.service.js";
 import { listen, fakeConfig } from "../integrations/helpers.js";
 import { ToolsService } from "../../src/tools/tools.service.js";
-import { RoutingService } from "../../src/routing/routing.service.js";
+import {
+  FreeRoutingBlockedError,
+  RoutingService,
+} from "../../src/routing/routing.service.js";
 
 // Exercise the HTTP request through orchestration to the model boundary.
 describe("chat attachments", () => {
@@ -561,5 +565,32 @@ describe("chat attachments", () => {
       .post("/api/chat")
       .send({ sessionId: "plain", message: "Hello" })
       .expect(201);
+  });
+
+  it("does not stream unexpected model diagnostics to the browser", async () => {
+    vi.spyOn(app.get(OrchestratorService), "run").mockRejectedValueOnce(
+      new Error("provider failed?token=secret-value"),
+    );
+    const response = await request(app.getHttpServer())
+      .post("/api/chat-stream")
+      .send({ sessionId: "private-stream-error", message: "Vertel iets." })
+      .expect(201);
+    expect(response.text).toContain("event: error");
+    expect(response.text).toContain("Dat is niet gelukt.");
+    expect(response.text).not.toContain("secret-value");
+  });
+
+  it("keeps the free-route reason in stream errors", async () => {
+    vi.spyOn(app.get(OrchestratorService), "run").mockRejectedValueOnce(
+      new FreeRoutingBlockedError("private policy diagnostic"),
+    );
+    const response = await request(app.getHttpServer())
+      .post("/api/chat-stream")
+      .send({ sessionId: "free-stream-error", message: "Vertel iets." })
+      .expect(201);
+    expect(response.text).toContain(
+      "Geen geverifieerde gratis AI-route beschikbaar.",
+    );
+    expect(response.text).not.toContain("private policy diagnostic");
   });
 });
