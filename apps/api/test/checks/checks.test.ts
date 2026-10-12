@@ -11,6 +11,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from "vitest";
 import type { InfrastructureEvent } from "@nova/contracts";
 import { ChecksService } from "../../src/checks/checks.service.js";
@@ -123,6 +124,20 @@ describe("network_check", () => {
       ["alerts_list", "READ_ONLY"],
       ["network_check", "READ_ONLY"],
     ]);
+  });
+
+  it("keeps unexpected check diagnostics out of tool results", async () => {
+    vi.spyOn(checks, "check").mockRejectedValueOnce(
+      new Error("private-upstream-diagnostic-8293"),
+    );
+    const result = await new ChecksSource(checks).execute("network_check", {});
+    expect(result).toMatchObject({
+      ok: false,
+      error: "De controle is mislukt. Probeer het opnieuw.",
+    });
+    expect(JSON.stringify(result)).not.toContain(
+      "private-upstream-diagnostic-8293",
+    );
   });
 });
 

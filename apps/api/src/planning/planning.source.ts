@@ -191,9 +191,54 @@ export class PlanningSource implements ToolSource {
     try {
       return { ok: true, result: await this.run(name, args) };
     } catch (error) {
+      const known = [
+        "Geef óf seconds óf at op, niet allebei en niet geen van beide.",
+        "at is geen geldige ISO-tijd.",
+        "Dat tijdstip is al voorbij.",
+        "Timers kunnen maximaal 7 dagen vooruit.",
+        "Er staan al te veel timers.",
+        "Geef een id of label op.",
+        "Geen timer gevonden.",
+        "Die lijst is vol.",
+        "De agenda-instelling is ongeldig.",
+        "De agenda vereist een veilige HTTPS-kalender-URL.",
+        "De agenda is niet geconfigureerd.",
+        "De agenda is nu niet bereikbaar.",
+        "De agenda-inlog is geweigerd. Controleer de serverinstellingen.",
+        "De agenda gaf geen geldige reactie.",
+        "De agenda gaf onleesbare gegevens terug.",
+        "De agenda verwees door naar een andere locatie.",
+        "De agenda kon de afspraak niet controleren.",
+        "De agenda gaf een ongeldige afspraaklocatie terug.",
+        "De eindtijd moet na de begintijd liggen.",
+        "De begintijd van de afspraak is ongeldig.",
+        "De titel moet 1 tot 160 tekens bevatten.",
+        "Gebruik een geldige ISO-tijd met tijdzone.",
+        "De afspraak kon niet worden opgeslagen.",
+        "De afspraak kon niet worden verplaatst.",
+        "Ik kan die afspraak niet meer vinden; er is niets gewijzigd.",
+        "Er zijn meerdere passende afspraken; er is niets gewijzigd.",
+        "Terugkerende afspraken kunnen niet veilig worden verplaatst.",
+        "De afspraak is intussen gewijzigd; ik heb niets aangepast.",
+        "De afspraak heeft geen veilig bewerkbare begin- en eindtijd.",
+        "Meerdere Home Assistant-items passen; noem de volledige tekst.",
+        "Dit item staat mogelijk verderop in de lijst; vraag eerst om de volledige lijst.",
+        "Dit item staat niet op de lijst.",
+        "Deze Home Assistant-lijst is te groot om veilig in één keer te wissen.",
+        "Meerdere Home Assistant-lijsten passen; noem de volledige naam.",
+      ];
+      const message = error instanceof Error ? error.message : "";
       return {
         ok: false,
-        error: String((error as Error).message || error).slice(0, 300),
+        error: known.includes(message)
+          ? message
+          : message.startsWith("Meerdere timers passen:")
+            ? "Meerdere timers passen. Welke bedoel je?"
+            : message.startsWith("Meerdere items passen:")
+              ? "Meerdere items passen. Welke bedoel je?"
+              : message.startsWith("Niets gevonden op de lijst ")
+                ? "Niets gevonden op de lijst."
+                : "De planningactie is mislukt. Probeer het opnieuw.",
       };
     }
   }

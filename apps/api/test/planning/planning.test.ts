@@ -82,6 +82,22 @@ afterEach(() => {
 });
 
 describe("tools", () => {
+  it("keeps Home Assistant diagnostics out of planning tool results", async () => {
+    home.configured = true;
+    home.sync = async () => {
+      throw new Error("private-upstream-diagnostic-8293");
+    };
+    boot();
+    const result = await run("list_show", { list: "boodschappen" });
+    expect(result).toMatchObject({
+      ok: false,
+      error: "De planningactie is mislukt. Probeer het opnieuw.",
+    });
+    expect(JSON.stringify(result)).not.toContain(
+      "private-upstream-diagnostic-8293",
+    );
+  });
+
   it("replaces backed-up lists without touching timers or alerts and keeps the state private", () => {
     store.data.timers.push({
       id: "11111111",

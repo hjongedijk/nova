@@ -54,7 +54,10 @@ export class ChecksSource implements ToolSource {
     } catch (error) {
       return {
         ok: false,
-        error: String((error as Error).message || error).slice(0, 300),
+        error:
+          error instanceof Error && error.message.startsWith("Onbekend doel.")
+            ? "Onbekend doel. Kies een bekend doel."
+            : "De controle is mislukt. Probeer het opnieuw.",
       };
     }
   }
