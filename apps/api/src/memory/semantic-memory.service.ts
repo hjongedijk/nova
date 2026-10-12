@@ -20,6 +20,16 @@ import { QdrantMemory, RemoteEmbeddings } from "./semantic/qdrant.backend.js";
 
 const DAY = 86_400_000;
 
+function publicMemoryHealth(health: MemoryHealth): MemoryHealth {
+  const error =
+    health.error === "Invalid memory collection"
+      ? "Ongeldige geheugenindex. Controleer de instellingen."
+      : health.error
+        ? "Geheugen is tijdelijk niet beschikbaar."
+        : null;
+  return { ...health, error };
+}
+
 /** Stands in for a backend that cannot even be constructed (bad collection name, ...). */
 class UnavailableMemory implements SemanticBackend {
   readonly configured = false;
@@ -197,13 +207,13 @@ export class SemanticMemoryService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Health of the selected backend (the dashboard's "longTermMemory"). */
-  health(): Promise<MemoryHealth> {
-    return this.backend.health();
+  async health(): Promise<MemoryHealth> {
+    return publicMemoryHealth(await this.backend.health());
   }
 
   /** Health of the Qdrant store itself (the dashboard's "qdrant"). */
-  qdrantHealth(): Promise<MemoryHealth> {
-    return this.qdrant.health();
+  async qdrantHealth(): Promise<MemoryHealth> {
+    return publicMemoryHealth(await this.qdrant.health());
   }
 
   /** One maintenance pass; never throws. */

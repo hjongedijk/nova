@@ -606,7 +606,40 @@ describe("SemanticMemoryService and MemorySource", () => {
       new RoutingService(new NovaConfig()),
     );
     expect(service.configured).toBe(false);
-    expect((await service.health()).error).toBe("Invalid memory collection");
+    expect((await service.health()).error).toBe(
+      "Ongeldige geheugenindex. Controleer de instellingen.",
+    );
+  });
+
+  it("never exposes upstream memory diagnostics in health reports", async () => {
+    process.env.NOVA_MEMORY_BACKEND = "qdrant";
+    const config = new NovaConfig();
+    const service = new SemanticMemoryService(
+      config,
+      new OmniRouteManagement(config),
+      new RoutingService(config),
+    );
+    service.useBackends({
+      qdrant: {
+        health: async () => ({
+          online: false,
+          ready: false,
+          embeddings: {
+            configured: true,
+            model: "free-test",
+            remoteOnly: true,
+          },
+          error: "upstream-private-host?trace=9281",
+        }),
+      } as never,
+    });
+    expect((await service.health()).error).toBe(
+      "Geheugen is tijdelijk niet beschikbaar.",
+    );
+    expect((await service.qdrantHealth()).error).toBe(
+      "Geheugen is tijdelijk niet beschikbaar.",
+    );
+    expect(JSON.stringify(await service.health())).not.toContain("9281");
   });
 
   it("selects the OmniRoute backend and exposes the tools with the prototype's risks", async () => {
