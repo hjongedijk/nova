@@ -17,6 +17,7 @@ export const helper = $state({
   shape: "orb" as "orb" | "ring" | "mist",
   notifications: {
     info: "helper",
+    briefing: "speak",
     warning: "speak",
     critical: "speak",
     timer: "speak",
@@ -53,11 +54,16 @@ export function loadHelperPreferences(): void {
       helper.shape = saved.shape as typeof helper.shape;
     if (saved.notifications && typeof saved.notifications === "object") {
       const notifications = saved.notifications as Record<string, unknown>;
-      for (const kind of ["info", "warning", "critical", "timer"] as const)
+      for (const kind of [
+        "info",
+        "briefing",
+        "warning",
+        "critical",
+        "timer",
+      ] as const)
         if (["screen", "helper", "speak"].includes(String(notifications[kind])))
-          helper.notifications[kind] = notifications[
-            kind
-          ] as (typeof helper.notifications)[typeof kind];
+          helper.notifications[kind] = notifications[kind] as
+            "screen" | "helper" | "speak";
     }
     if (saved.rituals && typeof saved.rituals === "object") {
       const rituals = saved.rituals as Record<string, unknown>;

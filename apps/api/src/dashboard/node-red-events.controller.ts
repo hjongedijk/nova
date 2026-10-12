@@ -27,6 +27,7 @@ type IncomingEvent = {
   title?: unknown;
   detail?: unknown;
   severity?: unknown;
+  category?: unknown;
   at?: unknown;
   flowId?: unknown;
 };
@@ -84,6 +85,8 @@ export class NodeRedEventsController {
         !severities.has(body.severity as string)
       )
         throw new BadRequestException("Unsupported alert severity");
+      if (body.category !== undefined && body.category !== "briefing")
+        throw new BadRequestException("Unsupported alert category");
       const at =
         typeof body.at === "string" && !Number.isNaN(Date.parse(body.at))
           ? new Date(body.at).toISOString()
@@ -95,6 +98,7 @@ export class NodeRedEventsController {
             ? sanitize(body.detail).slice(0, 240)
             : "",
         severity: body.severity as "info" | "warning" | "critical" | undefined,
+        category: body.category as "briefing" | undefined,
         at,
       });
       if (!result) throw new BadRequestException("Node-RED alert was rejected");

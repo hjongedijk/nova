@@ -2452,6 +2452,7 @@ describe("the helper overlay choice", () => {
       shape: "orb",
       notifications: {
         info: "helper",
+        briefing: "speak",
         warning: "speak",
         critical: "speak",
         timer: "speak",
@@ -2475,6 +2476,7 @@ describe("the helper overlay choice", () => {
       shape: "ring",
       notifications: {
         info: "screen",
+        briefing: "speak",
         warning: "helper",
         critical: "speak",
         timer: "speak",

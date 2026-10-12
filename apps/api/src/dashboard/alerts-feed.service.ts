@@ -94,7 +94,12 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     const entry = toFeedEvent(event);
     if (!entry) return null;
     const notifications = this.settings?.get().helperPreferences.notifications;
-    const category = entry.kind === "timer" ? "timer" : entry.severity;
+    const category =
+      entry.kind === "timer"
+        ? "timer"
+        : entry.key === "briefing"
+          ? "briefing"
+          : entry.severity;
     const mode =
       notifications?.[category] ?? (category === "info" ? "helper" : "speak");
     const voiceEligible = mode === "speak";
@@ -131,6 +136,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     title: string;
     detail?: string;
     severity?: "info" | "warning" | "critical";
+    category?: "briefing";
     at?: string;
   }): FeedEvent | null {
     return this.record({
@@ -139,7 +145,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
         title: input.title,
         detail: input.detail ?? "",
         severity: input.severity ?? "info",
-        key: "node-red",
+        key: input.category === "briefing" ? "briefing" : "node-red",
         at: input.at,
       },
     });

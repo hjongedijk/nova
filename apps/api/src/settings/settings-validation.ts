@@ -421,6 +421,7 @@ export function normalizeHelperPreferences(
     shape: shape as HelperPreferences["shape"],
     notifications: {
       info: notificationMode(notifications?.info, "helper"),
+      briefing: notificationMode(notifications?.briefing, "speak"),
       warning: notificationMode(notifications?.warning, "speak"),
       critical: notificationMode(notifications?.critical, "speak"),
       timer: notificationMode(notifications?.timer, "speak"),

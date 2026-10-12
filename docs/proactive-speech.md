@@ -1,6 +1,6 @@
 # Proactive speech policy
 
-Alerts stay visible in the feed even when NOVA does not speak them. In Helper settings, choose a delivery mode separately for information, warnings, critical alerts, and timers: screen only, helper notice with a short sound, or spoken announcement. Defaults preserve existing behavior: info goes to the helper, while warnings, critical alerts, and timers are spoken. The API allows at most five spoken announcements per rolling hour. Once the budget is reached, later items remain visible and are marked silent until an earlier announcement leaves the hour window.
+Alerts stay visible in the feed even when NOVA does not speak them. In Helper settings, choose a delivery mode separately for information, scheduled briefings, warnings, critical alerts, and timers: screen only, helper notice with a short sound, or spoken announcement. By default, ordinary info goes to the helper, while briefings, warnings, critical alerts, and timers are spoken. The API allows at most five spoken announcements per rolling hour. Once the budget is reached, later items remain visible and are marked silent until an earlier announcement leaves the hour window.
 
 Presence can suppress speech when Home Assistant confirms the owner is away and the Windows helper is closed. Unknown presence keeps existing delivery behavior. The configured quiet hours apply in both the helper and main browser; neither interrupts an active conversation or audio playback. These checks suppress speech, not the feed; critical ntfy push remains separate. A busy or offline helper does not queue skipped speech for later.
 
@@ -15,5 +15,7 @@ If the exact same non-secret request appears on three separate local days within
 ## Scheduled Node-RED briefings
 
 NOVA-generated morning and evening briefing templates set the `NOVA vraag` node to proactive mode. That mode sends requests to the bearer-protected `/api/proactive/ask` endpoint using `NODE_RED_EVENT_TOKEN`. The endpoint gives the model only enabled `READ_ONLY` tools, and the tool executor rejects any prepared action whose effective risk is higher. It accepts no attachments, keeps no conversation history, and allows at most ten requests per minute. The fixed flow then formats the short result and sends it through `NOVA melding`. Ordinary user-created `NOVA vraag` nodes keep the regular chat route unless proactive mode is enabled.
+
+The generated flow marks its notification as a briefing. That uses the briefing delivery mode and the same presence, quiet-hour, busy-conversation and hourly speech gates as other alerts. The browser dashboard or an open helper can speak it when active. If both are open, each may announce it; there is no cross-device speech acknowledgement. A missed or suppressed announcement remains visible in the feed but is not replayed aloud later.
 
 Proactive routines may read data and publish a bounded notification. They cannot approve, create, or execute a device action. If Node-RED or another external service has already accepted an action before cancellation, NOVA cannot undo it.

@@ -109,6 +109,51 @@ describe("AlertsFeed presence delivery", () => {
     expect(notifyHelper).toHaveBeenCalledTimes(2);
   });
 
+  it("gives briefings their own spoken mode without changing ordinary info alerts", () => {
+    let briefingMode: "screen" | "speak" = "speak";
+    let present = true;
+    const settings = {
+      get: () => ({
+        helperPreferences: {
+          notifications: {
+            info: "helper",
+            briefing: briefingMode,
+            warning: "speak",
+            critical: "speak",
+            timer: "speak",
+          },
+        },
+      }),
+    };
+    const feed = new AlertsFeed(
+      { onEvent: () => () => undefined } as unknown as PlanningService,
+      undefined,
+      { maySpeak: () => present } as SpeechPresenceService,
+      undefined,
+      settings as never,
+    );
+    expect(
+      feed.recordNodeRedAlert({ title: "Gewone info" })?.speakAllowed,
+    ).toBe(false);
+    expect(
+      feed.recordNodeRedAlert({
+        title: "Ochtendbriefing",
+        category: "briefing",
+      }),
+    ).toMatchObject({ key: "briefing", speakAllowed: true });
+    briefingMode = "screen";
+    expect(
+      feed.recordNodeRedAlert({ title: "Stil overzicht", category: "briefing" })
+        ?.speakAllowed,
+    ).toBe(false);
+    briefingMode = "speak";
+    present = false;
+    expect(
+      feed.recordNodeRedAlert({ title: "Niemand thuis", category: "briefing" })
+        ?.speakAllowed,
+    ).toBe(false);
+  });
+
   it("sends only critical alerts to the optional phone push service", () => {
     const ntfy = {
       notify: vi.fn(async () => undefined),

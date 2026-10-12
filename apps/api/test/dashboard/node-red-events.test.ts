@@ -59,6 +59,27 @@ describe("Node-RED event ingress", () => {
     );
   });
 
+  it("passes an explicit briefing category to the speech policy", () => {
+    const { controller, alerts } = fixture();
+    controller.receive(`Bearer ${token}`, {
+      type: "alert",
+      title: "Ochtendbriefing",
+      detail: "Het weer is helder.",
+      severity: "info",
+      category: "briefing",
+    });
+    expect(alerts.recordNodeRedAlert).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "briefing" }),
+    );
+    expect(() =>
+      controller.receive(`Bearer ${token}`, {
+        type: "alert",
+        title: "Onbekend",
+        category: "other",
+      }),
+    ).toThrow("Unsupported alert category");
+  });
+
   it("surfaces runtime errors through health without executing an action", () => {
     const { controller, health, alerts } = fixture();
     controller.receive(`Bearer ${token}`, {

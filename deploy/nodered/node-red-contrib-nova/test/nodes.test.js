@@ -169,6 +169,30 @@ describe("node-red-contrib-nova", () => {
     assert.deepEqual(result.errors, []);
   });
 
+  it("preserves the explicit briefing category for scheduled summaries", async () => {
+    process.env.NODE_RED_EVENT_TOKEN =
+      "fixture-event-token-that-is-32-characters";
+    installFetch(async (_url, options) => {
+      assert.deepEqual(JSON.parse(options.body), {
+        type: "alert",
+        title: "Ochtendbriefing",
+        detail: "Vandaag is het helder.",
+        severity: "info",
+        category: "briefing",
+      });
+      return Response.json({ accepted: true });
+    });
+    const result = await invoke("nova-notify", {
+      payload: {
+        title: "Ochtendbriefing",
+        detail: "Vandaag is het helder.",
+        severity: "info",
+        category: "briefing",
+      },
+    });
+    assert.deepEqual(result.errors, []);
+  });
+
   it("records bounded runtime errors and rejects non-local API URLs", async () => {
     process.env.NODE_RED_EVENT_TOKEN =
       "fixture-event-token-that-is-32-characters";

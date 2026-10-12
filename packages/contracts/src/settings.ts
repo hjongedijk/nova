@@ -653,6 +653,8 @@ export interface WindowsHelperDebugStatus {
 export type NotificationMode = "screen" | "helper" | "speak";
 export interface NotificationModes {
   info: NotificationMode;
+  /** Optional for settings saved before briefing delivery had its own mode. */
+  briefing?: NotificationMode;
   warning: NotificationMode;
   critical: NotificationMode;
   timer: NotificationMode;

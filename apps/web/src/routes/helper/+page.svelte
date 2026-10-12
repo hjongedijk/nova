@@ -72,6 +72,7 @@
 
   const notificationKinds: { key: keyof NotificationModes; label: string }[] = [
     { key: "info", label: "Informatie" },
+    { key: "briefing", label: "Dagoverzicht" },
     { key: "warning", label: "Waarschuwing" },
     { key: "critical", label: "Kritiek" },
     { key: "timer", label: "Timer" },
@@ -425,7 +426,11 @@
         autohide = prefs.autohide;
         contrast = prefs.contrast;
         helper.shape = prefs.shape;
-        if (prefs.notifications) helper.notifications = prefs.notifications;
+        if (prefs.notifications)
+          helper.notifications = {
+            ...helper.notifications,
+            ...prefs.notifications,
+          };
         if (prefs.rituals) helper.rituals = prefs.rituals;
         helper.cues = prefs.cues;
         if (prefs.wardrobe) helper.wardrobe = prefs.wardrobe;

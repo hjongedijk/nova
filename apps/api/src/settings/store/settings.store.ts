@@ -92,6 +92,7 @@ const blank = (): NovaSettings => ({
     shape: "orb",
     notifications: {
       info: "helper",
+      briefing: "speak",
       warning: "speak",
       critical: "speak",
       timer: "speak",

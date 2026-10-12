@@ -440,7 +440,7 @@ export class NodeRedFlowSource implements ToolSource {
             JSON.stringify(`${label}: fout`) +
             ',"detail":($exists(error.source.name)?error.source.name:"Een node") & ": " & ($exists(error.message)?$substring(error.message,0,160):"Er is een fout opgetreden."),"severity":"warning"}'
           : isBriefing
-            ? `{"title":${JSON.stringify(isEveningReview ? "Avondoverzicht" : "Ochtendbriefing")},"detail":$substring(payload,0,240),"severity":"info"}`
+            ? `{"title":${JSON.stringify(isEveningReview ? "Avondoverzicht" : "Ochtendbriefing")},"detail":$substring(payload,0,240),"severity":"info","category":"briefing"}`
             : '{"title":' +
               JSON.stringify(`${label}: offline`) +
               ',"detail":($exists(status.source.name)?status.source.name:"Een node") & ": " & ($exists(status.text)?$substring(status.text,0,160):"offline"),"severity":"warning"}';

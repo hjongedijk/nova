@@ -63,6 +63,7 @@ function eventPayload(type, input) {
           title: String(row.title || "").slice(0, 120),
           detail: String(row.detail || "").slice(0, 240),
           severity: row.severity || "info",
+          ...(row.category === "briefing" ? { category: "briefing" } : {}),
         }
       : {
           type,

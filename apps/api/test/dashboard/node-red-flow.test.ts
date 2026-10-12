@@ -385,6 +385,7 @@ describe("Node-RED flow tool", () => {
           evening ? "daily_briefing.activity.entries" : "ochtendbriefing",
         );
         expect(added[3].rules[0].to).toContain("$substring(payload,0,240)");
+        expect(added[3].rules[0].to).toContain('"category":"briefing"');
         flows = body.flows;
         rev = "rev-2";
         response.writeHead(200, { "content-type": "application/json" });

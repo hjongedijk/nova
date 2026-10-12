@@ -35,6 +35,7 @@ describe("helper preference history", () => {
     const preferences = normalize(f.settings.get().helperPreferences);
     expect(preferences.notifications).toEqual({
       info: "helper",
+      briefing: "speak",
       warning: "speak",
       critical: "speak",
       timer: "speak",

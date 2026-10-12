@@ -93,6 +93,7 @@ function current(): NovaSettings {
       shape: "orb",
       notifications: {
         info: "helper",
+        briefing: "speak",
         warning: "speak",
         critical: "speak",
         timer: "speak",
@@ -259,6 +260,17 @@ describe("bounded private settings backup plan", () => {
     expect(state.helper).toEqual({ mode: "helper", display: 2 });
     next.helperPreferences.wardrobe!.theme = "nova";
     expect(preferences.wardrobe.theme).toBe("gold");
+  });
+  it("restores older helper backups without a briefing mode", () => {
+    const state = current();
+    const legacy = structuredClone(state.helperPreferences);
+    delete legacy.notifications?.briefing;
+    const { next } = buildBackupPlan(
+      backup({ helperPreferences: legacy }),
+      "replace",
+      state,
+    );
+    expect(next.helperPreferences.notifications?.briefing).toBe("speak");
   });
   it("canonicalizes omitted per-cue defaults and reports unchanged canonical roundtrip", () => {
     const state = current();

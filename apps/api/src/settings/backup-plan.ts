@@ -244,7 +244,11 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
       ]);
   }
   if (notifications)
-    exactKeys(notifications, ["info", "warning", "critical", "timer"]);
+    exactKeys(
+      notifications,
+      ["info", "warning", "critical", "timer"],
+      ["briefing"],
+    );
   let wardrobe: Record<string, unknown> | undefined;
   if (Object.hasOwn(body, "wardrobe")) {
     const raw = object(body.wardrobe);

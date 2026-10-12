@@ -51,6 +51,7 @@ const helperPreferences: HelperPreferences = {
   shape: "mist",
   notifications: {
     info: "screen",
+    briefing: "speak",
     warning: "helper",
     critical: "speak",
     timer: "speak",
