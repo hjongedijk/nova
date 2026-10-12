@@ -12,6 +12,7 @@ const blob = (
 ).getPublicSSH();
 const ran: string[] = [];
 let snippetWorks = false;
+let executeFails = false;
 let fingerprint = blob.toString("hex");
 let sshServer: Server;
 let fake: Awaited<ReturnType<typeof listen>>;
@@ -71,11 +72,13 @@ beforeAll(async () => {
         useSocks5: false,
       });
     if (url === "/plugin-api/snippets" && method === "POST")
-      return send(201, { id: 9 });
-    if (url === "/plugin-api/snippets/execute")
       return snippetWorks
-        ? send(200, { success: true, output: "via termix\n" })
-        : send(500, { error: "Failed to execute snippet" });
+        ? send(201, { id: 9 })
+        : send(503, { error: "Snippet plugin unavailable" });
+    if (url === "/plugin-api/snippets/execute")
+      return executeFails
+        ? send(500, { error: "Failed to execute snippet" })
+        : send(200, { success: true, output: "via termix\n" });
     if (url.startsWith("/audit-logs"))
       return send(200, {
         logs: [
@@ -127,6 +130,20 @@ describe("Termix direct SSH fallback", () => {
     expect((result.result as { via: string }).via).toBe("termix");
     expect(ran.length).toBe(before);
     snippetWorks = false;
+  });
+
+  it("never retries over SSH after sending a snippet for execution", async () => {
+    snippetWorks = true;
+    executeFails = true;
+    const before = ran.length;
+    try {
+      const result = await run("uptime");
+      expect(result.ok).toBe(false);
+      expect(ran).toHaveLength(before);
+    } finally {
+      executeFails = false;
+      snippetWorks = false;
+    }
   });
 
   it("a server whose key does not match what Termix knows is never logged into", async () => {

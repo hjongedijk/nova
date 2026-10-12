@@ -301,19 +301,18 @@ export class NodeRedFlowSource implements ToolSource {
           maxResponseBytes: 16_384,
         },
       );
+      const accepted = response.status >= 200 && response.status < 300;
       const result =
-        response.data === null
-          ? null
-          : sanitize(JSON.stringify(response.data)).slice(0, 8192);
+        accepted && response.data !== null
+          ? sanitize(JSON.stringify(response.data)).slice(0, 8192)
+          : null;
       return {
-        ok: response.status >= 200 && response.status < 300,
-        accepted: response.status >= 200 && response.status < 300,
+        ok: accepted,
+        accepted,
         verified: null,
         status: response.status,
         ...(result !== null ? { result } : {}),
-        ...(!(response.status >= 200 && response.status < 300)
-          ? { error: "Node-RED rejected the flow request" }
-          : {}),
+        ...(!accepted ? { error: "Node-RED rejected the flow request" } : {}),
       };
     } catch (error) {
       if (call.signal.aborted) throw error;

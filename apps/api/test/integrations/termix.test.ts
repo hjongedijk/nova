@@ -140,6 +140,63 @@ describe("TermixService", () => {
     }
   });
 
+  it("returns only command fields from a successful snippet", async () => {
+    const diagnostic = "private-host.local /data/private/termix.json";
+    let succeeds = true;
+    const fixture = await listen((seen, send) => {
+      if (seen.url === "/host/db/host")
+        return send(200, [{ id: 1, name: "fixture-host" }]);
+      if (seen.url === "/plugin-api/snippets" && seen.method === "POST")
+        return send(201, { id: 7 });
+      if (seen.url === "/plugin-api/snippets/execute")
+        return send(200, {
+          success: succeeds,
+          output: "done\n",
+          exitCode: 0,
+          error: succeeds ? undefined : diagnostic,
+          debug: diagnostic,
+          credential: diagnostic,
+        });
+      if (seen.method === "DELETE") return send(200, {});
+      send(404, {});
+    });
+    try {
+      const result = await service(fixture.url, "tmx_key").execute(
+        "termix_run_command",
+        { host: "fixture-host", command: "hostname" },
+        call(),
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        result: {
+          host: "fixture-host",
+          via: "termix",
+          success: true,
+          output: "done\n",
+          exitCode: 0,
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain(diagnostic);
+      expect(result.result).not.toHaveProperty("debug");
+      expect(result.result).not.toHaveProperty("credential");
+      succeeds = false;
+      const failed = await service(fixture.url, "tmx_key").execute(
+        "termix_run_command",
+        { host: "fixture-host", command: "hostname" },
+        call(),
+      );
+      expect(failed.ok).toBe(false);
+      expect(JSON.stringify(failed)).not.toContain(diagnostic);
+      expect(
+        fixture.requests.some((item) =>
+          item.url?.startsWith("/host/db/host/1/export"),
+        ),
+      ).toBe(false);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("hides and refuses hosts outside the saved allowlist", async () => {
     const targetAccess = {
       allows: () => false,

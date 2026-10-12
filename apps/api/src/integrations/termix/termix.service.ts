@@ -31,18 +31,26 @@ interface TermixLogin extends SshLogin {
 
 interface SnippetBody {
   id?: number | string;
+  success?: boolean;
   error?: string;
   output?: unknown;
+  exitCode?: number;
   [key: string]: unknown;
 }
 
+interface SnippetAttempt {
+  outcome: ToolResult;
+  /** Only a proven pre-execution failure may retry the command over SSH. */
+  fallbackAllowed: boolean;
+}
+
 const clip = (value: unknown) =>
-  typeof value === "string" ? value.slice(0, 8000) : value;
+  typeof value === "string" ? value.slice(0, 8000) : "";
 
 /**
  * Termix access: lists the SSH hosts configured there and runs one confirmed command on a host.
- * Commands go through Termix' snippets plugin; when that fails, NOVA runs it over SSH itself with
- * the login Termix holds for that host, and only after the server's key matches the one Termix knows.
+ * Commands go through Termix' snippets plugin. If creation fails before execution, NOVA can run
+ * over SSH with Termix' login, after checking the host key. An uncertain execution is never retried.
  */
 @ToolSourceProvider()
 export class TermixService implements ToolSource {
@@ -221,7 +229,7 @@ export class TermixService implements ToolSource {
           : "Unknown Termix host",
       };
     const viaTermix = await this.runSnippet(host, command, signal);
-    if (viaTermix.ok) return viaTermix;
+    if (!viaTermix.fallbackAllowed) return viaTermix.outcome;
     const direct = await this.runSsh(host, command, signal);
     if (direct.ok)
       return {
@@ -233,7 +241,7 @@ export class TermixService implements ToolSource {
       };
     return {
       ok: false,
-      error: `${viaTermix.error} Rechtstreeks over SSH lukte ook niet: ${direct.error}`,
+      error: `${viaTermix.outcome.error} Rechtstreeks over SSH lukte ook niet: ${direct.error}`,
     };
   }
 
@@ -271,7 +279,7 @@ export class TermixService implements ToolSource {
     host: TermixHost,
     command: string,
     signal?: AbortSignal,
-  ): Promise<ToolResult> {
+  ): Promise<SnippetAttempt> {
     const created = await this.send<SnippetBody>(
       "POST",
       "/plugin-api/snippets",
@@ -285,8 +293,11 @@ export class TermixService implements ToolSource {
     const snippetId = created.data?.id;
     if (created.status !== 201 || snippetId === undefined)
       return {
-        ok: false,
-        error: `Termix snippet creation failed (${created.status})`,
+        outcome: {
+          ok: false,
+          error: `Termix snippet creation failed (${created.status})`,
+        },
+        fallbackAllowed: true,
       };
     try {
       const run = await this.send<SnippetBody>(
@@ -297,25 +308,47 @@ export class TermixService implements ToolSource {
       );
       if (run.status !== 200) {
         const reason = await this.lastConnectError(host.id, signal);
+        const loginRejected =
+          reason !== null && /authentication methods failed/i.test(reason);
         return {
-          ok: false,
-          error: reason
-            ? /authentication methods failed/i.test(reason)
+          outcome: {
+            ok: false,
+            error: loginRejected
               ? `Termix kon niet inloggen op ${host.name}: de server weigerde de login.`
-              : `Termix kon geen verbinding maken met ${host.name}.`
-            : `Termix execution failed (${run.status})`,
+              : reason
+                ? `Termix kon geen verbinding maken met ${host.name}.`
+                : `Termix execution failed (${run.status})`,
+          },
+          // A non-200 reply may arrive after the command ran; never execute it twice.
+          fallbackAllowed: false,
         };
       }
+      if (run.data?.success !== true)
+        return {
+          outcome: {
+            ok: false,
+            error: "Termix kon de opdracht niet uitvoeren.",
+          },
+          fallbackAllowed: false,
+        };
       return {
-        ok: true,
-        verified: null,
-        result: {
-          host: host.name,
-          via: "termix",
-          ...run.data,
-          output: clip(run.data?.output),
-          error: clip(run.data?.error),
+        outcome: {
+          ok: true,
+          verified: null,
+          result: {
+            host: host.name,
+            via: "termix",
+            success: true,
+            output: clip(run.data?.output),
+            ...(typeof run.data?.error === "string"
+              ? { error: clip(run.data.error) }
+              : {}),
+            ...(Number.isInteger(run.data?.exitCode)
+              ? { exitCode: run.data.exitCode }
+              : {}),
+          },
         },
+        fallbackAllowed: false,
       };
     } finally {
       await this.send(

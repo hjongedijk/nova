@@ -90,6 +90,32 @@ describe("Node-RED flow tool", () => {
     });
   });
 
+  it("omits an upstream error body from a rejected flow result", async () => {
+    const diagnostic = "private-host.local /data/private/node-red.json";
+    const server = createServer((_request, response) => {
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: diagnostic }));
+    });
+    const port = await listen(server);
+    const tool = source(
+      port,
+      '[{"id":"lights_on","label":"Lights","risk":"CONFIRM"}]',
+    );
+    const result = await tool.execute(
+      "node_red_flow",
+      { flow: "lights_on", payload: {} },
+      { signal: AbortSignal.timeout(2000) },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      accepted: false,
+      status: 500,
+      error: "Node-RED rejected the flow request",
+    });
+    expect(result).not.toHaveProperty("result");
+    expect(JSON.stringify(result)).not.toContain(diagnostic);
+  });
+
   it("rejects oversized arguments and never forwards a caller-selected URL", async () => {
     const unused = createServer();
     const port = await listen(unused);

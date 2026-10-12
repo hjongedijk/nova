@@ -55,6 +55,12 @@ export async function runSkill(
       error: safeMessage,
     };
   }
+  if (response.status >= 400)
+    return {
+      ok: false,
+      error: `De dienst antwoordde met HTTP ${response.status}.`,
+      result: { status: response.status, untrusted: true, response: null },
+    };
   let data: unknown = null;
   if (/json/i.test(response.contentType)) {
     try {
@@ -80,11 +86,5 @@ export async function runSkill(
     ...(response.location ? { location: response.location } : {}),
     ...(response.truncated ? { truncated: true } : {}),
   };
-  if (response.status >= 400)
-    return {
-      ok: false,
-      error: `De dienst antwoordde met HTTP ${response.status}.`,
-      result,
-    };
   return { ok: true, verified: null, result };
 }

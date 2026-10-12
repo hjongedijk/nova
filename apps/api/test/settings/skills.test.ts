@@ -409,7 +409,9 @@ describe.skipIf(!lan)("running a skill against a real server", () => {
   it("reports errors, a missing answer path and a hung service plainly", async () => {
     const fake = await service((entry, response) => {
       if (entry.url?.startsWith("/boom"))
-        return json(response, 500, { error: "stuk" });
+        return json(response, 500, {
+          error: "private-host.local /data/private/webhook.json",
+        });
       if (entry.url?.startsWith("/hang")) return;
       if (entry.url?.startsWith("/redirect")) {
         response.writeHead(302, { location: "http://169.254.169.254/" });
@@ -434,7 +436,12 @@ describe.skipIf(!lan)("running a skill against a real server", () => {
       const failed = await runSkill(make("/boom"), {});
       expect(failed.ok).toBe(false);
       expect(failed.error).toMatch(/HTTP 500/);
-      expect(failed.result?.response).toEqual({ error: "stuk" });
+      expect(failed.result).toEqual({
+        status: 500,
+        untrusted: true,
+        response: null,
+      });
+      expect(JSON.stringify(failed)).not.toContain("private-host.local");
       const noPath = await runSkill(make("/ok", { extract: "b.c" }), {});
       expect(noPath.ok).toBe(true);
       expect(noPath.result?.note).toMatch(/komt niet voor/);
