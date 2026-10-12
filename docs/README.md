@@ -18,6 +18,7 @@
 | [Web research](research.md)                         | Multi-step source research, citations, and uncertainty                                        |
 | [Node-RED routines](node-red-routines.md)           | Personal daily reminder routines and their safety boundaries                                  |
 | [Routes and travel time](routes.md)                 | Optional free route source, setup, attribution and current limits                             |
+| [Local plugins](local-plugins.md)                   | Private JSON webhook manifests, limits and safety rules                                       |
 | [Conversation language](conversation-language.md)   | Switch one conversation between Dutch and English, including voice                            |
 | [Urgent phone notifications](push-notifications.md) | Private ntfy setup and what NOVA sends to the phone                                           |
 

@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
+import { Optional } from "@nestjs/common";
+import { NovaConfig } from "../../core/config/nova-config.js";
 import { schema, ToolSourceProvider } from "../../tools/tool.types.js";
 import type {
   ToolCall,
@@ -8,6 +11,7 @@ import type {
 } from "../../tools/tool.types.js";
 import { SettingsStore } from "../store/settings.store.js";
 import { runSkill } from "./run-skill.js";
+import { loadPluginSkills } from "./plugin-skills.js";
 import {
   type StoredSkill,
   type StoredWebhookSkill,
@@ -24,13 +28,30 @@ import {
 export class SkillsSource implements ToolSource {
   readonly source = "skills";
 
-  constructor(private readonly settings: SettingsStore) {}
+  private readonly pluginSkills: StoredWebhookSkill[];
+
+  constructor(
+    private readonly settings: SettingsStore,
+    @Optional() config?: NovaConfig,
+  ) {
+    this.pluginSkills = config
+      ? loadPluginSkills(path.join(config.dataDir, "plugins"))
+      : [];
+  }
 
   private webhooks(): StoredWebhookSkill[] {
-    return (this.settings.get().skills as unknown as StoredSkill[]).filter(
+    const stored = this.settings.get().skills as unknown as StoredSkill[];
+    const saved = stored.filter(
       (skill): skill is StoredWebhookSkill =>
         skill.type === "webhook" && skill.enabled,
     );
+    const taken = new Set(stored.map((skill) => skill.id));
+    return [
+      ...saved,
+      ...this.pluginSkills.filter(
+        (skill) => skill.enabled && !taken.has(skill.id),
+      ),
+    ];
   }
 
   definitions(): ToolDefinition[] {
