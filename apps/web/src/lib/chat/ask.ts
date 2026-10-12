@@ -13,6 +13,8 @@ import {
   isConfirmReply,
   keepCardAfterReply,
   openCardIds,
+  recordActionReceipt,
+  recordConfirmedReceipt,
 } from "./cards.svelte.ts";
 import { chatEvents } from "./events.ts";
 import { getSessionId } from "./session.ts";
@@ -237,6 +239,21 @@ export async function ask(
                   ? "afgerond · niet gecontroleerd"
                   : "niet gelukt";
         chat.toolResult = `${toolHint(data?.name, responseLanguage).replace(/…$/, "")}: ${resultText}${data?.standingApproval === true ? (responseLanguage === "en" ? " · always allowed" : " · altijd toegestaan") : ""}`;
+        if (
+          data?.pendingConfirmation !== true &&
+          (data?.risk === "SAFE" ||
+            data?.risk === "CONFIRM" ||
+            data?.risk === "DANGEROUS") &&
+          typeof data?.name === "string"
+        )
+          recordActionReceipt(
+            { id: crypto.randomUUID(), label: text, tool: data.name },
+            {
+              ok: data.ok === true,
+              accepted: data.accepted === true,
+              verified: data.verified === true,
+            },
+          );
       }
       if (
         event === "mood" &&
@@ -250,6 +267,8 @@ export async function ask(
         speaker.setMood(data.mood);
       }
       if (event === "done") {
+        if (answering && data?.result && typeof data.result === "object")
+          recordConfirmedReceipt(answering, data.result);
         clearInterjection();
         if (typeof data?.model === "string") chat.model = data.model;
         if (typeof data?.role === "string") chat.modelRole = data.role;

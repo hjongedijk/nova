@@ -43,6 +43,8 @@ describe("multi-step chat progress", () => {
     } as unknown as OmniRouteClient;
     const definitions = ["list_show", "ha_scene"].map((name) => ({
       function: { name },
+      name,
+      risk: name === "list_show" ? "READ_ONLY" : "SAFE",
       enabled: true,
     }));
     const tools = {
@@ -91,5 +93,16 @@ describe("multi-step chat progress", () => {
         .map(({ data }) => data.step),
     ).toEqual([1, 2]);
     expect(tools.execute).toHaveBeenCalledTimes(2);
+    expect(
+      events
+        .filter(({ event }) => event === "tool_result")
+        .map(({ data }) => ({
+          risk: data.risk,
+          pendingConfirmation: data.pendingConfirmation,
+        })),
+    ).toEqual([
+      { risk: "READ_ONLY", pendingConfirmation: false },
+      { risk: "SAFE", pendingConfirmation: false },
+    ]);
   });
 });

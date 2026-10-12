@@ -46,6 +46,22 @@ export function actionReceipt(
   };
 }
 
+export function recordActionReceipt(
+  card: Pick<Card, "id" | "label" | "tool">,
+  result: NonNullable<ConfirmResult["result"]>,
+): void {
+  chat.actionReceipts.unshift(actionReceipt(card, result));
+  chat.actionReceipts.length = Math.min(chat.actionReceipts.length, 10);
+}
+
+export function recordConfirmedReceipt(
+  id: string,
+  result: NonNullable<ConfirmResult["result"]>,
+): void {
+  const card = cards.find((item) => item.id === id);
+  if (card) recordActionReceipt(card, result);
+}
+
 const CONFIRM_REPLY =
   /^(ja|ja graag|ja hoor|ja doe maar|jazeker|graag|doe maar|oké|oke|ok|okay|prima|akkoord|zeker|ga je gang|bevestig|yes|yes please|confirm|nee|nee hoor|nee dank je|nee bedankt|laat maar|niet doen|annuleer|cancel|no)$/;
 const REJECT_REPLY =
@@ -271,10 +287,7 @@ export async function answerCard(
   card.locked = true;
   try {
     const data = await confirmAction(getSessionId(), id, approve, always);
-    if (approve && data.result) {
-      chat.actionReceipts.unshift(actionReceipt(card, data.result));
-      chat.actionReceipts.length = Math.min(chat.actionReceipts.length, 10);
-    }
+    if (approve && data.result) recordActionReceipt(card, data.result);
     card.label = data.reply;
     chat.toolResult = data.reply;
     chat.history.push({ role: "assistant", text: data.reply });

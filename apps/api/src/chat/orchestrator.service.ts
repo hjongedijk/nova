@@ -466,6 +466,9 @@ export class OrchestratorService {
         completedSteps++;
         emit("tool_result", {
           name,
+          risk:
+            this.tools.list().find((tool) => tool.name === name)?.risk ?? null,
+          pendingConfirmation: result.requiresConfirmation === true,
           ok: result.ok,
           standingApproval: result.standingApproval === true,
           accepted: result.accepted === true,
