@@ -376,6 +376,8 @@ try {
     let personaPreferencesHistoryWrites = 0;
     let householdProfileHistoryReads = 0;
     let householdProfileHistoryWrites = 0;
+    let householdDefinitionHistoryReads = 0;
+    let householdDefinitionHistoryWrites = 0;
     let helperPreferenceHistoryWrites = 0;
     let toolSwitchHistoryReads = 0;
     let toolSwitchHistoryWrites = 0;
@@ -3412,6 +3414,33 @@ try {
         householdProfileHistoryWrites++;
         overview.activeHouseholdProfileId = "person-a";
         data = { ok: true, activeHouseholdProfileId: "person-a" };
+      } else if (
+        endpoint === "/settings/household-profiles/definitions/history"
+      ) {
+        householdDefinitionHistoryReads++;
+        data = {
+          revisions: [
+            {
+              id: "44444444-4444-4444-8444-444444444444",
+              at: "2026-10-10T13:00:00.000Z",
+              beforeCount: 2,
+              afterCount: 2,
+              changedProfileIds: ["person-b"],
+            },
+          ],
+          truncated: false,
+        };
+      } else if (
+        endpoint ===
+        "/settings/household-profiles/definitions/history/44444444-4444-4444-8444-444444444444/rollback"
+      ) {
+        householdDefinitionHistoryWrites++;
+        overview.householdProfiles[1].label = "Profiel B hersteld";
+        data = {
+          ok: true,
+          householdProfiles: overview.householdProfiles,
+          activeHouseholdProfileId: overview.activeHouseholdProfileId,
+        };
       } else if (endpoint === "/settings/persona/history") {
         personaHistoryReads++;
         data = {
@@ -6102,15 +6131,54 @@ try {
       .getByRole("button", { name: "Profielwissels laden" })
       .click();
     await householdHistory.getByText("Van Profiel A naar Profiel B").waitFor();
+    const switchHistoryReload = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/settings/household-profiles/history") &&
+        response.request().method() === "GET",
+    );
     await householdHistory
       .getByRole("button", { name: "Deze profielwissel terugdraaien" })
       .click();
+    await switchHistoryReload;
     await householdHistory
       .getByText("Actief gezinsprofiel hersteld.")
       .waitFor();
     assert.equal(householdProfileHistoryReads, 2);
     assert.equal(householdProfileHistoryWrites, 1);
     assert.equal(overview.activeHouseholdProfileId, "person-a");
+    const contentHistory = page.getByRole("region", {
+      name: "Geschiedenis gezinsprofielinhoud",
+    });
+    const contentHistoryLoad = page.waitForResponse(
+      (response) =>
+        response
+          .url()
+          .endsWith("/settings/household-profiles/definitions/history") &&
+        response.request().method() === "GET",
+    );
+    await contentHistory
+      .getByRole("button", { name: "Profielwijzigingen laden" })
+      .click();
+    await contentHistoryLoad;
+    await contentHistory
+      .getByRole("button", { name: "Deze profielwijziging terugdraaien" })
+      .waitFor();
+    assert.match(await contentHistory.innerText(), /gewijzigd:/);
+    assert.equal(householdDefinitionHistoryReads, 1);
+    const contentHistoryReload = page.waitForResponse(
+      (response) =>
+        response
+          .url()
+          .endsWith("/settings/household-profiles/definitions/history") &&
+        response.request().method() === "GET",
+    );
+    await contentHistory
+      .getByRole("button", { name: "Deze profielwijziging terugdraaien" })
+      .click();
+    await contentHistoryReload;
+    await contentHistory.getByText("Gezinsprofielen hersteld.").waitFor();
+    assert.equal(householdDefinitionHistoryReads, 2);
+    assert.equal(householdDefinitionHistoryWrites, 1);
     const personaHistory = page.getByRole("region", {
       name: "Eigen-regelsgeschiedenis",
     });

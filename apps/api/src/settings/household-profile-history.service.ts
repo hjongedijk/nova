@@ -67,10 +67,6 @@ function changedProfileIds(
   const changed = new Set<string>();
   for (const id of new Set([...old.keys(), ...next.keys()]))
     if (!isDeepStrictEqual(old.get(id), next.get(id))) changed.add(id);
-  if (before.activeProfileId !== after.activeProfileId) {
-    changed.add(before.activeProfileId);
-    changed.add(after.activeProfileId);
-  }
   return [...changed].sort();
 }
 
@@ -112,7 +108,7 @@ export class HouseholdProfileHistory {
             !Number.isFinite(Date.parse(row.at)) ||
             !before ||
             !after ||
-            isDeepStrictEqual(before, after)
+            isDeepStrictEqual(before.profiles, after.profiles)
           )
             return [];
           return [
@@ -166,7 +162,7 @@ export class HouseholdProfileHistory {
     if (
       !cleanBefore ||
       !cleanAfter ||
-      isDeepStrictEqual(cleanBefore, cleanAfter)
+      isDeepStrictEqual(cleanBefore.profiles, cleanAfter.profiles)
     )
       return;
     const revision: DefinitionsRevision = {
@@ -229,7 +225,10 @@ export class HouseholdProfileHistory {
       profiles: state.householdProfiles,
       activeProfileId: state.activeHouseholdProfileId,
     });
-    if (!current || !isDeepStrictEqual(current, revision.after))
+    if (
+      !current ||
+      !isDeepStrictEqual(current.profiles, revision.after.profiles)
+    )
       throw new NotFoundException(
         "Gezinsprofielen zijn daarna gewijzigd. Terugdraaien is afgebroken.",
       );
@@ -244,6 +243,7 @@ export class HouseholdProfileHistory {
       },
       phase: "attempt",
     });
+    let restoredActiveProfileId = revision.before.activeProfileId;
     this.settings.update((next) => {
       const latest = this.readDefinitions().at(-1);
       const live = cleanDefinitions({
@@ -253,22 +253,31 @@ export class HouseholdProfileHistory {
       if (
         latest?.id !== id ||
         !live ||
-        !isDeepStrictEqual(live, revision.after)
+        !isDeepStrictEqual(live.profiles, revision.after.profiles)
       )
         throw new NotFoundException(
           "Gezinsprofielen zijn intussen gewijzigd. Terugdraaien is afgebroken.",
         );
+      restoredActiveProfileId = revision.before.profiles.some(
+        (profile) => profile.id === live.activeProfileId,
+      )
+        ? live.activeProfileId
+        : revision.before.activeProfileId;
       next.householdProfiles = revision.before.profiles;
-      next.activeHouseholdProfileId = revision.before.activeProfileId;
+      next.activeHouseholdProfileId = restoredActiveProfileId;
       next.personaProfile = revision.before.profiles.find(
-        (profile) => profile.id === revision.before.activeProfileId,
+        (profile) => profile.id === restoredActiveProfileId,
       )!.personaProfile;
     });
-    this.record(
-      revision.after.activeProfileId,
-      revision.before.activeProfileId,
+    this.record(current.activeProfileId, restoredActiveProfileId);
+    this.recordDefinitions(
+      current,
+      {
+        profiles: revision.before.profiles,
+        activeProfileId: restoredActiveProfileId,
+      },
+      revision.id,
     );
-    this.recordDefinitions(revision.after, revision.before, revision.id);
     let auditWarning = this.definitionsWarning;
     try {
       this.audit.record({
@@ -289,7 +298,7 @@ export class HouseholdProfileHistory {
     return {
       ok: true,
       householdProfiles: revision.before.profiles,
-      activeHouseholdProfileId: revision.before.activeProfileId,
+      activeHouseholdProfileId: restoredActiveProfileId,
       ...(auditWarning ? { auditWarning } : {}),
     };
   }

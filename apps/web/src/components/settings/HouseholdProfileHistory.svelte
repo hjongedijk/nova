@@ -19,6 +19,7 @@
   );
   let busy = $state(false);
   let message = $state("");
+  let definitionMessage = $state("");
 
   function labelFor(id: string): string {
     return (
@@ -29,11 +30,12 @@
 
   async function loadDefinitions() {
     busy = true;
-    message = "";
+    definitionMessage = "";
     try {
       definitionHistory = await getHouseholdProfileDefinitionHistory();
     } catch {
-      message = "De profielinhoudgeschiedenis kon niet worden geladen.";
+      definitionMessage =
+        "De profielinhoudgeschiedenis kon niet worden geladen.";
     } finally {
       busy = false;
     }
@@ -42,19 +44,19 @@
   async function rollbackDefinitions(id: string) {
     if (
       !window.confirm(
-        "Zet de gezinsprofielen terug naar de vorige inhoud en actieve keuze? Latere wijzigingen blokkeren dit herstel.",
+        "Zet de gezinsprofielen terug naar de vorige inhoud? De actieve keuze blijft behouden als dat profiel nog bestaat.",
       )
     )
       return;
     busy = true;
-    message = "";
+    definitionMessage = "";
     try {
       const result = await rollbackHouseholdProfileDefinition(id);
-      message = result.auditWarning ?? "Gezinsprofielen hersteld.";
+      definitionMessage = result.auditWarning ?? "Gezinsprofielen hersteld.";
       await onRestored();
       definitionHistory = await getHouseholdProfileDefinitionHistory();
     } catch (error) {
-      message =
+      definitionMessage =
         error instanceof Error
           ? error.message
           : "Gezinsprofielen herstellen is mislukt.";
@@ -145,6 +147,7 @@
   <Button disabled={busy} onclick={loadDefinitions}
     >{busy ? "Even wachten…" : "Profielwijzigingen laden"}</Button
   >
+  {#if definitionMessage}<p role="status">{definitionMessage}</p>{/if}
   {#if definitionHistory}
     {#if definitionHistory.truncated}<p class="hint">
         Alleen de 20 nieuwste wijzigingen worden getoond.

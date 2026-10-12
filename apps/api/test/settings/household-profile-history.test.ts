@@ -198,6 +198,71 @@ describe("household profile switch history", () => {
     expect(stale.status).toBe(404);
   });
 
+  it("keeps content history usable after a profile switch and its rollback", async () => {
+    const changed = structuredClone(profiles);
+    changed[1]!.label = "Sam updated";
+    await nova.api
+      .put("/api/settings/household-profiles")
+      .set(ADMIN)
+      .send({ profiles: changed, activeProfileId: "harm" });
+    const definitions = await nova.api
+      .get("/api/settings/household-profiles/definitions/history")
+      .set(ADMIN);
+    const definitionId = definitions.body.revisions[0].id;
+    await nova.api
+      .put("/api/settings/household-profiles")
+      .set(ADMIN)
+      .send({ profiles: changed, activeProfileId: "sam" });
+    const afterSwitch = await nova.api
+      .get("/api/settings/household-profiles/definitions/history")
+      .set(ADMIN);
+    expect(afterSwitch.body.revisions[0].id).toBe(definitionId);
+    const switches = await nova.api
+      .get("/api/settings/household-profiles/history")
+      .set(ADMIN);
+    const switchBack = await nova.api
+      .post(
+        `/api/settings/household-profiles/history/${switches.body.revisions[0].id}/rollback`,
+      )
+      .set(ADMIN)
+      .send({});
+    expect(switchBack.status).toBe(200);
+    const restored = await nova.api
+      .post(
+        `/api/settings/household-profiles/definitions/history/${definitionId}/rollback`,
+      )
+      .set(ADMIN)
+      .send({});
+    expect(restored.status).toBe(200);
+    expect(restored.body.householdProfiles).toEqual(profiles);
+  });
+
+  it("preserves a switched active profile when restoring compatible content", async () => {
+    const changed = structuredClone(profiles);
+    changed[1]!.label = "Sam updated";
+    await nova.api
+      .put("/api/settings/household-profiles")
+      .set(ADMIN)
+      .send({ profiles: changed, activeProfileId: "harm" });
+    const definitions = await nova.api
+      .get("/api/settings/household-profiles/definitions/history")
+      .set(ADMIN);
+    await nova.api
+      .put("/api/settings/household-profiles")
+      .set(ADMIN)
+      .send({ profiles: changed, activeProfileId: "sam" });
+    const restored = await nova.api
+      .post(
+        `/api/settings/household-profiles/definitions/history/${definitions.body.revisions[0].id}/rollback`,
+      )
+      .set(ADMIN)
+      .send({});
+    expect(restored.status).toBe(200);
+    expect(restored.body.activeHouseholdProfileId).toBe("sam");
+    const settings = await nova.api.get("/api/settings").set(ADMIN);
+    expect(settings.body.personaProfile).toEqual(profiles[1]!.personaProfile);
+  });
+
   it("skips a definition snapshot containing a recognizable secret", async () => {
     const before = await nova.api
       .get("/api/settings/household-profiles/definitions/history")
