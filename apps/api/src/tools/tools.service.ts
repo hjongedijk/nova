@@ -201,6 +201,38 @@ export function documentAuditProjection(
   return { arguments: auditArgs(name, args), result: safe };
 }
 
+/** Own-video captions may contain private transcript text; keep only counts in the audit. */
+export function youtubeCaptionAuditProjection(
+  name: string,
+  result: ToolResult,
+): {
+  arguments: Record<string, unknown>;
+  result: Record<string, unknown>;
+} | null {
+  if (name !== "youtube_captions") return null;
+  const payload = result.result as
+    { transcript?: unknown; text?: unknown; cueCount?: unknown } | undefined;
+  const text =
+    typeof payload?.transcript === "string"
+      ? payload.transcript
+      : typeof payload?.text === "string"
+        ? payload.text
+        : "";
+  return {
+    arguments: { videoReference: "[redacted]" },
+    result: {
+      ok: result.ok,
+      ...(result.ok ? { characters: [...text].length } : {}),
+      ...(result.ok &&
+      typeof payload?.cueCount === "number" &&
+      Number.isInteger(payload.cueCount) &&
+      payload.cueCount >= 0
+        ? { cueCount: payload.cueCount }
+        : {}),
+    },
+  };
+}
+
 export function nodeRedRoutineAuditProjection(
   name: string,
   args: Record<string, unknown>,
@@ -397,6 +429,7 @@ export class ToolsService implements OnModuleInit {
         name === "memory_remember" ? memoryAuditProjection(args, clean) : null;
       const privateNote = noteAuditProjection(name, args, clean);
       const privateDocument = documentAuditProjection(name, args, clean);
+      const privateCaptions = youtubeCaptionAuditProjection(name, clean);
       const privateRoutine = nodeRedRoutineAuditProjection(name, args, clean);
       this.audit.record({
         sessionId,
@@ -406,6 +439,7 @@ export class ToolsService implements OnModuleInit {
           : (privateMemory?.arguments ??
             privateNote?.arguments ??
             privateDocument?.arguments ??
+            privateCaptions?.arguments ??
             privateRoutine?.arguments ??
             args),
         risk,
@@ -423,6 +457,7 @@ export class ToolsService implements OnModuleInit {
             : (privateMemory?.result ??
               privateNote?.result ??
               privateDocument?.result ??
+              privateCaptions?.result ??
               privateRoutine?.result ??
               clean),
         verification: clean.verified ?? null,

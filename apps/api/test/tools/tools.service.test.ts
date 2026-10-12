@@ -18,6 +18,7 @@ import {
   memoryAuditProjection,
   noteAuditProjection,
   documentAuditProjection,
+  youtubeCaptionAuditProjection,
   nodeRedRoutineAuditProjection,
   ToolsService,
 } from "../../src/tools/tools.service.js";
@@ -655,6 +656,22 @@ describe("document audit projection", () => {
     expect(JSON.stringify(projected)).not.toContain(excerpt);
     expect(JSON.stringify(projected)).not.toContain("contract.pdf");
     expect(JSON.stringify(projected)).not.toContain("private contract");
+  });
+});
+
+describe("YouTube caption audit projection", () => {
+  it("keeps own-video IDs and transcript text out of durable actions", () => {
+    const transcript = "Private subtitle about a family event.";
+    const projected = youtubeCaptionAuditProjection("youtube_captions", {
+      ok: true,
+      result: { videoId: "private-video", transcript, cueCount: 2 },
+    });
+    expect(projected).toEqual({
+      arguments: { videoReference: "[redacted]" },
+      result: { ok: true, characters: [...transcript].length, cueCount: 2 },
+    });
+    expect(JSON.stringify(projected)).not.toContain(transcript);
+    expect(JSON.stringify(projected)).not.toContain("private-video");
   });
 });
 

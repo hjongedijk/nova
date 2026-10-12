@@ -9,6 +9,7 @@
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import ConnectionsSection from "#components/settings/ConnectionsSection.svelte";
+  import YoutubeCaptionsConnection from "#components/settings/YoutubeCaptionsConnection.svelte";
   import ConnectionHistory from "#components/settings/ConnectionHistory.svelte";
   import HelperPreferencesHistory from "#components/settings/HelperPreferencesHistory.svelte";
   import ToolSwitchHistory from "#components/settings/ToolSwitchHistory.svelte";
@@ -203,6 +204,7 @@
                 "pangolin",
               ]}
             />
+            <YoutubeCaptionsConnection />
             <McpStatus />
             <AdminDialog embedded initialView="integrations" />
           {:else if section === "devices"}<ConnectionsSection
