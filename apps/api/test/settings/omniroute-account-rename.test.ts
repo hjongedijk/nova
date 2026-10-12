@@ -109,6 +109,15 @@ function fixture() {
 }
 
 describe("OmniRoute provider account rename", () => {
+  it("does not expose diagnostics that contain a known validation phrase", async () => {
+    const f = fixture();
+    const diagnostic = "bestaat al /private/omniroute token=marker";
+    f.request.mockRejectedValueOnce(new Error(diagnostic));
+    const result = await f.rename.prepare("account-1", "Home Mistral", true);
+    expect(result).toMatchObject({ ok: false });
+    expect(JSON.stringify(result)).not.toContain(diagnostic);
+  });
+
   it("requires explicit all-client acknowledgement and checks complete provider inventory", async () => {
     const f = fixture();
     await expect(
@@ -273,6 +282,29 @@ describe("OmniRoute provider account rename", () => {
         .prepare("SELECT name FROM provider_connections WHERE id=?")
         .get("account-1"),
     ).toEqual({ name: "Changed elsewhere" });
+  });
+
+  it("hides unexpected errors while preparing a rollback", async () => {
+    const f = fixture();
+    const changed = await f.rename.prepare("account-1", "Home Mistral", true);
+    await f.rename.confirm(
+      changed.action!.sessionId,
+      changed.action!.confirmationId,
+      true,
+    );
+    const revision = f.rename.listHistory("account-1").revisions[0]!;
+    await expect(
+      f.rename.prepareRollback("account-1", revision.id, false),
+    ).rejects.toThrow("bevestig");
+    const diagnostic = "private-host.local /private/omniroute token=marker";
+    vi.spyOn(f.rename, "prepare").mockRejectedValueOnce(new Error(diagnostic));
+    const result = await f.rename.prepareRollback(
+      "account-1",
+      revision.id,
+      true,
+    );
+    expect(result).toEqual({ ok: false, error: "Herstel niet beschikbaar." });
+    expect(JSON.stringify(result)).not.toContain(diagnostic);
   });
 
   it("rejects duplicate names and changed accounts before writing", async () => {

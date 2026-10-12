@@ -200,8 +200,9 @@ export class OmniRouteComboCreate {
       return {
         ok: false,
         error:
-          error instanceof Error && error.message.includes("al een combo")
-            ? error.message
+          error instanceof Error &&
+          error.message === "Er bestaat al een combo met deze naam."
+            ? "Er bestaat al een combo met deze naam."
             : unavailable,
       };
     }

@@ -34,6 +34,8 @@ const object = (value: unknown): Record<string, unknown> =>
     : {};
 const unavailable =
   "Account hernoemen is niet beschikbaar. Controleer de OmniRoute-koppeling.";
+const renameInputError =
+  "Kies een accountnaam van 1–200 tekens en bevestig dat de wijziging alle OmniRoute-clients en mogelijk OmniRoute Cloud raakt.";
 const MAX_HISTORY = 100;
 type RenameRevision = OmniRouteAccountRenameHistoryEntry;
 
@@ -168,17 +170,29 @@ export class OmniRouteAccountRename {
       return { ok: false, error: "Ongeldige accountwijziging." };
     try {
       const revision = this.rollbackRevision(id, revisionId);
-      return this.prepare(
+      return await this.prepare(
         id,
         revision.beforeName,
         acknowledgeEffects,
         revision.id,
       );
     } catch (error) {
+      if (
+        error instanceof ValidationError &&
+        error.details.length === 1 &&
+        error.details[0] === renameInputError
+      )
+        throw error;
       return {
         ok: false,
         error:
-          error instanceof Error ? error.message : "Herstel niet beschikbaar.",
+          error instanceof Error &&
+          [
+            "Deze accountwijziging bestaat niet meer.",
+            "Dit account is later gewijzigd. Herstel alleen de nieuwste wijziging.",
+          ].includes(error.message)
+            ? error.message
+            : "Herstel niet beschikbaar.",
       };
     }
   }
@@ -299,9 +313,7 @@ export class OmniRouteAccountRename {
     const id = typeof rawId === "string" ? rawId.trim() : "";
     const name = typeof rawName === "string" ? rawName.trim() : "";
     if (!validId(id) || !validName(name) || acknowledgeEffects !== true)
-      throw new ValidationError([
-        "Kies een accountnaam van 1–200 tekens en bevestig dat de wijziging alle OmniRoute-clients en mogelijk OmniRoute Cloud raakt.",
-      ]);
+      throw new ValidationError([renameInputError]);
     try {
       this.assertGateway();
       const account = await this.readAccount(id);
@@ -362,9 +374,14 @@ export class OmniRouteAccountRename {
         ok: false,
         error:
           error instanceof Error &&
-          /gelijk aan de huidige|bestaat al|onvolledig|gewijzigd sinds de geschiedenis|later gewijzigd|bestaat niet meer/.test(
-            error.message,
-          )
+          [
+            "De nieuwe naam is gelijk aan de huidige naam.",
+            "Er bestaat al een account met deze providernaam.",
+            "De provideraccountlijst is onvolledig; naamcontrole is afgebroken.",
+            "Accountnaam is gewijzigd sinds de geschiedenis.",
+            "Dit account is later gewijzigd. Herstel alleen de nieuwste wijziging.",
+            "Deze accountwijziging bestaat niet meer.",
+          ].includes(error.message)
             ? error.message
             : unavailable,
       };

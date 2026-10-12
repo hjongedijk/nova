@@ -139,6 +139,23 @@ function fixture() {
 }
 
 describe("OmniRoute combo creation", () => {
+  it("does not expose diagnostics that contain a duplicate-name phrase", async () => {
+    const f = fixture();
+    const diagnostic = "al een combo /private/omniroute token=marker";
+    f.request.mockRejectedValueOnce(new Error(diagnostic));
+    const result = await f.service.prepare(
+      "My route",
+      ["provider-1/free-model"],
+      true,
+    );
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Combo aanmaken is niet beschikbaar. Controleer de OmniRoute-koppeling.",
+    });
+    expect(JSON.stringify(result)).not.toContain(diagnostic);
+  });
+
   it("requires global-impact acknowledgement and restricts models to active free-catalog entries", async () => {
     const f = fixture();
     await expect(

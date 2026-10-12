@@ -179,8 +179,10 @@ export class OmniRouteAccountKeyUpdate {
       return {
         ok: false,
         error:
-          error instanceof Error && /gelijk aan de huidige/.test(error.message)
-            ? error.message
+          error instanceof Error &&
+          error.message ===
+            "De nieuwe sleutel is gelijk aan de huidige sleutel."
+            ? "De nieuwe sleutel is gelijk aan de huidige sleutel."
             : unavailable,
       };
     }

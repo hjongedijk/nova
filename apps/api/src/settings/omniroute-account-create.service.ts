@@ -162,8 +162,10 @@ export class OmniRouteAccountCreate {
       return {
         ok: false,
         error:
-          error instanceof Error && /al een account/.test(error.message)
-            ? error.message
+          error instanceof Error &&
+          error.message ===
+            "Er bestaat al een account met deze naam voor deze provider."
+            ? "Er bestaat al een account met deze naam voor deze provider."
             : unavailable,
       };
     }

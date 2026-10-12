@@ -233,7 +233,10 @@ export class OmniRouteComboUpdate {
         ok: false,
         error:
           error instanceof Error &&
-          /niet meer beschikbaar|al een combo/.test(error.message)
+          [
+            "Een gekozen model is niet meer beschikbaar via een actief account.",
+            "Er bestaat al een combo met deze naam.",
+          ].includes(error.message)
             ? error.message
             : unavailable,
       };
