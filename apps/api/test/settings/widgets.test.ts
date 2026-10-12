@@ -3,6 +3,7 @@ import http from "node:http";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   createWidgetData,
+  fetchWidget,
   normalizeWidget,
   publicWidget,
   shapeData,
@@ -85,6 +86,16 @@ describe("panels", () => {
       items: ["een", "twee"],
     });
     expect(shapeData(l, { a: 1 }).error).toMatch(/lijst/);
+  });
+
+  it("does not expose upstream diagnostics in panel data", async () => {
+    const widget = normalizeWidget(value()) as Parameters<typeof fetchWidget>[0];
+    const data = await fetchWidget(widget, async () => ({
+      ok: false,
+      error: "connect ETIMEDOUT to private-host?token=secret-value",
+    }));
+    expect(data.error).toBe("De gegevens konden niet worden opgehaald.");
+    expect(JSON.stringify(data)).not.toContain("secret-value");
   });
 
   it("are cached per panel, refreshed on time and fetched once at a time", async () => {

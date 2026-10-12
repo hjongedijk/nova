@@ -226,7 +226,7 @@ export async function fetchWidget(
   const outcome = await run(skill, {});
   if (!outcome.ok)
     return {
-      error: outcome.error || "De gegevens konden niet worden opgehaald.",
+      error: "De gegevens konden niet worden opgehaald.",
     };
   return shapeData(widget, outcome.result?.response);
 }
