@@ -95,6 +95,21 @@ export function canSpeakFeedEvent(
   return !paused && !busy && !cueQuiet(preferences, now);
 }
 
+/** Screen-only notices stay available in the list without opening the helper. */
+export function shouldOpenHelperForFeedEvent(
+  event: FeedEvent,
+  modes: NotificationModes,
+): boolean {
+  const kind =
+    event.kind === "timer"
+      ? "timer"
+      : event.key === "briefing"
+        ? "briefing"
+        : event.severity;
+  const mode = event.deliveryMode ?? modes[kind];
+  return mode === "helper" || mode === "speak";
+}
+
 /** The server's speech policy applies to helper delivery too. */
 export function feedSpeechText(events: FeedEvent[]): string {
   return events
@@ -189,4 +204,4 @@ export function createHelperCues(
     },
   };
 }
-import type { FeedEvent } from "@nova/contracts";
+import type { FeedEvent, NotificationModes } from "@nova/contracts";

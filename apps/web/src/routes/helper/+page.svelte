@@ -58,6 +58,7 @@
     HELPER_CUE_NAMES,
     canSpeakFeedEvent,
     feedSpeechText,
+    shouldOpenHelperForFeedEvent,
   } from "#lib/voice/helper-cues.ts";
   import { audioContext, outputVolume, applyVolume } from "#lib/voice/audio.ts";
   import { storage } from "#lib/util/storage.ts";
@@ -67,6 +68,11 @@
   import { speak, stopSpeaking } from "#lib/voice/speaker.ts";
   import { installAudioUnlock } from "#lib/voice/unlock.ts";
   import { initWake, setWake, cancelAwait } from "#lib/voice/wake.ts";
+  import {
+    readHelperSnoozes,
+    writeHelperSnoozes,
+    type SavedHelperSnooze,
+  } from "#lib/voice/helper-snoozes.ts";
   import "../../components/helper/helper.css";
 
   let responseLanguage = $state(getConversationLanguage());
@@ -114,6 +120,26 @@
   let notices: FeedEvent[] = $state([]);
   let swipe = { seq: 0, x: 0 };
   let snoozed = $state<Record<number, number>>({});
+  let savedSnoozes: SavedHelperSnooze[] = [];
+  const snoozeStorageKey = "nova.helper.snoozes.v1";
+  function persistSnoozes() {
+    storage.set(snoozeStorageKey, writeHelperSnoozes(savedSnoozes));
+  }
+  function snoozeNotice(event: FeedEvent) {
+    const until = Date.now() + 10 * 60_000;
+    snoozed[event.seq] = until;
+    savedSnoozes = [
+      ...savedSnoozes.filter((item) => item.event.seq !== event.seq),
+      { event, until },
+    ].slice(-20);
+    persistSnoozes();
+  }
+  function dismissNotice(seq: number) {
+    notices = notices.filter((item) => item.seq !== seq);
+    delete snoozed[seq];
+    savedSnoozes = savedSnoozes.filter((item) => item.event.seq !== seq);
+    persistSnoozes();
+  }
   let now = $state(Date.now());
   let cuePlayer = $state<HelperCuePlayer>();
   let preferencesNote = $state("");
@@ -401,6 +427,21 @@
   });
   onMount(() => {
     document.body.classList.add("helper");
+    savedSnoozes = readHelperSnoozes(storage.get(snoozeStorageKey, "[]"));
+    notices = [...savedSnoozes.map((item) => item.event), ...notices].slice(
+      0,
+      100,
+    );
+    snoozed = Object.fromEntries(
+      savedSnoozes
+        .filter((item) => item.until > Date.now())
+        .map((item) => [item.event.seq, item.until]),
+    );
+    const restoredDue = savedSnoozes.some(
+      (item) =>
+        item.until <= Date.now() &&
+        shouldOpenHelperForFeedEvent(item.event, helper.notifications),
+    );
     const saved =
       new URLSearchParams(location.search).get("view") ??
       storage.get("nova.helper.view", "compact");
@@ -424,7 +465,10 @@
           stopSpeaking();
         }
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (!disposed && restoredDue && !paused) open("notifications");
+      });
     void getHelperPreferences()
       .then((prefs) => {
         if (disposed) return;
@@ -534,8 +578,10 @@
         notice,
         ...notices.filter((item) => item.seq !== notice.seq),
       ].slice(0, 100);
-      open("notifications");
-      cuePlayer?.play("notice");
+      if (shouldOpenHelperForFeedEvent(notice, helper.notifications)) {
+        open("notifications");
+        cuePlayer?.play("notice");
+      }
     };
     window.addEventListener("nova-helper-notification", nativeNotice);
     const pending = (
@@ -550,7 +596,16 @@
       now = Date.now();
       const due = Object.entries(snoozed).filter(([, until]) => until <= now);
       for (const [id] of due) delete snoozed[Number(id)];
-      if (due.length && !paused) {
+      if (
+        due.some(([id]) =>
+          notices.some(
+            (notice) =>
+              notice.seq === Number(id) &&
+              shouldOpenHelperForFeedEvent(notice, helper.notifications),
+          ),
+        ) &&
+        !paused
+      ) {
         open("notifications");
         cuePlayer?.play("notice");
       }
@@ -567,8 +622,14 @@
             (item) => !events.some((event) => event.seq === item.seq),
           ),
         ].slice(0, 100);
-        cuePlayer?.play("notice");
-        open("notifications");
+        if (
+          events.some((event) =>
+            shouldOpenHelperForFeedEvent(event, helper.notifications),
+          )
+        ) {
+          cuePlayer?.play("notice");
+          open("notifications");
+        }
         const spoken = feedSpeechText(events);
         if (
           spoken &&
@@ -1119,24 +1180,19 @@
                   swipe.seq === event.seq &&
                   Math.abs(pointer.clientX - swipe.x) > 60
                 )
-                  notices = notices.filter((item) => item.seq !== event.seq);
+                  dismissNotice(event.seq);
               }}
             >
               <div>
                 <strong>{event.title}</strong>
                 <p>{event.detail}</p>
               </div>
-              <HelperUi
-                class="hp-button"
-                onclick={() =>
-                  (snoozed[event.seq] = Date.now() + 10 * 60 * 1000)}
+              <HelperUi class="hp-button" onclick={() => snoozeNotice(event)}
                 >Over 10 min</HelperUi
               ><HelperUi
                 class="hp-button"
                 aria-label={`Verwijder ${event.title}`}
-                onclick={() =>
-                  (notices = notices.filter((item) => item.seq !== event.seq))}
-                >×</HelperUi
+                onclick={() => dismissNotice(event.seq)}>×</HelperUi
               >
             </HelperUi>{:else}<p class="hp-empty">
               Geen nieuwe meldingen. Ik houd het in de gaten.

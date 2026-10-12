@@ -359,6 +359,7 @@ import assert from "node:assert/strict";
       await preferencesSaved;
       assert.deepEqual(savedNotificationModes, {
         info: "helper",
+        briefing: "speak",
         warning: "helper",
         critical: "screen",
         timer: "speak",
@@ -475,6 +476,29 @@ import assert from "node:assert/strict";
         window.dispatchEvent(
           new CustomEvent("nova-helper-notification", {
             detail: {
+              seq: 41,
+              kind: "alert",
+              severity: "warning",
+              title: "Alleen op scherm",
+              detail: "Geen helperpop-up.",
+              deliveryMode: "screen",
+              speakAllowed: false,
+              at: new Date().toISOString(),
+            },
+          }),
+        ),
+      );
+      assert.equal(
+        await page
+          .getByRole("button", { name: "Chat", exact: true })
+          .getAttribute("aria-current"),
+        "page",
+        "Screen-only alerts must not open the helper notification view.",
+      );
+      await page.evaluate(() =>
+        window.dispatchEvent(
+          new CustomEvent("nova-helper-notification", {
+            detail: {
               seq: 42,
               kind: "alert",
               severity: "warning",
@@ -488,14 +512,18 @@ import assert from "node:assert/strict";
       await snap("notification", 640, 180);
       await page
         .getByRole("button", { name: "Over 10 min", exact: true })
+        .first()
         .click();
+      assert.equal(await page.locator(".hp-notice").count(), 1);
+      await page.reload();
+      await page.waitForSelector(".hp-title");
       assert.equal(await page.locator(".hp-notice").count(), 0);
       await page.clock.fastForward("10:01");
       await page.waitForSelector(".hp-notice");
       assert.equal(
         await page.locator(".hp-notice").count(),
         1,
-        "Snoozed reminder must reopen the panel.",
+        "Snoozed reminder must reopen after helper reload.",
       );
 
       await page.getByRole("button", { name: "Chat", exact: true }).click();

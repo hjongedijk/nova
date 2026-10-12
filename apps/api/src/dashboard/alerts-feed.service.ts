@@ -134,6 +134,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
             "Herhaalde melding gebundeld; volgende herhalingen blijven stil.",
           at: now.toISOString(),
           speakAllowed: false,
+          deliveryMode: mode,
         };
         repeated.last = summary;
         this.feed.push(summary);
@@ -161,6 +162,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       ...entry,
       speakAllowed:
         mode === "speak" && presenceAllowsSpeech && withinSpeechBudget,
+      deliveryMode: mode,
     };
     this.feed.push(stored);
     if (this.feed.length > MAX_EVENTS) this.feed.shift();

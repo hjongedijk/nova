@@ -238,6 +238,42 @@ describe("tools", () => {
     expect((await run("timer_cancel", {})).error).toMatch(/id of label/);
   });
 
+  it("fires a persisted timer once after the planning service restarts", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-12T10:00:00.000Z"));
+
+    const created = planning.setTimer({ seconds: 3, label: "oven" }).timer;
+    expect(
+      JSON.parse(fs.readFileSync(store.file, "utf8")).timers,
+    ).toMatchObject([{ id: created.id, label: "oven" }]);
+
+    planning.onModuleDestroy();
+    boot(); // Fresh store and service read the same on-disk state.
+    expect(planning.timers()).toMatchObject([
+      { id: created.id, label: "oven" },
+    ]);
+
+    planning.onModuleInit();
+    try {
+      vi.advanceTimersByTime(3_000);
+      expect(events).toMatchObject([
+        {
+          topic: "jarvis/events/timer",
+          payload: { type: "timer_fired", id: created.id, label: "oven" },
+        },
+      ]);
+      expect(planning.timers()).toEqual([]);
+      expect(JSON.parse(fs.readFileSync(store.file, "utf8")).timers).toEqual(
+        [],
+      );
+
+      vi.advanceTimersByTime(1_000);
+      expect(events).toHaveLength(1);
+    } finally {
+      planning.onModuleDestroy();
+    }
+  });
+
   it("lists: add, duplicate, show, remove by part, ambiguity and clearing", async () => {
     const added = await run("list_add", { list: "Boodschappen", item: "Melk" });
     expect((added.result as { added: boolean }).added).toBe(true);

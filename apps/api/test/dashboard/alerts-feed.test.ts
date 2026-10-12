@@ -104,7 +104,10 @@ describe("AlertsFeed presence delivery", () => {
     );
 
     const screen = feed.record(event);
-    expect(screen?.speakAllowed).toBe(false);
+    expect(screen).toMatchObject({
+      speakAllowed: false,
+      deliveryMode: "screen",
+    });
     expect(notifyHelper).not.toHaveBeenCalled();
 
     warningMode = "helper";
@@ -112,7 +115,10 @@ describe("AlertsFeed presence delivery", () => {
       ...event,
       payload: { ...event.payload, title: "Een tweede melding" },
     });
-    expect(helper?.speakAllowed).toBe(false);
+    expect(helper).toMatchObject({
+      speakAllowed: false,
+      deliveryMode: "helper",
+    });
     expect(notifyHelper).toHaveBeenCalledTimes(1);
 
     warningMode = "speak";
@@ -120,7 +126,7 @@ describe("AlertsFeed presence delivery", () => {
       ...event,
       payload: { ...event.payload, title: "Een derde melding" },
     });
-    expect(speech?.speakAllowed).toBe(true);
+    expect(speech).toMatchObject({ speakAllowed: true, deliveryMode: "speak" });
     expect(notifyHelper).toHaveBeenCalledTimes(2);
   });
 

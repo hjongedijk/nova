@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { FeedEvent } from "@nova/contracts";
-import { canSpeakFeedEvent, cueQuiet, feedSpeechText } from "./helper-cues.ts";
+import {
+  canSpeakFeedEvent,
+  cueQuiet,
+  feedSpeechText,
+  shouldOpenHelperForFeedEvent,
+} from "./helper-cues.ts";
 
 describe("quiet-hour schedule", () => {
   const preferences = {
@@ -71,5 +76,38 @@ describe("quiet-hour schedule", () => {
         event("Mag spreken", true),
       ]),
     ).toBe("Mag spreken");
+  });
+
+  it("keeps screen-only alerts in the feed without opening the helper", () => {
+    const modes = {
+      info: "helper",
+      briefing: "speak",
+      warning: "speak",
+      critical: "speak",
+      timer: "speak",
+    } as const;
+    const notice: FeedEvent = {
+      seq: 8,
+      kind: "alert",
+      severity: "warning",
+      title: "Test",
+      detail: "",
+      at: "2026-10-12T08:00:00Z",
+      deliveryMode: "screen",
+      speakAllowed: false,
+    };
+    expect(shouldOpenHelperForFeedEvent(notice, modes)).toBe(false);
+    expect(
+      shouldOpenHelperForFeedEvent(
+        { ...notice, deliveryMode: "helper" },
+        modes,
+      ),
+    ).toBe(true);
+    expect(
+      shouldOpenHelperForFeedEvent(
+        { ...notice, deliveryMode: undefined, key: "briefing" },
+        { ...modes, briefing: "screen" },
+      ),
+    ).toBe(false);
   });
 });

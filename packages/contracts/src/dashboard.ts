@@ -51,6 +51,8 @@ export interface FeedEvent {
   at: string;
   /** Whether policy allows speech: checks the selected mode, presence, and hourly budget. */
   speakAllowed?: boolean;
+  /** Delivery chosen by the server; screen-only events stay in the feed without opening the helper. */
+  deliveryMode?: "screen" | "helper" | "speak";
 }
 
 /** GET /api/alerts?since=N */

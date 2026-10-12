@@ -63,6 +63,7 @@ function finishAwait(): void {
   shell.awaiting = false;
   clearTimeout(awaitTimer);
   clearTimeout(settleTimer);
+  pendingFinalIndex = -1;
   if (chat.uiState === "listening") setState("ready");
   chat.you = "";
 }
@@ -100,8 +101,10 @@ function bestHeard(result: SpeechResult): string {
 // The recognizer only calls a phrase final after a pause. When the words have stopped changing
 // for a moment, NOVA already has what it needs and answers without waiting for that.
 const SETTLED_MS = 1100;
+const FINAL_SETTLED_MS = 650;
 let sentIndex = -1;
 let settleTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingFinalIndex = -1;
 function sendCommand(command: string, index: number): void {
   sentIndex = index;
   clearTimeout(settleTimer);
@@ -125,10 +128,20 @@ function sendCommand(command: string, index: number): void {
 }
 function sendWhenSettled(command: string, index: number): void {
   clearTimeout(settleTimer);
+  pendingFinalIndex = -1;
   if (command.length < 3) return;
   settleTimer = setTimeout(() => {
     if (!busyTalking() && index > sentIndex) sendCommand(command, index);
   }, SETTLED_MS);
+}
+
+function sendFinalWhenSettled(command: string, index: number): void {
+  clearTimeout(settleTimer);
+  pendingFinalIndex = index;
+  settleTimer = setTimeout(() => {
+    pendingFinalIndex = -1;
+    if (index > sentIndex) sendCommand(command, index);
+  }, FINAL_SETTLED_MS);
 }
 
 export function handleWakeResult(event: SpeechResultEvent): void {
@@ -137,6 +150,10 @@ export function handleWakeResult(event: SpeechResultEvent): void {
     const result = event.results[i];
     if (!result) continue;
     const heard = bestHeard(result);
+    if (!result.isFinal && i >= pendingFinalIndex && pendingFinalIndex >= 0) {
+      clearTimeout(settleTimer);
+      pendingFinalIndex = -1;
+    }
     if (isSpeaking() && findWake(heard) && !isSpeechEcho(heard, lastSpoken)) {
       stopSpeech();
       if (chat.busy) cancelActiveAsk();
@@ -153,7 +170,7 @@ export function handleWakeResult(event: SpeechResultEvent): void {
         sendWhenSettled(command, i);
         continue;
       }
-      if (command.length >= 2) sendCommand(command, i);
+      if (command.length >= 2) sendFinalWhenSettled(command, i);
       else if (i === awaitIndex) {
         awaitIndex = i + 1; // only the wake word so far: the command is still to come
       }
@@ -161,7 +178,7 @@ export function handleWakeResult(event: SpeechResultEvent): void {
     }
     if (!findWake(heard)) continue;
     const command = afterWake(heard);
-    if (result.isFinal && command.length >= 2) sendCommand(command, i);
+    if (result.isFinal && command.length >= 2) sendFinalWhenSettled(command, i);
     else {
       beginAwait({ index: result.isFinal ? i + 1 : i });
       sendWhenSettled(command, i);
@@ -195,6 +212,9 @@ export function afterSpeech(): void {
 function stopWake(): void {
   wakeStartAttempt++;
   clearTimeout(restartTimer);
+  clearTimeout(settleTimer);
+  pendingFinalIndex = -1;
+  sentIndex = -1;
   const rec = wakeRec;
   wakeRec = null;
   shell.wakeActive = false;
