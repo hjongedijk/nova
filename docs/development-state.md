@@ -510,3 +510,5 @@ L2.4-kandidaatbeoordeling aangescherpt: `@ni-c/imap-mcp` schrijft onder `list_ne
 2026-10-12 — F6: Node-RED-flows laten bij HTTP-fouten geen upstreamantwoord door, webhookskills houden bij 4xx/5xx alleen status en vaste fout over, en Termix projecteert alleen commandovelden na een echte succesvolle snippet. Termix herhaalt een verzonden opdracht nooit via SSH na een mislukte of onzekere respons; fallback is alleen vóór uitvoering mogelijk. Gerichte API-tests, API-typecheck en lint slagen. F6 blijft open voor verdere integratieaudit.
 
 2026-10-12 — F6-aanvulling: de Termix-hostlijst toont bij een transportfout vaste tekst in plaats van de exception. De gerichte hostlijsttest dekt een privé-host en bestandspad af.
+
+2026-10-12 — F6-aanvulling: wereldtools geven bij onverwachte netwerkexceptions vaste tekst terug. Bekende plaats-, paginatype-, valuta-, inhouds- en HTTP-fouten blijven herkenbaar. Alle 32 gerichte wereldtests en lint slagen.

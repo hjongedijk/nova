@@ -219,12 +219,31 @@ export class WorldService {
       return await this.run(name, args, signal);
     } catch (error) {
       const failure = error as { name?: string; message?: unknown };
+      const message =
+        typeof failure?.message === "string" ? failure.message : "";
+      const known =
+        /^Request failed \([1-5][0-9]{2}\)$/.test(message) ||
+        /^Page returned [1-5][0-9]{2}$/.test(message) ||
+        /^Niet-leesbaar paginatype: [a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+$/.test(
+          message,
+        ) ||
+        /^Onbekende valuta: [A-Z]{3} of [A-Z]{3}$/.test(message) ||
+        [
+          "Response too large",
+          "Geen thuislocatie bekend. Noem een plaats.",
+          "Geen koersen beschikbaar",
+          "De pagina bevat geen leesbare tekst.",
+        ].includes(message);
       return {
         ok: false,
         error:
           failure?.name === "AbortError" || failure?.name === "TimeoutError"
             ? "Tijdslimiet bereikt"
-            : String(failure?.message ?? error).slice(0, 200),
+            : message.startsWith("Plaats niet gevonden:")
+              ? "Plaats niet gevonden."
+              : known
+                ? message
+                : "Externe dienst niet beschikbaar.",
       };
     }
   }

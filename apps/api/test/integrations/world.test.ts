@@ -234,6 +234,26 @@ describe("with a local web server", () => {
     expect(out).toEqual({ ok: false, error: "Request failed (500)" });
   });
 
+  it("hides unexpected network diagnostics from tool results", async () => {
+    const diagnostic = "private-host.local /data/private/world.json";
+    const getJson = vi
+      .spyOn(network, "getJson")
+      .mockRejectedValueOnce(new Error(diagnostic));
+    try {
+      const out = await make({ home: homeAt(1, 2) }).execute(
+        "weather_forecast",
+        {},
+      );
+      expect(out).toEqual({
+        ok: false,
+        error: "Externe dienst niet beschikbaar.",
+      });
+      expect(JSON.stringify(out)).not.toContain(diagnostic);
+    } finally {
+      getJson.mockRestore();
+    }
+  });
+
   it("the zone.home location is cached in the data dir and used after a restart", async () => {
     const world = make({ home: homeAt(53.05, 5.83) });
     expect(world.home()).toEqual({
