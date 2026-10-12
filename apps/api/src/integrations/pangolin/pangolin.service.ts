@@ -16,6 +16,76 @@ interface PangolinBody {
   data?: unknown;
 }
 
+const COLLECTIONS = {
+  pangolin_orgs: {
+    key: "orgs",
+    ids: ["id", "orgId"],
+    fields: ["name", "slug", "niceId"],
+  },
+  pangolin_sites: {
+    key: "sites",
+    ids: ["id", "siteId"],
+    fields: ["name", "niceId", "type", "online"],
+  },
+  pangolin_resources: {
+    key: "resources",
+    ids: ["id", "resourceId", "siteResourceId"],
+    fields: [
+      "name",
+      "niceId",
+      "fullDomain",
+      "subdomain",
+      "domain",
+      "type",
+      "protocol",
+      "online",
+      "enabled",
+      "http",
+    ],
+  },
+} as const;
+
+function projectCollection(
+  name: keyof typeof COLLECTIONS,
+  value: unknown,
+): unknown {
+  const { key, ids, fields } = COLLECTIONS[name];
+  const envelope =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  const raw = Array.isArray(value) ? value : envelope?.[key];
+  if (!Array.isArray(raw)) return null;
+  const rows = raw.slice(0, 200).flatMap((item): Record<string, unknown>[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const source = item as Record<string, unknown>;
+    const row: Record<string, unknown> = {};
+    const id = ids
+      .map((field) => source[field])
+      .find(
+        (entry) =>
+          (typeof entry === "string" &&
+            /^[A-Za-z0-9_.-]{1,100}$/.test(entry)) ||
+          (typeof entry === "number" &&
+            Number.isSafeInteger(entry) &&
+            entry >= 0),
+      );
+    if (id === undefined) return [];
+    row.id = id;
+    for (const field of fields) {
+      const data = source[field];
+      if (typeof data === "string" && data.length <= 255) row[field] = data;
+      else if (
+        typeof data === "boolean" ||
+        (typeof data === "number" && Number.isFinite(data))
+      )
+        row[field] = data;
+    }
+    return [row];
+  });
+  return Array.isArray(value) ? rows : { [key]: rows };
+}
+
 /**
  * Read-only Pangolin Integration API access (sites and public resources).
  * PANGOLIN_URL may be an IP address; PANGOLIN_HOST is then sent as Host/SNI,
@@ -100,9 +170,11 @@ export class PangolinService implements ToolSource {
       `/org/${encodeURIComponent(orgId)}/${name === "pangolin_sites" ? "sites" : "resources"}`,
       signal,
     );
-    if (response.status !== 200)
-      throw new Error(`Pangolin error (${response.status})`);
-    return response.data?.data ?? response.data;
+    if (response.status !== 200 || response.data?.data === undefined)
+      throw new Error(`Pangolin response unavailable (${response.status})`);
+    const projected = projectCollection(name, response.data.data);
+    if (projected === null) throw new Error("Pangolin response unavailable");
+    return projected;
   }
 
   private filteredTargets(
@@ -191,6 +263,11 @@ export class PangolinService implements ToolSource {
         ok: false,
         error: `Pangolin error (${response.status})`,
       };
-    return { ok: true, result: response.data?.data ?? response.data };
+    if (response.data?.data === undefined)
+      return { ok: false, error: "Pangolin response unavailable" };
+    const projected = projectCollection("pangolin_orgs", response.data.data);
+    if (projected === null)
+      return { ok: false, error: "Pangolin response unavailable" };
+    return { ok: true, result: projected };
   }
 }

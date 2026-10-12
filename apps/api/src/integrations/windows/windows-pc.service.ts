@@ -41,6 +41,36 @@ const ROUTES: Record<string, ["GET" | "POST", string]> = {
   windows_helper_size: ["POST", "/v1/helper/size"],
 };
 
+const RESULT_FIELDS: Record<string, readonly string[]> = {
+  windows_status: [
+    "hostname",
+    "user",
+    "uptimeHours",
+    "features",
+    "mode",
+    "helperDisplay",
+    "helperView",
+    "helperWarnings",
+    "agentPaused",
+    "helperOpen",
+    "agent",
+    "apps",
+    "running",
+  ],
+  windows_helper_debug: ["agent", "helper", "view", "display"],
+  windows_open_app: [],
+  windows_open_url: [],
+  windows_close_app: ["closed"],
+  windows_lock: [],
+  windows_displays: ["displays", "mode", "helperDisplay", "helperView"],
+  windows_wallpaper: ["displays", "mode", "helperDisplay", "helperView"],
+  windows_mode: ["displays", "mode", "helperDisplay", "helperView"],
+  windows_helper_preferences_get: ["preferences"],
+  windows_helper_preferences_set: ["preferences"],
+  windows_helper_notify: ["delivered", "reason", "seq"],
+  windows_helper_size: ["expanded", "view", "hidden"],
+};
+
 const coordinate = "-?\\d{1,6}";
 const rect = `(?:${coordinate},${coordinate},${coordinate},${coordinate}|n/a)`;
 const fourPixels = "\\d{1,5},\\d{1,5},\\d{1,5},\\d{1,5}";
@@ -60,6 +90,42 @@ interface AgentBody {
   error?: string;
   [key: string]: unknown;
 }
+
+const controlsWarning =
+  "Windows-bediening meldde een probleem. Controleer de agent op de pc.";
+const safeWarnings = (value: unknown) =>
+  Array.isArray(value) && value.length > 0 ? [controlsWarning] : [];
+const safePreferences = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  const hotkeys: Record<string, string> = {};
+  if (
+    source.hotkeys &&
+    typeof source.hotkeys === "object" &&
+    !Array.isArray(source.hotkeys)
+  ) {
+    const keys = source.hotkeys as Record<string, unknown>;
+    for (const name of ["open", "speak", "mute", "desktop"]) {
+      const key = keys[name];
+      if (typeof key === "string" && /^[A-Za-z0-9+ -]{1,80}$/.test(key))
+        hotkeys[name] = key;
+    }
+  }
+  return {
+    hotkeys,
+    warnings: safeWarnings(source.warnings),
+    ...(typeof source.paused === "boolean" ? { paused: source.paused } : {}),
+    ...(typeof source.view === "string" && /^[a-z]{1,24}$/.test(source.view)
+      ? { view: source.view }
+      : {}),
+    ...(typeof source.display === "number" &&
+    Number.isInteger(source.display) &&
+    source.display >= 0 &&
+    source.display <= 8
+      ? { display: source.display }
+      : {}),
+  };
+};
 
 /**
  * Talks to the Windows agent in agents/windows. The agent owns the allow-list of
@@ -322,6 +388,28 @@ export class WindowsPcService {
         error:
           "De Windows-agent reageert niet zoals verwacht. Controleer de verbinding en probeer opnieuw.",
       };
-    return { ok: true, verified: null, result: response.data };
+    const result: Record<string, unknown> = { ok: true };
+    for (const key of RESULT_FIELDS[name] ?? []) {
+      if (response.data[key] !== undefined) result[key] = response.data[key];
+    }
+    if (name === "windows_status")
+      result.helperWarnings = safeWarnings(result.helperWarnings);
+    if (
+      name === "windows_helper_preferences_get" ||
+      name === "windows_helper_preferences_set"
+    )
+      result.preferences = safePreferences(result.preferences);
+    if (name === "windows_helper_notify") {
+      if (typeof result.delivered !== "boolean") delete result.delivered;
+      if (result.reason !== "paused" && result.reason !== "helper-disabled")
+        delete result.reason;
+      if (
+        typeof result.seq !== "number" ||
+        !Number.isSafeInteger(result.seq) ||
+        result.seq <= 0
+      )
+        delete result.seq;
+    }
+    return { ok: true, verified: null, result };
   }
 }

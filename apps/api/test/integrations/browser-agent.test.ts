@@ -24,6 +24,17 @@ beforeAll(async () => {
 afterAll(() => fake.close());
 
 describe("BrowserAgentService", () => {
+  it("omits unexpected diagnostics from a successful status reply", async () => {
+    const diagnostic = "private-host.local /data/private/browser.json";
+    reply = () => ({
+      status: 200,
+      body: { ok: true, tabs: [], error: diagnostic, debug: diagnostic },
+    });
+    const result = await browser.execute("browser_status", {}, call());
+    expect(result).toEqual({ ok: true, verified: null, result: { tabs: [] } });
+    expect(JSON.stringify(result)).not.toContain(diagnostic);
+  });
+
   it("the tools are listed, valid and risk-ranked: only the buying click needs confirmation", () => {
     const defs = browser.definitions();
     const names = defs.map((item) => item.name);

@@ -30,6 +30,61 @@ async function agent(
 }
 
 describe("Windows tools", () => {
+  it("drops unexpected diagnostic fields from a successful agent reply", async () => {
+    const diagnostic = "private-host.local /data/private/windows.json";
+    const { tools } = await agent("agent-token", (_seen, send) =>
+      send(200, {
+        ok: true,
+        agent: "nova",
+        error: diagnostic,
+        debug: diagnostic,
+      }),
+    );
+    const result = await tools.execute("windows_status", {}, call());
+    expect(result).toMatchObject({
+      ok: true,
+      result: { ok: true, agent: "nova" },
+    });
+    expect(JSON.stringify(result)).not.toContain(diagnostic);
+  });
+
+  it("replaces raw Windows control warnings with fixed text", async () => {
+    const diagnostic = "private-host.local /data/private/hotkeys.json";
+    const { pc } = await agent("agent-token", (seen, send) =>
+      send(
+        200,
+        seen.url === "/v1/status"
+          ? { ok: true, helperWarnings: [diagnostic] }
+          : {
+              ok: true,
+              preferences: {
+                hotkeys: { open: "Ctrl+Alt+N" },
+                warnings: [diagnostic],
+                paused: false,
+                view: "compact",
+                display: 0,
+                debug: diagnostic,
+              },
+            },
+      ),
+    );
+    const status = await pc.call("windows_status", {});
+    const preferences = await pc.helperPreferences();
+    expect(status).toMatchObject({
+      ok: true,
+      result: {
+        helperWarnings: [expect.stringContaining("Windows-bediening")],
+      },
+    });
+    expect(preferences).toMatchObject({
+      ok: true,
+      result: {
+        preferences: { hotkeys: { open: "Ctrl+Alt+N" }, paused: false },
+      },
+    });
+    expect(JSON.stringify([status, preferences])).not.toContain(diagnostic);
+  });
+
   it("calls are authenticated and unconfigured clients stay disabled", async () => {
     const off = new WindowsPcService(
       fakeConfig({ windowsAgent: { url: "", token: "" } }),

@@ -514,3 +514,5 @@ L2.4-kandidaatbeoordeling aangescherpt: `@ni-c/imap-mcp` schrijft onder `list_ne
 2026-10-12 — F6-aanvulling: wereldtools geven bij onverwachte netwerkexceptions vaste tekst terug. Bekende plaats-, paginatype-, valuta-, inhouds- en HTTP-fouten blijven herkenbaar. Alle 32 gerichte wereldtests en lint slagen.
 
 2026-10-12 — F6-aanvulling: OmniRoute-account- en combovoorbereiding toont alleen exact bekende validatiefouten; vergelijkbare diagnostiek met privépad wordt generiek. Accountnaamrollback toont onverwachte fouten eveneens generiek. De gerichte settings-tests en API-typecheck slagen.
+
+2026-10-12 — F6-aanvulling: Pangolin projecteert alleen bekende organisatie-, site- en resourcevelden uit een geldige data-envelop. Windows- en browseragent projecteren bekende resultaatvelden; ruwe Windows-controlwaarschuwingen uit agentstatus en helpervoorkeuren worden vaste tekst. 35 gerichte integratietests en lint slagen.

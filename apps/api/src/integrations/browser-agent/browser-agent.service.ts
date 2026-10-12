@@ -42,6 +42,30 @@ const ROUTES: Record<string, ["GET" | "POST", string]> = {
   browser_tab: ["POST", "tab"],
 };
 
+const RESULT_FIELDS = [
+  "browser",
+  "headless",
+  "running",
+  "tabs",
+  "url",
+  "title",
+  "engine",
+  "fallback",
+  "note",
+  "blocked",
+  "untrusted",
+  "text",
+  "truncated",
+  "elements",
+  "scroll",
+  "clicked",
+  "typed",
+  "submitted",
+  "y",
+  "height",
+  "view",
+] as const;
+
 interface AgentBody {
   ok?: boolean;
   error?: string;
@@ -273,6 +297,10 @@ export class BrowserAgentService implements ToolSource {
             : `Browser-agent fout (${response.status})`,
         ...(rest.risky ? { risky: true } : {}),
       };
-    return { ok: true, verified: null, result: rest };
+    const result: Record<string, unknown> = {};
+    for (const key of RESULT_FIELDS) {
+      if (rest[key] !== undefined) result[key] = rest[key];
+    }
+    return { ok: true, verified: null, result };
   }
 }

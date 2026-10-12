@@ -4,21 +4,80 @@ import { call, fakeConfig, listen } from "./helpers.js";
 
 let fake: Awaited<ReturnType<typeof listen>>;
 let errorReply = false;
+let diagnosticReply = false;
+let nestedDiagnosticReply = false;
 beforeAll(async () => {
   fake = await listen((seen, send) =>
     errorReply
       ? send(503, { message: "private-upstream-diagnostic-8293" })
-      : seen.url === "/org/home/sites"
-        ? send(200, {
-            data: {
-              sites: [
-                { id: "site-1", name: "vps", online: true },
-                { id: "site-2", name: "hidden", online: false },
-              ],
-            },
-          })
-        : send(404, {}),
+      : diagnosticReply
+        ? send(200, { message: "private-upstream-diagnostic-8293" })
+        : nestedDiagnosticReply
+          ? send(200, {
+              data: {
+                sites: [
+                  {
+                    id: "site-1",
+                    name: "vps",
+                    online: true,
+                    secret: "private-upstream-diagnostic-8293",
+                  },
+                  {
+                    id: "private-host /private/secret",
+                    name: "invalid",
+                  },
+                ],
+                debug: "private-upstream-diagnostic-8293",
+              },
+            })
+          : seen.url === "/org/home/sites"
+            ? send(200, {
+                data: {
+                  sites: [
+                    { id: "site-1", name: "vps", online: true },
+                    { id: "site-2", name: "hidden", online: false },
+                  ],
+                },
+              })
+            : send(404, {}),
   );
+});
+
+it("projects site fields without nested diagnostics or secrets", async () => {
+  const pangolin = new PangolinService(
+    fakeConfig({ pangolin: { url: fake.url, apiKey: "pk", orgId: "home" } }),
+  );
+  nestedDiagnosticReply = true;
+  try {
+    const sites = await pangolin.execute("pangolin_sites", {}, call());
+    expect(sites).toEqual({
+      ok: true,
+      result: { sites: [{ id: "site-1", name: "vps", online: true }] },
+    });
+    expect(await pangolin.listTargets("pangolin_sites")).toEqual(sites.result);
+    expect(JSON.stringify(sites)).not.toContain("diagnostic-8293");
+  } finally {
+    nestedDiagnosticReply = false;
+  }
+});
+
+it("rejects a successful envelope without data instead of exposing diagnostics", async () => {
+  const pangolin = new PangolinService(
+    fakeConfig({ pangolin: { url: fake.url, apiKey: "pk", orgId: "home" } }),
+  );
+  diagnosticReply = true;
+  try {
+    const sites = await pangolin.execute("pangolin_sites", {}, call());
+    const orgs = await pangolin.execute("pangolin_orgs", {}, call());
+    expect(sites.ok).toBe(false);
+    expect(orgs).toEqual({
+      ok: false,
+      error: "Pangolin response unavailable",
+    });
+    expect(JSON.stringify([sites, orgs])).not.toContain("diagnostic-8293");
+  } finally {
+    diagnosticReply = false;
+  }
 });
 
 it("does not expose upstream error details through tool results", async () => {
