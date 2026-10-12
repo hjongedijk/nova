@@ -215,6 +215,28 @@ try {
     ),
     ["concise"],
   );
+  await page.getByRole("button", { name: "Overdracht", exact: true }).click();
+  await page.locator("#handoffQuestion").fill("Een vervolgvraag");
+  await page.locator("#handoffFiles").fill("apps/web/src/routes/+page.svelte");
+  await page.locator("#handoffNextStep").fill("Controleer de chatweergave");
+  await page.getByRole("button", { name: "Lokaal bewaren" }).click();
+  assert.equal(
+    await page.evaluate(
+      () =>
+        JSON.parse(localStorage.getItem("nova-handoff-v1") ?? "null")?.nextStep,
+    ),
+    "Controleer de chatweergave",
+  );
+  await page.locator("#historyClose").click();
+  await page.reload();
+  await page.locator("#menuButton").click();
+  await page.locator("#historyOpen").click();
+  await page.getByRole("button", { name: "Verder hiermee" }).waitFor();
+  await page.getByRole("button", { name: "Wissen" }).click();
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem("nova-handoff-v1")),
+    null,
+  );
   await page.locator("#historyClose").click();
 
   if (!(await page.locator("#input").isVisible()))
@@ -225,9 +247,21 @@ try {
     () => globalThis.document.querySelector("#input")?.value === "",
   );
   assert.deepEqual(requests[1]?.communicationPreferences, ["concise"]);
-  console.log(
-    "Conversation feedback browser check passed: thumbs-down preference is saved and sent on the next turn.",
+  await page.locator("#menuButton").click();
+  await page.locator("#historyOpen").click();
+  await page.getByRole("button", { name: "Overdracht", exact: true }).click();
+  await page.locator("#handoffQuestion").fill("Nog een vraag");
+  await page.locator("#handoffNextStep").fill("Ga verder met de tests");
+  await page.getByRole("button", { name: "Lokaal bewaren" }).click();
+  const handoffRequest = page.waitForRequest(
+    (request) =>
+      request.url().endsWith("/api/chat-stream") &&
+      request.postDataJSON()?.message?.includes("Ga verder met de tests"),
   );
+  await page.getByRole("button", { name: "Verder hiermee" }).click();
+  await handoffRequest;
+  assert.match(requests[2]?.message ?? "", /Ga verder met de tests/);
+  console.log("Conversation feedback and local handoff browser checks passed.");
 } finally {
   await browser.close();
 }

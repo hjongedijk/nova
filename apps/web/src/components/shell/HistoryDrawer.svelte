@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { onMount, tick } from "svelte";
   import { addMessage, showStage } from "#lib/chat/index.ts";
   import { getSessionId } from "#lib/chat/session.ts";
   import { forgetConversation } from "#lib/api/chat.ts";
-  import { chat } from "#lib/stores/chat.svelte.ts";
+  import { ask, chat } from "#lib/stores/chat.svelte.ts";
   import { dialogs } from "#lib/stores/dialogs.svelte.ts";
   import { stopSpeech } from "#lib/voice/speaker.ts";
   import type { CommunicationPreference } from "@nova/contracts";
@@ -11,6 +11,14 @@
     readCommunicationPreferences,
     saveCommunicationPreference,
   } from "#lib/chat/communication-preferences.ts";
+  import {
+    clearHandoff,
+    handoffPrompt,
+    latestQuestion,
+    readHandoff,
+    saveHandoff,
+    type HandoffCard,
+  } from "#lib/chat/handoff.ts";
 
   let messages: HTMLElement;
   let closeButton: HTMLButtonElement;
@@ -19,6 +27,53 @@
   let savedPreference = $state<CommunicationPreference[]>(
     readCommunicationPreferences(),
   );
+  let handoff = $state<HandoffCard | null>(null);
+  let handoffOpen = $state(false);
+  let draftQuestion = $state("");
+  let draftFiles = $state("");
+  let draftNextStep = $state("");
+  let handoffNote = $state("");
+  onMount(() => {
+    handoff = readHandoff();
+  });
+
+  function prepareHandoff(): void {
+    draftQuestion = latestQuestion(chat.history) || handoff?.question || "";
+    draftFiles = handoff?.files.join("\n") || "";
+    draftNextStep = handoff?.nextStep || "";
+    handoffNote = "";
+    handoffOpen = true;
+    void tick().then(() => {
+      messages.scrollTop = messages.scrollHeight;
+      document.querySelector<HTMLTextAreaElement>("#handoffQuestion")?.focus();
+    });
+  }
+
+  function storeHandoff(): void {
+    const saved = saveHandoff(draftQuestion, draftFiles, draftNextStep);
+    if (!saved) {
+      handoffNote =
+        "Vul de vraag en vervolgstap in. Controleer of lokale opslag beschikbaar is.";
+      return;
+    }
+    handoff = saved;
+    handoffOpen = false;
+    handoffNote = "Overdracht alleen op dit apparaat bewaard.";
+  }
+
+  function removeHandoff(): void {
+    clearHandoff();
+    handoff = null;
+    handoffOpen = false;
+    handoffNote = "Overdracht gewist.";
+  }
+
+  function continueHandoff(): void {
+    if (!handoff || chat.busy) return;
+    const prompt = handoffPrompt(handoff);
+    close();
+    void ask(prompt);
+  }
   const feedbackChoices: { id: CommunicationPreference; label: string }[] = [
     { id: "concise", label: "Kortere antwoorden" },
     { id: "fewer_jokes", label: "Minder grapjes" },
@@ -79,6 +134,9 @@
   <div class="drawer-head">
     <h2>Gesprek</h2>
     <div class="drawer-actions">
+      <button class="btn" type="button" onclick={prepareHandoff}
+        >Overdracht</button
+      >
       <button class="btn" id="newChat" type="button" onclick={newChat}
         >Nieuw gesprek</button
       >
@@ -143,5 +201,60 @@
         {/if}
       </div>
     {/each}
+    {#if handoffOpen}
+      <section class="handoff-card" aria-label="Overdracht bewaren">
+        <h3>Overdracht bewaren</h3>
+        <label for="handoffQuestion">Huidige vraag</label>
+        <textarea
+          id="handoffQuestion"
+          maxlength="500"
+          bind:value={draftQuestion}></textarea>
+        <label for="handoffFiles"
+          >Relevante bestanden (optioneel, één per regel)</label
+        >
+        <textarea id="handoffFiles" maxlength="1400" bind:value={draftFiles}
+        ></textarea>
+        <label for="handoffNextStep">Volgende stap</label>
+        <textarea
+          id="handoffNextStep"
+          maxlength="500"
+          bind:value={draftNextStep}></textarea>
+        <p>
+          Alleen op dit apparaat. Er wordt pas iets verstuurd als je later op
+          “Verder hiermee” klikt.
+        </p>
+        <div class="handoff-actions">
+          <button class="btn" type="button" onclick={storeHandoff}
+            >Lokaal bewaren</button
+          >
+          <button
+            class="btn"
+            type="button"
+            onclick={() => (handoffOpen = false)}>Annuleren</button
+          >
+        </div>
+      </section>
+    {:else if handoff}
+      <section class="handoff-card" aria-label="Bewaarde overdracht">
+        <h3>Bewaarde overdracht</h3>
+        <p>{handoff.question}</p>
+        {#if handoff.files.length}<p>
+            Bestanden: {handoff.files.join(", ")}
+          </p>{/if}
+        <p>Volgende stap: {handoff.nextStep}</p>
+        <div class="handoff-actions">
+          <button
+            class="btn"
+            type="button"
+            disabled={chat.busy}
+            onclick={continueHandoff}>Verder hiermee</button
+          >
+          <button class="btn" type="button" onclick={removeHandoff}
+            >Wissen</button
+          >
+        </div>
+      </section>
+    {/if}
+    {#if handoffNote}<p role="status">{handoffNote}</p>{/if}
   </div>
 </aside>
