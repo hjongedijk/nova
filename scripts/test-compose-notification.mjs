@@ -39,7 +39,7 @@ const fixtureFlows = [
     onceDelay: 0.2,
     topic: "",
     payload:
-      '{"title":"Compose testmelding","detail":"Volledige NOVA-meldingsroute","severity":"warning"}',
+      '{"title":"Compose testmelding","detail":"Volledige NOVA-meldingsroute","severity":"info","category":"briefing"}',
     payloadType: "json",
     wires: [["nova-compose-notification-node"]],
   },
@@ -212,6 +212,8 @@ const server = http.createServer((req,res) => {
     await delay(250);
   }
   assert.ok(delivered, "NOVA did not record the Node-RED alert in its feed");
+  assert.equal(delivered.key, "briefing");
+  assert.equal(delivered.speakAllowed, true);
   const notifyPath = join(helperData, "last-notification.json");
   const notifyDeadline = Date.now() + 10_000;
   while (!existsSync(notifyPath) && Date.now() < notifyDeadline)
