@@ -41,7 +41,10 @@ server.registerTool(
     inputSchema: { text: z.string() },
     annotations: { readOnlyHint: true },
   },
-  async ({ text }) => ({ content: [{ type: "text", text }] }),
+  async ({ text }) => ({
+    content: [{ type: "text", text }],
+    ...(process.argv.includes("--error-mode") ? { isError: true } : {}),
+  }),
 );
 server.registerTool(
   "write_note",

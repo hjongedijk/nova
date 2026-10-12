@@ -30,6 +30,8 @@ const CALL_TIMEOUT_MS = 30000;
 const RESYNC_MS = 60000;
 const MAX_ACTIVITY = 500;
 const MAX_ACTIVITY_PER_SERVER = 50;
+const MCP_TOOL_FAILURE =
+  "MCP-aanroep is mislukt. Controleer de serverstatus en probeer opnieuw.";
 const GITHUB_REPOSITORY_TOOLS = new Set([
   "actions_get",
   "actions_list",
@@ -493,15 +495,16 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
         tool.remote,
       );
       return response.isError
-        ? { ok: false, error: result.slice(0, 500) }
+        ? {
+            ok: false,
+            error: MCP_TOOL_FAILURE,
+          }
         : { ok: true, verified: null, result };
-    } catch (error) {
+    } catch {
       this.recordActivity(tool.server, "tool_failed", tool.remote);
       return {
         ok: false,
-        error: this.secrets
-          .redactSecrets(sanitize(String((error as Error).message)))
-          .slice(0, 500),
+        error: MCP_TOOL_FAILURE,
       };
     }
   }

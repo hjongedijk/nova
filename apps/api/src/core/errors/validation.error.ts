@@ -44,9 +44,7 @@ export class ApiErrorFilter implements ExceptionFilter {
         .json({ error: Array.isArray(message) ? message.join(" ") : message });
       return;
     }
-    this.log.error(
-      exception instanceof Error ? exception.message : String(exception),
-    );
+    this.log.error("Unexpected API error");
     response.status(500).json({ error: "Dat is niet gelukt." });
   }
 }

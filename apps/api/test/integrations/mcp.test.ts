@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Test } from "@nestjs/testing";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { ToolsModule } from "../../src/tools/tools.module.js";
 import { ToolsService } from "../../src/tools/tools.service.js";
 import { CoreModule } from "../../src/core/core.module.js";
@@ -290,6 +290,35 @@ describe("MCP hub", () => {
       servers: ["echo"],
       tools: 2,
     });
+  });
+
+  it("does not expose MCP error content or transport diagnostics", async () => {
+    const hub = await start(
+      configFile({
+        echo: {
+          command: process.execPath,
+          args: [fixture, "--error-mode"],
+          risk: "CONFIRM",
+        },
+      }),
+    );
+    const diagnostic =
+      "private-host.local /data/private/session.json upstream secret";
+    const failed = await hub.execute("mcp_echo_echo", { text: diagnostic });
+    expect(failed).toEqual({
+      ok: false,
+      error:
+        "MCP-aanroep is mislukt. Controleer de serverstatus en probeer opnieuw.",
+    });
+    expect(JSON.stringify(failed)).not.toContain(diagnostic);
+
+    const client = Reflect.get(hub, "clients").get("echo");
+    vi.spyOn(client, "callTool").mockRejectedValueOnce(new Error(diagnostic));
+    const transportFailed = await hub.execute("mcp_echo_echo", {
+      text: "test",
+    });
+    expect(transportFailed).toEqual(failed);
+    expect(JSON.stringify(transportFailed)).not.toContain(diagnostic);
   });
 
   it("projects PIN-screen status without commands or environment secrets", async () => {

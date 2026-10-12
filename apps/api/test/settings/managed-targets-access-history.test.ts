@@ -31,6 +31,52 @@ afterAll(async () => {
 });
 
 describe("managed target access history", () => {
+  it("keeps unexpected Home Assistant failures out of the settings response", async () => {
+    const home = nova.app.get(HomeAssistantService);
+    const sync = home.sync.bind(home);
+    home.sync = async () => {
+      throw new Error("private-host.local /data/private/ha-token.json");
+    };
+    try {
+      const response = await nova.api
+        .put("/api/settings/home-assistant/access")
+        .set(admin)
+        .send({ mode: "all", areaIds: [], deviceIds: [], entityIds: [] });
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({ error: "Dat is niet gelukt." });
+    } finally {
+      home.sync = sync;
+    }
+  });
+
+  it("keeps unknown policy diagnostics private but preserves input errors", async () => {
+    const home = nova.app.get(HomeAssistantService);
+    const sync = home.sync.bind(home);
+    const setAccessPolicy = home.setAccessPolicy.bind(home);
+    home.sync = async () => home.entities;
+    try {
+      home.setAccessPolicy = () => {
+        throw new Error("private-host.local /data/private/policy.json");
+      };
+      const failed = await nova.api
+        .put("/api/settings/home-assistant/access")
+        .set(admin)
+        .send({ mode: "all", areaIds: [], deviceIds: [], entityIds: [] });
+      expect(failed.status).toBe(500);
+      expect(failed.body).toEqual({ error: "Dat is niet gelukt." });
+      home.setAccessPolicy = setAccessPolicy;
+      const invalid = await nova.api
+        .put("/api/settings/home-assistant/access")
+        .set(admin)
+        .send({ mode: "unknown", areaIds: [], deviceIds: [], entityIds: [] });
+      expect(invalid.status).toBe(400);
+      expect(invalid.body.error).toBe("Ongeldige Home Assistant-toegang.");
+    } finally {
+      home.sync = sync;
+      home.setAccessPolicy = setAccessPolicy;
+    }
+  });
+
   it("stores private bounded changes and restores only after fresh dangerous confirmation", async () => {
     const changed = await nova.api
       .put("/api/settings/managed-targets/access")

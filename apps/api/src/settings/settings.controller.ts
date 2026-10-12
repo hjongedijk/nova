@@ -205,31 +205,36 @@ export class SettingsController {
 
   @Put("home-assistant/access")
   async setHomeAssistantAccess(@Body() body: unknown) {
+    await this.homeAssistant.sync();
+    const before = this.homeAssistant.accessPolicy();
+    let policy: ReturnType<HomeAssistantService["setAccessPolicy"]>;
     try {
-      await this.homeAssistant.sync();
-      const before = this.homeAssistant.accessPolicy();
-      const policy = this.homeAssistant.setAccessPolicy(body);
-      this.homeAccessHistory.record(before, policy);
-      this.log("home_assistant_access", {
-        mode: policy.mode,
-        areas: policy.areaIds.length,
-        devices: policy.deviceIds.length,
-        entities: policy.entityIds.length,
-      });
-      return {
-        ok: true,
-        policy,
-        ...(this.homeAccessHistory.lastWarning
-          ? { historyWarning: this.homeAccessHistory.lastWarning }
-          : {}),
-      };
+      policy = this.homeAssistant.setAccessPolicy(body);
     } catch (error) {
-      throw new ValidationError([
-        error instanceof Error
-          ? error.message
-          : "Home Assistant-toegang kon niet worden opgeslagen.",
-      ]);
+      if (
+        error instanceof Error &&
+        [
+          "Ongeldige Home Assistant-toegang.",
+          "Kies alleen apparaten uit het actuele overzicht.",
+        ].includes(error.message)
+      )
+        throw new ValidationError([error.message]);
+      throw error;
     }
+    this.homeAccessHistory.record(before, policy);
+    this.log("home_assistant_access", {
+      mode: policy.mode,
+      areas: policy.areaIds.length,
+      devices: policy.deviceIds.length,
+      entities: policy.entityIds.length,
+    });
+    return {
+      ok: true,
+      policy,
+      ...(this.homeAccessHistory.lastWarning
+        ? { historyWarning: this.homeAccessHistory.lastWarning }
+        : {}),
+    };
   }
 
   @Get("home-assistant/access/history")
