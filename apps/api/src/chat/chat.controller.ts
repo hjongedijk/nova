@@ -398,6 +398,7 @@ export class ChatController {
         body.confirmationId,
         body.approve === true && body.always === true,
         body.responseLanguage === "en" ? "en" : "nl",
+        true,
       );
       return sanitize(
         reply ?? {

@@ -13,6 +13,7 @@ import { NovaConfig } from "../core/config/nova-config.js";
 import { MqttService } from "../core/mqtt/mqtt.service.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
+import { requiresScreenConfirmation } from "../confirmations/screen-confirmation.js";
 import { memoryCandidate } from "../memory/semantic/candidate.js";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { SettingsStore } from "../settings/store/settings.store.js";
@@ -525,10 +526,13 @@ export class ToolsService implements OnModuleInit {
           error:
             "Device actions are disabled until integration onboarding is complete",
         });
+      const screenRequired = requiresScreenConfirmation(name, args, risk);
       const needsConfirmation =
+        screenRequired ||
         risk === "CONFIRM" ||
-        risk === "DANGEROUS" ||
         (risk === "SAFE" && !this.config.autoExecuteSafe);
+      const allowStandingApproval =
+        tool.definition.allowStandingApproval !== false && !screenRequired;
       if (needsConfirmation) {
         const matches =
           approved &&
@@ -543,7 +547,7 @@ export class ToolsService implements OnModuleInit {
         const grants = this.settings.get().standingApprovals ?? [];
         const standing =
           risk === "CONFIRM" &&
-          tool.definition.allowStandingApproval !== false &&
+          allowStandingApproval &&
           !unknownArguments &&
           grants.some(
             (grant) =>
@@ -559,7 +563,7 @@ export class ToolsService implements OnModuleInit {
             args,
             risk,
             schemaFingerprint,
-            tool.definition.allowStandingApproval !== false,
+            allowStandingApproval,
           );
           return finish({ ok: false, requiresConfirmation: true, action });
         }
@@ -569,7 +573,7 @@ export class ToolsService implements OnModuleInit {
           always &&
           matches &&
           risk === "CONFIRM" &&
-          tool.definition.allowStandingApproval !== false &&
+          allowStandingApproval &&
           !unknownArguments &&
           approved.schemaFingerprint === schemaFingerprint &&
           !standing

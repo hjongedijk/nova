@@ -13,7 +13,11 @@
   import { requestHelperSize } from "#lib/api/helper.ts";
   import { ApiError } from "#lib/api/client.ts";
   import { friendlyApiError } from "#lib/api/error-copy.ts";
-  import { answerCard, cards } from "#lib/chat/cards.svelte.ts";
+  import {
+    answerCard,
+    cards,
+    confirmationShortcutApproval,
+  } from "#lib/chat/cards.svelte.ts";
   import { encodeAttachments } from "#lib/chat/attachments.ts";
   import { forgetConversation } from "#lib/api/chat.ts";
   import { showToast } from "#lib/stores/toasts.svelte.ts";
@@ -324,7 +328,8 @@
       /^[yn]$/i.test(event.key)
     ) {
       event.preventDefault();
-      void answerCard(card.id, event.key.toLowerCase() === "y");
+      const approval = confirmationShortcutApproval(card, event.key);
+      if (approval !== null) void answerCard(card.id, approval);
     }
   }
   $effect(() => {

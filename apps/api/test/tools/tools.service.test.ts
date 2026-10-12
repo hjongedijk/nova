@@ -33,6 +33,7 @@ import {
 } from "../../src/tools/tool.types.js";
 
 let effectiveRisk: "CONFIRM" | "DANGEROUS" = "CONFIRM";
+let doorRisk: "SAFE" | "CONFIRM" = "CONFIRM";
 let changedSchema = false;
 let approvalRevision = "initial-execution";
 const ran: { name: string; args: Record<string, unknown> }[] = [];
@@ -64,6 +65,15 @@ class FakeSource implements ToolSource {
         risk: "CONFIRM",
       },
       {
+        name: "ha_call_service",
+        description: "Controls a door in this fixture",
+        parameters: schema(
+          { entity_id: text(), domain: text(), service: text() },
+          ["entity_id", "domain", "service"],
+        ),
+        risk: "CONFIRM",
+      },
+      {
         name: "fake_broken",
         description: "Answers nonsense",
         parameters: schema(),
@@ -90,7 +100,12 @@ class FakeSource implements ToolSource {
   ): Promise<ToolPlan> {
     return {
       args,
-      risk: name === "fake_restart" ? effectiveRisk : "READ_ONLY",
+      risk:
+        name === "fake_restart"
+          ? effectiveRisk
+          : name === "ha_call_service"
+            ? doorRisk
+            : "READ_ONLY",
     };
   }
   async execute(
@@ -139,6 +154,7 @@ describe("ToolsService", () => {
   beforeEach(() => {
     ran.length = 0;
     effectiveRisk = "CONFIRM";
+    doorRisk = "CONFIRM";
     changedSchema = false;
     approvalRevision = "initial-execution";
     activeToolSignal = null;
@@ -285,6 +301,31 @@ describe("ToolsService", () => {
         .requiresConfirmation,
     ).toBe(true);
   });
+
+  it.each([
+    ["lock.front_door", "lock", "lock"],
+    ["cover.garage", "cover", "open_cover"],
+  ])(
+    "never creates or reuses standing approval for %s",
+    async (entity_id, domain, service) => {
+      doorRisk = "SAFE";
+      const args = { entity_id, domain, service };
+      const pending = await tools.execute("ha_call_service", args, "door");
+      expect(pending.action?.allowAlways).toBe(false);
+      const approval = confirmations.take(
+        "door",
+        pending.action!.confirmationId,
+      )!;
+      expect(
+        await tools.execute("ha_call_service", args, "door", approval, true),
+      ).toMatchObject({ ok: true });
+      expect(settings.get().standingApprovals).toEqual([]);
+      expect(
+        (await tools.execute("ha_call_service", args, "door-next"))
+          .requiresConfirmation,
+      ).toBe(true);
+    },
+  );
 
   it("invalidates grants and pending approvals when execution revision changes with the same schema", async () => {
     await grant();

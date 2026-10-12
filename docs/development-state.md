@@ -7,7 +7,7 @@ Do not record credentials, personal messages or actual deployment configuration 
 ## Current work
 
 - Task file: `tasks-09-10-2026.md`. Order: A → J (except J4) → K → L → B → C/J4 → D/E/F/G/H/I.
-- Current task count: 200/248; the task file has the current per-item status. `docs/new-tool-checklist.md` is linked from `docs/tools-and-safety.md`.
+- Current task count: 201/248; the task file has the current per-item status. `docs/new-tool-checklist.md` is linked from `docs/tools-and-safety.md`.
 - After the Phase A checkpoint, continue J. A1.3/A1.5 and several B tasks still need actual Windows/phone/audio checks. Do not claim these hardware or live-service checks from repository tests.
 - Phase A: 37/41 complete, commit `fbcad59`. Four items remain open for Windows testing, calendar auth, or integrated PC/phone validation; see its checkpoint.
 - Latest A verification: `node scripts/check-helper.mjs` passed at 1x/2x, including views, audio-device behavior, stream cleanup, attachments, choices and confirmations. This does not replace the remaining real Windows/phone checks.
@@ -502,3 +502,5 @@ L2.4-kandidaatbeoordeling aangescherpt: `@ni-c/imap-mcp` schrijft onder `list_ne
 2026-10-12 — F6-vervolg: browseragent-, Pangolin-, planning-, controle-, notitie- en documenttools vervangen onverwachte upstream- of opslagdiagnostiek door vaste meldingen. Bekende validatie- en herstelmeldingen blijven bruikbaar; dynamische lijstinhoud wordt niet in fouttekst gekopieerd. De volledige API-suite is groen: 1546 tests in 114 bestanden, plus API-typecheck, gerichte lint en formatcheck. De eerdere SSH-fallbacktest is aangepast aan de afgeschermde melding. F6 blijft open voor een audit van resterende instellingen-/integratiefoutvelden. Lokale commits tot `c9478b9`, werkboom schoon; geen push of release.
 
 2026-10-12 — Previewcontrole: lokale HTTPS-server op poort 5173 antwoordt HTTP 200. Beide infokolommen staan in de homepagina; `Info-panelen` kan ze via browseropslag verbergen. Onder 1340 CSS-pixels wordt rechts verborgen en links compact. Geen orb-code veranderd. De Windows-agent op het eerder ingestelde LAN-adres was in deze sessie vanaf host en container niet bereikbaar; A1.3/A1.5 vragen nog een echte Windows-check. Ga verder met open taken uit `tasks-09-10-2026.md`; release pas na de ontbrekende controles.
+
+2026-10-12 — I12: sloten, covers/garagedeuren, alarm, ondoorzichtige HA-scènes/scripts, browserklikken met bevestiging en DANGEROUS-tools vragen nu altijd de schermknop. Gesproken/getypt akkoord voert ze niet uit; annuleren blijft mogelijk. Bestaande en nieuwe staande toestemming worden genegeerd. Reviewer vond een cover-omweg; die is gedicht en getest. Gerichte API/webtests, typecheck, lint, format en build slagen. L1.2 blijft open: de huidige MCP-reviewcatalogus begrenst identiteit, maar stdio-kindprocessen hebben nog geen aparte netwerkuitgangsgrens.

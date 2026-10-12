@@ -12,6 +12,8 @@ export interface Card {
   id: string;
   tool?: string;
   risk?: PendingConfirmation["risk"];
+  /** Sensitive action: only the visible button may approve it. */
+  screenOnly?: boolean;
   allowAlways?: boolean;
   label: string;
   /** Buttons are locked (answered, or the time ran out). */
@@ -27,15 +29,48 @@ export const cards = $state<Card[]>([]);
 
 const CONFIRM_REPLY =
   /^(ja|ja graag|ja hoor|ja doe maar|jazeker|graag|doe maar|oké|oke|ok|okay|prima|akkoord|zeker|ga je gang|bevestig|yes|yes please|confirm|nee|nee hoor|nee dank je|nee bedankt|laat maar|niet doen|annuleer|cancel|no)$/;
+const REJECT_REPLY =
+  /^(nee|nee hoor|nee dank je|nee bedankt|laat maar|niet doen|annuleer|cancel|no)$/;
+const normalizedReply = (text: string): string =>
+  text
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?,]+$/g, "");
 
 /** "ja" / "nee" and friends: an answer to a confirmation card, spoken or typed. */
 export const isConfirmReply = (text: string): boolean =>
-  CONFIRM_REPLY.test(
-    text
-      .trim()
-      .toLowerCase()
-      .replace(/[.!?,]+$/g, ""),
-  );
+  CONFIRM_REPLY.test(normalizedReply(text));
+
+export const isApproveReply = (text: string): boolean =>
+  isConfirmReply(text) && !REJECT_REPLY.test(normalizedReply(text));
+
+/** Mirrors the server rule only to keep a blocked card visible. */
+export const requiresScreenConfirmation = (
+  action: PendingConfirmation,
+): boolean =>
+  action.risk === "DANGEROUS" ||
+  action.tool === "browser_click_confirmed" ||
+  (action.tool === "ha_call_service" &&
+    (action.args.domain === "lock" ||
+      action.args.domain === "cover" ||
+      action.args.domain === "scene" ||
+      action.args.domain === "script" ||
+      action.args.domain === "alarm_control_panel"));
+
+export const keepCardAfterReply = (
+  action: PendingConfirmation,
+  text: string,
+): boolean => isApproveReply(text) && requiresScreenConfirmation(action);
+
+export const confirmationShortcutApproval = (
+  card: Pick<Card, "screenOnly">,
+  key: string,
+): boolean | null =>
+  key.toLowerCase() === "n"
+    ? false
+    : key.toLowerCase() === "y" && !card.screenOnly
+      ? true
+      : null;
 
 /** The sentence on a card: what is about to happen. */
 export function confirmationLabel(
@@ -184,6 +219,7 @@ export function addCard(action: PendingConfirmation | null | undefined): void {
     id,
     tool: action.tool,
     risk: action.risk,
+    screenOnly: requiresScreenConfirmation(action),
     allowAlways: action.allowAlways,
     label: confirmationLabel(action),
     locked: false,

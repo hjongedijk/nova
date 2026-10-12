@@ -57,7 +57,7 @@ Examples of how risk is decided:
 
 1. The model calls a tool that needs confirmation. Nothing runs. NOVA creates a pending confirmation and answers with a question ("Zal ik ...?"). The interface shows a confirmation card.
 2. The confirmation is valid for **60 seconds**, **one per session** and can be used **once**. A new message that is not an answer cancels it.
-3. You answer by voice or text with a plain "ja", "ok", "doe maar", "akkoord", "yes", "confirm" ... or "nee", "laat maar", "annuleer", "no" ..., or press the buttons (`POST /api/actions/confirm` with the confirmation id). A "ja" with nothing waiting is just conversation.
+3. For ordinary actions you answer by voice or text with a plain "ja", "ok", "doe maar", "akkoord", "yes", "confirm" ... or "nee", "laat maar", "annuleer", "no" ..., or press the buttons (`POST /api/actions/confirm` with the confirmation id). A "ja" with nothing waiting is just conversation. Doors, alarms, purchase-like browser clicks and every `DANGEROUS` action require the confirmation button on screen. Spoken or typed approval leaves these actions pending; spoken cancellation still works. A voice never proves who is speaking.
 4. On approval the call is re-checked: the tool, session, arguments and risk must match exactly what was asked, then it runs. Expiry, rejection and cancellation are written to the action log.
 
 The helper pill and the Windows wallpaper use the same confirmations.
@@ -136,7 +136,9 @@ Typed chat allows useful lists, links, code and fuller explanations. Speech reco
 
 ## Scoped standing approvals
 
-“Altijd” on a fresh confirmation grants permission only for a `CONFIRM` tool with exactly the same normalized arguments. `DANGEROUS` never qualifies. The backend still validates arguments, prepares the call, determines its actual risk and checks action availability before considering a rule. Unknown fields cannot reuse a rule. The confirmation remains session-bound, single-use and valid for 60 seconds.
+Sensitive chat actions need the visible confirmation button. Spoken or typed approval cannot execute locks, covers (including garage doors), alarms, opaque Home Assistant scenes/scripts, purchase-like browser clicks or any `DANGEROUS` action; spoken cancellation still works. This rule applies even when only one voice is heard. It does not use voice recognition as identity proof.
+
+“Altijd” on a fresh confirmation grants permission only for a `CONFIRM` tool with exactly the same normalized arguments. `DANGEROUS`, locks, covers (including garage doors), alarms, Home Assistant scenes/scripts and purchase-like browser clicks never qualify. Existing standing permissions are ignored for these sensitive actions. The backend still validates arguments, prepares the call, determines its actual risk and checks action availability before considering a rule. Unknown fields cannot reuse a rule. The confirmation remains session-bound, single-use and valid for 60 seconds.
 
 Rules store argument and schema/execution fingerprints, a sanitized display scope and creation time. Changing parameters, risk, source identity or schema requires a new confirmation. Webhook skill execution settings contribute a private revision; changing its endpoint/body/credentials invalidates the rule. MCP connections receive a private generation revision, so reconnecting invalidates existing permissions. Private revision fields never reach the model or public tool metadata.
 
