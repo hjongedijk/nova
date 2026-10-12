@@ -10,7 +10,22 @@ import {
   type ToolResult,
   type ToolSource,
 } from "../tools/tool.types.js";
-import { messageOf } from "./semantic/backend.js";
+
+const safeErrors = new Set([
+  "Invalid memory ID",
+  "Memory is not owned by NOVA",
+  "Memory rejected: not durable or contains secrets",
+  "Memory index is rebuilding; retry shortly",
+  "Verified free embeddings are not configured",
+  "Long-term memory is not configured",
+]);
+
+function safeMemoryError(error: unknown): string {
+  const message = error instanceof Error ? error.message : error;
+  return typeof message === "string" && safeErrors.has(message)
+    ? message
+    : "Long-term memory is temporarily unavailable";
+}
 
 /** memory_search, memory_remember and memory_forget: NOVA's long-term memory as tools. */
 @ToolSourceProvider()
@@ -75,28 +90,39 @@ export class MemorySource implements ToolSource {
     args: Record<string, unknown>,
   ): Promise<ToolResult> {
     if (name === "memory_search") {
-      const result = await this.memory.search(String(args.query));
-      const ok = this.memory.configured && !this.memory.lastError;
-      return {
-        ok,
-        result,
-        ...(ok
-          ? {}
-          : {
-              error:
-                this.memory.lastError || "Long-term memory is not configured",
-            }),
-      };
+      try {
+        const result = await this.memory.search(String(args.query));
+        const ok = this.memory.configured && !this.memory.lastError;
+        return {
+          ok,
+          result,
+          ...(ok
+            ? {}
+            : {
+                error: this.memory.configured
+                  ? safeMemoryError(this.memory.lastError)
+                  : "Long-term memory is not configured",
+              }),
+        };
+      } catch (error) {
+        return { ok: false, result: [], error: safeMemoryError(error) };
+      }
     }
-    if (name === "memory_remember")
-      return {
-        ...(await this.memory.write(args.text, args)),
-      };
+    if (name === "memory_remember") {
+      try {
+        const result = await this.memory.write(args.text, args);
+        return result.ok
+          ? { ...result }
+          : { ok: false, error: safeMemoryError(result.error) };
+      } catch (error) {
+        return { ok: false, error: safeMemoryError(error) };
+      }
+    }
     if (name === "memory_forget") {
       try {
         return await this.memory.remove(String(args.id));
       } catch (error) {
-        return { ok: false, error: messageOf(error) };
+        return { ok: false, error: safeMemoryError(error) };
       }
     }
     return { ok: false, error: `Unknown memory tool ${name}` };

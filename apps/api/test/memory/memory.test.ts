@@ -574,6 +574,32 @@ describe("SemanticMemoryService and MemorySource", () => {
     process.env = { ...saved };
   });
 
+  it("keeps backend diagnostics out of memory tool results", async () => {
+    const diagnostic = "connect private-host?trace=9281";
+    const memory = {
+      configured: true,
+      lastError: diagnostic,
+      search: async () => [],
+      write: async () => ({ ok: false, error: diagnostic }),
+      remove: async () => {
+        throw new Error(diagnostic);
+      },
+    };
+    const source = new MemorySource(memory as never);
+    for (const [name, args] of [
+      ["memory_search", { query: "test" }],
+      ["memory_remember", { text: "Onthoud mijn voorkeur is koffie" }],
+      ["memory_forget", { id: "not-an-id" }],
+    ] as const) {
+      const result = await source.execute(name, args);
+      expect(result).toMatchObject({
+        ok: false,
+        error: "Long-term memory is temporarily unavailable",
+      });
+      expect(JSON.stringify(result)).not.toContain("9281");
+    }
+  });
+
   it("does not crash when nothing is configured and says why", async () => {
     delete process.env.EMBEDDING_MODEL;
     const service = new SemanticMemoryService(

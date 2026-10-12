@@ -192,7 +192,7 @@ export class OmniRouteMemory implements SemanticBackend {
   async remove(id: string): Promise<{ ok: true }> {
     if (!validMemoryId(id)) throw new Error("Invalid memory ID");
     const row = await this.get(id);
-    if (!this.owned(row)) throw new Error("Memory is not owned by Jarvis");
+    if (!this.owned(row)) throw new Error("Memory is not owned by NOVA");
     await this.client.request(`/api/memory/${id}`, { method: "DELETE" });
     return { ok: true };
   }
