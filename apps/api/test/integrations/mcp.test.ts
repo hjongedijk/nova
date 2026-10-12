@@ -559,7 +559,7 @@ describe("MCP hub", () => {
       {
         environment: () => ({}),
         environmentFor: () => ({
-          GITHUB_REPOSITORY_OWNER: "techlepp",
+          GITHUB_REPOSITORY_OWNER: "example-owner",
           GITHUB_REPOSITORY_NAME: "nova",
         }),
         redactSecrets: (value: string) =>
@@ -582,12 +582,12 @@ describe("MCP hub", () => {
     });
     expect(
       await hub.execute("mcp_github_list_issues", {
-        owner: "techlepp",
+        owner: "example-owner",
         repo: "nova",
       }),
     ).toMatchObject({
       ok: true,
-      result: expect.stringContaining("techlepp/nova [redacted]"),
+      result: expect.stringContaining("example-owner/nova [redacted]"),
     });
     expect(hub.activity("github").events[0]?.kind).toBe("tool_succeeded");
   });

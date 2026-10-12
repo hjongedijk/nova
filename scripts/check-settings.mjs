@@ -5160,18 +5160,20 @@ try {
       .getByRole("listitem")
       .filter({ hasText: /^github/ });
     await github.getByRole("button", { name: "Koppeling instellen" }).click();
-    await github.getByLabel("GitHub-gebruiker of organisatie").fill("techlepp");
+    await github
+      .getByLabel("GitHub-gebruiker of organisatie")
+      .fill("example-owner");
     await github.getByLabel("Repository").fill("nova");
     await github
       .getByLabel("Fijnmazige read-only token")
       .fill("github_pat_fixture_not_real");
     await github.getByRole("button", { name: "Opslaan" }).click();
     await github.getByText("ingesteld", { exact: true }).first().waitFor();
-    assert.match(await github.innerText(), /techlepp/);
+    assert.match(await github.innerText(), /example-owner/);
     assert.match(await github.innerText(), /nova/);
     assert.equal(mcpSecretWrites, 2);
     assert.deepEqual(mcpSecretValues, {
-      GITHUB_REPOSITORY_OWNER: "techlepp",
+      GITHUB_REPOSITORY_OWNER: "example-owner",
       GITHUB_REPOSITORY_NAME: "nova",
       GITHUB_PERSONAL_ACCESS_TOKEN: "github_pat_fixture_not_real",
     });

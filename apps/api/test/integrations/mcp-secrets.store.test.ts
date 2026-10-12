@@ -84,12 +84,12 @@ describe("MCP private configuration", () => {
       "deployment-token-must-not-be-used";
     try {
       store.save("github", {
-        GITHUB_REPOSITORY_OWNER: "techlepp",
+        GITHUB_REPOSITORY_OWNER: "example-owner",
         GITHUB_REPOSITORY_NAME: "nova",
         GITHUB_PERSONAL_ACCESS_TOKEN: "github_pat_personal_secret",
       });
       expect(store.environmentFor("github")).toEqual({
-        GITHUB_REPOSITORY_OWNER: "techlepp",
+        GITHUB_REPOSITORY_OWNER: "example-owner",
         GITHUB_REPOSITORY_NAME: "nova",
         GITHUB_PERSONAL_ACCESS_TOKEN: "github_pat_personal_secret",
       });
@@ -97,7 +97,7 @@ describe("MCP private configuration", () => {
         {
           key: "GITHUB_REPOSITORY_OWNER",
           configured: true,
-          value: "techlepp",
+          value: "example-owner",
         },
         {
           key: "GITHUB_REPOSITORY_NAME",
@@ -131,14 +131,14 @@ describe("MCP private configuration", () => {
     const { store } = fixture();
     expect(() =>
       store.save("github", {
-        GITHUB_REPOSITORY_OWNER: "techlepp",
+        GITHUB_REPOSITORY_OWNER: "example-owner",
         GITHUB_REPOSITORY_NAME: "nova",
         GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_classic_token",
       }),
     ).toThrow("fijnmazige");
     expect(() =>
       store.save("github", {
-        GITHUB_REPOSITORY_OWNER: "techlepp",
+        GITHUB_REPOSITORY_OWNER: "example-owner",
         GITHUB_REPOSITORY_NAME: "nova/other",
         GITHUB_PERSONAL_ACCESS_TOKEN: "github_pat_secret",
       }),
