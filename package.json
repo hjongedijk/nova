@@ -25,6 +25,7 @@
     "test:code-sandbox": "node scripts/test-code-sandbox.mjs",
     "test:code-sandbox:runtime": "node scripts/test-code-sandbox-runtime.mjs",
     "check:code-workspace": "node scripts/check-code-workspace.mjs",
+    "check:privacy-screenshots": "node scripts/check-screenshot-privacy.mjs",
     "lint": "eslint .",
     "typecheck": "npm run typecheck -w @nova/contracts && npm run typecheck -w @nova/api && npm run check -w @nova/web",
     "format": "prettier --write .",

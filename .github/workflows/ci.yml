@@ -21,6 +21,8 @@ jobs:
       - run: npm test
       - run: npm test -w @nova/web
       - run: npm run build
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      - run: npm run check:privacy-screenshots
       - run: node scripts/check-nodered-flows.mjs
       - run: npm test --prefix deploy/nodered/node-red-contrib-nova
       - run: npm run test:nodered-seed
