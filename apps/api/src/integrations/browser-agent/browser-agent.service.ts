@@ -263,7 +263,12 @@ export class BrowserAgentService implements ToolSource {
     if (response.status !== 200 || ok !== true)
       return {
         ok: false,
-        error: rest.error || `Browser-agent fout (${response.status})`,
+        error: rest.risky
+          ? "Deze browseractie lijkt een aankoop, betaling of verwijdering en is geweigerd."
+          : response.status === 400 &&
+              rest.error === "Dat element bestaat niet meer."
+            ? "Dat element bestaat niet meer."
+            : `Browser-agent fout (${response.status})`,
         ...(rest.risky ? { risky: true } : {}),
       };
     return { ok: true, verified: null, result: rest };

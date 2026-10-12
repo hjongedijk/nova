@@ -3,23 +3,50 @@ import { PangolinService } from "../../src/integrations/pangolin/pangolin.servic
 import { call, fakeConfig, listen } from "./helpers.js";
 
 let fake: Awaited<ReturnType<typeof listen>>;
+let errorReply = false;
 beforeAll(async () => {
   fake = await listen((seen, send) =>
-    seen.url === "/org/home/sites"
-      ? send(200, {
-          data: {
-            sites: [
-              { id: "site-1", name: "vps", online: true },
-              { id: "site-2", name: "hidden", online: false },
-            ],
-          },
-        })
-      : send(404, {}),
+    errorReply
+      ? send(503, { message: "private-upstream-diagnostic-8293" })
+      : seen.url === "/org/home/sites"
+        ? send(200, {
+            data: {
+              sites: [
+                { id: "site-1", name: "vps", online: true },
+                { id: "site-2", name: "hidden", online: false },
+              ],
+            },
+          })
+        : send(404, {}),
   );
+});
+
+it("does not expose upstream error details through tool results", async () => {
+  const pangolin = new PangolinService(
+    fakeConfig({
+      pangolin: { url: fake.url, apiKey: "pk", orgId: "home" },
+    }),
+  );
+  errorReply = true;
+  try {
+    const sites = await pangolin.execute("pangolin_sites", {}, call());
+    const orgs = await pangolin.execute("pangolin_orgs", {}, call());
+    expect(sites).toMatchObject({
+      ok: false,
+      error: "Pangolin request failed. Check the connection and configuration.",
+    });
+    expect(orgs).toMatchObject({ ok: false, error: "Pangolin error (503)" });
+    expect(JSON.stringify([sites, orgs])).not.toContain(
+      "private-upstream-diagnostic-8293",
+    );
+  } finally {
+    errorReply = false;
+  }
 });
 afterAll(() => fake.close());
 
 it("sends the API key and Host override", async () => {
+  fake.requests.length = 0;
   const pangolin = new PangolinService(
     fakeConfig({
       pangolin: {

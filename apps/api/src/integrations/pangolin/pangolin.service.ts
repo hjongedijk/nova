@@ -166,11 +166,11 @@ export class PangolinService implements ToolSource {
             key,
           ),
         };
-      } catch (error) {
+      } catch {
         return {
           ok: false,
           error:
-            error instanceof Error ? error.message : "Pangolin request failed",
+            "Pangolin request failed. Check the connection and configuration.",
         };
       }
     }
@@ -189,7 +189,7 @@ export class PangolinService implements ToolSource {
     if (response.status !== 200)
       return {
         ok: false,
-        error: response.data?.message || `Pangolin error (${response.status})`,
+        error: `Pangolin error (${response.status})`,
       };
     return { ok: true, result: response.data?.data ?? response.data };
   }

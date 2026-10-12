@@ -128,7 +128,7 @@ describe("BrowserAgentService", () => {
     expect("confirmed" in click.parameters.properties).toBe(false);
   });
 
-  it("a refused risky click comes back flagged, with the agent's explanation", async () => {
+  it("a refused risky click stays flagged without exposing the agent's label", async () => {
     reply = () => ({
       status: 200,
       body: {
@@ -142,6 +142,7 @@ describe("BrowserAgentService", () => {
     expect(out.ok).toBe(false);
     expect(out.risky).toBe(true);
     expect(out.error).toMatch(/aankoop/);
+    expect(out.error).not.toContain("Koop nu");
   });
 
   it("failures are said in plain Dutch: offline PC, wrong token, agent error", async () => {
@@ -166,6 +167,15 @@ describe("BrowserAgentService", () => {
     expect(
       (await browser.execute("browser_click", { id: 1 }, call())).error,
     ).toBe("Dat element bestaat niet meer.");
+    reply = () => ({
+      status: 500,
+      body: { ok: false, error: "private-upstream-diagnostic-8293" },
+    });
+    const unexpected = await browser.execute("browser_read", {}, call());
+    expect(unexpected.error).toBe("Browser-agent fout (500)");
+    expect(JSON.stringify(unexpected)).not.toContain(
+      "private-upstream-diagnostic-8293",
+    );
     reply = () => ({ status: 502, body: null });
     expect((await browser.execute("browser_read", {}, call())).error).toMatch(
       /Browser-agent fout \(502\)/,
