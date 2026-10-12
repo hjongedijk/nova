@@ -42,11 +42,17 @@ export async function runSkill(
   } catch (error) {
     if (signal?.aborted || (error as Error)?.name === "AbortError")
       return { ok: false, error: "De aanroep duurde te lang." };
+    const message = (error as Error)?.message;
+    const safeMessage = [
+      "Dit adres hoort bij NOVA zelf en is geblokkeerd voor vaardigheden.",
+      "NOVA-beheerheaders zijn alleen voor het instellingenscherm.",
+      "De aanroep duurde te lang.",
+    ].includes(message)
+      ? message
+      : "De aanroep is mislukt. Controleer de verbinding en instellingen.";
     return {
       ok: false,
-      error: String(
-        (error as Error)?.message || "De aanroep is mislukt.",
-      ).slice(0, 200),
+      error: safeMessage,
     };
   }
   let data: unknown = null;

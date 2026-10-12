@@ -58,4 +58,16 @@ describe("settings screen credentials cannot become webhook tools", () => {
     expect(JSON.stringify(result)).not.toContain("private-admin-secret");
     expect(network).not.toHaveBeenCalled();
   });
+
+  it("does not return unexpected request diagnostics from a stored skill", async () => {
+    const skill = normalizeSkill(webhook());
+    if (skill.type !== "webhook") throw new Error("Expected webhook fixture");
+    skill.http.url = "https://[invalid-host?token=private-runtime-secret";
+    const result = await runSkill(skill, { actie: "open" });
+    expect(result).toMatchObject({
+      ok: false,
+      error: "De aanroep is mislukt. Controleer de verbinding en instellingen.",
+    });
+    expect(JSON.stringify(result)).not.toContain("private-runtime-secret");
+  });
 });
