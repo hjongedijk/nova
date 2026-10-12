@@ -47,8 +47,14 @@ describe("AlertsFeed presence delivery", () => {
     } as unknown as PlanningService);
     const start = new Date("2026-10-11T12:00:00.000Z");
     for (let index = 0; index < 5; index++)
-      feed.record(event, new Date(start.getTime() + index * 60_000));
-    feed.record(event, new Date(start.getTime() + 10 * 60_000));
+      feed.record(
+        { ...event, payload: { ...event.payload, title: `Melding ${index}` } },
+        new Date(start.getTime() + index * 60_000),
+      );
+    feed.record(
+      { ...event, payload: { ...event.payload, title: "Melding 5" } },
+      new Date(start.getTime() + 10 * 60_000),
+    );
 
     expect(feed.recent().events).toHaveLength(6);
     expect(
@@ -59,7 +65,10 @@ describe("AlertsFeed presence delivery", () => {
     ).toBe(true);
     expect(feed.recent().events[5]).toMatchObject({ speakAllowed: false });
 
-    feed.record(event, new Date(start.getTime() + 60 * 60_000));
+    feed.record(
+      { ...event, payload: { ...event.payload, title: "Melding 6" } },
+      new Date(start.getTime() + 60 * 60_000),
+    );
     expect(feed.recent().events[6]).toMatchObject({ speakAllowed: true });
   });
 
@@ -99,12 +108,18 @@ describe("AlertsFeed presence delivery", () => {
     expect(notifyHelper).not.toHaveBeenCalled();
 
     warningMode = "helper";
-    const helper = feed.record(event);
+    const helper = feed.record({
+      ...event,
+      payload: { ...event.payload, title: "Een tweede melding" },
+    });
     expect(helper?.speakAllowed).toBe(false);
     expect(notifyHelper).toHaveBeenCalledTimes(1);
 
     warningMode = "speak";
-    const speech = feed.record(event);
+    const speech = feed.record({
+      ...event,
+      payload: { ...event.payload, title: "Een derde melding" },
+    });
     expect(speech?.speakAllowed).toBe(true);
     expect(notifyHelper).toHaveBeenCalledTimes(2);
   });
@@ -173,5 +188,59 @@ describe("AlertsFeed presence delivery", () => {
     expect(ntfy.notify).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Kritiek", severity: "critical" }),
     );
+  });
+
+  it("bundles repeating non-critical alerts without muting critical alerts or timers", () => {
+    const notifyHelper = vi.fn(async () => ({
+      ok: true as const,
+      verified: null,
+      result: {},
+    }));
+    const windows = {
+      configured: true,
+      notifyHelper,
+    } as unknown as WindowsPcService;
+    const feed = new AlertsFeed(
+      { onEvent: () => () => undefined } as unknown as PlanningService,
+      windows,
+    );
+    const start = new Date("2026-10-11T12:00:00.000Z");
+    const first = feed.record(event, start);
+    const second = feed.record(event, new Date(start.getTime() + 60_000));
+    expect(second?.seq).toBe(first?.seq);
+    expect(feed.recent().events).toHaveLength(1);
+    const summary = feed.record(event, new Date(start.getTime() + 120_000));
+    expect(summary).toMatchObject({
+      title: "Regen komt eraan (3 keer in 10 minuten)",
+      speakAllowed: false,
+    });
+    expect(feed.recent(first!.seq).events).toEqual([summary]);
+    feed.record(event, new Date(start.getTime() + 180_000));
+    expect(feed.recent().events).toHaveLength(2);
+    expect(notifyHelper).toHaveBeenCalledTimes(2);
+    expect(notifyHelper).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ speakAllowed: false }),
+    );
+    const critical = {
+      ...event,
+      payload: { ...event.payload, severity: "critical" },
+    };
+    feed.record(critical, new Date(start.getTime() + 190_000));
+    feed.record(critical, new Date(start.getTime() + 200_000));
+    expect(feed.recent().events).toHaveLength(4);
+    const timer: InfrastructureEvent = {
+      topic: "jarvis/events/timer",
+      payload: { type: "timer_fired", label: "Eten" },
+    };
+    feed.record(timer, new Date(start.getTime() + 210_000));
+    feed.record(timer, new Date(start.getTime() + 220_000));
+    expect(feed.recent().events).toHaveLength(6);
+    const afterWindow = feed.record(
+      event,
+      new Date(start.getTime() + 11 * 60_000),
+    );
+    expect(afterWindow?.title).toBe("Regen komt eraan");
+    expect(feed.recent().events).toHaveLength(7);
   });
 });

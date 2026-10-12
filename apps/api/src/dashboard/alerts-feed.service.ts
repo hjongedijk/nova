@@ -20,6 +20,8 @@ const SEVERITIES = new Set(["info", "warning", "critical"]);
 const MAX_EVENTS = 50;
 const MAX_SPOKEN_EVENTS_PER_HOUR = 5;
 const SPOKEN_EVENT_WINDOW_MS = 60 * 60_000;
+const REPEAT_WINDOW_MS = 10 * 60_000;
+const MAX_REPEAT_KEYS = 100;
 
 const text = (value: unknown, max: number) =>
   typeof value === "string" ? sanitize(value).slice(0, max) : "";
@@ -73,6 +75,10 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   private sequence = 0;
   private stop?: () => void;
   private readonly spokenEventTimes: number[] = [];
+  private readonly repeats = new Map<
+    string,
+    { firstAt: number; count: number; last: FeedEvent }
+  >();
 
   constructor(
     private readonly planning: PlanningService,
@@ -91,8 +97,9 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   }
 
   record(event: InfrastructureEvent, now = new Date()): FeedEvent | null {
-    const entry = toFeedEvent(event);
+    const entry = toFeedEvent(event, now);
     if (!entry) return null;
+    const timestamp = now.getTime();
     const notifications = this.settings?.get().helperPreferences.notifications;
     const category =
       entry.kind === "timer"
@@ -102,8 +109,41 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
           : entry.severity;
     const mode =
       notifications?.[category] ?? (category === "info" ? "helper" : "speak");
+    if (entry.kind === "alert" && entry.severity !== "critical") {
+      for (const [key, value] of this.repeats)
+        if (
+          timestamp - value.firstAt >= REPEAT_WINDOW_MS ||
+          timestamp < value.firstAt
+        )
+          this.repeats.delete(key);
+      const key = JSON.stringify([
+        entry.severity,
+        entry.key,
+        entry.title,
+        entry.detail,
+      ]);
+      const repeated = this.repeats.get(key);
+      if (repeated) {
+        repeated.count++;
+        if (repeated.count !== 3) return repeated.last;
+        const summary: FeedEvent = {
+          ...entry,
+          seq: ++this.sequence,
+          title: `${entry.title} (3 keer in 10 minuten)`,
+          detail:
+            "Herhaalde melding gebundeld; volgende herhalingen blijven stil.",
+          at: now.toISOString(),
+          speakAllowed: false,
+        };
+        repeated.last = summary;
+        this.feed.push(summary);
+        if (this.feed.length > MAX_EVENTS) this.feed.shift();
+        if (mode !== "screen" && this.windows?.configured)
+          void this.windows.notifyHelper(summary).catch(() => undefined);
+        return summary;
+      }
+    }
     const voiceEligible = mode === "speak";
-    const timestamp = now.getTime();
     while (
       this.spokenEventTimes[0] !== undefined &&
       timestamp - this.spokenEventTimes[0] >= SPOKEN_EVENT_WINDOW_MS
@@ -124,6 +164,14 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     };
     this.feed.push(stored);
     if (this.feed.length > MAX_EVENTS) this.feed.shift();
+    if (entry.kind === "alert" && entry.severity !== "critical") {
+      if (this.repeats.size >= MAX_REPEAT_KEYS)
+        this.repeats.delete(this.repeats.keys().next().value!);
+      this.repeats.set(
+        JSON.stringify([entry.severity, entry.key, entry.title, entry.detail]),
+        { firstAt: timestamp, count: 1, last: stored },
+      );
+    }
     if (mode !== "screen" && this.windows?.configured)
       void this.windows.notifyHelper(stored).catch(() => undefined);
     if (stored.kind === "alert" && stored.severity === "critical")
