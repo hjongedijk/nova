@@ -311,3 +311,28 @@ describe("reviewed MCP catalog management", () => {
     ).toBe(false);
   });
 });
+
+it("reads the image catalog without granting write access outside the data directory", () => {
+  const f = fixture();
+  fs.writeFileSync(
+    path.join(f.root, "mcp-servers.json"),
+    JSON.stringify({
+      servers: { context7: reviewedMcpServerSpec("context7") },
+    }),
+  );
+  const service = new McpManagement(
+    {
+      dataDir: path.join(f.root, "private"),
+      mcpConfig: path.join(f.root, "mcp-servers.json"),
+    } as NovaConfig,
+    {} as McpHub,
+    {} as ConfirmationsService,
+    {} as AuditService,
+  );
+  expect(service.catalog()).toEqual({
+    installed: ["context7"],
+    editable: false,
+    available: [],
+  });
+  expect(() => service.prepareCatalog("context7", "remove")).toThrow();
+});

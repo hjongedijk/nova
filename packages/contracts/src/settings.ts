@@ -768,6 +768,7 @@ export interface McpServerStatus {
 }
 
 export interface McpServerCatalog {
+  editable?: boolean;
   installed: string[];
   available: { id: string; description: string; rights: string; risk: Risk }[];
 }

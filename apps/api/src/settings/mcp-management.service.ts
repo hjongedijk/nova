@@ -12,7 +12,7 @@ import {
   reviewedMcpCatalog,
   reviewedMcpServerSpec,
 } from "../integrations/mcp/reviewed-mcp-servers.js";
-import { RISKS } from "../integrations/mcp/mcp-config.js";
+import { readMcpServers, RISKS } from "../integrations/mcp/mcp-config.js";
 import type { Risk } from "@nova/contracts";
 
 type Draft = {
@@ -106,15 +106,18 @@ export class McpManagement {
   }
 
   catalog() {
-    const { data } = this.read();
-    const installed = Object.entries(data.servers)
+    const servers = this.editable
+      ? this.read().data.servers
+      : readMcpServers(this.file);
+    const installed = Object.entries(servers)
       .filter(([id, spec]) => isReviewedMcpServer(id, spec as never))
       .map(([id]) => id)
       .sort();
     const installedSet = new Set(installed);
     return {
       installed,
-      available: reviewedMcpCatalog().filter(
+      ...(this.editable ? {} : { editable: false }),
+      available: (this.editable ? reviewedMcpCatalog() : []).filter(
         (entry) => !installedSet.has(entry.id),
       ),
     };

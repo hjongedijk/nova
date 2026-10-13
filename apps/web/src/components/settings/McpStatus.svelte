@@ -318,6 +318,10 @@
   >
   {#if error}<p role="alert">{error}</p>{/if}
   {#if report}
+    {#if catalog?.editable === false}<p class="hint">
+        De meegeleverde MCP-catalogus is alleen-lezen. Verbindingsstatus blijft
+        beschikbaar.
+      </p>{/if}
     {#if report.workers}
       <section class="mcp-workers" aria-label="MCP-workers">
         <h3>Geïsoleerde MCP-workers</h3>
@@ -423,7 +427,7 @@
               disabled={busy || activityBusy !== null}
               >{server.enabled ? "Uitschakelen" : "Inschakelen"}</Button
             >
-            {#if catalog?.installed.includes(server.id)}
+            {#if catalog?.editable !== false && catalog?.installed.includes(server.id)}
               <Button
                 onclick={() => changeCatalog(server.id, "remove")}
                 disabled={busy || activityBusy !== null}

@@ -1,4 +1,5 @@
-import { Controller, Get, Query, UseGuards } from "@nestjs/common";
+import { Controller, Get, Query, Res, UseGuards } from "@nestjs/common";
+import type { Response } from "express";
 import { SettingsGuard } from "./settings.guard.js";
 import { WorkspaceCodeService } from "./workspace-code.service.js";
 
@@ -18,7 +19,8 @@ export class WorkspaceCodeController {
   }
 
   @Get("latest-run")
-  latestRun() {
-    return this.code.latestRunReport();
+  latestRun(@Res() response: Response) {
+    // Nest otherwise sends an empty body for null, which is not JSON null.
+    response.json(this.code.latestRunReport());
   }
 }

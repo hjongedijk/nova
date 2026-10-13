@@ -370,14 +370,24 @@ export const getWorkspaceCodeFile = (path: string) =>
   read<{ path: string; bytes: number; sha256: string; content: string }>(
     `/workspace/code/file?path=${enc(path)}`,
   );
-export const getWorkspaceCodeRun = () =>
-  read<{
+export const getWorkspaceCodeRun = async () => {
+  const value = await read<{
     projectId: string;
     command: string[];
     output: string;
     exitCode: number | null;
     durationMs: number;
   } | null>("/workspace/code/latest-run");
+  // Older servers returned an empty HTTP body, parsed as {} by the shared client.
+  if (value === null || (value && Object.keys(value).length === 0)) return null;
+  if (
+    !value ||
+    !Array.isArray(value.command) ||
+    value.command.some((part) => typeof part !== "string")
+  )
+    throw new Error("Testuitvoer is niet beschikbaar. Probeer opnieuw.");
+  return value;
+};
 export const getUpdates = () => read<UpdateReport>("/updates");
 export const checkUpdates = () => write<UpdateReport>("POST", "/updates/check");
 

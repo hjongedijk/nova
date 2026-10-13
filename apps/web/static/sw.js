@@ -1,6 +1,6 @@
 /* NOVA service worker: lets the app install and open when the network is slow.
    Live data and the API are never cached. */
-const CACHE = "nova-shell-v1";
+const CACHE = "nova-shell-v2";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png"];
 
 self.addEventListener("install", (event) => {
@@ -33,10 +33,16 @@ self.addEventListener("fetch", (event) => {
         if (
           response.ok &&
           (request.mode === "navigate" || SHELL.includes(url.pathname))
-        )
-          caches
-            .open(CACHE)
-            .then((cache) => cache.put(request, response.clone()));
+        ) {
+          // Clone before returning the response: the page can consume its body immediately.
+          const copy = response.clone();
+          event.waitUntil(
+            caches
+              .open(CACHE)
+              .then((cache) => cache.put(request, copy))
+              .catch(() => {}),
+          );
+        }
         return response;
       })
       .catch(() =>
