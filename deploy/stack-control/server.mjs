@@ -11,6 +11,7 @@ export const STACK_SERVICES = Object.freeze({
   omniroute: "nova-omniroute",
   mqtt: "nova-mqtt",
   qdrant: "nova-qdrant",
+  piper: "nova-piper",
   "home-assistant": "nova-home-assistant",
   "mcp-egress": "nova-mcp-egress",
 });

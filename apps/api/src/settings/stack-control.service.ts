@@ -18,6 +18,7 @@ const labels: Record<StackServiceId, string> = {
   omniroute: "OmniRoute",
   mqtt: "MQTT",
   qdrant: "Qdrant",
+  piper: "Lokale stem",
   "home-assistant": "Home Assistant",
   "mcp-egress": "MCP-bronverbinding",
   "stack-control": "Stackbeheer",

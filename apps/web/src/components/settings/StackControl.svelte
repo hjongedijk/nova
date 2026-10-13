@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import Button from "#components/ui/Button.svelte";
   import type {
     StackControlStatus,
     StackRestartPrepared,
@@ -116,9 +117,9 @@
     die service en afhankelijke functies tijdelijk onbereikbaar maken. Elke
     herstart vraagt een verse DANGEROUS-bevestiging.
   </p>
-  <button type="button" onclick={load} disabled={busy !== ""}>
+  <Button type="button" onclick={load} disabled={busy !== ""}>
     {busy === "load" ? "Status laden…" : "Containerstatus vernieuwen"}
-  </button>
+  </Button>
   {#if error}<p role="alert" class="connection-failed">{error}</p>{/if}
   {#if status?.reason}<p role="status" class="connection-pending">
       {status.reason}
@@ -130,7 +131,7 @@
           <strong>{service.label}</strong> — {stateLabel(
             service.state,
           )}{service.health ? `, healthcheck ${service.health}` : ""}
-          {#if service.canRestart}<button
+          {#if service.canRestart}<Button
               type="button"
               disabled={!status.available ||
                 service.state !== "running" ||
@@ -138,7 +139,7 @@
               onclick={() => prepare(service.id)}
               >{busy === service.id
                 ? "Bezig…"
-                : `${service.label} herstarten`}</button
+                : `${service.label} herstarten`}</Button
             >{:else}<span>Wordt via de Compose-beheerder bijgewerkt.</span>{/if}
         </li>
       {/each}
@@ -151,20 +152,20 @@
         functies kunnen kort uitvallen. NOVA controleerde de actuele status; de
         aanvraag verloopt na 60 seconden.
       </p>
-      <button
+      <Button
         type="button"
         disabled={busy !== ""}
         onclick={() => confirm(true)}
       >
         Bevestig herstart
-      </button>
-      <button
+      </Button>
+      <Button
         type="button"
         disabled={busy !== ""}
         onclick={() => confirm(false)}
       >
         Annuleren
-      </button>
+      </Button>
     </div>
   {/if}
 </section>

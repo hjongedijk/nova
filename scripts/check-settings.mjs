@@ -1045,6 +1045,7 @@ try {
             ["omniroute", "OmniRoute"],
             ["mqtt", "MQTT"],
             ["qdrant", "Qdrant"],
+            ["piper", "Lokale stem"],
             ["home-assistant", "Home Assistant"],
             ["stack-control", "Stackbeheer"],
           ].map(([id, label]) => ({
@@ -5162,6 +5163,7 @@ try {
       .click();
     const stack = page.getByRole("region", { name: "Containerstatus" });
     await stack.getByText("Qdrant — actief", { exact: false }).waitFor();
+    await stack.getByText("Lokale stem — actief", { exact: false }).waitFor();
     await stack.getByRole("button", { name: "Qdrant herstarten" }).click();
     await stack.getByRole("button", { name: "Bevestig herstart" }).click();
     assert.equal(stackRestartPrepares, 1);

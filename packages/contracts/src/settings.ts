@@ -913,6 +913,7 @@ export interface ServiceRestartResult {
   scheduled?: boolean;
 }
 export type StackServiceId =
+  | "piper"
   | "nova"
   | "node-red"
   | "omniroute"

@@ -10,6 +10,7 @@ const services = [
   ["omniroute", "OmniRoute"],
   ["mqtt", "MQTT"],
   ["qdrant", "Qdrant"],
+  ["piper", "Lokale stem"],
   ["home-assistant", "Home Assistant"],
   ["mcp-egress", "MCP-bronverbinding"],
   ["stack-control", "Stackbeheer"],
@@ -81,6 +82,37 @@ describe("StackControlService", () => {
     expect(await service.status()).toMatchObject({
       available: false,
       services: [],
+    });
+  });
+
+  it("shows an absent optional voice service and prepares its restart only when running", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({
+        services: services.map((row) =>
+          row.id === "piper" ? { ...row, state: "missing", health: null } : row,
+        ),
+      }),
+    );
+    const status = await service.status();
+    expect(status.available).toBe(true);
+    expect(status.services.find((row) => row.id === "piper")).toMatchObject({
+      label: "Lokale stem",
+      state: "missing",
+    });
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({
+        services: services.map((row) =>
+          row.id === "piper" ? { ...row, state: "missing", health: null } : row,
+        ),
+      }),
+    );
+    expect(await service.prepareRestart("piper")).toMatchObject({ ok: false });
+    expect(confirmations.create).not.toHaveBeenCalled();
+    const prepared = await service.prepareRestart("piper");
+    expect(prepared).toMatchObject({
+      ok: true,
+      service: "piper",
+      label: "Lokale stem",
     });
   });
 
