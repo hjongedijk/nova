@@ -74,6 +74,7 @@ beforeAll(async () => {
           upid: "UPID:private-host:secret",
         },
         { type: "vzdump", status: "OK", starttime: 125 },
+        { type: "privateSecretType123", status: "OK", starttime: 126 },
       ];
     else {
       actions.push({ url, method: req.method });
@@ -190,8 +191,12 @@ describe("ProxmoxSource", () => {
           starttime: 125,
           endtime: undefined,
         },
+        { type: "other", status: "OK", starttime: 126, endtime: undefined },
       ],
     });
+    expect(JSON.stringify((await run("proxmox_tasks")).result)).not.toContain(
+      "privateSecretType123",
+    );
   });
 
   it("uses the fixed action path for both guest types and verifies the result", async () => {

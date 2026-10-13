@@ -50,11 +50,22 @@ export interface ProxmoxTaskView {
   endtime?: number;
 }
 
+const SAFE_TASK_TYPES = new Set([
+  "qmstart",
+  "qmstop",
+  "qmshutdown",
+  "qmreboot",
+  "pctstart",
+  "pctstop",
+  "pctshutdown",
+  "vzdump",
+]);
+
 function taskView(value: unknown): ProxmoxTaskView | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const task = value as Record<string, unknown>;
   const type =
-    typeof task.type === "string" && /^[a-z0-9_-]{1,40}$/i.test(task.type)
+    typeof task.type === "string" && SAFE_TASK_TYPES.has(task.type)
       ? task.type
       : "other";
   const time = (value: unknown) =>
