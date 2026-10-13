@@ -11,6 +11,7 @@
     type FocusStatus,
   } from "#lib/api/shell.ts";
   import { showToast } from "#lib/stores/toasts.svelte.ts";
+  import { cooking } from "#lib/cooking/session.svelte.ts";
 
   let { element = $bindable() }: { element?: HTMLElement } = $props();
   let focus: FocusStatus | null = $state(null);
@@ -105,6 +106,13 @@
     role="menuitem"
     type="button"
     onclick={() => (dialogs.admin = true)}>Status &amp; geheugen</button
+  >
+  <hr />
+  <button
+    class="menu-item"
+    role="menuitem"
+    type="button"
+    onclick={() => (cooking.open = true)}>Kookmodus</button
   >
   <hr />
   {#if focus?.active}

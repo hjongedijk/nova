@@ -14,6 +14,7 @@
 | [Document library](document-library.md)             | Explicit file indexing and private Qdrant search                                              |
 | [Image understanding](image-understanding.md)       | Photo uploads, free vision routing and privacy                                                |
 | [Planning lists](planning-lists.md)                 | Local lists and synchronized Home Assistant to-do entities                                    |
+| [Cooking mode](cooking-mode.md)                     | Read recipe steps aloud, voice step controls, and planner timers                              |
 | [Music and media](media-control.md)                 | Home Assistant and Music Assistant playback, volume, and confirmation rules                   |
 | [Web research](research.md)                         | Multi-step source research, citations, and uncertainty                                        |
 | [Node-RED routines](node-red-routines.md)           | Personal daily reminder routines and their safety boundaries                                  |

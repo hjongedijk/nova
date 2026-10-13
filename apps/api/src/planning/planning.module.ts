@@ -4,6 +4,7 @@ import { JarvisStateStore } from "./jarvis-state.store.js";
 import { PlanningService } from "./planning.service.js";
 import { PlanningSource } from "./planning.source.js";
 import { CalDavService } from "./caldav.service.js";
+import { CookingController } from "./cooking.controller.js";
 import { HomeModule } from "../home/home.module.js";
 
 /**
@@ -12,6 +13,7 @@ import { HomeModule } from "../home/home.module.js";
  */
 @Module({
   imports: [ProxmoxModule, HomeModule],
+  controllers: [CookingController],
   providers: [JarvisStateStore, PlanningService, PlanningSource, CalDavService],
   exports: [PlanningService, JarvisStateStore, CalDavService],
 })

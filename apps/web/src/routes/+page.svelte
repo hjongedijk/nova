@@ -4,6 +4,7 @@
   import AdminDialog from "#components/admin/AdminDialog.svelte";
   import Column from "#components/hud/Column.svelte";
   import Composer from "#components/shell/Composer.svelte";
+  import CookingMode from "#components/shell/CookingMode.svelte";
   import WorkspaceCodePanel from "#components/shell/WorkspaceCodePanel.svelte";
   import Entity from "#components/shell/Entity.svelte";
   import Header from "#components/shell/Header.svelte";
@@ -98,5 +99,6 @@
   <SettingsDialog />
   <AdminDialog />
   <WorkspaceCodePanel />
+  <CookingMode />
 {/if}
 <AccessGate />

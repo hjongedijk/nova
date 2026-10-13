@@ -24,6 +24,7 @@ import { showStage } from "./stage.ts";
 import { nextToolInterjection } from "./tool-interjection.ts";
 import { readCommunicationPreferences } from "./communication-preferences.ts";
 import { friendlyChatError } from "./error-copy.ts";
+import { handleCookingCommand } from "#lib/cooking/session.svelte.ts";
 
 // A few words about what NOVA is doing, so a long task never looks stuck.
 const TOOL_HINTS: [RegExp, { nl: string; en: string }][] = [
@@ -93,6 +94,7 @@ export async function ask(
     raw.trim() ||
     (attachments.length ? "Bekijk de bijgevoegde bestanden." : "");
   if (!text || chat.busy) return false;
+  if (!attachments.length && handleCookingCommand(text)) return true;
 
   stopSpeaking();
   chat.model = "";
