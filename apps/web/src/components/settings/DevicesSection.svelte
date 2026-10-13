@@ -46,11 +46,11 @@
   $effect(() => {
     getWallpaper().then(
       (data) => (wallpaper = data),
-      (error: unknown) =>
+      () =>
         (wallpaper = {
           available: false,
           reason: "unreachable",
-          error: error instanceof Error ? error.message : undefined,
+          error: "De pc-instellingen zijn nu niet bereikbaar.",
         }),
     );
   });

@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { PublicWidget } from "@nova/contracts";
-  import { ApiError } from "#lib/api/client.ts";
   import { pressWidgetButton } from "#lib/api/widgets.ts";
   import { ask } from "#lib/stores/chat.svelte.ts";
   import { showChrome } from "#lib/stores/chrome.svelte.ts";
@@ -38,14 +37,11 @@
           detail: result.message,
         });
       }
-    } catch (error) {
+    } catch {
       showToast({
         severity: "warning",
         title: "Deze knop werkt niet",
-        detail:
-          error instanceof ApiError || error instanceof Error
-            ? error.message
-            : "Dat is niet gelukt.",
+        detail: "Dat is niet gelukt.",
       });
     } finally {
       pressing = null;
