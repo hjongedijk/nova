@@ -3,7 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import http from "node:http";
+import crypto from "node:crypto";
+import { once } from "node:events";
+import { ReadBuffer } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import { createMcpSandbox } from "../deploy/stack-control/mcp-sandbox.mjs";
+import { createMcpUpgradeHandler } from "../deploy/stack-control/mcp-stream.mjs";
 import { dockerRequest } from "../deploy/stack-control/server.mjs";
 
 // Reuse a cached NOVA image. This gate never changes the running stack or pulls an image.
@@ -65,9 +70,113 @@ function stdoutFrames(bytes) {
 
 const sandbox = createMcpSandbox({ docker, workspaceRoot });
 let containerId;
+let stream;
+const token = crypto.randomBytes(32).toString("hex");
+const server = http.createServer();
+const bridge = createMcpUpgradeHandler({
+  sandbox: {
+    prepare: async (input) => {
+      const prepared = await sandbox.prepare(input);
+      containerId = prepared.containerId;
+      return prepared;
+    },
+    close: (id) => sandbox.close(id),
+  },
+  docker,
+  authorized: (request) => request.headers.authorization === `Bearer ${token}`,
+});
+server.on("upgrade", bridge);
 try {
-  ({ containerId } = await sandbox.prepare({ server: "sequential-thinking" }));
-  await dockerRequest(`/containers/${containerId}/start`, "POST");
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  await new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: "127.0.0.1",
+      port: server.address().port,
+      path: "/mcp/offline?server=sequential-thinking",
+      headers: {
+        authorization: `Bearer ${token}`,
+        connection: "Upgrade",
+        upgrade: "nova-mcp",
+      },
+    });
+    const timeout = setTimeout(() => {
+      request.destroy();
+      reject(new Error("MCP broker runtime handshake timed out"));
+    }, 25_000);
+    const fail = () => {
+      clearTimeout(timeout);
+      reject(new Error("MCP broker runtime handshake failed"));
+    };
+    request.on("error", fail);
+    request.on("response", (response) => {
+      response.resume();
+      fail();
+    });
+    request.on("upgrade", (response, socket, head) => {
+      stream = socket;
+      if (
+        response.statusCode !== 101 ||
+        response.headers.upgrade !== "nova-mcp"
+      ) {
+        socket.destroy();
+        fail();
+        return;
+      }
+      const buffer = new ReadBuffer();
+      const receive = (chunk) => {
+        try {
+          buffer.append(chunk);
+          let message;
+          while ((message = buffer.readMessage()) !== null) {
+            if (message.id === 1) {
+              assert.ok(message.result?.serverInfo);
+              socket.write(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  method: "notifications/initialized",
+                }) + "\n",
+              );
+              socket.write(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: 2,
+                  method: "tools/list",
+                  params: {},
+                }) + "\n",
+              );
+            } else if (message.id === 2) {
+              assert.ok(
+                message.result?.tools?.some(
+                  (tool) => tool.name === "sequentialthinking",
+                ),
+              );
+              clearTimeout(timeout);
+              resolve();
+            }
+          }
+        } catch {
+          fail();
+        }
+      };
+      socket.on("error", fail);
+      socket.on("data", receive);
+      if (head.length) receive(head);
+      socket.write(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: { name: "nova-runtime-test", version: "1" },
+          },
+        }) + "\n",
+      );
+    });
+    request.end();
+  });
   const probe = `
     const fs = require('node:fs');
     const net = require('node:net');
@@ -146,8 +255,12 @@ try {
     providerConnection: false,
     mcpHandshake: true,
   });
-  console.log("Real MCP handshake and offline container isolation passed.");
+  console.log(
+    "Real broker stream, MCP handshake and offline container isolation passed.",
+  );
 } finally {
+  stream?.destroy();
+  await new Promise((resolve) => server.close(resolve));
   if (containerId) await sandbox.close(containerId);
   fs.rmSync(dataRoot, { recursive: true, force: true });
 }

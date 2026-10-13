@@ -3,6 +3,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { WorkspaceProjects } from "./workspace-projects.service.js";
+import { NovaConfig } from "../core/config/nova-config.js";
+import { SandboxMcpTransport } from "../integrations/mcp/sandbox-transport.js";
 
 const ALLOWED_TOOLS = new Set([
   "git_status",
@@ -20,7 +22,10 @@ const REVIEWED_PYTHON = "/opt/git-mcp/bin/python";
 /** Starts the pinned Git MCP server for one project, with its repository root fixed at launch. */
 @Injectable()
 export class WorkspaceGitMcp {
-  constructor(private readonly projects: WorkspaceProjects) {}
+  constructor(
+    private readonly projects: WorkspaceProjects,
+    private readonly config: NovaConfig,
+  ) {}
 
   async call(
     projectId: string,
@@ -34,21 +39,35 @@ export class WorkspaceGitMcp {
       throw new ValidationError(["Het actieve project is gewijzigd."]);
     const repoPath = this.projects.projectDirectory(projectId);
     const client = new Client({ name: "nova-workspace-git", version: "1.0.0" });
-    const transport = new StdioClientTransport({
-      command: REVIEWED_PYTHON,
-      args: ["-m", "mcp_server_git", "--repository", repoPath],
-      env: {
-        PATH: process.env.PATH ?? "/usr/bin:/bin",
-        HOME: "/tmp",
-        PYTHONNOUSERSITE: "1",
-        PYTHONDONTWRITEBYTECODE: "1",
-      },
-      stderr: "ignore",
-    });
+    const isolated = process.env.NODE_ENV !== "test";
+    const transport = isolated
+      ? new SandboxMcpTransport(
+          this.config.stackControlUrl,
+          this.config.stackControlToken,
+          "workspace-git",
+          projectId,
+        )
+      : new StdioClientTransport({
+          command: REVIEWED_PYTHON,
+          args: ["-m", "mcp_server_git", "--repository", repoPath],
+          env: {
+            PATH: process.env.PATH ?? "/usr/bin:/bin",
+            HOME: "/tmp",
+            PYTHONNOUSERSITE: "1",
+            PYTHONDONTWRITEBYTECODE: "1",
+          },
+          stderr: "ignore",
+        });
     try {
       await client.connect(transport, { timeout: TIMEOUT_MS });
       const result = await client.callTool(
-        { name: tool, arguments: { ...args, repo_path: repoPath } },
+        {
+          name: tool,
+          arguments: {
+            ...args,
+            repo_path: isolated ? `/data/workspace/${projectId}` : repoPath,
+          },
+        },
         undefined,
         { timeout: TIMEOUT_MS },
       );

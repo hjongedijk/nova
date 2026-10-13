@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Test } from "@nestjs/testing";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SandboxMcpTransport } from "../../src/integrations/mcp/sandbox-transport.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { ToolsModule } from "../../src/tools/tools.module.js";
 import { ToolsService } from "../../src/tools/tools.service.js";
@@ -57,6 +59,49 @@ describe("MCP hub", () => {
     await hub.sync();
     return hub;
   };
+
+  it("routes reviewed offline servers through the isolated broker in production", async () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    const connect = vi
+      .spyOn(Client.prototype, "connect")
+      .mockResolvedValue(undefined);
+    const tools = vi
+      .spyOn(Client.prototype, "listTools")
+      .mockResolvedValue({ tools: [] });
+    const hub = new McpHub(
+      {
+        mcpConfig: configFile(
+          {
+            "sequential-thinking": {
+              ...reviewedMcpServerSpec("sequential-thinking"),
+              enabled: true,
+            },
+            filesystem: {
+              ...reviewedMcpServerSpec("filesystem"),
+              enabled: true,
+            },
+          },
+          "offline-isolation.json",
+        ),
+        stackControlUrl: "http://broker:8090",
+        stackControlToken: "a".repeat(64),
+      } as NovaConfig,
+      { environment: () => ({}) } as never,
+    );
+    try {
+      await hub.sync();
+      expect(connect).toHaveBeenCalledTimes(2);
+      for (const [transport] of connect.mock.calls)
+        expect(transport).toBeInstanceOf(SandboxMcpTransport);
+    } finally {
+      await hub.stop();
+      connect.mockRestore();
+      tools.mockRestore();
+      if (previous === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previous;
+    }
+  });
 
   it("allows only exact, source-reviewed server identities in production", async () => {
     expect(

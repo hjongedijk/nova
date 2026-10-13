@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import http from "node:http";
 import { URL } from "node:url";
 import { createCodeSandbox } from "./code-sandbox.mjs";
+import { createMcpSandbox } from "./mcp-sandbox.mjs";
+import { createMcpUpgradeHandler } from "./mcp-stream.mjs";
 
 export const STACK_SERVICES = Object.freeze({
   nova: "nova",
@@ -125,7 +127,7 @@ export function createStackControlServer({
     };
   };
 
-  return http.createServer(async (request, response) => {
+  const server = http.createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://stack-control");
     if (request.method === "GET" && url.pathname === "/health") {
       send(response, 200, { ok: true });
@@ -225,9 +227,30 @@ export function createStackControlServer({
       send(response, 503, { error: "stack control unavailable" });
     }
   });
+  const mcp = createMcpUpgradeHandler({
+    sandbox: createMcpSandbox({ docker, workspaceRoot }),
+    docker,
+    authorized,
+  });
+  server.on("upgrade", mcp);
+  server.closeMcpSessions = () => mcp.shutdown();
+  server.on("close", () => {
+    void mcp.shutdown().catch(() => {});
+  });
+  return server;
 }
 
 if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
   const server = createStackControlServer();
+  const shutdown = () => {
+    void server
+      .closeMcpSessions()
+      .catch(() => {
+        console.warn("MCP sandbox cleanup failed during shutdown");
+      })
+      .finally(() => server.close(() => process.exit(0)));
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
   server.listen(Number(process.env.PORT ?? 8090), "0.0.0.0");
 }

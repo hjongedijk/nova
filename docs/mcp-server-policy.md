@@ -10,6 +10,16 @@ Commands, image, environment, mounts and network policy are constructed by the t
 The container has no external network, capabilities or credentials; its root is readonly and its
 memory, CPU and process count are bounded. Git can read only its selected project. Filesystem access
 stays confined to the configured workspace. Creation precedes transport attachment and start.
+Outside fixture tests, NOVA's sequential-thinking, filesystem and workspace Git clients use this
+broker transport. It requires the private `NOVA_STACK_CONTROL_URL` and a 64-character hex
+`NOVA_STACK_CONTROL_TOKEN`; the official Compose configuration shares that token with stack-control.
+A missing or unavailable broker leaves these tools unavailable rather than starting an unrestricted
+process. Git tool arguments are fixed to the selected project's path inside the container.
+
+The authenticated upgrade stream forwards stdout JSON lines and discards stderr. Both directions
+have message limits; sessions expire after 30 minutes and reconnect through the normal MCP lifecycle.
+Disconnects remove the owned container. Cleanup retries are bounded, and graceful broker shutdown
+closes active streams and waits for cleanup. Failed removals retain their runner capacity reservation.
 
 Run `npm run test:mcp-sandbox` for policy and lifecycle tests. Run
 `npm run test:mcp-sandbox:runtime` to use the already cached image of the running `nova` container,
@@ -17,9 +27,9 @@ or set `NOVA_MCP_SANDBOX_TEST_IMAGE` to another cached NOVA image. The runtime g
 workspace and container; it neither pulls images nor edits the running stack. It checks a real MCP
 initialization alongside failed direct internet/provider connections and then removes the container.
 
-This runner is not yet integrated with the application's MCP transports. It does not prove that
-production MCP processes are isolated. Both launch paths and the destination-bound relay for
-network servers still need implementation and end-to-end proof before L1.2 can be completed.
+Network MCP servers still use the direct stdio path. The destination-bound relay and its end-to-end
+proof remain unfinished, so L1.2 is open. The running production image also needs an approved release
+and deployment before it receives the offline transport; repository tests do not prove that rollout.
 
 ## Admission checks
 

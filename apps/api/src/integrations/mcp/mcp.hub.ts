@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { SandboxMcpTransport } from "./sandbox-transport.js";
 import type { ArgumentSchema, Risk } from "@nova/contracts";
 import { Ajv } from "ajv";
 import { randomUUID } from "node:crypto";
@@ -341,12 +342,20 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
     if (resolved.missing)
       throw new Error(`missing ${resolved.missing.join(", ")}`);
     const client = new Client({ name: "nova", version: "1.0.0" });
-    const transport = new StdioClientTransport({
-      command: spec.command,
-      args: spec.args ?? [],
-      env: resolved.env,
-      stderr: "ignore",
-    });
+    const transport =
+      process.env.NODE_ENV !== "test" &&
+      (id === "sequential-thinking" || id === "filesystem")
+        ? new SandboxMcpTransport(
+            this.config.stackControlUrl,
+            this.config.stackControlToken,
+            id,
+          )
+        : new StdioClientTransport({
+            command: spec.command,
+            args: spec.args ?? [],
+            env: resolved.env,
+            stderr: "ignore",
+          });
     transport.onclose = () => this.drop(id, client);
     try {
       await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
