@@ -6,6 +6,7 @@ Do not record credentials, personal messages or actual deployment configuration 
 
 ## Current work
 
+- F6 follow-up: Node-RED flow HTTP-2xx error envelopes no longer project raw diagnostics to model/chat; tool and Home Assistant sync logs use fixed text. Focused API tests, typecheck and lint pass. Other free-form integration fields remain open.
 - I10 is partial: separate opt-in, fixed birthday/New Year copy, once-a-day 0600 progress, focus/quiet/presence gating. No memory-derived birthday, durable question milestone or live speech proof yet. Focused dashboard/settings tests and typechecks pass.
 - I9 one-way room-light sync is locally complete: explicit per-browser opt-in and area choice, read-only bounded Home Assistant color projection, idle orb hue with original fallback, no lamp writes. API home tests and web store tests cover bounds, opt-in and revoked requests; physical lamp appearance remains unverified.
 - F6 follow-up: memory constructor errors and webhook HTTP-200 error envelopes now have fixed public failures; common Node-RED diagnostic payloads are replaced before alert delivery. Custom flow text remains a potential source of unexpected diagnostics, so F6 is still open. I13 exact local phrases animate the helper orb and speak short replies without calling a model. Focused API/web tests, typechecks and scoped lint pass; production audio is untested.

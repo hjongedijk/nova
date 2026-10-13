@@ -327,7 +327,17 @@ export class NodeRedFlowSource implements ToolSource {
           maxResponseBytes: 16_384,
         },
       );
-      const accepted = response.status >= 200 && response.status < 300;
+      const accepted =
+        response.status >= 200 &&
+        response.status < 300 &&
+        !(
+          response.data !== null &&
+          typeof response.data === "object" &&
+          !Array.isArray(response.data) &&
+          ((response.data as { ok?: unknown }).ok === false ||
+            (response.data as { success?: unknown }).success === false ||
+            Object.hasOwn(response.data, "error"))
+        );
       const result =
         accepted && response.data !== null
           ? sanitize(JSON.stringify(response.data)).slice(0, 8192)
