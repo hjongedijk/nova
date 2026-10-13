@@ -13,12 +13,13 @@ import type {
 import { NovaConfig } from "../core/config/nova-config.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingService } from "../routing/routing.service.js";
-import { messageOf, type SemanticBackend } from "./semantic/backend.js";
+import type { SemanticBackend } from "./semantic/backend.js";
 import type { CandidateMetadata } from "./semantic/candidate.js";
 import { OmniRouteMemory } from "./semantic/omniroute.backend.js";
 import { QdrantMemory, RemoteEmbeddings } from "./semantic/qdrant.backend.js";
 
 const DAY = 86_400_000;
+const MEMORY_UNAVAILABLE = "Geheugen is tijdelijk niet beschikbaar.";
 
 function publicMemoryHealth(health: MemoryHealth): MemoryHealth {
   const error =
@@ -117,7 +118,12 @@ export class SemanticMemoryService implements OnModuleInit, OnModuleDestroy {
           }),
         });
       } catch (error) {
-        this.qdrantBackend = new UnavailableMemory(messageOf(error));
+        this.qdrantBackend = new UnavailableMemory(
+          error instanceof Error &&
+            error.message === "Invalid memory collection"
+            ? "Invalid memory collection"
+            : MEMORY_UNAVAILABLE,
+        );
       }
     }
     return this.qdrantBackend;

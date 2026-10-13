@@ -637,6 +637,26 @@ describe("SemanticMemoryService and MemorySource", () => {
     );
   });
 
+  it("does not expose a constructor exception through memory results", async () => {
+    const diagnostic = "private-data-path?token=private-value";
+    const config = new NovaConfig();
+    const management = new OmniRouteManagement(config);
+    const routing = new RoutingService(config);
+    vi.spyOn(config, "dataFile").mockImplementation(() => {
+      throw new Error(diagnostic);
+    });
+    const service = new SemanticMemoryService(config, management, routing);
+    const listed = await service.list();
+    const written = await service.write("Onthoud mijn voorkeur is koffie");
+    const health = await service.health();
+    expect(listed.unavailable).toBe("Geheugen is tijdelijk niet beschikbaar.");
+    expect(written.error).toBe("Geheugen is tijdelijk niet beschikbaar.");
+    expect(health.error).toBe("Geheugen is tijdelijk niet beschikbaar.");
+    expect(JSON.stringify({ listed, written, health })).not.toContain(
+      diagnostic,
+    );
+  });
+
   it("never exposes upstream memory diagnostics in health reports", async () => {
     process.env.NOVA_MEMORY_BACKEND = "qdrant";
     const config = new NovaConfig();
