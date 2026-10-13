@@ -70,7 +70,16 @@ export class PlanningService implements OnModuleInit, OnModuleDestroy {
     const state = this.store.data;
     const due = state.timers.filter((timer) => timer.fireAt <= now);
     if (!due.length) return;
-    state.timers = state.timers.filter((timer) => timer.fireAt > now);
+    try {
+      this.store.transaction((candidate) => {
+        candidate.timers = candidate.timers.filter(
+          (timer) => timer.fireAt > now,
+        );
+      });
+    } catch {
+      // Retain due timers for the next pump; announce only persisted removals.
+      return;
+    }
     for (const timer of due)
       this.store.emit({
         topic: "jarvis/events/timer",
@@ -82,7 +91,6 @@ export class PlanningService implements OnModuleInit, OnModuleDestroy {
           late: now - timer.fireAt > 5000,
         },
       });
-    this.store.save();
   }
 
   setTimer(args: { seconds?: number; at?: string; label?: string }) {
@@ -116,9 +124,10 @@ export class PlanningService implements OnModuleInit, OnModuleDestroy {
       fireAt,
       createdAt: Date.now(),
     };
-    state.timers.push(timer);
-    state.timers.sort((a, b) => a.fireAt - b.fireAt);
-    this.store.save();
+    this.store.transaction((candidate) => {
+      candidate.timers.push(timer);
+      candidate.timers.sort((a, b) => a.fireAt - b.fireAt);
+    });
     return { timer: describeTimer(timer) };
   }
 
@@ -136,15 +145,17 @@ export class PlanningService implements OnModuleInit, OnModuleDestroy {
         `Meerdere timers passen: ${matches.map((timer) => timer.label).join(", ")}. Welke bedoel je?`,
       );
     const [match] = matches as [StoredTimer];
-    state.timers = state.timers.filter((timer) => timer !== match);
-    this.store.save();
+    const index = state.timers.indexOf(match);
+    this.store.transaction((candidate) => {
+      candidate.timers = candidate.timers.filter((_, at) => at !== index);
+    });
     return { cancelled: describeTimer(match) };
   }
 
   addItem(listName: string, item: string) {
     const state = this.store.data;
     const key = listKey(listName);
-    const items = (state.lists[key] ||= []);
+    const items = state.lists[key] || [];
     if (
       items.some(
         (entry) => entry.text.toLowerCase() === item.trim().toLowerCase(),
@@ -157,13 +168,15 @@ export class PlanningService implements OnModuleInit, OnModuleDestroy {
         count: items.length,
       };
     if (items.length >= MAX_LIST_ITEMS) throw new Error("Die lijst is vol.");
-    items.push({
+    const entry: StoredListItem = {
       id: newId(),
       text: item.trim(),
       addedAt: new Date().toISOString(),
+    };
+    this.store.transaction((candidate) => {
+      (candidate.lists[key] ||= []).push(entry);
     });
-    this.store.save();
-    return { list: key, added: true, count: items.length };
+    return { list: key, added: true, count: items.length + 1 };
   }
 
   showList(listName?: string) {
@@ -201,10 +214,12 @@ export class PlanningService implements OnModuleInit, OnModuleDestroy {
         `Meerdere items passen: ${matches.map((entry) => entry.text).join(", ")}. Welke bedoel je?`,
       );
     const [match] = matches as [StoredListItem];
-    const left = items.filter((entry) => entry !== match);
-    if (left.length) state.lists[key] = left;
-    else delete state.lists[key];
-    this.store.save();
+    const index = items.indexOf(match);
+    this.store.transaction((candidate) => {
+      const left = candidate.lists[key]!.filter((_, at) => at !== index);
+      if (left.length) candidate.lists[key] = left;
+      else delete candidate.lists[key];
+    });
     return { list: key, removed: match.text };
   }
 
@@ -212,8 +227,9 @@ export class PlanningService implements OnModuleInit, OnModuleDestroy {
     const state = this.store.data;
     const key = listKey(listName);
     const count = (state.lists[key] || []).length;
-    delete state.lists[key];
-    this.store.save();
+    this.store.transaction((candidate) => {
+      delete candidate.lists[key];
+    });
     return { list: key, cleared: count };
   }
 }

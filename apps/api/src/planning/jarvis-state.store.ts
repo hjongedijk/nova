@@ -90,12 +90,44 @@ export class JarvisStateStore {
   }
 
   save(): void {
-    const tmp = `${this.file}.${process.pid}.tmp`;
     try {
-      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 1));
-      fs.renameSync(tmp, this.file);
+      this.persist(this.data);
+    } catch {
+      // Checks still mutate the shared state directly and use best-effort saving.
+    }
+  }
+
+  /** Commit planning changes only after the private candidate is persisted. */
+  transaction(
+    mutate: (candidate: Pick<JarvisState, "timers" | "lists">) => void,
+  ): void {
+    const state = this.data;
+    const candidate = structuredClone(state);
+    mutate(candidate);
+    this.persist(candidate);
+    // Watchdog rounds hold this root and system objects across asynchronous probes.
+    state.timers = candidate.timers;
+    state.lists = candidate.lists;
+  }
+
+  private persist(state: JarvisState): void {
+    const temporary = `${this.file}.${process.pid}.tmp`;
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      fs.writeFileSync(temporary, JSON.stringify(state, null, 1), {
+        mode: 0o600,
+      });
+      fs.chmodSync(temporary, 0o600);
+      fs.renameSync(temporary, this.file);
     } catch {
       this.log.warn("Could not save planning state");
+      throw new Error("Could not save planning state");
+    } finally {
+      try {
+        fs.rmSync(temporary, { force: true });
+      } catch {
+        // Cleanup must not mask a failed write or undo a successful commit.
+      }
     }
   }
 
@@ -106,19 +138,9 @@ export class JarvisStateStore {
 
   /** Replace lists atomically without touching timers, alerts or watchdog state. */
   replaceLists(lists: Record<string, StoredListItem[]>): void {
-    const next = { ...this.data, lists: structuredClone(lists) };
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const temporary = `${this.file}.${process.pid}.tmp`;
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(next, null, 1), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      fs.renameSync(temporary, this.file);
-      this.state = next;
-    } finally {
-      fs.rmSync(temporary, { force: true });
-    }
+    this.transaction((candidate) => {
+      candidate.lists = structuredClone(lists);
+    });
   }
 
   /** Forget the in-memory copy; the next read loads the file again (a restart, in tests). */

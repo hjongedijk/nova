@@ -78,6 +78,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -365,6 +366,94 @@ describe("tools", () => {
       entity_id: "todo.boodschappen",
       item: "ha-1",
     });
+  });
+});
+
+describe("planning persistence failures", () => {
+  const mutations = [
+    ["timer_set", { seconds: 120, label: "new timer" }],
+    ["timer_cancel", { label: "existing timer" }],
+    ["list_add", { list: "new list", item: "new item" }],
+    ["list_remove", { list: "existing list", item: "existing item" }],
+    ["list_clear", { list: "existing list" }],
+  ] as const;
+
+  for (const operation of ["writeFileSync", "renameSync"] as const) {
+    it.each(mutations)(
+      `refuses %s without changing stored or visible state when ${operation} fails`,
+      async (tool, args) => {
+        await run("timer_set", { seconds: 60, label: "existing timer" });
+        await run("list_add", { list: "existing list", item: "existing item" });
+        const before = structuredClone(store.data);
+        const persisted = fs.readFileSync(store.file, "utf8");
+        const failure = vi.spyOn(fs, operation).mockImplementation(() => {
+          throw new Error("ENOSPC private-path-and-credential-fixture");
+        });
+
+        const result = await run(tool, args);
+
+        expect(result).toMatchObject({
+          ok: false,
+          error: "De planningactie is mislukt. Probeer het opnieuw.",
+        });
+        expect(store.data).toEqual(before);
+        expect(fs.readFileSync(store.file, "utf8")).toBe(persisted);
+        expect(events).toEqual([]);
+        expect(
+          fs.readdirSync(dir).filter((name) => name.endsWith(".tmp")),
+        ).toEqual([]);
+        failure.mockRestore();
+        expect(await run(tool, args)).toMatchObject({ ok: true });
+        store.reload();
+        expect(store.data).not.toEqual(before);
+      },
+    );
+
+    it(`retries timer expiry once after ${operation} recovers, without premature events`, () => {
+      vi.useFakeTimers();
+      planning.setTimer({ seconds: 2, label: "persist first" });
+      const before = structuredClone(store.data);
+      const persisted = fs.readFileSync(store.file, "utf8");
+      const failure = vi.spyOn(fs, operation).mockImplementation(() => {
+        throw new Error("ENOSPC private-expiry-path-fixture");
+      });
+      planning.onModuleInit();
+      try {
+        expect(() => vi.advanceTimersByTime(4000)).not.toThrow();
+        expect(events).toEqual([]);
+        expect(store.data).toEqual(before);
+        expect(fs.readFileSync(store.file, "utf8")).toBe(persisted);
+        failure.mockRestore();
+        vi.advanceTimersByTime(1000);
+        expect(events).toHaveLength(1);
+        expect(events[0]?.payload).toMatchObject({
+          type: "timer_fired",
+          label: "persist first",
+        });
+        expect(store.data.timers).toEqual([]);
+        store.reload();
+        vi.advanceTimersByTime(1000);
+        expect(events).toHaveLength(1);
+        expect(store.data.timers).toEqual([]);
+      } finally {
+        planning.onModuleDestroy();
+      }
+    });
+  }
+
+  it("preserves watchdog references while committing planning data", () => {
+    const root = store.data;
+    const { alerts, active, watch } = root;
+    planning.setTimer({ seconds: 60 });
+    planning.addItem("tasks", "test");
+    expect(store.data).toBe(root);
+    expect(store.data.alerts).toBe(alerts);
+    expect(store.data.active).toBe(active);
+    expect(store.data.watch).toBe(watch);
+    watch.down.example = 123;
+    store.save();
+    store.reload();
+    expect(store.data.watch.down.example).toBe(123);
   });
 });
 
