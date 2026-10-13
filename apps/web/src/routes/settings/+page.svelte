@@ -1,6 +1,7 @@
 <script lang="ts">
   import ToolUsage from "#components/settings/ToolUsage.svelte";
   import WorkspaceProjects from "#components/settings/WorkspaceProjects.svelte";
+  import StackControl from "#components/settings/StackControl.svelte";
   import McpStatus from "#components/settings/McpStatus.svelte";
   import FreePolicyWizard from "#components/settings/FreePolicyWizard.svelte";
   import InstallationWizard from "#components/settings/InstallationWizard.svelte";
@@ -9,7 +10,6 @@
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import ConnectionsSection from "#components/settings/ConnectionsSection.svelte";
-  import YoutubeCaptionsConnection from "#components/settings/YoutubeCaptionsConnection.svelte";
   import ConnectionHistory from "#components/settings/ConnectionHistory.svelte";
   import HelperPreferencesHistory from "#components/settings/HelperPreferencesHistory.svelte";
   import ToolSwitchHistory from "#components/settings/ToolSwitchHistory.svelte";
@@ -42,6 +42,8 @@
     SECTIONS,
     settingsSection,
     searchSettings,
+    SETTINGS_GROUPS,
+    FREQUENT_SECTIONS,
   } from "#components/settings/sections.ts";
   import { getPin, setPin } from "#lib/api/settings.ts";
   import "#lib/chat/ask.ts";
@@ -111,22 +113,54 @@
           bind:value={query}
         />
       </form>
+      <label class="settings-mobile-label" for="settingsSection">Ga naar</label>
+      <select
+        class="settings-mobile-select"
+        id="settingsSection"
+        value={section}
+        onchange={(event) =>
+          void goto(`/settings?section=${event.currentTarget.value}`)}
+      >
+        {#each SETTINGS_GROUPS as group (group.name)}
+          <optgroup label={group.name}>
+            {#each SECTIONS.filter((item) => FREQUENT_SECTIONS.has(item.id) === group.frequent) as item (item.id)}
+              <option value={item.id}>{item.name}</option>
+            {/each}
+          </optgroup>
+        {/each}
+      </select>
       <nav aria-label="Instellingen">
-        {#each matches as item (item.id)}
-          <a
-            href="/settings?section={item.id}"
-            aria-current={section === item.id ? "page" : undefined}
-            >{item.name}</a
-          >
-        {:else}<p role="status">
+        {#each SETTINGS_GROUPS as group (group.name)}
+          {@const items = matches.filter(
+            (item) => FREQUENT_SECTIONS.has(item.id) === group.frequent,
+          )}
+          {#if items.length}
+            <div class="settings-nav-group">
+              <h2>{query.trim() ? "Zoekresultaten" : group.name}</h2>
+              {#each items as item (item.id)}
+                <a
+                  href="/settings?section={item.id}"
+                  aria-current={section === item.id ? "page" : undefined}
+                  >{item.name}</a
+                >
+              {/each}
+            </div>
+          {/if}
+        {/each}
+        {#if !matches.length}<p role="status">
             Geen instelling gevonden. Probeer een ander woord.
-          </p>{/each}
+          </p>{/if}
       </nav>
     </aside>
     <main class="settings-content" id="settingsBody">
       <h1>{current.name}</h1>
       <p class="settings-intro">{current.detail}</p>
-      <div id="settingsMessage" role="status" class={message.kind}>
+      <div
+        id="settingsMessage"
+        role="status"
+        class={message.kind}
+        hidden={!message.text}
+      >
         {message.text}
         {#if message.details.length}<ul>
             {#each message.details as detail (detail)}<li>{detail}</li>{/each}
@@ -192,6 +226,9 @@
             <AdminDialog embedded initialView="providers" />
             <h2>OmniRoute</h2>
             <AdminDialog embedded initialView="gateway" />
+          {:else if section === "services"}
+            <StackControl />
+            <McpStatus />
           {:else if section === "connections"}
             <ConnectionsSection
               ids={[
@@ -204,7 +241,6 @@
                 "pangolin",
               ]}
             />
-            <YoutubeCaptionsConnection />
             <McpStatus />
             <AdminDialog embedded initialView="integrations" />
           {:else if section === "devices"}<ConnectionsSection
@@ -228,19 +264,8 @@
             <BackupSection />
             <h2 id="actielog">Actielog</h2>
             <AdminDialog embedded initialView="audit" />
-          {:else}
-            <section class="settings-notice">
-              <h2>Node-RED</h2>
-              <p>
-                Onder Koppelingen kun je de Node-RED-verbinding controleren en
-                de flowlijst alleen-lezen bekijken. Flows starten, wijzigen en
-                importeren volgt later; bestaande automatiseringen blijven
-                werken.
-              </p>
-              <a href="/settings?section=connections"
-                >Bekijk de verbindingsstatus</a
-              >
-            </section>
+          {:else if section === "automation"}
+            <ConnectionsSection ids={["node-red"]} />
           {/if}
         {/key}
       {:else}

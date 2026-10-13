@@ -52,8 +52,16 @@ export const SECTIONS = [
   {
     id: "automation",
     name: "Automatisering",
-    detail: "Node-RED wordt hier beheerd zodra de nieuwe koppeling klaar is.",
+    detail:
+      "Bekijk je Node-RED-flows, beheer routines en herstel eerdere versies.",
     keywords: "flows nodes node-red planning routines",
+  },
+  {
+    id: "services",
+    name: "MCP en services",
+    detail:
+      "Status van achtergrondservices, MCP-servers en hun gereedschappen.",
+    keywords: "workers containers broker verbinding services mcp server status",
   },
   {
     id: "connections",
@@ -94,6 +102,21 @@ export const SECTIONS = [
 ] as const;
 
 export type SettingsSection = (typeof SECTIONS)[number]["id"];
+
+/** Everyday preferences stay separate from service and administration settings. */
+export const FREQUENT_SECTIONS: ReadonlySet<SettingsSection> = new Set([
+  "general",
+  "voice",
+  "personality",
+  "devices",
+  "memory",
+  "documents",
+  "automation",
+]);
+export const SETTINGS_GROUPS = [
+  { name: "Dagelijks gebruik", frequent: true },
+  { name: "Geavanceerd en beheer", frequent: false },
+] as const;
 
 export function settingsSection(value: string | null): SettingsSection {
   const legacy: Record<string, SettingsSection> = {

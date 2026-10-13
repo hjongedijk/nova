@@ -266,8 +266,6 @@ try {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     let pinned = false;
-    let youtubeOAuthConfigured = false;
-    let youtubeOAuthWrites = 0;
     const services = structuredClone(initialServices);
     let tested = false;
     let mqttReads = 0;
@@ -3337,24 +3335,7 @@ try {
         data = { ok: true, skill: structuredClone(overview.skills[0]) };
       } else if (endpoint === "/settings/services/history")
         data = { revisions: [] };
-      else if (endpoint === "/settings/youtube/oauth/status") {
-        data = {
-          configured: youtubeOAuthConfigured,
-          connected: false,
-          callbackUrl:
-            "https://nova.example.com/api/settings/youtube/oauth/callback",
-        };
-      } else if (endpoint === "/settings/youtube/oauth/config") {
-        assert.equal(request.postDataJSON().clientSecret, "GOCSPX-test-secret");
-        youtubeOAuthConfigured = true;
-        youtubeOAuthWrites++;
-        data = {
-          configured: true,
-          connected: false,
-          callbackUrl:
-            "https://nova.example.com/api/settings/youtube/oauth/callback",
-        };
-      } else if (
+      else if (
         endpoint.endsWith("/test") &&
         endpoint.startsWith("/settings/services/")
       ) {
@@ -5888,31 +5869,6 @@ try {
     await wallpaperHistoryPanel.locator("ol li").waitFor();
     assert.equal(wallpaperHistoryWrites, 1);
     await page.goto(`${base}/settings?section=connections`);
-    const youtubeCaptions = page.getByRole("region", {
-      name: "YouTube-ondertitels",
-    });
-    await youtubeCaptions
-      .getByText("https://nova.example.com/api/settings/youtube/oauth/callback")
-      .waitFor();
-    await youtubeCaptions
-      .getByLabel("OAuth-client-ID")
-      .fill("123456789012-abcdef.apps.googleusercontent.com");
-    await youtubeCaptions
-      .getByLabel("OAuth-clientgeheim")
-      .fill("GOCSPX-test-secret");
-    await youtubeCaptions
-      .getByRole("button", { name: "Client opslaan" })
-      .click();
-    await youtubeCaptions.getByText(/OAuth-client lokaal opgeslagen/).waitFor();
-    assert.equal(youtubeOAuthWrites, 1);
-    assert.equal(
-      await youtubeCaptions.getByLabel("OAuth-clientgeheim").inputValue(),
-      "",
-    );
-    assert.equal(
-      (await youtubeCaptions.innerText()).includes("GOCSPX-test-secret"),
-      false,
-    );
     await page.getByRole("button", { name: "Doelen laden" }).click();
     await page.getByText(/guest-one/).waitFor();
     await page.getByText(/tunnel/).waitFor();

@@ -164,26 +164,6 @@ const write = <T>(
 
 const enc = encodeURIComponent;
 
-export interface YoutubeOAuthStatus {
-  configured: boolean;
-  connected: boolean;
-  callbackUrl: string | null;
-}
-export const getYoutubeOAuthStatus = () =>
-  read<YoutubeOAuthStatus>("/youtube/oauth/status");
-export const saveYoutubeOAuthClient = (
-  clientId: string,
-  clientSecret: string,
-) =>
-  write<YoutubeOAuthStatus>("POST", "/youtube/oauth/config", {
-    clientId,
-    clientSecret,
-  });
-export const startYoutubeOAuth = () =>
-  write<{ authorizationUrl: string }>("POST", "/youtube/oauth/start", {});
-export const disconnectYoutubeOAuth = () =>
-  write<YoutubeOAuthStatus>("POST", "/youtube/oauth/disconnect", {});
-
 export const getSettings = () => read<SettingsOverview>("");
 export const getNativeGateway = () =>
   read<NativeGatewayReport>("/omniroute/native");

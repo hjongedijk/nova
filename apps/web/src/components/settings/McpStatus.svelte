@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type {
     McpServerActivity,
     McpServerCatalog,
@@ -47,6 +48,10 @@
       busy = false;
     }
   }
+
+  onMount(() => {
+    void load();
+  });
 
   async function loadActivity(id: string) {
     activityBusy = id;
@@ -283,7 +288,7 @@
     })[kind];
 </script>
 
-<section class="settings-notice" aria-label="MCP-servers">
+<section class="settings-notice" id="mcp-status" aria-label="MCP-servers">
   <h2>MCP-servers</h2>
   <p>
     Verbindingsstatus en gereedschapaantal zijn zichtbaar. Activiteit wordt op

@@ -903,13 +903,25 @@
       use:openForFlowLink={service.id === "node-red" &&
         Boolean(selectedNodeRedFlowId)}
     >
-      <summary
-        ><strong>{service.label}</strong><span
-          >{service.restartRequired
+      <summary>
+        <strong>{service.label}</strong>
+        <span
+          class="connection-status"
+          class:pending={service.restartRequired}
+          class:healthy={!service.restartRequired &&
+            tests[service.id]?.ok === true}
+          class:failed={!service.restartRequired &&
+            tests[service.id]?.ok === false}
+        >
+          {service.restartRequired
             ? "Herstart nodig"
-            : "Bekijk of wijzig"}</span
-        ></summary
-      >
+            : tests[service.id]
+              ? tests[service.id]!.ok
+                ? "Bereikbaar"
+                : "Controle mislukt"
+              : "Niet getest"}
+        </span>
+      </summary>
       {#if service.id === "omniroute"}
         <p class="hint">
           Een ander gateway-adres vraagt een nieuwe gratis-route-controle. Tot
@@ -1497,6 +1509,21 @@
   .connection-editor button:disabled {
     opacity: 0.6;
     cursor: wait;
+  }
+  .connection-status {
+    border: 1px solid var(--line);
+    padding: 3px 9px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .connection-editor summary .healthy {
+    color: var(--good);
+  }
+  .connection-editor summary .failed {
+    color: var(--alert);
+  }
+  .connection-editor summary .pending {
+    color: var(--amber);
   }
   .connection-pending {
     color: var(--amber);

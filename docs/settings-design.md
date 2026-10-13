@@ -1,61 +1,11 @@
 # Settings workspace
 
-The settings page is a quiet control surface for NOVA, sharing the helper's opaque navy palette.
-The sidebar carries navigation; the content carries the current job. Existing editors keep their semantics.
+The settings workspace keeps NOVA's navy palette and Sora type. Everyday preferences and service administration have separate navigation groups. Stable section URLs and search continue to reach every editor; mobile adds a native grouped section selector and bounds navigation height so the editor stays reachable.
 
-## Design plan and review
+Palette: background `#081421`, control surface `#112338`, text `#e8f0f8`, secondary text `#a3b7cc`, border `#2c4258`, action accent `#91d7f7`. Status colors distinguish success (`#85d7bb`), pending restart (`#f3cf88`) and failed checks (`#ffa083`). Status labels describe verified checks rather than assuming that stored configuration means a working connection.
 
-- Base `#081421`, controls `#112338`, rules `#2c4258`, text `#e8f0f8`, secondary `#a3b7cc`, focus `#91d7f7`.
-- Sora with Segoe UI/system fallbacks; headings 25–34 px, body 15 px, navigation 13–15 px.
-- Desktop: header, 260 px sidebar, left-aligned content with bounded line lengths. Mobile: search and wrapping section links above a single column.
-- No decorative motion, repeated card kit or external imagery. Sharp boundaries represent navigation and editable controls.
-- Review fixed a CSS specificity conflict that left embedded status reports in the old modal's purple background and frame.
+The settings page retains existing state, PIN expiry, admin headers, secret replacement, confirmations and save handlers. Buttons keep a 44-pixel minimum target; keyboard focus and reduced motion remain supported. Empty notifications are hidden. Node-RED's existing flow editor now also appears in Automatisering, replacing an obsolete placeholder.
 
-## Routes and compatibility
+MCP en services provides a direct route to existing stack and MCP status. MCP status loads on opening the section, while activity and history remain explicit read-only requests. YouTube subtitle UI and its frontend OAuth API helpers have been removed.
 
-`/settings?section=<id>` provides twelve stable deep links. The shared catalogue in
-`apps/web/src/components/settings/sections.ts` drives both navigation and search. Enter opens the first match.
-Unknown IDs fall back to General. Older `behavior`, `sidebar`, `more` names retain meaningful destinations.
-Home-menu settings calls redirect through the existing dialog store; the original admin modal remains available.
-Node-RED flow editing is explicitly pending phase C/J4, while existing automations remain unaffected.
-
-Settings storage and API ownership stay unchanged. Before the first overview of an existing installation,
-NOVA keeps `settings.json.before-settings-page-v1` locally at mode 0600. The snapshot includes private skill headers,
-is never exported and is never overwritten. A UI rollback can use the previous release without transforming data.
-To restore the snapshot, stop NOVA and replace `settings.json` with the snapshot, retaining its permissions.
-The import roundtrip also preserves existing persona/actions/tools/skills/widgets/sidebar IDs and values.
-
-The Models section also exposes an explicit native OmniRoute overview: NOVA/global skill metadata, separate documentation and gateway prompt status. It performs no installation or execution.
-
-## Proof
-
-`scripts/check-settings.mjs` uses fixtures only and checks every section at desktop 1x/2x and 390 px mobile,
-search, keyboard Enter navigation, deep links, saving, PIN expiry, explicit lock, private model metrics and an explicit release check. Set `NOVA_SETTINGS_TEST_URL`
-to the local production preview to check its built assets. API tests cover preservation, null defaults,
-snapshot protection/permissions and PIN throttling.
-
-| View            | Desktop 1x                               | Desktop 2x                               | Mobile                                       |
-| --------------- | ---------------------------------------- | ---------------------------------------- | -------------------------------------------- |
-| General         | ![](img/settings-general-1x.png)         | ![](img/settings-general-2x.png)         | ![](img/settings-general-mobile.png)         |
-| Models          | ![](img/settings-models-1x.png)          | ![](img/settings-models-2x.png)          | ![](img/settings-models-mobile.png)          |
-| Native gateway  | ![](img/settings-native-1x.png)          | ![](img/settings-native-2x.png)          | ![](img/settings-native-mobile.png)          |
-| Devices         | ![](img/settings-devices-1x.png)         | ![](img/settings-devices-2x.png)         | ![](img/settings-devices-mobile.png)         |
-| System          | ![](img/settings-system-1x.png)          | ![](img/settings-system-2x.png)          | ![](img/settings-system-mobile.png)          |
-| Personality     | ![](img/settings-personality-1x.png)     | ![](img/settings-personality-2x.png)     | ![](img/settings-personality-mobile.png)     |
-| Helper history  | ![](img/settings-helper-history-1x.png)  | ![](img/settings-helper-history-2x.png)  | ![](img/settings-helper-history-mobile.png)  |
-| Tool history    | ![](img/settings-tool-history-1x.png)    | ![](img/settings-tool-history-2x.png)    | ![](img/settings-tool-history-mobile.png)    |
-| Sidebar history | ![](img/settings-sidebar-history-1x.png) | ![](img/settings-sidebar-history-2x.png) | ![](img/settings-sidebar-history-mobile.png) |
-| Backup import   | ![](img/settings-backup-confirm-1x.png)  | ![](img/settings-backup-confirm-2x.png)  | ![](img/settings-backup-confirm-mobile.png)  |
-
-No real phone or Windows-PC test has been performed for this settings transition. Connection editors, bounded adapters and connection history are now implemented.
-Onboarding, complete-system backups, service-specific controls and upstream account/model management remain later phase J work.
-
-The Connections section has expandable service editors, secret-presence flags, an unsaved-input
-test button and a saved-versus-running restart message. The System section provides selective
-nonsecret rollback. Screenshots use fixture credentials, never actual connections.
-
-Personality offers an explicitly loaded, PIN-protected history of user-authored behavior rules with conflict-checked rollback. The history stays in a private mode-0600 file, redacts credential-shaped strings, and does not enter audit contents.
-
-![](img/settings-connections-1x.png)
-![](img/settings-connections-2x.png)
-![](img/settings-connections-mobile.png)
+Verification: `scripts/check-settings.mjs` uses mocked endpoints to verify navigation, responsive overflow, saving, PIN expiry, secret clearing, confirmations and rollback at desktop 1×/2× and mobile. Screenshots in `docs/img/settings-*.png` are synthetic fixture data. No provider credentials or live settings are changed by that browser gate.
