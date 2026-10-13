@@ -15,6 +15,14 @@ export function friendlyChatError(
     return language === "en"
       ? "NOVA has no available free AI route right now. Check the model settings."
       : "NOVA heeft nu geen beschikbare gratis AI-route. Controleer de modelinstellingen.";
+  if (
+    /response.*interrupted|antwoord.*onderbroken|stream.*before completion/.test(
+      message,
+    )
+  )
+    return language === "en"
+      ? "The AI response was interrupted. Please retry your question."
+      : "Het AI-antwoord is onderbroken. Probeer je vraag opnieuw.";
   if (/already active|al actief|session.*busy/.test(message))
     return language === "en"
       ? "A reply is already in progress in this chat. Wait a moment and try again."

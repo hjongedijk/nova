@@ -26,6 +26,19 @@ describe("friendly chat errors", () => {
     }
   });
 
+  it.each([
+    "AI response interrupted before completion",
+    "The AI response was interrupted.",
+    "Het AI-antwoord is onderbroken.",
+  ])("keeps interruption copy and retry instruction: %s", (message) => {
+    expect(friendlyChatError(message, "en")).toBe(
+      "The AI response was interrupted. Please retry your question.",
+    );
+    expect(friendlyChatError(message, "nl")).toBe(
+      "Het AI-antwoord is onderbroken. Probeer je vraag opnieuw.",
+    );
+  });
+
   it("gives known network and attachment failures plain next steps", () => {
     expect(friendlyChatError(new Error("fetch failed"))).toContain(
       "Probeer het zo nog eens",

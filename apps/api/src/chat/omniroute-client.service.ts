@@ -11,6 +11,18 @@ import {
   type AssistantMood,
 } from "./assistant-mood.js";
 
+export class IncompleteModelResponseError extends Error {
+  constructor(readonly reason: string) {
+    super("OmniRoute response was interrupted before completion");
+    this.name = "IncompleteModelResponseError";
+  }
+}
+
+function checkFinishReason(reason: unknown): void {
+  if (reason != null && reason !== "stop" && reason !== "tool_calls")
+    throw new IncompleteModelResponseError(String(reason));
+}
+
 export interface ModelToolCall {
   id: string;
   type: "function";
@@ -140,6 +152,9 @@ export class OmniRouteClient {
     const temperature = options.temperature ?? 0.7;
     if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2)
       throw new Error("Invalid model temperature");
+    const maxTokens = options.maxTokens ?? 1800;
+    if (!Number.isSafeInteger(maxTokens) || maxTokens < 1)
+      throw new Error("Invalid model token limit");
     const started = Date.now();
     const roleModels = options.roleModel
       ? this.routing.roleModels(options.roleModel.role)
@@ -157,7 +172,7 @@ export class OmniRouteClient {
       model,
       messages: sanitize(messages),
       temperature,
-      max_tokens: options.maxTokens ?? 1800,
+      max_tokens: maxTokens,
       reasoning_effort: "none",
       stream,
     };
@@ -235,12 +250,13 @@ export class OmniRouteClient {
     };
     if (!stream) {
       const data = (await response.json()) as {
-        choices?: { message?: ModelMessage }[];
+        choices?: { message?: ModelMessage; finish_reason?: string | null }[];
         model?: string;
         usage?: Record<string, unknown>;
         provider?: string;
         fallback?: unknown;
       };
+      checkFinishReason(data.choices?.[0]?.finish_reason);
       const message = data.choices?.[0]?.message;
       if (!message) throw new Error("OmniRoute returned no assistant message");
       const parsed = includeMood
@@ -271,7 +287,8 @@ export class OmniRouteClient {
     emit: NonNullable<CallOptions["emit"]>,
     includeMood: boolean,
   ): Promise<ModelAnswer> {
-    const reader = response.body!.getReader();
+    if (!response.body) throw new IncompleteModelResponseError("missing_body");
+    const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let content = "";
@@ -284,6 +301,8 @@ export class OmniRouteClient {
     let provider: string | null = null;
     let fallback: unknown = null;
     let finished = false;
+    let receivedDone = false;
+    let reachedEof = false;
     const calls = new Map<number, ModelToolCall>();
 
     const consume = (line: string) => {
@@ -291,6 +310,7 @@ export class OmniRouteClient {
       const raw = line.slice(5).trim();
       if (raw === "[DONE]") {
         finished = true;
+        receivedDone = true;
         return;
       }
       if (!raw) return;
@@ -373,13 +393,18 @@ export class OmniRouteClient {
           throw new Error("Tool arguments exceeded limit");
         calls.set(index, current);
       }
-      if (data.choices?.[0]?.finish_reason) finished = true;
+      const finishReason = data.choices?.[0]?.finish_reason;
+      checkFinishReason(finishReason);
+      if (finishReason) finished = true;
     };
 
     try {
       for (;;) {
         const { value, done } = await reader.read();
-        if (done) break;
+        if (done) {
+          reachedEof = true;
+          break;
+        }
         buffer += decoder.decode(value, { stream: true });
         if (buffer.length > 1_000_000)
           throw new Error("OmniRoute stream exceeded limit");
@@ -387,12 +412,13 @@ export class OmniRouteClient {
         while ((end = buffer.indexOf("\n")) >= 0) {
           consume(buffer.slice(0, end).replace(/\r$/, ""));
           buffer = buffer.slice(end + 1);
+          if (receivedDone) break;
         }
+        if (receivedDone) break;
       }
       buffer += decoder.decode();
-      if (buffer.trim()) consume(buffer.trim());
-      if (!finished)
-        throw new Error("OmniRoute stream ended before completion");
+      if (!receivedDone && buffer.trim()) consume(buffer.trim());
+      if (!finished) throw new IncompleteModelResponseError("premature_eof");
       if (includeMood) {
         const parsed = extractAssistantMood(content);
         mood = parsed.mood;
@@ -422,6 +448,7 @@ export class OmniRouteClient {
         },
       };
     } finally {
+      if (!reachedEof) await reader.cancel().catch(() => {});
       reader.releaseLock();
     }
   }

@@ -216,7 +216,12 @@ export class OrchestratorService {
     if (!result.assistant.tool_calls?.length) {
       held.length = 0;
       heldMood = undefined;
-      result = await attempt("required", [REMINDER]).catch(() => result);
+      result = await attempt("required", [REMINDER]).catch((error) => {
+        if (options.signal?.aborted) throw error;
+        held.length = 0;
+        heldMood = result.mood;
+        return result;
+      });
     }
     if (!result.assistant.tool_calls?.length && options.stream) {
       // Nothing worked: the model really has no tool for this, so its text is the answer.

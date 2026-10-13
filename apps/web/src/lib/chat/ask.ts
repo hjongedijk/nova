@@ -382,8 +382,9 @@ export async function ask(
     const message = (error as Error).message;
     console.warn("Chat request failed:", message);
     const failure = friendlyChatError(message, responseLanguage);
-    setAssistant(failure);
-    showStage(text, failure, false);
+    const visible = fullReply ? `${fullReply}\n\n${failure}` : failure;
+    setAssistant(visible);
+    showStage(text, visible, false);
     setState("ready");
   } finally {
     if (activeRequest === requestController) activeRequest = null;

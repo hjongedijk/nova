@@ -4,7 +4,11 @@ import { pdf, docx, png } from "./fixtures.js";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../../src/app.module.js";
-import { OmniRouteClient } from "../../src/chat/omniroute-client.service.js";
+import {
+  IncompleteModelResponseError,
+  OmniRouteClient,
+} from "../../src/chat/omniroute-client.service.js";
+import { SessionMemoryService } from "../../src/memory/session-memory.service.js";
 import { OrchestratorService } from "../../src/chat/orchestrator.service.js";
 import { listen, fakeConfig } from "../integrations/helpers.js";
 import { ToolsService } from "../../src/tools/tools.service.js";
@@ -621,4 +625,37 @@ describe("chat attachments", () => {
     );
     expect(response.text).not.toContain("private policy diagnostic");
   });
+  it.each([
+    ["nl", "chat-stream"],
+    ["en", "chat-stream"],
+    ["nl", "chat"],
+    ["en", "chat"],
+  ])(
+    "identifies interrupted %s %s requests without completion or memory writes",
+    async (responseLanguage, endpoint) => {
+      const sessionId = `incomplete-${responseLanguage}-${endpoint}`;
+      const memory = app.get(SessionMemoryService);
+      const add = vi.spyOn(memory, "add");
+      add.mockClear();
+      vi.spyOn(app.get(OrchestratorService), "run").mockRejectedValueOnce(
+        new IncompleteModelResponseError("length"),
+      );
+      const response = await request(app.getHttpServer())
+        .post(`/api/${endpoint}`)
+        .send({ sessionId, message: "Explain something.", responseLanguage })
+        .expect(endpoint === "chat" ? 503 : 201);
+      expect(response.text).toContain(
+        responseLanguage === "en"
+          ? "The AI response was interrupted."
+          : "Het AI-antwoord is onderbroken.",
+      );
+      if (endpoint === "chat-stream") {
+        expect(response.text).toContain("event: error");
+        expect(response.text).not.toContain("event: done");
+      }
+      expect(add).not.toHaveBeenCalled();
+      expect(memory.recent(sessionId)).toEqual([]);
+      add.mockRestore();
+    },
+  );
 });

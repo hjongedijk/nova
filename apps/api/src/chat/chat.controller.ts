@@ -33,7 +33,10 @@ import { ConfirmationHandler } from "./confirmation-handler.service.js";
 import { directAnswer } from "./direct-answer.js";
 import { directDefinitionQuery } from "./direct-definition.js";
 import { directCurrencyQuery } from "./direct-currency.js";
-import { OmniRouteClient } from "./omniroute-client.service.js";
+import {
+  IncompleteModelResponseError,
+  OmniRouteClient,
+} from "./omniroute-client.service.js";
 import { OrchestratorService, type Reply } from "./orchestrator.service.js";
 import { matchesNodeRedToken } from "../dashboard/node-red-token.js";
 
@@ -212,6 +215,14 @@ export class ChatController {
         sessionId,
         durationMs: Date.now() - started,
       });
+    } catch (error) {
+      if (error instanceof IncompleteModelResponseError)
+        throw new ServiceUnavailableException(
+          responseLanguage === "en"
+            ? "The AI response was interrupted. Please retry your question."
+            : "Het AI-antwoord is onderbroken. Probeer je vraag opnieuw.",
+        );
+      throw error;
     } finally {
       active.delete(sessionId);
     }
@@ -354,9 +365,13 @@ export class ChatController {
               ? responseLanguage === "en"
                 ? "No verified free AI route is available."
                 : "Geen geverifieerde gratis AI-route beschikbaar."
-              : responseLanguage === "en"
-                ? "That did not work. Check the settings and try again."
-                : "Dat is niet gelukt. Controleer de instellingen en probeer opnieuw.",
+              : error instanceof IncompleteModelResponseError
+                ? responseLanguage === "en"
+                  ? "The AI response was interrupted. Please retry your question."
+                  : "Het AI-antwoord is onderbroken. Probeer je vraag opnieuw."
+                : responseLanguage === "en"
+                  ? "That did not work. Check the settings and try again."
+                  : "Dat is niet gelukt. Controleer de instellingen en probeer opnieuw.",
         });
     } finally {
       clearInterval(heartbeat);
