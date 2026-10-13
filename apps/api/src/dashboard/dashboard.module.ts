@@ -29,6 +29,7 @@ import { WeatherDepartureAlertService } from "./weather-departure-alert.service.
 import { NtfyPushService } from "./ntfy-push.service.js";
 import { RitualsService } from "./rituals.service.js";
 import { WeeklyOverviewService } from "./weekly-overview.service.js";
+import { DailyHighlightService } from "./daily-highlight.service.js";
 import { CalendarReminderService } from "./calendar-reminder.service.js";
 
 /** Home-screen data: this machine, the side panels, the unasked-for alerts, and the health of everything. */
@@ -65,6 +66,7 @@ import { CalendarReminderService } from "./calendar-reminder.service.js";
     NtfyPushService,
     RitualsService,
     WeeklyOverviewService,
+    DailyHighlightService,
     CalendarReminderService,
   ],
   exports: [HostMetricsService, OverviewService, IntegrationsHealth],

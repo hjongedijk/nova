@@ -929,6 +929,19 @@
             <label
               ><input
                 type="checkbox"
+                bind:checked={helper.rituals.dailyHighlight.enabled}
+              /> Dagelijks hoogtepunt</label
+            >
+            <label
+              >Om <input
+                aria-label="Dagelijks hoogtepunt om"
+                type="time"
+                bind:value={helper.rituals.dailyHighlight.time}
+              /></label
+            >
+            <label
+              ><input
+                type="checkbox"
                 bind:checked={helper.rituals.calendarReminders.enabled}
               /> Agenda-herinneringen</label
             >

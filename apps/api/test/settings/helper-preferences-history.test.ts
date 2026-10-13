@@ -54,6 +54,7 @@ describe("helper preference history", () => {
       evening: { enabled: false, time: "22:00" },
       checkIn: { enabled: false, afterHours: 4 },
       weeklyOverview: { enabled: false, time: "18:00" },
+      dailyHighlight: { enabled: false, time: "20:00" },
       calendarReminders: { enabled: false, minutesBefore: 15 },
     });
     const legacy = normalize({

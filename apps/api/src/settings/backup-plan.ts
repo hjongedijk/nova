@@ -230,13 +230,15 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
     exactKeys(
       rituals,
       ["morning", "evening", "checkIn"],
-      ["weeklyOverview", "calendarReminders"],
+      ["weeklyOverview", "dailyHighlight", "calendarReminders"],
     );
     exactKeys(object(rituals.morning), ["enabled", "time"]);
     exactKeys(object(rituals.evening), ["enabled", "time"]);
     exactKeys(object(rituals.checkIn), ["enabled", "afterHours"]);
     if (Object.hasOwn(rituals, "weeklyOverview"))
       exactKeys(object(rituals.weeklyOverview), ["enabled", "time"]);
+    if (Object.hasOwn(rituals, "dailyHighlight"))
+      exactKeys(object(rituals.dailyHighlight), ["enabled", "time"]);
     if (Object.hasOwn(rituals, "calendarReminders"))
       exactKeys(object(rituals.calendarReminders), [
         "enabled",

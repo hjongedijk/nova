@@ -2529,6 +2529,7 @@ describe("the helper overlay choice", () => {
         evening: { enabled: false, time: "22:00" },
         checkIn: { enabled: true, afterHours: 6 },
         weeklyOverview: { enabled: false, time: "18:00" },
+        dailyHighlight: { enabled: false, time: "20:00" },
         calendarReminders: { enabled: false, minutesBefore: 15 },
       },
       cues: {
@@ -2548,6 +2549,7 @@ describe("the helper overlay choice", () => {
       rituals: {
         ...preferences.rituals,
         weeklyOverview: { enabled: false, time: "18:00" },
+        dailyHighlight: { enabled: false, time: "20:00" },
       },
     });
     const invalid = [

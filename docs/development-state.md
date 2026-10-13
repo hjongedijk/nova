@@ -6,8 +6,9 @@ Do not record credentials, personal messages or actual deployment configuration 
 
 ## Current work
 
+- I5–I8 and I11 now have local implementations: cooking steps/timers, explicit clipboard preview, F9 quick notes, consented screen snapshot, and opt-in day highlight. Screen sharing stops after one frame; vision and daily summary calls fail closed unless their role has a verified-free model. Full API suite: 1,636 tests; web: 109 tests; typecheck and build pass. Physical browser/microphone and live model checks remain.
 - Task file: `tasks-09-10-2026.md`. Order: A → J (except J4) → K → L → B → C/J4 → D/E/F/G/H/I.
-- Current task count: 201/248; the task file has the current per-item status. `docs/new-tool-checklist.md` is linked from `docs/tools-and-safety.md`.
+- Current task count: 212/248; the task file has the current per-item status. `docs/new-tool-checklist.md` is linked from `docs/tools-and-safety.md`.
 - B1.2 audit fix: web speech omits voice until a browser selection exists, allowing API `TTS_VOICE`; Sound reads the server default from existing health endpoint. B3.9 choices now toggle and contradictory length choices normalize. Full web tests (95), Svelte-check, scoped lint/format and settings browser gate pass.
 - C4.1 incremental fix: API grants one speech claim per eligible feed event; dashboard and helper request it before playback. API typecheck, Svelte-check and scoped lint pass. Audible Windows playback remains open.
 - C4.1 follow-up: SpeechPresenceService signals a confirmed return; AlertsFeed summarizes at most 50 silent events from the last four hours into one spoken notice, respecting the current category mode and hourly budget. A minute retry covers transient unknown presence or a full budget. Dashboard suite (66) and focused stale/mode regressions pass; live return and audio checks remain open.

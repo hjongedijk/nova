@@ -284,6 +284,8 @@ export function normalizeHelperPreferences(
   const checkIn = rituals?.checkIn as Record<string, unknown> | undefined;
   const weeklyOverview = rituals?.weeklyOverview as
     Record<string, unknown> | undefined;
+  const dailyHighlight = rituals?.dailyHighlight as
+    Record<string, unknown> | undefined;
   const calendarReminders = rituals?.calendarReminders as
     Record<string, unknown> | undefined;
   if (
@@ -295,7 +297,10 @@ export function normalizeHelperPreferences(
     if (
       Object.keys(rituals)
         .filter(
-          (key) => key !== "weeklyOverview" && key !== "calendarReminders",
+          (key) =>
+            key !== "weeklyOverview" &&
+            key !== "dailyHighlight" &&
+            key !== "calendarReminders",
         )
         .sort()
         .join(",") !== "checkIn,evening,morning" ||
@@ -303,6 +308,10 @@ export function normalizeHelperPreferences(
         (!weeklyOverview ||
           typeof weeklyOverview !== "object" ||
           Array.isArray(weeklyOverview))) ||
+      (rituals.dailyHighlight !== undefined &&
+        (!dailyHighlight ||
+          typeof dailyHighlight !== "object" ||
+          Array.isArray(dailyHighlight))) ||
       (rituals.calendarReminders !== undefined &&
         (!calendarReminders ||
           typeof calendarReminders !== "object" ||
@@ -331,6 +340,13 @@ export function normalizeHelperPreferences(
       )
         throw new ValidationError(["Ongeldige ritueelinstellingen."]);
     }
+    if (dailyHighlight) {
+      if (
+        Object.keys(dailyHighlight).sort().join(",") !== "enabled,time" ||
+        typeof dailyHighlight.enabled !== "boolean"
+      )
+        throw new ValidationError(["Ongeldige ritueelinstellingen."]);
+    }
     if (calendarReminders) {
       if (
         Object.keys(calendarReminders).sort().join(",") !==
@@ -346,6 +362,7 @@ export function normalizeHelperPreferences(
     evening,
     checkIn,
     weeklyOverview,
+    dailyHighlight,
     calendarReminders,
   ])
     if (item && item.enabled !== undefined && typeof item.enabled !== "boolean")
@@ -445,6 +462,10 @@ export function normalizeHelperPreferences(
       weeklyOverview: {
         enabled: weeklyOverview?.enabled === true,
         time: ritualTime(weeklyOverview?.time, "18:00"),
+      },
+      dailyHighlight: {
+        enabled: dailyHighlight?.enabled === true,
+        time: ritualTime(dailyHighlight?.time, "20:00"),
       },
       calendarReminders: {
         enabled: calendarReminders?.enabled === true,
