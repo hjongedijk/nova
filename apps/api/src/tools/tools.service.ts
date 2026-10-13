@@ -334,10 +334,8 @@ export class ToolsService implements OnModuleInit {
       let definitions: ToolDefinition[];
       try {
         definitions = source.definitions();
-      } catch (error) {
-        this.log.warn(
-          `${source.source}: definitions failed (${(error as Error).message})`,
-        );
+      } catch {
+        this.log.warn(`${source.source}: definitions unavailable`);
         continue;
       }
       for (const raw of definitions) {
@@ -676,8 +674,8 @@ export class ToolsService implements OnModuleInit {
       if (!result || typeof result.ok !== "boolean")
         return finish({ ok: false, error: "Malformed tool response" });
       return finish(result);
-    } catch (error) {
-      this.log.warn(`${name} failed: ${(error as Error).message}`);
+    } catch {
+      this.log.warn(`${name} failed`);
       return finish({
         ok: false,
         error: "Tool unavailable, timed out, or verification failed",
