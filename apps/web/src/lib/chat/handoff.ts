@@ -20,9 +20,9 @@ export function latestQuestion(history: HistoryMessage[]): string {
 }
 
 export function readHandoff(
-  storage: Pick<Storage, "getItem"> | null = typeof localStorage === "undefined"
-    ? null
-    : localStorage,
+  storage:
+    | (Pick<Storage, "getItem"> & Partial<Pick<Storage, "removeItem">>)
+    | null = typeof localStorage === "undefined" ? null : localStorage,
   now = Date.now(),
 ): HandoffCard | null {
   try {
@@ -35,10 +35,13 @@ export function readHandoff(
       typeof value.nextStep !== "string" ||
       !Array.isArray(value.files) ||
       typeof value.savedAt !== "number" ||
-      now - value.savedAt > MAX_AGE_MS ||
       value.savedAt > now + 60_000
     )
       return null;
+    if (now - value.savedAt > MAX_AGE_MS) {
+      storage?.removeItem?.(KEY);
+      return null;
+    }
     const question = value.question.trim().slice(0, 500);
     const nextStep = value.nextStep.trim().slice(0, 500);
     const files = value.files

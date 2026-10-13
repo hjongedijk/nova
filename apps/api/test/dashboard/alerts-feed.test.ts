@@ -300,15 +300,12 @@ describe("AlertsFeed presence delivery", () => {
     expect(summary).toMatchObject({
       title: "Regen komt eraan (3 keer in 10 minuten)",
       speakAllowed: false,
+      deliveryMode: "screen",
     });
     expect(feed.recent(first!.seq).events).toEqual([summary]);
     feed.record(event, new Date(start.getTime() + 180_000));
     expect(feed.recent().events).toHaveLength(2);
-    expect(notifyHelper).toHaveBeenCalledTimes(2);
-    expect(notifyHelper).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ speakAllowed: false }),
-    );
+    expect(notifyHelper).toHaveBeenCalledTimes(1);
     const critical = {
       ...event,
       payload: { ...event.payload, severity: "critical" },

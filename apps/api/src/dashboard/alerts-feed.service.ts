@@ -146,13 +146,11 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
             "Herhaalde melding gebundeld; volgende herhalingen blijven stil.",
           at: now.toISOString(),
           speakAllowed: false,
-          deliveryMode: mode,
+          deliveryMode: "screen",
         };
         repeated.last = summary;
         this.feed.push(summary);
         if (this.feed.length > MAX_EVENTS) this.feed.shift();
-        if (mode !== "screen" && this.windows?.configured)
-          void this.windows.notifyHelper(summary).catch(() => undefined);
         return summary;
       }
     }

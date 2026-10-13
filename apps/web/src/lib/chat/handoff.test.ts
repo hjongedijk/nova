@@ -50,5 +50,6 @@ describe("local conversation handoff", () => {
     expect(readHandoff(storage)).toBeNull();
     saveHandoff("vraag", "", "stap", storage, 1000);
     expect(readHandoff(storage, 31 * 24 * 60 * 60_000)).toBeNull();
+    expect(storage.getItem("nova-handoff-v1")).toBeNull();
   });
 });

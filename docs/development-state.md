@@ -541,3 +541,7 @@ L2.4-kandidaatbeoordeling aangescherpt: `@ni-c/imap-mcp` schrijft onder `list_ne
 2026-10-13 — I14 eerste deel: chatwijzigingen via de schermknop, gesproken bevestiging of directe toolaanroep tonen in Gesprek een actiekaart met vraag, uitvoerstatus en aparte verificatiestatus, plus een Actielog-link. Wachtende bevestigingen krijgen nog geen kaart. Maximaal tien kaarten blijven in het lopende gesprek; Nieuw gesprek wist ze. Een gerichte test onderscheidt gecontroleerd, alleen aangenomen en mislukt. Instellingenwijzigingen en eventuele veilige herstelacties volgen nog.
 
 2026-10-13 — H6: versiegebonden release notes voor de volgende patch (`v0.1.12`) bevatten korte wijzigingen en updateacties. Het release-script eist zo'n bestand vóór pushen; de GitHub-release leest dezelfde notitie. Tekst moet bij de definitieve tag opnieuw op juistheid worden gecontroleerd.
+
+2026-10-13 — F6/I16-hercontrole: gegenereerde Node-RED-fout- en offlineflows bevatten geen interpolatie van upstreamdiagnostiek of nodenamen meer in meldingen. De derde identieke melding wordt als `screen`-samenvatting getoond zonder de Windows-helper te openen. Twintig gerichte flow-/feedtests slagen; volledige API-suite vóór deze fixes: 1604 tests groen. API-typecheck na de parallelle J4-wijziging volgt.
+
+2026-10-13 — I15-hercontrole: een verlopen overdrachtkaart wordt bij lezen uit lokale opslag verwijderd. De gerichte webtests, lint, format en Svelte-check slagen.

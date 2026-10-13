@@ -437,12 +437,12 @@ export class NodeRedFlowSource implements ToolSource {
         : isError
           ? '{"title":' +
             JSON.stringify(`${label}: fout`) +
-            ',"detail":($exists(error.source.name)?error.source.name:"Een node") & ": " & ($exists(error.message)?$substring(error.message,0,160):"Er is een fout opgetreden."),"severity":"warning"}'
+            ',"detail":"Er is een fout opgetreden in deze flow. Bekijk de Node-RED-log voor details.","severity":"warning"}'
           : isBriefing
             ? `{"title":${JSON.stringify(isEveningReview ? "Avondoverzicht" : "Ochtendbriefing")},"detail":$substring(payload,0,240),"severity":"info","category":"briefing"}`
             : '{"title":' +
               JSON.stringify(`${label}: offline`) +
-              ',"detail":($exists(status.source.name)?status.source.name:"Een node") & ": " & ($exists(status.text)?$substring(status.text,0,160):"offline"),"severity":"warning"}';
+              ',"detail":"Een bewaakte node is offline. Bekijk de Node-RED-log voor details.","severity":"warning"}';
       const notify = {
         id: notifyId,
         type: "nova-notify",

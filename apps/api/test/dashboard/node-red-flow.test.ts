@@ -268,8 +268,9 @@ describe("Node-RED flow tool", () => {
           p: "payload",
           tot: "jsonata",
         });
-        expect(added[1].rules[0].to).toContain(
-          "$substring(error.message,0,160)",
+        expect(added[1].rules[0].to).toContain("Er is een fout opgetreden");
+        expect(added[1].rules[0].to).not.toMatch(
+          /error\.message|error\.source/,
         );
         flows = body.flows;
         rev = "rev-2";
@@ -338,6 +339,8 @@ describe("Node-RED flow tool", () => {
         expect(added[0].scope).toEqual(["home-node"]);
         expect(added[1].rules[0].v).toBe("disconnected|offline|error");
         expect(added[2].rules[0].tot).toBe("jsonata");
+        expect(added[2].rules[0].to).toContain("Een bewaakte node is offline");
+        expect(added[2].rules[0].to).not.toMatch(/status\.text|status\.source/);
         flows = body.flows;
         rev = "rev-2";
         response.writeHead(200, { "content-type": "application/json" });
