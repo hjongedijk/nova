@@ -68,6 +68,7 @@
       const result = await savePersona(persona);
       await afterChange(
         result.historyWarning ?? "De eigen regels zijn opgeslagen.",
+        { kind: "persona-rules", text: result.persona },
       );
     } catch (error) {
       fail(error);
@@ -78,7 +79,10 @@
     try {
       const result = await savePersonaStyle(style);
       personaStyle = result.personaStyle;
-      await afterChange("Gespreksstijl opgeslagen.");
+      await afterChange("Gespreksstijl opgeslagen.", {
+        kind: "persona-style",
+        style: result.personaStyle,
+      });
     } catch (error) {
       fail(error);
     }

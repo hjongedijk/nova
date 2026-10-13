@@ -49,7 +49,7 @@
   }
 </script>
 
-<section aria-label="Profielgeschiedenis">
+<section id="persona-preferences-history" aria-label="Profielgeschiedenis">
   <h4>Stijl- en profielgeschiedenis</h4>
   <p class="hint">
     Privégeschiedenis op dit apparaat. Gevoelige tekst wordt niet opgeslagen;

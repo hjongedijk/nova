@@ -50,7 +50,7 @@
   }
 </script>
 
-<section aria-label="Eigen-regelsgeschiedenis">
+<section id="persona-history" aria-label="Eigen-regelsgeschiedenis">
   <h4>Wijzigingsgeschiedenis</h4>
   <p class="hint">
     Privégeschiedenis. Herkenbare tokens en wachtwoorden worden eruit gehaald.

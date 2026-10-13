@@ -5,6 +5,8 @@ import { settingsActionReceipt } from "./action-receipts.ts";
 const overview = {
   tools: [{ name: "secret-tool-name", switchedOff: true }],
   sidebar: [{ id: "w:secret-widget-id", column: "left", page: 1, shown: true }],
+  personaStyle: "friendly",
+  persona: "My private instruction and token abc123",
 } as SettingsOverview;
 
 describe("settings action receipts", () => {
@@ -41,6 +43,32 @@ describe("settings action receipts", () => {
     ).toContain("niet gecontroleerd");
     expect(
       settingsActionReceipt({ kind: "sidebar", items: [] }, null).verification,
+    ).toContain("niet gecontroleerd");
+  });
+
+  it("checks persona settings without copying private rules to the card", () => {
+    const style = settingsActionReceipt(
+      { kind: "persona-style", style: "friendly" },
+      overview,
+    );
+    expect(style.verification).toContain("gecontroleerd");
+    expect(style.recoverHref).toBe(
+      "/settings?section=personality#persona-preferences-history",
+    );
+    const rules = settingsActionReceipt(
+      { kind: "persona-rules", text: overview.persona },
+      overview,
+    );
+    expect(rules.verification).toContain("gecontroleerd");
+    expect(rules.recoverHref).toBe(
+      "/settings?section=personality#persona-history",
+    );
+    expect(JSON.stringify(rules)).not.toContain(overview.persona);
+    expect(
+      settingsActionReceipt(
+        { kind: "persona-rules", text: "other instruction" },
+        overview,
+      ).verification,
     ).toContain("niet gecontroleerd");
   });
 });
