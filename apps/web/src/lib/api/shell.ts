@@ -14,3 +14,14 @@ export const getAlerts = (since: number) =>
 export const claimAlertSpeech = async (seq: number): Promise<boolean> =>
   (await sendJson<{ claimed: boolean }>("POST", `/alerts/${seq}/claim-speech`))
     .claimed;
+
+export interface FocusStatus {
+  active: boolean;
+  until: string | null;
+  pending: number;
+  needsReset?: boolean;
+}
+export const getFocusStatus = () => getJson<FocusStatus>("/focus");
+export const startFocus = (minutes: 25 | 60 | 120) =>
+  sendJson<FocusStatus>("POST", `/focus/${minutes}/start`);
+export const endFocus = () => sendJson<FocusStatus>("POST", "/focus/end");

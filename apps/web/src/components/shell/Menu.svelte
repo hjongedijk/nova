@@ -3,8 +3,40 @@
   import { shell } from "#lib/stores/shell.svelte.ts";
   import { setWake } from "#lib/voice/wake.ts";
   import { storage } from "#lib/util/storage.ts";
+  import {
+    endFocus,
+    getFocusStatus,
+    startFocus,
+    type FocusStatus,
+  } from "#lib/api/shell.ts";
+  import { showToast } from "#lib/stores/toasts.svelte.ts";
 
   let { element = $bindable() }: { element?: HTMLElement } = $props();
+  let focus: FocusStatus | null = $state(null);
+  let focusBusy = $state(false);
+
+  $effect(() => {
+    if (shell.menuOpen)
+      void getFocusStatus()
+        .then((value) => (focus = value))
+        .catch(() => undefined);
+  });
+
+  async function changeFocus(minutes?: 25 | 60 | 120) {
+    if (focusBusy) return;
+    focusBusy = true;
+    try {
+      focus = minutes ? await startFocus(minutes) : await endFocus();
+    } catch {
+      showToast({
+        severity: "warning",
+        title: "Focusmodus aanpassen mislukt",
+        detail: "Probeer het opnieuw.",
+      });
+    } finally {
+      focusBusy = false;
+    }
+  }
 
   function pick(event: MouseEvent) {
     const item = (event.target as Element).closest(".menu-item");
@@ -67,6 +99,43 @@
     type="button"
     onclick={() => (dialogs.admin = true)}>Status &amp; geheugen</button
   >
+  <hr />
+  {#if focus?.active}
+    <p class="menu-status" role="status">
+      Focus aan{focus.until
+        ? ` tot ${new Date(focus.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+        : ""} · {focus.pending} meldingen bewaard
+    </p>
+    <button
+      class="menu-item"
+      role="menuitem"
+      type="button"
+      disabled={focusBusy}
+      onclick={() => void changeFocus()}>Focus afronden</button
+    >
+  {:else}
+    <button
+      class="menu-item"
+      role="menuitem"
+      type="button"
+      disabled={focusBusy}
+      onclick={() => void changeFocus(25)}>Focus 25 minuten</button
+    >
+    <button
+      class="menu-item"
+      role="menuitem"
+      type="button"
+      disabled={focusBusy}
+      onclick={() => void changeFocus(60)}>Focus 1 uur</button
+    >
+    <button
+      class="menu-item"
+      role="menuitem"
+      type="button"
+      disabled={focusBusy}
+      onclick={() => void changeFocus(120)}>Focus 2 uur</button
+    >
+  {/if}
   <hr />
   <button
     class="menu-item switch"

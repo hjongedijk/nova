@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Param,
@@ -18,6 +19,7 @@ import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { ToolsService } from "../tools/tools.service.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
+import type { FocusStatus } from "./alerts-feed.service.js";
 import { HostMetricsService } from "./host-metrics.service.js";
 import { IntegrationsHealth } from "./integrations-health.service.js";
 import { OverviewService } from "./overview.service.js";
@@ -80,6 +82,26 @@ export class DashboardController {
   @Post("alerts/:seq/claim-speech")
   claimAlertSpeech(@Param("seq") seq: string): { claimed: boolean } {
     return { claimed: this.alerts.claimSpeech(Number(seq)) };
+  }
+
+  @Get("focus")
+  focusStatus(): FocusStatus {
+    return this.alerts.focusStatus();
+  }
+
+  @Post("focus/:minutes/start")
+  startFocus(@Param("minutes") minutes: string): FocusStatus {
+    const duration = Number(minutes);
+    if (!Number.isInteger(duration) || duration < 5 || duration > 240)
+      throw new BadRequestException(
+        "Focusduur moet tussen 5 en 240 minuten liggen.",
+      );
+    return this.alerts.startFocus(duration);
+  }
+
+  @Post("focus/end")
+  endFocus(): FocusStatus {
+    return this.alerts.endFocus();
   }
 
   /** GET /api/integrations */

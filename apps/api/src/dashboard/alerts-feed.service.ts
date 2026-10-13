@@ -26,6 +26,14 @@ const SPOKEN_EVENT_WINDOW_MS = 60 * 60_000;
 const REPEAT_WINDOW_MS = 10 * 60_000;
 const MAX_REPEAT_KEYS = 100;
 const DEFERRED_MAX_AGE_MS = 4 * 60 * 60_000;
+const MAX_FOCUS_MINUTES = 240;
+
+export interface FocusStatus {
+  active: boolean;
+  until: string | null;
+  pending: number;
+  needsReset?: boolean;
+}
 
 const text = (value: unknown, max: number) =>
   typeof value === "string" ? sanitize(value).slice(0, max) : "";
@@ -86,6 +94,9 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   private readonly spokenEventTimes: number[] = [];
   private readonly speechProgressFile?: string;
   private speechProgressUnavailable = false;
+  private readonly focusFile?: string;
+  private focus: { until: number; count: number } | null = null;
+  private focusUnreadable = false;
   private readonly repeats = new Map<
     string,
     { firstAt: number; count: number; last: FeedEvent }
@@ -102,6 +113,8 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     if (config) {
       this.speechProgressFile = config.dataFile("spoken-alert-progress.json");
       this.loadSpeechProgress();
+      this.focusFile = config.dataFile("focus-mode.json");
+      this.loadFocus();
     }
   }
 
@@ -110,7 +123,10 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     this.stopPresence = this.presence?.onSpeechAvailable(() =>
       this.releaseDeferred(),
     );
-    this.deferredTimer = setInterval(() => this.releaseDeferred(), 60_000);
+    this.deferredTimer = setInterval(() => {
+      this.settleFocus();
+      this.releaseDeferred();
+    }, 60_000);
     this.deferredTimer.unref();
   }
 
@@ -121,6 +137,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   }
 
   record(event: InfrastructureEvent, now = new Date()): FeedEvent | null {
+    this.settleFocus(now);
     const entry = toFeedEvent(event, now);
     if (!entry) return null;
     const timestamp = now.getTime();
@@ -133,6 +150,15 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
           : entry.severity;
     const mode =
       notifications?.[category] ?? (category === "info" ? "helper" : "speak");
+    const focused = this.focusUnreadable || this.focus !== null;
+    if (focused && this.focus) {
+      this.focus.count = Math.min(100_000, this.focus.count + 1);
+      try {
+        this.saveFocus(this.focus);
+      } catch {
+        // The alert must stay visible and silent even when focus storage fails.
+      }
+    }
     if (entry.kind === "alert" && entry.severity !== "critical") {
       for (const [key, value] of this.repeats)
         if (
@@ -166,16 +192,15 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
         return summary;
       }
     }
-    const voiceEligible = mode === "speak";
+    const voiceEligible = mode === "speak" && !focused;
     const presenceAllowsSpeech = this.presence?.maySpeak() !== false;
     const withinSpeechBudget =
       !voiceEligible || !presenceAllowsSpeech || this.reserveSpeech(timestamp);
     const stored: FeedEvent = {
       seq: ++this.sequence,
       ...entry,
-      speakAllowed:
-        mode === "speak" && presenceAllowsSpeech && withinSpeechBudget,
-      deliveryMode: mode,
+      speakAllowed: voiceEligible && presenceAllowsSpeech && withinSpeechBudget,
+      deliveryMode: focused ? "screen" : mode,
     };
     this.feed.push(stored);
     if (voiceEligible && !presenceAllowsSpeech) {
@@ -194,7 +219,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
         { firstAt: timestamp, count: 1, last: stored },
       );
     }
-    if (mode !== "screen" && this.windows?.configured)
+    if (!focused && mode !== "screen" && this.windows?.configured)
       void this.windows.notifyHelper(stored).catch(() => undefined);
     if (stored.kind === "alert" && stored.severity === "critical")
       void this.ntfy?.notify(stored).catch(() => undefined);
@@ -222,6 +247,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   }
 
   recent(since = 0): AlertsResponse {
+    this.settleFocus();
     return {
       latest: this.sequence,
       events: this.feed.filter((item) => item.seq > since),
@@ -230,6 +256,8 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
 
   /** First visible client to claim a spoken event wins across browser contexts. */
   claimSpeech(seq: number): boolean {
+    this.settleFocus();
+    if (this.focusUnreadable || this.focus) return false;
     if (!Number.isSafeInteger(seq) || seq <= 0) return false;
     const event = this.feed.find((item) => item.seq === seq);
     if (!event?.speakAllowed || this.speechClaims.has(event)) return false;
@@ -239,6 +267,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
 
   /** One bounded spoken summary when confirmed presence returns; original alerts stay visible. */
   private releaseDeferred(now = new Date()): void {
+    if (this.focusUnreadable || this.focus) return;
     if (this.presence?.maySpeak() !== true || !this.deferredWhileAway.size)
       return;
     const timestamp = now.getTime();
@@ -281,6 +310,126 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     this.deferredWhileAway.clear();
     if (this.windows?.configured)
       void this.windows.notifyHelper(summary).catch(() => undefined);
+  }
+
+  focusStatus(now = new Date()): FocusStatus {
+    this.settleFocus(now);
+    return {
+      active: this.focusUnreadable || this.focus !== null,
+      until: this.focus ? new Date(this.focus.until).toISOString() : null,
+      pending: this.focus?.count ?? 0,
+      ...(this.focusUnreadable ? { needsReset: true } : {}),
+    };
+  }
+
+  startFocus(minutes: number, now = new Date()): FocusStatus {
+    if (
+      !Number.isInteger(minutes) ||
+      minutes < 5 ||
+      minutes > MAX_FOCUS_MINUTES
+    )
+      throw new Error("Focusduur moet tussen 5 en 240 minuten liggen.");
+    this.settleFocus(now);
+    const next = {
+      until: now.getTime() + minutes * 60_000,
+      count: this.focus?.count ?? 0,
+    };
+    this.saveFocus(next);
+    this.focus = next;
+    this.focusUnreadable = false;
+    for (const item of this.feed) item.speakAllowed = false;
+    this.deferredWhileAway.clear();
+    return this.focusStatus(now);
+  }
+
+  endFocus(now = new Date()): FocusStatus {
+    if (this.focus) {
+      const count = this.focus.count;
+      this.saveFocus(null);
+      this.focus = null;
+      this.focusUnreadable = false;
+      this.focusSummary(count, now);
+    } else if (this.focusUnreadable) {
+      this.saveFocus(null);
+      this.focusUnreadable = false;
+    }
+    return this.focusStatus(now);
+  }
+
+  private settleFocus(now = new Date()): void {
+    if (this.focus && now.getTime() >= this.focus.until) {
+      try {
+        this.endFocus(now);
+      } catch {
+        // Storage failure keeps focus active and speech disabled.
+      }
+    }
+  }
+
+  private focusSummary(count: number, now: Date): void {
+    if (!count) return;
+    const wantsSpeech =
+      this.settings?.get().helperPreferences.notifications?.info === "speak";
+    const maySpeak = this.presence?.maySpeak() !== false;
+    const speakAllowed =
+      wantsSpeech && maySpeak && this.reserveSpeech(now.getTime());
+    const summary: FeedEvent = {
+      seq: ++this.sequence,
+      kind: "alert",
+      severity: "info",
+      key: "focus-summary",
+      title: `${count} ${count === 1 ? "melding" : "meldingen"} tijdens focus`,
+      detail: "Bekijk ze in Meldingen.",
+      at: now.toISOString(),
+      deliveryMode: speakAllowed ? "speak" : "helper",
+      speakAllowed,
+    };
+    this.feed.push(summary);
+    if (this.feed.length > MAX_EVENTS) this.feed.shift();
+    if (this.windows?.configured)
+      void this.windows.notifyHelper(summary).catch(() => undefined);
+  }
+
+  private loadFocus(): void {
+    try {
+      const data = JSON.parse(fs.readFileSync(this.focusFile!, "utf8")) as {
+        until?: unknown;
+        count?: unknown;
+      };
+      if (
+        !Number.isSafeInteger(data?.until) ||
+        (data.until as number) < 0 ||
+        !Number.isSafeInteger(data?.count) ||
+        (data.count as number) < 0 ||
+        (data.count as number) > 100_000
+      )
+        throw new Error("Invalid focus status");
+      if (data.until) this.focus = data as { until: number; count: number };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      this.focusUnreadable = true;
+      this.logger.error("Focus status is unreadable; automatic speech paused");
+    }
+  }
+
+  private saveFocus(value: { until: number; count: number } | null): void {
+    if (!this.focusFile) return;
+    const temporary = `${this.focusFile}.tmp`;
+    try {
+      fs.writeFileSync(
+        temporary,
+        JSON.stringify(value ?? { until: 0, count: 0 }),
+        { mode: 0o600 },
+      );
+      fs.chmodSync(temporary, 0o600);
+      fs.renameSync(temporary, this.focusFile);
+    } catch {
+      this.focusUnreadable = true;
+      this.logger.error(
+        "Focus status could not be saved; automatic speech paused",
+      );
+      throw new Error("Focusstatus kon niet worden opgeslagen.");
+    }
   }
 
   private loadSpeechProgress(): void {
