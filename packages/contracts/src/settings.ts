@@ -745,7 +745,15 @@ export interface MqttOverview {
   recent: MqttRecentMessage[];
 }
 
+export interface McpWorkerStatus {
+  server: "sequential-thinking" | "filesystem" | "context7" | "workspace-git";
+  state: "running" | "starting" | "stopped" | "missing" | "mixed";
+  workerCount: number;
+  connected: boolean | null;
+}
+
 export interface McpServerStatus {
+  workers?: McpWorkerStatus[];
   servers: Array<{
     id: string;
     description?: string;
@@ -930,6 +938,7 @@ export interface StackServiceStatus {
   startedAt?: string | null;
 }
 export interface StackControlStatus {
+  mcpWorkers?: Omit<McpWorkerStatus, "connected">[];
   available: boolean;
   reason?: string;
   services: StackServiceStatus[];

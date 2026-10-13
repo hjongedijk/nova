@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { afterEach, test } from "node:test";
-import { createStackControlServer, STATUS_SERVICES } from "./server.mjs";
+import {
+  createStackControlServer,
+  STATUS_SERVICES,
+  summarizeMcpWorkers,
+} from "./server.mjs";
 
 const token = "a".repeat(64);
 const liveContainers = Object.entries(STATUS_SERVICES).map(
@@ -125,4 +129,64 @@ test("rejects stale state without restarting", async () => {
   });
   assert.equal(response.status, 409);
   assert.ok(calls.every(([, method]) => method !== "POST"));
+});
+
+test("worker summaries show lifecycle and duplicates without exposing Docker data", () => {
+  const worker = (command, state = "running") => ({
+    Name: "/nova-mcp-" + "a".repeat(36),
+    Config: {
+      User: "1000:1000",
+      Cmd: command,
+      Env: ["SECRET=private-fixture"],
+    },
+    HostConfig: { NetworkMode: "none", ReadonlyRootfs: true },
+    State: { Status: state },
+  });
+  const result = summarizeMcpWorkers([
+    worker(["mcp-server-filesystem", "/data/workspace"]),
+    worker(["mcp-server-filesystem", "/data/workspace"], "created"),
+    worker(["node", "/app/stack-control/mcp-proxy-stdio.mjs", "context7"]),
+    {
+      ...worker(["mcp-server-sequential-thinking"]),
+      HostConfig: { NetworkMode: "host", ReadonlyRootfs: true },
+    },
+    null,
+  ]);
+  assert.deepEqual(
+    result.find((row) => row.server === "filesystem"),
+    { server: "filesystem", state: "mixed", workerCount: 2 },
+  );
+  assert.deepEqual(
+    result.find((row) => row.server === "context7"),
+    { server: "context7", state: "running", workerCount: 1 },
+  );
+  assert.equal(
+    result.find((row) => row.server === "sequential-thinking").workerCount,
+    0,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private-fixture|nova-mcp-|Cmd|Env|workspace\//,
+  );
+});
+
+test("worker inspection failures remain unknown while confirmed disappearance permits missing", async () => {
+  for (const message of ["Docker timeout", "Docker API status 404"]) {
+    const base = await start(async (path) => {
+      if (path.startsWith("/containers/json?all=1"))
+        return [
+          ...liveContainers,
+          { Id: "worker", Names: [`/nova-mcp-${"a".repeat(36)}`] },
+        ];
+      if (path === "/containers/worker/json") throw new Error(message);
+      return inspect(path);
+    });
+    const response = await fetch(`${base}/services`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    if (message === "Docker timeout") assert.equal(body.mcpWorkers, undefined);
+    else assert.ok(body.mcpWorkers.every((row) => row.state === "missing"));
+  }
 });

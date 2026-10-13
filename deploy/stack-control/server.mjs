@@ -73,6 +73,79 @@ const safeEqual = (left, right) => {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 
+const MCP_WORKERS = [
+  "sequential-thinking",
+  "filesystem",
+  "context7",
+  "workspace-git",
+];
+
+/** Project fixed worker identities only; Docker paths, commands and credentials stay private. */
+export function summarizeMcpWorkers(details) {
+  const groups = new Map(MCP_WORKERS.map((server) => [server, []]));
+  for (const detail of details) {
+    if (
+      !/^\/nova-mcp-[a-f0-9-]{36}$/.test(detail?.Name ?? "") ||
+      detail?.Config?.User !== "1000:1000" ||
+      detail?.HostConfig?.NetworkMode !== "none" ||
+      detail?.HostConfig?.ReadonlyRootfs !== true
+    )
+      continue;
+    const cmd = detail.Config.Cmd;
+    let server;
+    if (
+      JSON.stringify(cmd) === JSON.stringify(["mcp-server-sequential-thinking"])
+    )
+      server = "sequential-thinking";
+    else if (
+      JSON.stringify(cmd) ===
+      JSON.stringify(["mcp-server-filesystem", "/data/workspace"])
+    )
+      server = "filesystem";
+    else if (
+      JSON.stringify(cmd) ===
+      JSON.stringify([
+        "node",
+        "/app/stack-control/mcp-proxy-stdio.mjs",
+        "context7",
+      ])
+    )
+      server = "context7";
+    else if (
+      Array.isArray(cmd) &&
+      cmd.length === 5 &&
+      cmd[0] === "/opt/git-mcp/bin/python" &&
+      cmd[1] === "-m" &&
+      cmd[2] === "mcp_server_git" &&
+      cmd[3] === "--repository" &&
+      /^\/data\/workspace\/[a-z0-9][a-z0-9-]{0,47}$/.test(cmd[4])
+    )
+      server = "workspace-git";
+    if (server) groups.get(server).push(detail.State?.Status);
+  }
+  return MCP_WORKERS.map((server) => {
+    const states = groups.get(server);
+    const kinds = new Set(
+      states.map((state) =>
+        state === "running"
+          ? "running"
+          : ["created", "restarting"].includes(state)
+            ? "starting"
+            : "stopped",
+      ),
+    );
+    return {
+      server,
+      state: !states.length
+        ? "missing"
+        : kinds.size > 1
+          ? "mixed"
+          : [...kinds][0],
+      workerCount: states.length,
+    };
+  });
+}
+
 export function createStackControlServer({
   token = process.env.STACK_CONTROL_TOKEN ?? "",
   docker = dockerRequest,
@@ -91,7 +164,9 @@ export function createStackControlServer({
     safeEqual(request.headers.authorization ?? "", `Bearer ${token}`);
   const allContainers = async () => {
     const filters = encodeURIComponent(
-      JSON.stringify({ name: Object.values(STATUS_SERVICES) }),
+      JSON.stringify({
+        name: [...Object.values(STATUS_SERVICES), "nova-mcp-"],
+      }),
     );
     const rows = await docker(`/containers/json?all=1&filters=${filters}`);
     return Array.isArray(rows) ? rows : [];
@@ -146,7 +221,34 @@ export function createStackControlServer({
             inspectService(service, containers),
           ),
         );
-        send(response, 200, { services });
+        const workerRows = containers
+          .filter(
+            (row) =>
+              Array.isArray(row.Names) &&
+              row.Names.some((name) => /^\/nova-mcp-[a-f0-9-]{36}$/.test(name)),
+          )
+          .slice(0, 64);
+        let workersAvailable = true;
+        const workerDetails = await Promise.all(
+          workerRows.map(async (row) => {
+            try {
+              return await docker(
+                `/containers/${encodeURIComponent(row.Id)}/json`,
+              );
+            } catch (error) {
+              // Only confirmed disappearance permits a missing worker count.
+              if (error?.message !== "Docker API status 404")
+                workersAvailable = false;
+              return null;
+            }
+          }),
+        );
+        send(response, 200, {
+          services,
+          ...(workersAvailable
+            ? { mcpWorkers: summarizeMcpWorkers(workerDetails) }
+            : {}),
+        });
         return;
       }
 

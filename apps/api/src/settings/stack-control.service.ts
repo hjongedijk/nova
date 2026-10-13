@@ -99,6 +99,7 @@ export class StackControlService {
     try {
       const response = (await this.call("/services")) as {
         services?: unknown;
+        mcpWorkers?: unknown;
       };
       if (!Array.isArray(response.services)) throw new Error(baseError);
       const byId = new Map<string, StackServiceStatus>();
@@ -145,6 +146,46 @@ export class StackControlService {
         });
       }
       return {
+        ...(Array.isArray(response.mcpWorkers)
+          ? {
+              mcpWorkers: response.mcpWorkers.flatMap((value: unknown) => {
+                if (!value || typeof value !== "object") return [];
+                const row = value as Record<string, unknown>;
+                if (
+                  typeof row.server !== "string" ||
+                  typeof row.state !== "string" ||
+                  ![
+                    "sequential-thinking",
+                    "filesystem",
+                    "context7",
+                    "workspace-git",
+                  ].includes(row.server) ||
+                  ![
+                    "running",
+                    "starting",
+                    "stopped",
+                    "missing",
+                    "mixed",
+                  ].includes(row.state) ||
+                  !Number.isInteger(row.workerCount) ||
+                  Number(row.workerCount) < 0 ||
+                  Number(row.workerCount) > 64
+                )
+                  return [];
+                return [
+                  {
+                    server: row.server as NonNullable<
+                      StackControlStatus["mcpWorkers"]
+                    >[number]["server"],
+                    state: row.state as NonNullable<
+                      StackControlStatus["mcpWorkers"]
+                    >[number]["state"],
+                    workerCount: Number(row.workerCount),
+                  },
+                ];
+              }),
+            }
+          : {}),
         available: byId.size === ids.length,
         ...(byId.size !== ids.length ? { reason: baseError } : {}),
         services: ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : [])),

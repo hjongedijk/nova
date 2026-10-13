@@ -185,6 +185,7 @@ export function createMcpSandbox({
           "POST",
           {
             Image: novaInfo.Image,
+            Healthcheck: { Test: ["NONE"] },
             User: "1000:1000",
             Entrypoint: [],
             WorkingDir: "/tmp",

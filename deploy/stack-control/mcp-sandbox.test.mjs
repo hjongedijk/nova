@@ -98,6 +98,7 @@ test("fixed offline containers have exact restricted configuration and are never
     assert.deepEqual(create.body, {
       Image: `sha256:${"a".repeat(64)}`,
       User: "1000:1000",
+      Healthcheck: { Test: ["NONE"] },
       Entrypoint: [],
       WorkingDir: "/tmp",
       Cmd:

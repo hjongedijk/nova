@@ -84,6 +84,30 @@ describe("StackControlService", () => {
     });
   });
 
+  it("projects validated MCP worker counts without Docker secrets", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({
+        services,
+        mcpWorkers: [
+          {
+            server: "filesystem",
+            state: "running",
+            workerCount: 1,
+            Env: ["PRIVATE_TOKEN=secret"],
+          },
+          { server: ["context7"], state: ["running"], workerCount: 1 },
+          { server: "other", state: "running", workerCount: 1 },
+          { server: "context7", state: "running", workerCount: -1 },
+        ],
+      }),
+    );
+    const status = await service.status();
+    expect(status.mcpWorkers).toEqual([
+      { server: "filesystem", state: "running", workerCount: 1 },
+    ]);
+    expect(JSON.stringify(status)).not.toContain("PRIVATE_TOKEN");
+  });
+
   it("prepares a one-time DANGEROUS action and executes only after approval", async () => {
     const prepared = await service.prepareRestart("qdrant");
     expect(prepared).toMatchObject({

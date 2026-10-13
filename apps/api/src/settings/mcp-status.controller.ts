@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Optional,
   Post,
   UseGuards,
 } from "@nestjs/common";
@@ -13,6 +14,7 @@ import { SettingsGuard } from "./settings.guard.js";
 import { McpManagement } from "./mcp-management.service.js";
 import { RISKS } from "../integrations/mcp/mcp-config.js";
 import { McpSecretsStore } from "../integrations/mcp/mcp-secrets.store.js";
+import { StackControlService } from "./stack-control.service.js";
 import type { Risk } from "@nova/contracts";
 
 /** PIN-protected status only; never projects MCP commands, arguments, variables or process errors. */
@@ -23,6 +25,7 @@ export class McpStatusController {
     private readonly hub: McpHub,
     private readonly management: McpManagement,
     private readonly secrets: McpSecretsStore,
+    @Optional() private readonly stack?: StackControlService,
   ) {}
 
   @Get("servers/:id/config")
@@ -51,8 +54,22 @@ export class McpStatusController {
   }
 
   @Get("servers")
-  getServers() {
-    return this.hub.status();
+  async getServers() {
+    const report = this.hub.status();
+    const stack = await this.stack?.status();
+    if (!stack?.mcpWorkers) return report;
+    return {
+      ...report,
+      workers: stack.mcpWorkers.map((worker) => ({
+        ...worker,
+        connected:
+          worker.server === "workspace-git"
+            ? null
+            : report.servers.some(
+                (server) => server.id === worker.server && server.connected,
+              ),
+      })),
+    };
   }
 
   @Get("servers/catalog")
