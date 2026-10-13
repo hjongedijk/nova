@@ -1,5 +1,9 @@
 <script lang="ts">
   import { encodeAttachments } from "#lib/chat/attachments.ts";
+  import {
+    clipboardRequest,
+    prepareClipboardText,
+  } from "#lib/chat/clipboard.ts";
   import { friendlyChatError } from "#lib/chat/error-copy.ts";
   import { onMount } from "svelte";
   import { cards } from "#lib/chat/cards.svelte.ts";
@@ -30,6 +34,54 @@
   let reading = $state(false);
   let modelRole = $state<Exclude<ModelRoleId, "embedding"> | "">("");
   let responseLanguage = $state(getConversationLanguage());
+  let clipboardText = $state("");
+  let clipboardOpen = $state(false);
+  let clipboardReading = $state(false);
+  let clipboardTruncated = $state(false);
+  let clipboardError = $state("");
+
+  function clearClipboard(): void {
+    clipboardText = "";
+    clipboardOpen = false;
+    clipboardTruncated = false;
+    clipboardError = "";
+  }
+
+  async function readClipboard(): Promise<void> {
+    clearClipboard();
+    clipboardReading = true;
+    showChrome();
+    try {
+      if (!navigator.clipboard?.readText)
+        throw new Error("Clipboard unavailable");
+      const prepared = prepareClipboardText(
+        await navigator.clipboard.readText(),
+      );
+      if (!prepared.text) {
+        clipboardError = "Het klembord bevat geen tekst.";
+        return;
+      }
+      clipboardText = prepared.text;
+      clipboardTruncated = prepared.truncated;
+      clipboardOpen = true;
+    } catch {
+      clipboardError =
+        "Klembord lezen mislukt. Sta toegang toe in je browser of plak de tekst zelf.";
+    } finally {
+      clipboardReading = false;
+    }
+  }
+
+  async function useClipboard(
+    action: "summary" | "translation",
+  ): Promise<void> {
+    if (!clipboardOpen || !clipboardText || clipboardReading || chat.busy)
+      return;
+    const request = clipboardRequest(action, responseLanguage);
+    const attachment = { name: "klembord.txt", content: clipboardText };
+    clearClipboard();
+    await ask(request, [attachment], "text", "summary");
+  }
 
   function changeLanguage(value: "nl" | "en"): void {
     responseLanguage = setConversationLanguage(value);
@@ -96,6 +148,9 @@
         shell.draft.trim() !== "" ||
         attachments.length > 0 ||
         reading ||
+        clipboardReading ||
+        clipboardOpen ||
+        !!clipboardError ||
         !!fileError ||
         shell.menuOpen ||
         cards.length > 0 ||
@@ -149,6 +204,19 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"
       ><path d="m8 13 7-7a3 3 0 0 1 4 4l-9 9a5 5 0 0 1-7-7l9-9M6 15l9-9" /></svg
     >
+  </button>
+  <button
+    class="icon"
+    type="button"
+    aria-label="Klembordhulp openen"
+    title="Lees gekopieerde tekst voor samenvatten of vertalen"
+    disabled={chat.busy || reading || clipboardReading}
+    onclick={readClipboard}
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="5" y="5" width="14" height="16" rx="2" />
+      <path d="M9 5V3h6v2M8 10h8M8 14h8" />
+    </svg>
   </button>
   <button
     id="micButton"
@@ -217,6 +285,42 @@
       {#if fileError}<span role="alert">{fileError}</span>{/if}
     </div>
   {/if}
+  {#if clipboardReading || clipboardError || clipboardOpen}
+    <div class="clipboard-help" aria-live="polite">
+      {#if clipboardReading}<p>Klembord lezen…</p>{/if}
+      {#if clipboardError}<p role="alert">{clipboardError}</p>{/if}
+      {#if clipboardOpen}
+        <p>
+          <strong>Klembordhulp actief.</strong> Bekijk de tekst vóór verzenden. Herkende
+          wachtwoorden en sleutels zijn gemaskeerd.
+        </p>
+        <pre>{clipboardText}</pre>
+        {#if clipboardTruncated}<p>
+            Alleen de eerste 12.000 tekens worden verzonden.
+          </p>{/if}
+        <div class="clipboard-actions">
+          <button
+            type="button"
+            disabled={chat.busy}
+            onclick={() => useClipboard("summary")}>Vat samen</button
+          >
+          <button
+            type="button"
+            disabled={chat.busy}
+            onclick={() => useClipboard("translation")}
+            >Vertaal naar {responseLanguage === "en"
+              ? "Engels"
+              : "Nederlands"}</button
+          >
+          <button type="button" onclick={clearClipboard}>Annuleren</button>
+        </div>
+        <p>
+          Pas na je keuze gaat de gemaskeerde tekst via de gewone NOVA-chat naar
+          de AI-route.
+        </p>
+      {/if}
+    </div>
+  {/if}
 </form>
 <button
   id="reveal"
@@ -233,6 +337,9 @@
 <style>
   .composer {
     flex-wrap: wrap;
+  }
+  .composer:has(.clipboard-help) {
+    border-radius: 18px;
   }
   .role-select {
     min-height: 44px;
@@ -266,6 +373,38 @@
     padding: 4px 8px;
     background: transparent;
     color: inherit;
+    cursor: pointer;
+  }
+  .clipboard-help {
+    flex-basis: 100%;
+    padding: 8px 12px 10px;
+    color: var(--mist);
+    font-size: 13px;
+  }
+  .clipboard-help p {
+    margin: 4px 0 8px;
+  }
+  .clipboard-help pre {
+    max-height: 100px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px;
+    font: inherit;
+  }
+  .clipboard-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .clipboard-actions button {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 10px;
+    background: var(--panel);
+    color: var(--text);
     cursor: pointer;
   }
 </style>

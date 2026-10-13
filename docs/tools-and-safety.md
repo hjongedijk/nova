@@ -129,6 +129,12 @@ NOVA sees at most the first 24,000 characters of each text document and at most 
 
 Files are held in memory during the request, never saved to the server filesystem or as file contents in conversation history. The browser history shows file names. To ask another question about a file in a later turn, attach it again.
 
+## Clipboard help
+
+Click the clipboard button next to chat input to read copied text. Browser clipboard permission may be requested. NOVA shows the complete prepared text and asks you to choose **Vat samen** or **Vertaal** before sending anything. **Annuleren** clears the preview. Each new use requires another button click and task choice; there is no background clipboard watcher.
+
+The browser masks recognizable credentials, including password fields, API keys, bearer tokens and JWTs, before the preview and request. Review the preview: masking cannot recognize every private detail. Only the prepared text is sent as a temporary text attachment through the normal chat route, up to 12,000 characters. The attachment body is not saved in conversation history or local storage; chat keeps the task and the resulting answer as usual. Clearing the panel or sending the request discards the browser copy held by this feature. The selected conversation language determines the translation target. Clipboard help needs a secure browser context and clipboard access.
+
 ## Conversation style
 
 NOVA aims to be a calm, attentive personal assistant: understand the intention, act within the request, and explain the useful result. It can acknowledge a difficult day without launching unrelated tools, and suggest a relevant next step without appending an offer to every answer. Actions and claims of success still follow the backend's existing verification and confirmation rules.
