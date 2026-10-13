@@ -274,3 +274,97 @@ describe("OmniRoute response completeness", () => {
     },
   );
 });
+
+describe("OmniRoute HTTP failure cleanup and bounded fallback", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const messages = [{ role: "user" as const, content: "Return NOVA_OK only" }];
+  const preferred = "gemini/free-fixture";
+  const fallback = "mistral/free-fixture";
+
+  function setup() {
+    const routing = {
+      assertFree: vi.fn(() => ({})),
+      roleModels: vi.fn(() => [preferred, fallback]),
+      assertRoleModel: vi.fn((_role: string, model: string) => model),
+    };
+    const client = new OmniRouteClient(
+      {
+        omniUrl: "http://gateway.test/v1",
+        omniKey: "fixture",
+        omniModel: "auto",
+        omniCompression: "off",
+      } as NovaConfig,
+      routing as unknown as RoutingService,
+    );
+    return { client, routing };
+  }
+  const rejected = (status: number, cancel: () => void) =>
+    new Response(new ReadableStream<Uint8Array>({ cancel }), { status });
+
+  it("cancels a rate-limited response before trying the verified fallback once", async () => {
+    const cancel = vi.fn();
+    const { client, routing } = setup();
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(rejected(429, cancel))
+      .mockImplementationOnce(async () => {
+        expect(cancel).toHaveBeenCalledOnce();
+        return new Response(
+          JSON.stringify({
+            model: fallback,
+            choices: [
+              {
+                message: { role: "assistant", content: "NOVA_OK" },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+        );
+      });
+    vi.stubGlobal("fetch", fetcher);
+    const answer = await client.call(messages, {
+      roleModel: { role: "conversation", modelId: preferred },
+    });
+    expect(answer.assistant.content).toBe("NOVA_OK");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(
+      fetcher.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).model),
+    ).toEqual([preferred, fallback]);
+    expect(routing.assertFree).toHaveBeenCalledOnce();
+    expect(routing.assertRoleModel).toHaveBeenLastCalledWith(
+      "conversation",
+      fallback,
+    );
+  });
+
+  it("cancels every failed attempt and stops after the configured free choices", async () => {
+    const first = vi.fn();
+    const last = vi.fn();
+    const { client } = setup();
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(rejected(429, first))
+      .mockResolvedValueOnce(rejected(503, last));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(
+      client.call(messages, {
+        roleModel: { role: "conversation", modelId: preferred },
+      }),
+    ).rejects.toThrow("OmniRoute request failed (503)");
+    expect(first).toHaveBeenCalledOnce();
+    expect(last).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("releases a failed auto response without retrying outside the native router", async () => {
+    const cancel = vi.fn();
+    const { client } = setup();
+    const fetcher = vi.fn().mockResolvedValue(rejected(429, cancel));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(client.call(messages)).rejects.toThrow(
+      "OmniRoute request failed (429)",
+    );
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+});

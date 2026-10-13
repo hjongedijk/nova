@@ -228,21 +228,24 @@ export class OmniRouteClient {
         candidate === attempts.at(-1)
       )
         break;
+      // A rejected response can still have an open stream; release it before failover.
+      await response.body?.cancel().catch(() => {});
       lastFailure = new Error(`OmniRoute request failed (${response.status})`);
     }
     if (!response) throw lastFailure ?? new Error("OmniRoute request failed");
-    if (
-      !response.ok &&
-      [400, 415, 422].includes(response.status) &&
-      messages.some((message) => Array.isArray(message.content))
-    )
-      throw new Error(
-        "OmniRoute weigert deze afbeelding. Kies in OmniRoute een gratis model dat afbeeldingen kan lezen, of stuur een PDF of tekstdocument.",
-      );
-    if (!response.ok)
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      if (
+        [400, 415, 422].includes(response.status) &&
+        messages.some((message) => Array.isArray(message.content))
+      )
+        throw new Error(
+          "OmniRoute weigert deze afbeelding. Kies in OmniRoute een gratis model dat afbeeldingen kan lezen, of stuur een PDF of tekstdocument.",
+        );
       throw new Error(
         `OmniRoute request failed (${response.status}); no alternate gateway or paid fallback was attempted`,
       );
+    }
     const gateway: GatewayMetadata = {
       compression: response.headers.get("x-omniroute-compression"),
       cache: response.headers.get("x-omniroute-cache"),
