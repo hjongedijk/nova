@@ -56,27 +56,23 @@ function words(value: string): Set<string> {
   );
 }
 
-/**
- * Narrow an obvious request to tools whose names/descriptions match its subject.
- * If lexical evidence is weak, keep every tool: omission is worse than a larger prompt.
- */
-export function selectToolsForRequest<T extends SelectableTool>(
+export const TOOL_DISCOVERY_NAME = "nova_tools_search";
+export const MAX_MODEL_TOOLS = 24;
+
+/** Shared lexical ranking for initial selection and explicit catalog discovery. */
+export function rankToolsForRequest<T extends SelectableTool>(
   tools: T[],
   message: string,
   role: ModelRoleId,
-  maxTools = 24,
 ): T[] {
-  if (tools.length <= maxTools || !message.trim()) return tools;
-
   const query = words(message);
   const expanded = new Set(query);
   for (const word of query)
     for (const alias of ALIASES[word] ?? []) expanded.add(alias);
-  if (expanded.size === 0) return tools;
-
-  const ranked = tools
+  return tools
     .map((tool, index) => {
-      const nameWords = words(tool.function.name);
+      const nameWords = words(tool.function.name.replace(/_/g, " "));
+      nameWords.add(tool.function.name.toLowerCase());
       const descriptionWords = words(tool.function.description);
       let score = 0;
       for (const word of expanded) {
@@ -93,9 +89,27 @@ export function selectToolsForRequest<T extends SelectableTool>(
       return { tool, index, score };
     })
     .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score || a.index - b.index);
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.tool);
+}
 
-  if (ranked.length === 0) return tools;
-  const selected = ranked.slice(0, maxTools).map(({ tool }) => tool);
-  return selected.length < tools.length ? selected : tools;
+/** Keep large catalogs discoverable rather than sending every schema on weak matches. */
+export function selectToolsForRequest<T extends SelectableTool>(
+  tools: T[],
+  message: string,
+  role: ModelRoleId,
+  maxTools = MAX_MODEL_TOOLS,
+): T[] {
+  if (tools.length <= maxTools) return tools;
+  const discovery = tools.find(
+    (tool) => tool.function.name === TOOL_DISCOVERY_NAME,
+  );
+  const candidates = tools.filter((tool) => tool !== discovery);
+  const ranked = rankToolsForRequest(candidates, message, role);
+  // Compatibility for registries that intentionally disable catalog discovery.
+  if (!ranked.length) return discovery ? [discovery] : tools;
+  return [
+    ...ranked.slice(0, Math.max(0, maxTools - (discovery ? 1 : 0))),
+    ...(discovery ? [discovery] : []),
+  ];
 }

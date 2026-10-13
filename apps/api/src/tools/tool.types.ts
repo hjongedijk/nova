@@ -43,6 +43,8 @@ export interface ToolResult {
 export interface ToolCall {
   sessionId: string;
   signal: AbortSignal;
+  /** Internal execution scope; never supplied by model arguments. */
+  readOnlyOnly?: boolean;
 }
 
 /** What `prepare` decided: possibly adjusted arguments and the real risk for this call. */

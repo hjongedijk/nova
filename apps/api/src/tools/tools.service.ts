@@ -18,7 +18,12 @@ import { memoryCandidate } from "../memory/semantic/candidate.js";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { SettingsStore } from "../settings/store/settings.store.js";
 import { coerceArguments, dropTransportReason } from "./tool-arguments.js";
-import { selectToolsForRequest } from "./tool-selection.js";
+import {
+  MAX_MODEL_TOOLS,
+  TOOL_DISCOVERY_NAME,
+  rankToolsForRequest,
+  selectToolsForRequest,
+} from "./tool-selection.js";
 import {
   TOOL_SOURCE,
   type ToolDefinition,
@@ -381,6 +386,37 @@ export class ToolsService implements OnModuleInit {
       : tools;
   }
 
+  /** Search only currently enabled tools in the caller's execution scope. */
+  discoverForModel(query: string, readOnlyOnly = false): ModelTool[] {
+    return rankToolsForRequest(
+      this.forModel(undefined, readOnlyOnly).filter(
+        (tool) => tool.function.name !== TOOL_DISCOVERY_NAME,
+      ),
+      query,
+      "conversation",
+    ).slice(0, 8);
+  }
+
+  /** Rebuild definitions from the live registry; never trust schemas returned by a tool. */
+  expandModelTools(
+    current: ModelTool[],
+    query: string,
+    readOnlyOnly = false,
+  ): ModelTool[] {
+    const available = this.forModel(undefined, readOnlyOnly);
+    const byName = new Map(available.map((tool) => [tool.function.name, tool]));
+    const names = [
+      TOOL_DISCOVERY_NAME,
+      ...this.discoverForModel(query, readOnlyOnly).map(
+        (tool) => tool.function.name,
+      ),
+      ...current.map((tool) => tool.function.name),
+    ];
+    return [...new Set(names)]
+      .flatMap((name) => (byName.has(name) ? [byName.get(name)!] : []))
+      .slice(0, MAX_MODEL_TOOLS);
+  }
+
   /**
    * Run one tool for a session. `approved` is the confirmation the user gave; without one, an
    * action that needs confirming comes back as { requiresConfirmation, action }.
@@ -515,7 +551,11 @@ export class ToolsService implements OnModuleInit {
       const signal = options.signal
         ? AbortSignal.any([options.signal, timeout])
         : timeout;
-      const call = { sessionId, signal };
+      const call = {
+        sessionId,
+        signal,
+        readOnlyOnly: options.readOnlyOnly === true,
+      };
       let plan: ToolPlan = { args, risk };
       if (tool.source.prepare) {
         const prepared = await tool.source.prepare(name, args, call);

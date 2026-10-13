@@ -22,6 +22,7 @@ import {
 } from "../routing/routing.service.js";
 import { parseToolArguments } from "../tools/tool-arguments.js";
 import { ToolsService } from "../tools/tools.service.js";
+import { TOOL_DISCOVERY_NAME } from "../tools/tool-selection.js";
 import {
   OmniRouteClient,
   type GatewayMetadata,
@@ -395,11 +396,12 @@ export class OrchestratorService {
     const rounds = this.config.maxToolRounds;
     let emptyRetried = false;
     let completedSteps = 0;
+    let liveToolAttempted = false;
 
     for (let round = 0; round < rounds; round++) {
       if (signal?.aborted) throw new Error("Request cancelled");
       const last =
-        round === 0 && mustUseTool
+        mustUseTool && !liveToolAttempted
           ? await this.firstRoundWithTool(messages, {
               stream,
               emit,
@@ -478,6 +480,26 @@ export class OrchestratorService {
           { signal, readOnlyOnly: input.readOnlyOnly },
         );
         if (signal?.aborted) throw new Error("Request cancelled");
+        if (
+          name === TOOL_DISCOVERY_NAME &&
+          result.ok &&
+          args &&
+          typeof args.query === "string"
+        ) {
+          const expanded = this.tools.expandModelTools(
+            modelTools,
+            args.query,
+            input.readOnlyOnly,
+          );
+          modelTools.splice(0, modelTools.length, ...expanded);
+          emit("tools", {
+            count: modelTools.length,
+            total: allTools.length,
+            names: modelTools.map((tool) => tool.function.name),
+          });
+        } else if (name !== TOOL_DISCOVERY_NAME) {
+          liveToolAttempted = true;
+        }
         completedSteps++;
         emit("tool_result", {
           name,

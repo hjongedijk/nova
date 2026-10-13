@@ -5,6 +5,7 @@ import { MemoryModule } from "../memory/memory.module.js";
 import { SettingsStoreModule } from "../settings/store/settings-store.module.js";
 import { ToolsController } from "./tools.controller.js";
 import { ToolsService } from "./tools.service.js";
+import { ToolCatalogSource } from "./tool-catalog.source.js";
 
 /**
  * The tool registry and executor. Sources of tools live in their own modules and are found
@@ -19,7 +20,7 @@ import { ToolsService } from "./tools.service.js";
     SettingsStoreModule,
   ],
   controllers: [ToolsController],
-  providers: [ToolsService],
+  providers: [ToolsService, ToolCatalogSource],
   exports: [
     ToolsService,
     ConfirmationsModule,

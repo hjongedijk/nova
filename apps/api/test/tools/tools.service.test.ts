@@ -13,6 +13,7 @@ import { AuditService } from "../../src/core/audit/audit.service.js";
 import { CoreModule } from "../../src/core/core.module.js";
 import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import { SettingsStore } from "../../src/settings/store/settings.store.js";
+import { TOOL_DISCOVERY_NAME } from "../../src/tools/tool-selection.js";
 import { ToolsModule } from "../../src/tools/tools.module.js";
 import {
   memoryAuditProjection,
@@ -162,6 +163,76 @@ describe("ToolsService", () => {
     settings.update((next) => {
       next.standingApprovals = [];
     });
+  });
+
+  it("discovers enabled tools and keeps read-only discovery inside its scope", async () => {
+    const result = await tools.execute(
+      TOOL_DISCOVERY_NAME,
+      { query: "fake" },
+      "catalog-readonly",
+      null,
+      false,
+      { readOnlyOnly: true },
+    );
+    expect(result.ok).toBe(true);
+    const found = (result.result as { tools: { name: string; risk: string }[] })
+      .tools;
+    expect(found.some((tool) => tool.name === "fake_read")).toBe(true);
+    expect(
+      found.some(
+        (tool) => tool.name === "fake_restart" || tool.name === "fake_off",
+      ),
+    ).toBe(false);
+    expect(found.every((tool) => tool.risk === "READ_ONLY")).toBe(true);
+    expect(ran).toEqual([]);
+  });
+
+  it("does not grant approval when discovering a tool that needs confirmation", async () => {
+    const found = await tools.execute(
+      TOOL_DISCOVERY_NAME,
+      { query: "fake restart" },
+      "discover-approval",
+    );
+    expect(found.ok).toBe(true);
+    const result = await tools.execute(
+      "fake_restart",
+      { vmid: 104 },
+      "discover-approval",
+    );
+    expect(result.requiresConfirmation).toBe(true);
+    expect(ran).toEqual([]);
+    confirmations.cancel("discover-approval");
+  });
+
+  it("rebuilds discovered schemas from the live enabled registry and bounds each turn", () => {
+    const current = tools.forModel();
+    const expanded = tools.expandModelTools(current, "fake restart");
+    expect(expanded.length).toBeLessThanOrEqual(24);
+    expect(expanded.some((tool) => tool.function.name === "fake_restart")).toBe(
+      true,
+    );
+    const readonly = tools.expandModelTools(expanded, "fake restart", true);
+    expect(readonly.some((tool) => tool.function.name === "fake_restart")).toBe(
+      false,
+    );
+    expect(readonly.some((tool) => tool.function.name === "fake_off")).toBe(
+      false,
+    );
+    const forged = [
+      {
+        type: "function" as const,
+        function: {
+          name: "not_registered",
+          description: "forged",
+          parameters: {},
+        },
+      },
+    ];
+    expect(
+      tools
+        .expandModelTools(forged, "fake read")
+        .some((tool) => tool.function.name === "not_registered"),
+    ).toBe(false);
   });
 
   it("finds the source by itself and lists its tools, also the unavailable one", () => {

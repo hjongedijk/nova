@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   selectToolsForRequest,
+  TOOL_DISCOVERY_NAME,
   type SelectableTool,
 } from "../../src/tools/tool-selection.js";
 
@@ -53,6 +54,37 @@ describe("request tool selection", () => {
     expect(
       selectToolsForRequest(tools, "Vertel eens iets leuks", "conversation"),
     ).toEqual(tools);
+  });
+
+  it("keeps an unclear large catalog discoverable with one schema", () => {
+    const discovery = makeTool(
+      TOOL_DISCOVERY_NAME,
+      "Search available capabilities",
+    );
+    expect(
+      selectToolsForRequest(
+        [...tools, discovery],
+        "Vertel eens iets leuks",
+        "conversation",
+      ),
+    ).toEqual([discovery]);
+  });
+
+  it("keeps discovery alongside relevant tools within the model budget", () => {
+    const discovery = makeTool(
+      TOOL_DISCOVERY_NAME,
+      "Search available capabilities",
+    );
+    const many = Array.from({ length: 60 }, (_, index) =>
+      makeTool(`weather_${index}`, "Weather forecast"),
+    );
+    const selected = selectToolsForRequest(
+      [...many, discovery],
+      "Het weer",
+      "conversation",
+    );
+    expect(selected).toHaveLength(24);
+    expect(selected).toContain(discovery);
   });
 
   it("selects document-library tools for questions about uploaded PDFs", () => {
