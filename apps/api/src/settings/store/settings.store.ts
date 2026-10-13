@@ -103,6 +103,7 @@ const blank = (): NovaSettings => ({
       checkIn: { enabled: false, afterHours: 4 },
       weeklyOverview: { enabled: false, time: "18:00" },
       dailyHighlight: { enabled: false, time: "20:00" },
+      smallSurprises: { enabled: false },
       calendarReminders: { enabled: false, minutesBefore: 15 },
     },
     cues: {

@@ -28,7 +28,10 @@ const QUIET_RITUAL_TEXT: Record<
   },
 };
 
-function localParts(date: Date, timezone: string): Record<string, string> {
+export function localParts(
+  date: Date,
+  timezone: string,
+): Record<string, string> {
   return Object.fromEntries(
     new Intl.DateTimeFormat("en-CA", {
       timeZone: timezone,
@@ -45,7 +48,7 @@ function localParts(date: Date, timezone: string): Record<string, string> {
   );
 }
 
-function inQuietHours(now: string, start: string, end: string): boolean {
+export function inQuietHours(now: string, start: string, end: string): boolean {
   const toMinutes = (value: string) => {
     const [hours, minutes] = value.split(":").map(Number);
     return hours! * 60 + minutes!;

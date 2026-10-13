@@ -31,6 +31,7 @@ import { RitualsService } from "./rituals.service.js";
 import { WeeklyOverviewService } from "./weekly-overview.service.js";
 import { DailyHighlightService } from "./daily-highlight.service.js";
 import { CalendarReminderService } from "./calendar-reminder.service.js";
+import { SmallSurprisesService } from "./small-surprises.service.js";
 
 /** Home-screen data: this machine, the side panels, the unasked-for alerts, and the health of everything. */
 @Module({
@@ -68,6 +69,7 @@ import { CalendarReminderService } from "./calendar-reminder.service.js";
     WeeklyOverviewService,
     DailyHighlightService,
     CalendarReminderService,
+    SmallSurprisesService,
   ],
   exports: [HostMetricsService, OverviewService, IntegrationsHealth],
 })

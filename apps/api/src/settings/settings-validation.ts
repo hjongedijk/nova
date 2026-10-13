@@ -286,6 +286,8 @@ export function normalizeHelperPreferences(
     Record<string, unknown> | undefined;
   const dailyHighlight = rituals?.dailyHighlight as
     Record<string, unknown> | undefined;
+  const smallSurprises = rituals?.smallSurprises as
+    Record<string, unknown> | undefined;
   const calendarReminders = rituals?.calendarReminders as
     Record<string, unknown> | undefined;
   if (
@@ -300,6 +302,7 @@ export function normalizeHelperPreferences(
           (key) =>
             key !== "weeklyOverview" &&
             key !== "dailyHighlight" &&
+            key !== "smallSurprises" &&
             key !== "calendarReminders",
         )
         .sort()
@@ -312,6 +315,10 @@ export function normalizeHelperPreferences(
         (!dailyHighlight ||
           typeof dailyHighlight !== "object" ||
           Array.isArray(dailyHighlight))) ||
+      (rituals.smallSurprises !== undefined &&
+        (!smallSurprises ||
+          typeof smallSurprises !== "object" ||
+          Array.isArray(smallSurprises))) ||
       (rituals.calendarReminders !== undefined &&
         (!calendarReminders ||
           typeof calendarReminders !== "object" ||
@@ -347,6 +354,13 @@ export function normalizeHelperPreferences(
       )
         throw new ValidationError(["Ongeldige ritueelinstellingen."]);
     }
+    if (smallSurprises) {
+      if (
+        Object.keys(smallSurprises).join(",") !== "enabled" ||
+        typeof smallSurprises.enabled !== "boolean"
+      )
+        throw new ValidationError(["Ongeldige ritueelinstellingen."]);
+    }
     if (calendarReminders) {
       if (
         Object.keys(calendarReminders).sort().join(",") !==
@@ -363,6 +377,7 @@ export function normalizeHelperPreferences(
     checkIn,
     weeklyOverview,
     dailyHighlight,
+    smallSurprises,
     calendarReminders,
   ])
     if (item && item.enabled !== undefined && typeof item.enabled !== "boolean")
@@ -467,6 +482,7 @@ export function normalizeHelperPreferences(
         enabled: dailyHighlight?.enabled === true,
         time: ritualTime(dailyHighlight?.time, "20:00"),
       },
+      smallSurprises: { enabled: smallSurprises?.enabled === true },
       calendarReminders: {
         enabled: calendarReminders?.enabled === true,
         minutesBefore: (calendarReminders?.minutesBefore === undefined

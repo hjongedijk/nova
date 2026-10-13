@@ -980,6 +980,12 @@
             <label
               ><input
                 type="checkbox"
+                bind:checked={helper.rituals.smallSurprises.enabled}
+              /> Kleine verrassingen bij een gelegenheid</label
+            >
+            <label
+              ><input
+                type="checkbox"
                 bind:checked={helper.rituals.calendarReminders.enabled}
               /> Agenda-herinneringen</label
             >

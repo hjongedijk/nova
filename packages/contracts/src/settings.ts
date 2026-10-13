@@ -688,6 +688,7 @@ export interface HelperPreferences {
     checkIn: { enabled: boolean; afterHours: number };
     weeklyOverview: { enabled: boolean; time: string };
     dailyHighlight: { enabled: boolean; time: string };
+    smallSurprises: { enabled: boolean };
     calendarReminders: { enabled: boolean; minutesBefore: 5 | 15 | 30 };
   };
   cues: {
