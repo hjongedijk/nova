@@ -1320,6 +1320,149 @@ export class SettingsController {
     return this.nodeRedFlowRevisions.list();
   }
 
+  @Get("node-red/palette")
+  getNodeRedPalette() {
+    return this.nodeRedManagement.paletteState();
+  }
+
+  @Post("node-red/palette/prepare")
+  @HttpCode(200)
+  async prepareNodeRedPalette(@Body() body: unknown) {
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).some(
+        (key) => !["module", "install", "revision"].includes(key),
+      )
+    )
+      throw new ValidationError(["Ongeldige palette-aanvraag."]);
+    const value = body as Record<string, unknown>;
+    if (
+      typeof value.module !== "string" ||
+      typeof value.install !== "boolean" ||
+      typeof value.revision !== "string" ||
+      !/^[0-9a-f]{64}$/.test(value.revision)
+    )
+      throw new ValidationError(["Ongeldige palette-aanvraag."]);
+    const state = await this.nodeRedManagement.paletteState();
+    const selected = state.modules.find((row) => row.name === value.module);
+    if (!selected)
+      throw new ValidationError(["Deze Node-RED-module is niet toegestaan."]);
+    if (
+      state.revision !== value.revision ||
+      selected.installed === value.install
+    )
+      throw new ValidationError([
+        "Node-RED-palette is gewijzigd. Laad opnieuw.",
+      ]);
+    const sessionId = `settings-node-red-palette:${crypto.randomUUID()}`;
+    const action = this.confirmations.create(
+      sessionId,
+      "node_red_palette",
+      {
+        module: value.module,
+        install: value.install,
+        revision: state.revision,
+      },
+      "DANGEROUS",
+      state.revision,
+      false,
+    );
+    this.audit.record({
+      sessionId,
+      tool: "node_red_palette",
+      risk: "DANGEROUS",
+      confirmation: "pending_admin_ui",
+      arguments: { module: value.module, install: value.install },
+    });
+    return {
+      ok: true as const,
+      action,
+      warning: value.install
+        ? "Installeren voert de actuele npm-versie van deze module uit in Node-RED."
+        : "Verwijderen kan flows die deze module gebruiken onderbreken.",
+    };
+  }
+
+  @Post("node-red/palette/confirm")
+  @HttpCode(200)
+  async confirmNodeRedPalette(@Body() body: unknown) {
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).some(
+        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
+      )
+    )
+      throw new ValidationError(["Ongeldige palettebevestiging."]);
+    const value = body as Record<string, unknown>;
+    if (
+      typeof value.sessionId !== "string" ||
+      !/^settings-node-red-palette:[0-9a-f-]{36}$/i.test(value.sessionId) ||
+      typeof value.confirmationId !== "string" ||
+      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
+      typeof value.approve !== "boolean"
+    )
+      throw new ValidationError(["Ongeldige palettebevestiging."]);
+    const pending = this.confirmations.peek(value.sessionId);
+    if (
+      pending?.confirmationId !== value.confirmationId ||
+      pending.expiresAt <= Date.now() ||
+      pending.tool !== "node_red_palette" ||
+      pending.risk !== "DANGEROUS" ||
+      typeof pending.args.module !== "string" ||
+      typeof pending.args.install !== "boolean" ||
+      typeof pending.args.revision !== "string"
+    )
+      return {
+        ok: false as const,
+        error: "Bevestiging verlopen. Kies opnieuw.",
+      };
+    if (!value.approve) {
+      this.confirmations.cancel(value.sessionId, "rejected_admin_ui");
+      return { ok: true as const, cancelled: true as const };
+    }
+    const action = this.confirmations.take(
+      value.sessionId,
+      value.confirmationId,
+    );
+    if (!action)
+      return {
+        ok: false as const,
+        error: "Bevestiging verlopen. Kies opnieuw.",
+      };
+    const module = String(action.args.module);
+    const install = action.args.install === true;
+    try {
+      const state = await this.nodeRedManagement.changePalette(
+        module,
+        install,
+        String(action.args.revision),
+      );
+      this.audit.record({
+        sessionId: value.sessionId,
+        tool: "node_red_palette",
+        risk: "DANGEROUS",
+        confirmation: "approved_admin_ui",
+        arguments: { module, install },
+        result: { ok: true },
+      });
+      return { ok: true as const, state };
+    } catch (error) {
+      this.audit.record({
+        sessionId: value.sessionId,
+        tool: "node_red_palette",
+        risk: "DANGEROUS",
+        confirmation: "approved_admin_ui",
+        arguments: { module, install },
+        result: { ok: false },
+      });
+      throw error;
+    }
+  }
+
   @Post("node-red/flow-revisions/capture")
   @HttpCode(200)
   async captureNodeRedFlowRevision() {

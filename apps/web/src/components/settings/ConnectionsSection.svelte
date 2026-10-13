@@ -45,6 +45,7 @@
   import Button from "#components/ui/Button.svelte";
   import StackControl from "./StackControl.svelte";
   import NodeRedFlowHistory from "./NodeRedFlowHistory.svelte";
+  import NodeRedPalette from "./NodeRedPalette.svelte";
   import AdminConfirmation from "#components/admin/AdminConfirmation.svelte";
   import { sessionId } from "#components/admin/session.ts";
   import { executeAction } from "#lib/api/admin.ts";
@@ -1160,6 +1161,7 @@
               />{/if}
           {/if}
           <NodeRedFlowHistory />
+          <NodeRedPalette />
         </section>
       {/if}
       {#if service.id === "qdrant"}

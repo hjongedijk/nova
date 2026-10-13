@@ -163,6 +163,8 @@ export class NovaConfig {
   readonly nodeRedUrl = url("NODE_RED_URL", "http://node-red:1880");
   readonly nodeRedEditorUrl = text("NODE_RED_EDITOR_URL");
   readonly nodeRedAdminToken = text("NODE_RED_ADMIN_TOKEN");
+  /** JSON array of exact npm module names NOVA may install or remove. Empty by default. */
+  readonly nodeRedPaletteAllowlist = text("NODE_RED_PALETTE_ALLOWLIST", "[]");
   /** Shared only with trusted Node-RED flows that send allow-listed events. */
   readonly nodeRedEventToken = text("NODE_RED_EVENT_TOKEN");
   /** JSON allowlist of HTTP-in flows NOVA may trigger; entries contain no credentials. */

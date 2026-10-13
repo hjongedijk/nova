@@ -589,6 +589,35 @@ export const rollbackWallpaper = (id: string) =>
   write<WallpaperState>("POST", `/wallpaper/history/${enc(id)}/rollback`, {});
 export const getNodeRedFlows = () =>
   read<NodeRedFlowInventory>("/node-red/flows");
+export interface NodeRedPaletteState {
+  revision: string;
+  modules: { name: string; installed: boolean; version: string | null }[];
+}
+export const getNodeRedPalette = () =>
+  read<NodeRedPaletteState>("/node-red/palette");
+export const prepareNodeRedPalette = (
+  module: string,
+  install: boolean,
+  revision: string,
+) =>
+  write<{ ok: true; warning: string; action: PendingConfirmation }>(
+    "POST",
+    "/node-red/palette/prepare",
+    { module, install, revision },
+  );
+export const confirmNodeRedPalette = (
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<
+    | { ok: true; cancelled?: true; state?: NodeRedPaletteState }
+    | { ok: false; error: string }
+  >("POST", "/node-red/palette/confirm", {
+    sessionId,
+    confirmationId,
+    approve,
+  });
 export const exportNodeRedFlows = () =>
   write<Record<string, unknown>[]>("POST", "/node-red/flows/export", {});
 export interface NodeRedFlowRevision {

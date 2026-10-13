@@ -1,4 +1,5 @@
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
+import crypto from "node:crypto";
 import { requestJson } from "../core/http/http-json.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
@@ -78,6 +79,11 @@ export interface NodeRedFlowTab {
   lastError: string | null;
 }
 
+export interface NodeRedPaletteState {
+  revision: string;
+  modules: { name: string; installed: boolean; version: string | null }[];
+}
+
 /** Add only projected execution metadata; never return the logged payload. */
 export function projectNodeRedFlowRuns<T extends { id: string }>(
   flows: T[],
@@ -144,6 +150,165 @@ export class NodeRedManagement {
         ? { authorization: `Bearer ${this.config.nodeRedAdminToken}` }
         : {}),
     };
+  }
+
+  private allowedPaletteModules(): string[] {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(this.config.nodeRedPaletteAllowlist);
+    } catch {
+      throw new ServiceUnavailableException(
+        "Node-RED-palette-toegang is ongeldig ingesteld.",
+      );
+    }
+    if (
+      !Array.isArray(raw) ||
+      raw.length > 20 ||
+      raw.some(
+        (name) =>
+          typeof name !== "string" ||
+          !/^node-red-(?:contrib|node)-[a-z0-9][a-z0-9._-]{0,99}$/.test(name),
+      ) ||
+      new Set(raw).size !== raw.length
+    )
+      throw new ServiceUnavailableException(
+        "Node-RED-palette-toegang is ongeldig ingesteld.",
+      );
+    return raw;
+  }
+
+  private async installedPalette(): Promise<
+    Map<string, { version: string | null; types: string[] }>
+  > {
+    if (this.config.nodeRedAdminToken.length < 32)
+      throw new ServiceUnavailableException(
+        "Stel NODE_RED_ADMIN_TOKEN met nodes.read en nodes.write in.",
+      );
+    let response;
+    try {
+      response = await requestJson<unknown>(`${this.baseUrl().origin}/nodes`, {
+        headers: this.flowHeaders(),
+        timeoutMs: 5000,
+        maxResponseBytes: 300_000,
+        signal: AbortSignal.timeout(6000),
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        "Node-RED-palette is niet beschikbaar.",
+      );
+    }
+    if (
+      response.status !== 200 ||
+      !Array.isArray(response.data) ||
+      response.data.length > 2000
+    )
+      throw new ServiceUnavailableException(
+        "Node-RED-palette kon niet veilig worden gelezen.",
+      );
+    const modules = new Map<
+      string,
+      { version: string | null; types: string[] }
+    >();
+    for (const item of response.data) {
+      if (!item || typeof item !== "object" || Array.isArray(item))
+        throw new ServiceUnavailableException(
+          "Node-RED-palette gaf ongeldige gegevens.",
+        );
+      const row = item as Record<string, unknown>;
+      if (
+        typeof row.module !== "string" ||
+        row.module.length > 120 ||
+        !Array.isArray(row.types) ||
+        row.types.length > 100 ||
+        row.types.some((type) => typeof type !== "string" || type.length > 120)
+      )
+        throw new ServiceUnavailableException(
+          "Node-RED-palette gaf ongeldige gegevens.",
+        );
+      const current = modules.get(row.module) ?? { version: null, types: [] };
+      if (
+        typeof row.version === "string" &&
+        /^[0-9A-Za-z.+_-]{1,60}$/.test(row.version)
+      )
+        current.version = row.version;
+      current.types.push(...(row.types as string[]));
+      modules.set(row.module, current);
+    }
+    return modules;
+  }
+
+  async paletteState(): Promise<NodeRedPaletteState> {
+    const allowed = this.allowedPaletteModules();
+    const installed = await this.installedPalette();
+    const canonical = [...installed]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, value]) => [name, value.version, [...value.types].sort()]);
+    return {
+      revision: crypto
+        .createHash("sha256")
+        .update(JSON.stringify(canonical))
+        .digest("hex"),
+      modules: allowed.map((name) => ({
+        name,
+        installed: installed.has(name),
+        version: installed.get(name)?.version ?? null,
+      })),
+    };
+  }
+
+  async changePalette(
+    name: string,
+    install: boolean,
+    expectedRevision: string,
+  ): Promise<NodeRedPaletteState> {
+    if (!this.allowedPaletteModules().includes(name))
+      throw new ServiceUnavailableException(
+        "Deze Node-RED-module is niet toegestaan.",
+      );
+    const before = await this.paletteState();
+    if (before.revision !== expectedRevision)
+      throw new ServiceUnavailableException(
+        "Node-RED-palette is gewijzigd. Laad opnieuw.",
+      );
+    if (before.modules.find((row) => row.name === name)?.installed === install)
+      throw new ServiceUnavailableException(
+        "Node-RED-palette is gewijzigd. Laad opnieuw.",
+      );
+    let response;
+    try {
+      response = await requestJson<unknown>(
+        `${this.baseUrl().origin}/nodes${install ? "" : `/${name}`}`,
+        {
+          method: install ? "POST" : "DELETE",
+          headers: this.flowHeaders(),
+          ...(install ? { body: { module: name } } : {}),
+          timeoutMs: 30_000,
+          maxResponseBytes: 100_000,
+          signal: AbortSignal.timeout(31_000),
+        },
+      );
+    } catch {
+      throw new ServiceUnavailableException(
+        "Node-RED-wijziging heeft geen bevestigde uitkomst. Controleer de palette.",
+      );
+    }
+    if (response.status !== (install ? 200 : 204))
+      throw new ServiceUnavailableException(
+        "Node-RED heeft de palettewijziging geweigerd.",
+      );
+    let after: NodeRedPaletteState;
+    try {
+      after = await this.paletteState();
+    } catch {
+      throw new ServiceUnavailableException(
+        "Palettewijziging is mogelijk uitgevoerd maar kon niet worden gecontroleerd.",
+      );
+    }
+    if (after.modules.find((row) => row.name === name)?.installed !== install)
+      throw new ServiceUnavailableException(
+        "Node-RED heeft de palettewijziging niet bevestigd.",
+      );
+    return after;
   }
 
   async flowSnapshot(): Promise<NodeRedFlowSnapshot> {
