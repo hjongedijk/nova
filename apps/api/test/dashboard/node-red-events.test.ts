@@ -80,6 +80,29 @@ describe("Node-RED event ingress", () => {
     ).toThrow("Unsupported alert category");
   });
 
+  it("replaces upstream diagnostics before they reach helper, push or speech", () => {
+    const { controller, alerts, audit } = fixture();
+    controller.receive(`Bearer ${token}`, {
+      type: "alert",
+      title: "Flow error: gateway failed",
+      detail: "ECONNREFUSED at http://192.168.1.10:1880 token=private",
+      severity: "critical",
+      category: "briefing",
+    });
+    expect(alerts.recordNodeRedAlert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Node-RED meldt een fout",
+        detail: "Een flow meldde een fout. Controleer de flow in Node-RED.",
+        severity: "critical",
+        category: undefined,
+      }),
+    );
+    const output = JSON.stringify(alerts.recordNodeRedAlert.mock.calls);
+    expect(output).not.toContain("192.168.1.10");
+    expect(output).not.toContain("private");
+    expect(JSON.stringify(audit.record.mock.calls)).not.toContain("gateway");
+  });
+
   it("surfaces runtime errors through health without executing an action", () => {
     const { controller, health, alerts } = fixture();
     controller.receive(`Bearer ${token}`, {

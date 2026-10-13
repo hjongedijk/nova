@@ -21,6 +21,8 @@ import { matchesNodeRedToken } from "./node-red-token.js";
 const MAX_BODY_BYTES = 4096;
 const MAX_PER_MINUTE = 60;
 const severities = new Set(["info", "warning", "critical"]);
+const RAW_DIAGNOSTIC =
+  /\b(?:exception|traceback|stack trace|error|failed|failure|econn\w+|timeout)\b|https?:\/\/|(?:\d{1,3}\.){3}\d{1,3}|\b(?:bearer|token|password|secret)\s*[:= ]/i;
 
 type IncomingEvent = {
   type?: unknown;
@@ -91,14 +93,23 @@ export class NodeRedEventsController {
         typeof body.at === "string" && !Number.isNaN(Date.parse(body.at))
           ? new Date(body.at).toISOString()
           : new Date().toISOString();
+      const rawTitle = sanitize(body.title).slice(0, 120);
+      const rawDetail =
+        typeof body.detail === "string"
+          ? sanitize(body.detail).slice(0, 240)
+          : "";
+      const diagnostic =
+        RAW_DIAGNOSTIC.test(body.title) ||
+        (typeof body.detail === "string" && RAW_DIAGNOSTIC.test(body.detail));
       const result = this.alerts.recordNodeRedAlert({
-        title: sanitize(body.title).slice(0, 120),
-        detail:
-          typeof body.detail === "string"
-            ? sanitize(body.detail).slice(0, 240)
-            : "",
+        title: diagnostic ? "Node-RED meldt een fout" : rawTitle,
+        detail: diagnostic
+          ? "Een flow meldde een fout. Controleer de flow in Node-RED."
+          : rawDetail,
         severity: body.severity as "info" | "warning" | "critical" | undefined,
-        category: body.category as "briefing" | undefined,
+        category: diagnostic
+          ? undefined
+          : (body.category as "briefing" | undefined),
         at,
       });
       if (!result) throw new BadRequestException("Node-RED alert was rejected");
