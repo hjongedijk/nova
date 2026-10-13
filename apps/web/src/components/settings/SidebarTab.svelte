@@ -21,7 +21,7 @@
   async function saveLayout(next: SidebarItem[], text: string): Promise<void> {
     try {
       await saveSidebar($state.snapshot(next));
-      await afterChange(text);
+      await afterChange(text, { kind: "sidebar", items: next });
     } catch (error) {
       fail(error);
       void reload();
@@ -80,8 +80,12 @@
 
   async function reset(): Promise<void> {
     try {
-      await resetSidebar();
-      await afterChange("De standaardindeling is terug.");
+      const result = await resetSidebar();
+      await afterChange("De standaardindeling is terug.", {
+        kind: "sidebar",
+        items: result.sidebar,
+        reset: true,
+      });
     } catch (error) {
       fail(error);
     }

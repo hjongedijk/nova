@@ -20,6 +20,8 @@ export interface ActionReceipt {
   requested: string;
   performed: string;
   verification: string;
+  /** Fixed settings history link; rollback there always asks for confirmation. */
+  recoverHref?: string;
 }
 
 /** The conversation as the screen shows it. The chat layer (lib/chat) is the only writer. */

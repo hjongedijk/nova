@@ -35,6 +35,13 @@
       history = null;
       await afterChange(
         `“${tool.name}” is bijgewerkt.${result.historyWarning ? ` ${result.historyWarning}` : ""}`,
+        box
+          ? {
+              kind: "tool-switch",
+              name: tool.name,
+              enabled: override.enabled === true,
+            }
+          : undefined,
       );
     } catch (error) {
       if (box) {

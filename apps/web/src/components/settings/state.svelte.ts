@@ -10,6 +10,11 @@ import { ApiError } from "#lib/api/client.ts";
 import { friendlyApiError, uiErrorLanguage } from "#lib/api/error-copy.ts";
 import { getSettings, setPin } from "#lib/api/settings.ts";
 import { loadSidebar } from "#lib/stores/sidebar.svelte.ts";
+import { chat } from "#lib/stores/chat.svelte.ts";
+import {
+  settingsActionReceipt,
+  type SettingsReceiptTarget,
+} from "./action-receipts.ts";
 
 export type Tab = "abilities" | "skills" | "sidebar" | "behavior" | "more";
 
@@ -97,8 +102,25 @@ export function unlock(pin: string): Promise<void> {
 }
 
 /** After every change: fetch the overview again, say what happened, refresh the sidebar on the home screen. */
-export async function afterChange(text: string): Promise<void> {
-  settings.data = await getSettings();
+export async function afterChange(
+  text: string,
+  receipt?: SettingsReceiptTarget,
+): Promise<void> {
+  let overview: SettingsOverview;
+  try {
+    overview = await getSettings();
+    settings.data = overview;
+  } catch (error) {
+    if (receipt) {
+      chat.actionReceipts.unshift(settingsActionReceipt(receipt, null));
+      chat.actionReceipts.length = Math.min(chat.actionReceipts.length, 10);
+    }
+    throw error;
+  }
+  if (receipt) {
+    chat.actionReceipts.unshift(settingsActionReceipt(receipt, overview));
+    chat.actionReceipts.length = Math.min(chat.actionReceipts.length, 10);
+  }
   say(text, "ok");
   void loadSidebar();
 }

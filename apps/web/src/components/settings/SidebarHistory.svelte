@@ -52,7 +52,7 @@
   }
 </script>
 
-<section aria-label="Zijbalk wijzigingsgeschiedenis">
+<section id="sidebar-history" aria-label="Zijbalk wijzigingsgeschiedenis">
   <h2>Zijbalkindeling</h2>
   <p class="hint">
     Bewaart alleen paneelindeling en zichtbaarheid. Inhoud, prompts en

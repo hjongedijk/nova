@@ -209,6 +209,9 @@
         <p><strong>Uitgevoerd:</strong> {receipt.performed}</p>
         <p><strong>Gecontroleerd:</strong> {receipt.verification}</p>
         <a href="/settings?section=system#actielog">Bekijk het actielog</a>
+        {#if receipt.recoverHref}
+          <a href={receipt.recoverHref}>Bekijk herstelopties</a>
+        {/if}
       </section>
     {/each}
     {#if handoffOpen}

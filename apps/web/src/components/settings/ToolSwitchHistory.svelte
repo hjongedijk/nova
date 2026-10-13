@@ -59,7 +59,10 @@
   }
 </script>
 
-<section aria-label="Gereedschap wijzigingsgeschiedenis">
+<section
+  id="tool-switch-history"
+  aria-label="Gereedschap wijzigingsgeschiedenis"
+>
   <h2>Gereedschapswijzigingen</h2>
   <p class="hint">
     Bewaart alleen toolnamen en aan/uit-statussen. Beschrijvingen en invoer
