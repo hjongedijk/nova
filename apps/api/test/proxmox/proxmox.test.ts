@@ -63,7 +63,18 @@ beforeAll(async () => {
         { storage: "empty", disk: 0, maxdisk: 0 },
       ];
     else if (url.startsWith("/api2/json/cluster/tasks"))
-      data = [{ type: "qmstart", status: "OK" }];
+      data = [
+        {
+          type: "qmstart",
+          status: "ERROR /private/host?token=secret",
+          starttime: 123,
+          endtime: 124,
+          user: "private@example.test",
+          error: "password=secret",
+          upid: "UPID:private-host:secret",
+        },
+        { type: "vzdump", status: "OK", starttime: 125 },
+      ];
     else {
       actions.push({ url, method: req.method });
       data = "UPID:mock-task";
@@ -167,6 +178,20 @@ describe("ProxmoxSource", () => {
     expect((await run("proxmox_guest_status", { vmid: 999 })).error).toBe(
       "Guest not found",
     );
+  });
+
+  it("projects task results without upstream diagnostics or account details", async () => {
+    expect((await run("proxmox_tasks")).result).toEqual({
+      tasks: [
+        { type: "qmstart", status: "failed", starttime: 123, endtime: 124 },
+        {
+          type: "vzdump",
+          status: "OK",
+          starttime: 125,
+          endtime: undefined,
+        },
+      ],
+    });
   });
 
   it("uses the fixed action path for both guest types and verifies the result", async () => {

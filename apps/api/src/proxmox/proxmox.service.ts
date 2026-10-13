@@ -43,6 +43,38 @@ export interface GuestView {
   uptime: number;
 }
 
+export interface ProxmoxTaskView {
+  type: string;
+  status: "running" | "OK" | "failed";
+  starttime?: number;
+  endtime?: number;
+}
+
+function taskView(value: unknown): ProxmoxTaskView | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const task = value as Record<string, unknown>;
+  const type =
+    typeof task.type === "string" && /^[a-z0-9_-]{1,40}$/i.test(task.type)
+      ? task.type
+      : "other";
+  const time = (value: unknown) =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+      ? value
+      : undefined;
+  return {
+    type,
+    status:
+      task.status === "OK"
+        ? "OK"
+        : task.status === "running" ||
+            (task.status === undefined && task.endtime === undefined)
+          ? "running"
+          : "failed",
+    starttime: time(task.starttime),
+    endtime: time(task.endtime),
+  };
+}
+
 const round1 = (value: number) => Math.round(value * 10) / 10;
 
 export function guestView(g: PveResource): GuestView {
@@ -145,15 +177,22 @@ export class ProxmoxService {
     return this.request<PveResource[]>("/nodes", "GET", signal);
   }
 
-  tasks(signal?: AbortSignal) {
+  /** Recent task summaries; upstream status text and metadata stay private. */
+  tasks(signal?: AbortSignal): Promise<ProxmoxTaskView[]> {
     if (this.targetAccess?.get().mode === "allowlist")
-      return Promise.resolve([] as unknown[]);
-    return this.track(async () =>
-      (await this.request<unknown[]>("/cluster/tasks", "GET", signal)).slice(
-        0,
-        25,
-      ),
-    );
+      return Promise.resolve([] as ProxmoxTaskView[]);
+    return this.track(async () => {
+      const tasks = await this.request<unknown>(
+        "/cluster/tasks",
+        "GET",
+        signal,
+      );
+      if (!Array.isArray(tasks)) throw new Error("Invalid Proxmox task list");
+      return tasks.slice(0, 25).flatMap((task) => {
+        const projected = taskView(task);
+        return projected ? [projected] : [];
+      });
+    });
   }
 
   /** Health of each node, as proxmox_status / proxmox_nodes answer. */
