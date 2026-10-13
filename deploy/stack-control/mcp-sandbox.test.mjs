@@ -17,6 +17,8 @@ function fixture() {
   );
   roots.push(workspaceRoot);
   fs.mkdirSync(path.join(workspaceRoot, "project"));
+  const relayRoot = path.join(workspaceRoot, "relay");
+  fs.mkdirSync(path.join(relayRoot, "context7"), { recursive: true });
   const calls = [];
   const nova = {
     Image: `sha256:${"a".repeat(64)}`,
@@ -28,6 +30,11 @@ function fixture() {
         Type: "bind",
         Source: "/host/data/workspace",
         Destination: "/workspace-host",
+      },
+      {
+        Type: "bind",
+        Source: "/host/data/mcp-relay",
+        Destination: "/relay-host",
       },
     ],
   };
@@ -59,10 +66,11 @@ function fixture() {
   };
   return {
     workspaceRoot,
+    relayRoot,
     calls,
     state,
     docker,
-    sandbox: createMcpSandbox({ docker, workspaceRoot }),
+    sandbox: createMcpSandbox({ docker, workspaceRoot, relayRoot }),
   };
 }
 
@@ -148,6 +156,39 @@ test("fixed offline containers have exact restricted configuration and are never
     });
   }
   assert.ok(f.calls.every(({ url }) => !url.endsWith("/start")));
+});
+
+test("Context7 sees only its verified readonly relay socket and cannot configure a destination", async () => {
+  const f = fixture();
+  const { containerId } = await f.sandbox.prepare({ server: "context7" });
+  const body = f.calls.find((call) =>
+    call.url.startsWith("/containers/create?"),
+  ).body;
+  assert.deepEqual(body.Cmd, [
+    "node",
+    "/app/stack-control/mcp-proxy-stdio.mjs",
+    "context7",
+  ]);
+  assert.equal(body.HostConfig.NetworkMode, "none");
+  assert.deepEqual(body.HostConfig.Mounts, [
+    {
+      Type: "bind",
+      Source: "/host/data/mcp-relay/context7",
+      Target: "/run/nova-mcp-relay",
+      ReadOnly: true,
+    },
+  ]);
+  await f.sandbox.close(containerId);
+  await assert.rejects(
+    f.sandbox.prepare({
+      server: "context7",
+      destination: "https://api.openai.com",
+    }),
+  );
+  f.state.broker.Mounts.find(
+    (mount) => mount.Destination === "/relay-host",
+  ).Source = "/another/relay";
+  await assert.rejects(f.sandbox.prepare({ server: "context7" }));
 });
 
 test("rejects unknown servers, extra fields and invalid project IDs before Docker access", async () => {

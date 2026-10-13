@@ -12,6 +12,7 @@ export const STACK_SERVICES = Object.freeze({
   mqtt: "nova-mqtt",
   qdrant: "nova-qdrant",
   "home-assistant": "nova-home-assistant",
+  "mcp-egress": "nova-mcp-egress",
 });
 export const STATUS_SERVICES = Object.freeze({
   ...STACK_SERVICES,

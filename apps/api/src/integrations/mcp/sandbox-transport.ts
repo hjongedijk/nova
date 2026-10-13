@@ -9,8 +9,8 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 const MAX_MESSAGE_BYTES = 1024 * 1024;
 const CONNECT_TIMEOUT_MS = 20_000;
-export type OfflineMcpServer =
-  "sequential-thinking" | "filesystem" | "workspace-git";
+export type IsolatedMcpServer =
+  "sequential-thinking" | "filesystem" | "workspace-git" | "context7";
 
 /** MCP JSON lines over the authenticated broker's isolated-container stream. */
 export class SandboxMcpTransport implements Transport {
@@ -26,7 +26,7 @@ export class SandboxMcpTransport implements Transport {
   constructor(
     private readonly brokerUrl: string,
     private readonly token: string,
-    private readonly server: OfflineMcpServer,
+    private readonly server: IsolatedMcpServer,
     private readonly projectId?: string,
   ) {}
 

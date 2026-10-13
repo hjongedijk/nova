@@ -344,7 +344,7 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
     const client = new Client({ name: "nova", version: "1.0.0" });
     const transport =
       process.env.NODE_ENV !== "test" &&
-      (id === "sequential-thinking" || id === "filesystem")
+      (id === "sequential-thinking" || id === "filesystem" || id === "context7")
         ? new SandboxMcpTransport(
             this.config.stackControlUrl,
             this.config.stackControlToken,

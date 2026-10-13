@@ -3,7 +3,12 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 const PROJECT_ID = /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/;
-const SERVERS = new Set(["sequential-thinking", "filesystem", "workspace-git"]);
+const SERVERS = new Set([
+  "sequential-thinking",
+  "filesystem",
+  "workspace-git",
+  "context7",
+]);
 const MAX_CONTAINERS = 8;
 
 function fail(message) {
@@ -37,6 +42,7 @@ function mountAt(detail, destination) {
 export function createMcpSandbox({
   docker,
   workspaceRoot = "/workspace-host",
+  relayRoot = "/relay-host",
 }) {
   if (typeof docker !== "function")
     throw new TypeError("docker adapter required");
@@ -95,6 +101,17 @@ export function createMcpSandbox({
         )
           fail("MCP sandbox unavailable");
         const git = input.server === "workspace-git";
+        const context7 = input.server === "context7";
+        const relay = context7 ? mountAt(brokerInfo, "/relay-host") : undefined;
+        if (context7) {
+          if (
+            relay?.Type !== "bind" ||
+            relay.Source !== path.join(data.Source, "mcp-relay")
+          )
+            fail("MCP sandbox unavailable");
+          realDirectory(relayRoot);
+          realDirectory(path.join(relayRoot, "context7"));
+        }
         const cmd = git
           ? [
               "/opt/git-mcp/bin/python",
@@ -105,7 +122,9 @@ export function createMcpSandbox({
             ]
           : input.server === "filesystem"
             ? ["mcp-server-filesystem", "/data/workspace"]
-            : ["mcp-server-sequential-thinking"];
+            : context7
+              ? ["node", "/app/stack-control/mcp-proxy-stdio.mjs", "context7"]
+              : ["mcp-server-sequential-thinking"];
         const created = await docker(
           `/containers/create?name=${encodeURIComponent(`nova-mcp-${crypto.randomUUID()}`)}`,
           "POST",
@@ -141,8 +160,16 @@ export function createMcpSandbox({
                 "/tmp": "rw,noexec,nosuid,nodev,size=64m",
                 "/data": "ro,noexec,nosuid,nodev,size=1m",
               },
-              Mounts:
-                input.server === "sequential-thinking"
+              Mounts: context7
+                ? [
+                    {
+                      Type: "bind",
+                      Source: path.join(relay.Source, "context7"),
+                      Target: "/run/nova-mcp-relay",
+                      ReadOnly: true,
+                    },
+                  ]
+                : input.server === "sequential-thinking"
                   ? []
                   : [
                       {

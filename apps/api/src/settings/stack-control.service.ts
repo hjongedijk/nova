@@ -19,6 +19,7 @@ const labels: Record<StackServiceId, string> = {
   mqtt: "MQTT",
   qdrant: "Qdrant",
   "home-assistant": "Home Assistant",
+  "mcp-egress": "MCP-bronverbinding",
   "stack-control": "Stackbeheer",
 };
 const ids = Object.keys(labels) as StackServiceId[];

@@ -81,6 +81,7 @@ describe("MCP hub", () => {
               ...reviewedMcpServerSpec("filesystem"),
               enabled: true,
             },
+            context7: { ...reviewedMcpServerSpec("context7"), enabled: true },
           },
           "offline-isolation.json",
         ),
@@ -91,7 +92,7 @@ describe("MCP hub", () => {
     );
     try {
       await hub.sync();
-      expect(connect).toHaveBeenCalledTimes(2);
+      expect(connect).toHaveBeenCalledTimes(3);
       for (const [transport] of connect.mock.calls)
         expect(transport).toBeInstanceOf(SandboxMcpTransport);
     } finally {

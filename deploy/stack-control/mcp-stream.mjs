@@ -3,7 +3,12 @@ import http from "node:http";
 const MAX_BYTES = 1024 * 1024;
 const PREPARE_TIMEOUT_MS = 20_000;
 const SESSION_TIMEOUT_MS = 30 * 60_000;
-const SERVERS = new Set(["sequential-thinking", "filesystem", "workspace-git"]);
+const SERVERS = new Set([
+  "sequential-thinking",
+  "filesystem",
+  "workspace-git",
+  "context7",
+]);
 const PROJECT_ID = /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/;
 
 function reject(socket, status) {

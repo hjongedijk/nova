@@ -11,6 +11,7 @@ const services = [
   ["mqtt", "MQTT"],
   ["qdrant", "Qdrant"],
   ["home-assistant", "Home Assistant"],
+  ["mcp-egress", "MCP-bronverbinding"],
   ["stack-control", "Stackbeheer"],
 ].map(([id]) => ({
   id,

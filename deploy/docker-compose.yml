@@ -1,6 +1,7 @@
 # NOVA production stack. Put this file in e.g. /opt/nova, with .env and the *-data folders next to it.
 # Update: set NOVA_VERSION in .env, then: docker compose pull && docker compose up -d
-# Once: chown -R 1000:1000 nova-data nova-backups nodered-data
+# Once: mkdir -p nova-data/workspace nova-data/mcp-relay/context7
+# Then: chown -R 1000:1000 nova-data nova-backups nodered-data
 name: nova
 
 x-restart: &restart
@@ -123,6 +124,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./nova-data/workspace:/workspace-host:ro
+      - ./nova-data/mcp-relay:/relay-host:ro
     networks: [stack-control]
     healthcheck:
       test:
@@ -131,6 +133,35 @@ services:
           "node",
           "-e",
           "fetch('http://127.0.0.1:8090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+  # Only this trusted, fixed-route relay can reach Context7; MCP workers have no IP network.
+  mcp-egress:
+    <<: *restart
+    image: ghcr.io/${NOVA_OWNER:-hjongedijk}/nova:${NOVA_VERSION:-latest}
+    container_name: nova-mcp-egress
+    user: "1000:1000" # Relay directory uses the same ownership as nova-data.
+    command: ["node", "/app/stack-control/mcp-egress-server.mjs"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 64m
+    cpus: 0.25
+    volumes:
+      - ./nova-data/mcp-relay:/relay-host
+    networks: [nova]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('node:http').get({socketPath:'/relay-host/context7/relay.sock',path:'/health'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
         ]
       interval: 15s
       timeout: 3s
