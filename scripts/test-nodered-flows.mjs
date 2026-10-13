@@ -373,5 +373,27 @@ try {
 } finally {
   if (container) spawnSync("docker", ["stop", container], { encoding: "utf8" });
   await new Promise((resolve) => eventServer.close(resolve));
+  try {
+    // Run after shutdown so the real UID-1000 image cannot create another file.
+    // Only this test's temporary bind mount is exposed; never follow symlinks.
+    docker([
+      "run",
+      "--rm",
+      "--pull=never",
+      "--network=none",
+      "--user=0:0",
+      "--mount",
+      `type=bind,source=${data},target=/data`,
+      "--entrypoint=chown",
+      image,
+      "-hR",
+      `${process.getuid()}:${process.getgid()}`,
+      "/data",
+    ]);
+  } catch (error) {
+    console.error(
+      `Node-RED fixture ownership cleanup warning: ${error.message}`,
+    );
+  }
   rmSync(data, { recursive: true, force: true });
 }

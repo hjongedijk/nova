@@ -232,5 +232,26 @@ const server = http.createServer((req,res) => {
   } catch (error) {
     console.error(`Compose cleanup warning: ${error.message}`);
   }
+  try {
+    // All writers have stopped. Expose only our private fixture tree, never the repo.
+    run("docker", [
+      "run",
+      "--rm",
+      "--pull=never",
+      "--network=none",
+      "--user=0:0",
+      "--mount",
+      `type=bind,source=${temp},target=/data`,
+      "--entrypoint=chown",
+      process.env.NOVA_NODE_RED_TEST_IMAGE || "nodered/node-red:4.1",
+      "-hR",
+      `${process.getuid()}:${process.getgid()}`,
+      "/data",
+    ]);
+  } catch (error) {
+    console.error(
+      `Compose fixture ownership cleanup warning: ${error.message}`,
+    );
+  }
   rmSync(temp, { recursive: true, force: true });
 }
