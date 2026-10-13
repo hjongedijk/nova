@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { InfrastructureEvent } from "@nova/contracts";
 import type { PlanningService } from "../../src/planning/planning.service.js";
@@ -151,6 +154,89 @@ describe("AlertsFeed presence delivery", () => {
       new Date(start.getTime() + 60 * 60_000),
     );
     expect(feed.recent().events[6]).toMatchObject({ speakAllowed: true });
+  });
+
+  it("keeps the rolling speech limit across service restarts", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nova-speech-budget-"),
+    );
+    try {
+      const config = { dataFile: (name: string) => path.join(directory, name) };
+      const planning = {
+        onEvent: () => () => undefined,
+      } as unknown as PlanningService;
+      const first = new AlertsFeed(
+        planning,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        config as never,
+      );
+      const start = new Date("2026-10-11T12:00:00.000Z");
+      for (let index = 0; index < 5; index++) {
+        expect(
+          first.record(
+            {
+              ...event,
+              payload: { ...event.payload, title: `Melding ${index}` },
+            },
+            new Date(start.getTime() + index * 60_000),
+          )?.speakAllowed,
+        ).toBe(true);
+      }
+
+      const restarted = new AlertsFeed(
+        planning,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        config as never,
+      );
+      expect(
+        restarted.record(event, new Date(start.getTime() + 10 * 60_000))
+          ?.speakAllowed,
+      ).toBe(false);
+      expect(
+        restarted.record(
+          { ...event, payload: { ...event.payload, title: "Na het uur" } },
+          new Date(start.getTime() + 60 * 60_000),
+        )?.speakAllowed,
+      ).toBe(true);
+      const stored = JSON.parse(
+        fs.readFileSync(config.dataFile("spoken-alert-progress.json"), "utf8"),
+      );
+      expect(stored.spokenAt).toHaveLength(5);
+      expect(JSON.stringify(stored)).not.toContain("Melding");
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when stored speech progress is corrupt", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nova-speech-budget-"),
+    );
+    try {
+      const config = { dataFile: (name: string) => path.join(directory, name) };
+      fs.writeFileSync(
+        config.dataFile("spoken-alert-progress.json"),
+        "{broken",
+      );
+      const feed = new AlertsFeed(
+        { onEvent: () => () => undefined } as unknown as PlanningService,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        config as never,
+      );
+      expect(feed.record(event)?.speakAllowed).toBe(false);
+      expect(feed.recent().events).toHaveLength(1);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("routes each delivery mode to screen, helper, or speech", () => {

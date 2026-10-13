@@ -1,15 +1,18 @@
 import {
   Injectable,
+  Logger,
   Optional,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
+import fs from "node:fs";
 import type {
   AlertsResponse,
   FeedEvent,
   InfrastructureEvent,
 } from "@nova/contracts";
 import { sanitize } from "../core/security/sanitize.js";
+import { NovaConfig } from "../core/config/nova-config.js";
 import { WindowsPcService } from "../integrations/windows/windows-pc.service.js";
 import { PlanningService } from "../planning/planning.service.js";
 import { SpeechPresenceService } from "./speech-presence.service.js";
@@ -72,6 +75,7 @@ export function toFeedEvent(
 /** Things NOVA should tell the user without being asked: watchdog alerts and fired timers. The interface polls this feed. */
 @Injectable()
 export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(AlertsFeed.name);
   private readonly feed: FeedEvent[] = [];
   private readonly speechClaims = new WeakSet<FeedEvent>();
   private sequence = 0;
@@ -80,6 +84,8 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   private deferredTimer?: NodeJS.Timeout;
   private readonly deferredWhileAway = new Map<number, number>();
   private readonly spokenEventTimes: number[] = [];
+  private readonly speechProgressFile?: string;
+  private speechProgressUnavailable = false;
   private readonly repeats = new Map<
     string,
     { firstAt: number; count: number; last: FeedEvent }
@@ -91,7 +97,13 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly presence?: SpeechPresenceService,
     @Optional() private readonly ntfy?: NtfyPushService,
     @Optional() private readonly settings?: SettingsStore,
-  ) {}
+    @Optional() config?: NovaConfig,
+  ) {
+    if (config) {
+      this.speechProgressFile = config.dataFile("spoken-alert-progress.json");
+      this.loadSpeechProgress();
+    }
+  }
 
   onModuleInit(): void {
     this.stop = this.planning.onEvent((event) => this.record(event));
@@ -155,18 +167,9 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       }
     }
     const voiceEligible = mode === "speak";
-    while (
-      this.spokenEventTimes[0] !== undefined &&
-      timestamp - this.spokenEventTimes[0] >= SPOKEN_EVENT_WINDOW_MS
-    )
-      this.spokenEventTimes.shift();
     const presenceAllowsSpeech = this.presence?.maySpeak() !== false;
     const withinSpeechBudget =
-      !voiceEligible ||
-      !presenceAllowsSpeech ||
-      this.spokenEventTimes.length < MAX_SPOKEN_EVENTS_PER_HOUR;
-    if (voiceEligible && presenceAllowsSpeech && withinSpeechBudget)
-      this.spokenEventTimes.push(timestamp);
+      !voiceEligible || !presenceAllowsSpeech || this.reserveSpeech(timestamp);
     const stored: FeedEvent = {
       seq: ++this.sequence,
       ...entry,
@@ -260,12 +263,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       eligible.push(event);
     }
     if (!eligible.length) return;
-    while (
-      this.spokenEventTimes[0] !== undefined &&
-      timestamp - this.spokenEventTimes[0] >= SPOKEN_EVENT_WINDOW_MS
-    )
-      this.spokenEventTimes.shift();
-    if (this.spokenEventTimes.length >= MAX_SPOKEN_EVENTS_PER_HOUR) return;
+    if (!this.reserveSpeech(timestamp)) return;
     const count = eligible.length;
     const summary: FeedEvent = {
       seq: ++this.sequence,
@@ -278,11 +276,64 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       deliveryMode: "speak",
       speakAllowed: true,
     };
-    this.spokenEventTimes.push(timestamp);
     this.feed.push(summary);
     if (this.feed.length > MAX_EVENTS) this.feed.shift();
     this.deferredWhileAway.clear();
     if (this.windows?.configured)
       void this.windows.notifyHelper(summary).catch(() => undefined);
+  }
+
+  private loadSpeechProgress(): void {
+    try {
+      const value = JSON.parse(
+        fs.readFileSync(this.speechProgressFile!, "utf8"),
+      ) as { spokenAt?: unknown };
+      const times = value?.spokenAt;
+      if (
+        !Array.isArray(times) ||
+        times.length > MAX_SPOKEN_EVENTS_PER_HOUR ||
+        times.some(
+          (time, index) =>
+            !Number.isSafeInteger(time) ||
+            time < 0 ||
+            (index > 0 && time < times[index - 1]),
+        )
+      )
+        throw new Error("Invalid speech progress");
+      this.spokenEventTimes.push(...(times as number[]));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      this.speechProgressUnavailable = true;
+      this.logger.error(
+        "Speech progress is unreadable; automatic speech paused",
+      );
+    }
+  }
+
+  private reserveSpeech(timestamp: number): boolean {
+    if (this.speechProgressUnavailable) return false;
+    const recent = this.spokenEventTimes.filter(
+      (time) => timestamp - time < SPOKEN_EVENT_WINDOW_MS,
+    );
+    if (recent.length >= MAX_SPOKEN_EVENTS_PER_HOUR) return false;
+    const next = [...recent, timestamp].sort((a, b) => a - b);
+    if (this.speechProgressFile) {
+      try {
+        const temporary = `${this.speechProgressFile}.tmp`;
+        fs.writeFileSync(temporary, JSON.stringify({ spokenAt: next }), {
+          mode: 0o600,
+        });
+        fs.chmodSync(temporary, 0o600);
+        fs.renameSync(temporary, this.speechProgressFile);
+      } catch {
+        this.speechProgressUnavailable = true;
+        this.logger.error(
+          "Speech progress could not be saved; automatic speech paused",
+        );
+        return false;
+      }
+    }
+    this.spokenEventTimes.splice(0, this.spokenEventTimes.length, ...next);
+    return true;
   }
 }
