@@ -238,6 +238,31 @@ describe("tools", () => {
     expect((await run("timer_cancel", {})).error).toMatch(/id of label/);
   });
 
+  it("requires an explicit timezone for absolute timers", async () => {
+    const fireAt = new Date(Date.now() + 60_000);
+    const utcAt = fireAt.toISOString();
+    expect((await run("timer_set", { at: utcAt.slice(0, -1) })).error).toMatch(
+      /geldige ISO/,
+    );
+
+    const offsetAt = new Date(fireAt.getTime() + 2 * 3600_000)
+      .toISOString()
+      .replace("Z", "+02:00");
+    const result = await run("timer_set", { at: offsetAt });
+    expect(result).toMatchObject({
+      ok: true,
+      result: { timer: { fireAt: utcAt } },
+    });
+
+    const negativeOffsetAt = new Date(fireAt.getTime() - 5 * 3600_000)
+      .toISOString()
+      .replace("Z", "-05:00");
+    expect(await run("timer_set", { at: negativeOffsetAt })).toMatchObject({
+      ok: true,
+      result: { timer: { fireAt: utcAt } },
+    });
+  });
+
   it("fires a persisted timer once after the planning service restarts", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-12T10:00:00.000Z"));

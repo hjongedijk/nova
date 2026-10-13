@@ -91,6 +91,13 @@ export class PlanningService implements OnModuleInit, OnModuleDestroy {
       throw new Error(
         "Geef óf seconds óf at op, niet allebei en niet geen van beide.",
       );
+    if (
+      args.at !== undefined &&
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+        args.at,
+      )
+    )
+      throw new Error("at is geen geldige ISO-tijd.");
     const fireAt =
       args.seconds !== undefined
         ? Date.now() + args.seconds * 1000
