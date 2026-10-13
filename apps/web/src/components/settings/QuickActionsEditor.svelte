@@ -47,6 +47,11 @@
       );
       await afterChange(
         `De snelle opdrachten zijn opgeslagen.${result.historyWarning ? ` ${result.historyWarning}` : ""}`,
+        {
+          kind: "quick-actions",
+          items: result.quickActions,
+          operation: "save",
+        },
       );
       history = null;
     } catch (error) {
@@ -60,6 +65,11 @@
       rows = result.quickActions.map((item) => ({ key: nextKey++, ...item }));
       await afterChange(
         `De standaardknoppen zijn terug.${result.historyWarning ? ` ${result.historyWarning}` : ""}`,
+        {
+          kind: "quick-actions",
+          items: result.quickActions,
+          operation: "reset",
+        },
       );
       history = null;
     } catch (error) {
@@ -80,6 +90,11 @@
       rows = result.quickActions.map((item) => ({ key: nextKey++, ...item }));
       await afterChange(
         `Snelle opdrachten hersteld.${result.auditWarning ? ` ${result.auditWarning}` : ""}`,
+        {
+          kind: "quick-actions",
+          items: result.quickActions,
+          operation: "rollback",
+        },
       );
       history = await getQuickActionsHistory();
     } catch (error) {
@@ -90,7 +105,7 @@
   }
 </script>
 
-<section>
+<section id="quick-actions-history">
   <p class="hint">
     De knoppen die op het beginscherm verschijnen als de invoer zichtbaar is
     (maximaal 8). Een druk op een knop is hetzelfde als de opdracht typen.

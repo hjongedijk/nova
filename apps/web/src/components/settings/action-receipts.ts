@@ -1,5 +1,6 @@
 import type {
   PersonaStyleId,
+  QuickAction,
   SettingsOverview,
   SidebarItem,
 } from "@nova/contracts";
@@ -10,7 +11,12 @@ export type SettingsReceiptTarget =
   | { kind: "tool-switch"; name: string; enabled: boolean }
   | { kind: "sidebar"; items: SidebarItem[]; reset?: boolean }
   | { kind: "persona-style"; style: PersonaStyleId }
-  | { kind: "persona-rules"; text: string };
+  | { kind: "persona-rules"; text: string }
+  | {
+      kind: "quick-actions";
+      items: QuickAction[];
+      operation: "save" | "reset" | "rollback";
+    };
 
 let sequence = 0;
 
@@ -26,25 +32,37 @@ export function settingsActionReceipt(
         ? target.reset
           ? "Standaardindeling van de zijbalk herstellen"
           : "Zijbalkindeling aanpassen"
-        : target.kind === "persona-style"
-          ? "Gespreksstijl aanpassen"
-          : "Eigen gespreksregels aanpassen";
+        : target.kind === "quick-actions"
+          ? target.operation === "reset"
+            ? "Standaard snelle opdrachten herstellen"
+            : target.operation === "rollback"
+              ? "Eerdere snelle opdrachten herstellen"
+              : "Snelle opdrachten aanpassen"
+          : target.kind === "persona-style"
+            ? "Gespreksstijl aanpassen"
+            : "Eigen gespreksregels aanpassen";
   const performed =
     target.kind === "tool-switch"
       ? "Gereedschapsinstelling opgeslagen"
       : target.kind === "sidebar"
         ? "Zijbalkindeling opgeslagen"
-        : target.kind === "persona-style"
-          ? "Gespreksstijl opgeslagen"
-          : "Eigen gespreksregels opgeslagen";
+        : target.kind === "quick-actions"
+          ? target.operation === "rollback"
+            ? "Snelle opdrachten hersteld"
+            : "Snelle opdrachten opgeslagen"
+          : target.kind === "persona-style"
+            ? "Gespreksstijl opgeslagen"
+            : "Eigen gespreksregels opgeslagen";
   const recoverHref =
     target.kind === "tool-switch"
       ? "/settings?section=system#tool-switch-history"
       : target.kind === "sidebar"
         ? "/settings?section=system#sidebar-history"
-        : target.kind === "persona-style"
-          ? "/settings?section=personality#persona-preferences-history"
-          : "/settings?section=personality#persona-history";
+        : target.kind === "quick-actions"
+          ? "/settings?section=general#quick-actions-history"
+          : target.kind === "persona-style"
+            ? "/settings?section=personality#persona-preferences-history"
+            : "/settings?section=personality#persona-history";
   return {
     id: `settings-${Date.now()}-${++sequence}`,
     requested,
@@ -72,5 +90,9 @@ function checkReadback(
       return overview.personaStyle === target.style;
     case "persona-rules":
       return overview.persona === target.text;
+    case "quick-actions":
+      return (
+        JSON.stringify(overview.quickActions) === JSON.stringify(target.items)
+      );
   }
 }

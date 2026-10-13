@@ -7,6 +7,9 @@ const overview = {
   sidebar: [{ id: "w:secret-widget-id", column: "left", page: 1, shown: true }],
   personaStyle: "friendly",
   persona: "My private instruction and token abc123",
+  quickActions: [
+    { label: "Private label", prompt: "Private prompt token abc123" },
+  ],
 } as SettingsOverview;
 
 describe("settings action receipts", () => {
@@ -67,6 +70,30 @@ describe("settings action receipts", () => {
     expect(
       settingsActionReceipt(
         { kind: "persona-rules", text: "other instruction" },
+        overview,
+      ).verification,
+    ).toContain("niet gecontroleerd");
+  });
+
+  it("checks quick actions in order without copying labels or prompts", () => {
+    const receipt = settingsActionReceipt(
+      {
+        kind: "quick-actions",
+        items: overview.quickActions,
+        operation: "reset",
+      },
+      overview,
+    );
+    expect(receipt.verification).toContain("gecontroleerd");
+    expect(receipt.requested).toBe("Standaard snelle opdrachten herstellen");
+    expect(receipt.recoverHref).toBe(
+      "/settings?section=general#quick-actions-history",
+    );
+    expect(JSON.stringify(receipt)).not.toContain("Private");
+    expect(JSON.stringify(receipt)).not.toContain("abc123");
+    expect(
+      settingsActionReceipt(
+        { kind: "quick-actions", items: [], operation: "save" },
         overview,
       ).verification,
     ).toContain("niet gecontroleerd");
