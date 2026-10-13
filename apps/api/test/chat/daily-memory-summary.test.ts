@@ -47,4 +47,27 @@ describe("daily memory summary schedule", () => {
     expect(input).toHaveLength(1);
     expect(input[0]?.content).toContain("keuken");
   });
+
+  it("keeps the latest decision within the transcript limit in chronological order", () => {
+    const messages = Array.from({ length: 12 }, (_, index) => ({
+      role: "user" as const,
+      content: `Earlier discussion ${index}: ${"a".repeat(1180)}`,
+      at: new Date(Date.UTC(2026, 9, 11, 8, index)).toISOString(),
+    }));
+    messages.push({
+      role: "user",
+      content: "Final decision: renovate the kitchen next month.",
+      at: "2026-10-11T09:00:00.000Z",
+    });
+
+    const input = summaryInput(messages, "2026-10-11", "Europe/Amsterdam");
+
+    expect(input.at(-1)?.content).toContain("Final decision");
+    expect(input.map((message) => message.at)).toEqual(
+      [...input.map((message) => message.at)].sort(),
+    );
+    expect(
+      input.reduce((length, message) => length + message.content.length, 0),
+    ).toBeLessThanOrEqual(12_000);
+  });
 });

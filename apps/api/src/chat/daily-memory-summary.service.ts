@@ -75,10 +75,10 @@ export function summaryInput(
     .sort((a, b) => a.at.localeCompare(b.at));
   let remaining = MAX_TRANSCRIPT_CHARS;
   const bounded: StoredMessage[] = [];
-  for (const item of dated.slice(-80)) {
+  for (const item of dated.slice(-80).reverse()) {
     const content = item.content.slice(0, Math.min(1200, remaining));
     if (content.trim().length < 12) continue;
-    bounded.push({ ...item, content });
+    bounded.unshift({ ...item, content });
     remaining -= content.length;
     if (remaining <= 0) break;
   }

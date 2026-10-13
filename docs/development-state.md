@@ -545,3 +545,5 @@ L2.4-kandidaatbeoordeling aangescherpt: `@ni-c/imap-mcp` schrijft onder `list_ne
 2026-10-13 — F6/I16-hercontrole: gegenereerde Node-RED-fout- en offlineflows bevatten geen interpolatie van upstreamdiagnostiek of nodenamen meer in meldingen. De derde identieke melding wordt als `screen`-samenvatting getoond zonder de Windows-helper te openen. Twintig gerichte flow-/feedtests slagen; volledige API-suite vóór deze fixes: 1604 tests groen. API-typecheck na de parallelle J4-wijziging volgt.
 
 2026-10-13 — I15-hercontrole: een verlopen overdrachtkaart wordt bij lezen uit lokale opslag verwijderd. De gerichte webtests, lint, format en Svelte-check slagen.
+
+2026-10-13 — D4-hercontrole: het nachtelijke samenvattingsvenster vult de 12.000-tekengrens nu vanuit de nieuwste berichten en zet die daarna chronologisch voor het model. Daardoor verdringen lange vroege gesprekken geen late beslissingen meer. De regressie faalde vóór de fix en slaagt nu; drie gerichte tests en API-typecheck groen.
