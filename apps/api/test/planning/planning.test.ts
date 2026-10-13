@@ -59,6 +59,7 @@ function boot() {
     home as unknown as import("../../src/home/home-assistant.service.js").HomeAssistantService,
   );
   events = [];
+  planning.onTimerEvent(() => true);
   planning.onEvent((e) => events.push(e));
 }
 

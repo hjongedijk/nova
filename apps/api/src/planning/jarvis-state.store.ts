@@ -12,6 +12,11 @@ export interface StoredTimer {
   fireAt: number;
   createdAt?: number;
 }
+export interface PendingTimerEvent {
+  timer: StoredTimer;
+  firedAt: string;
+  late: boolean;
+}
 export interface StoredListItem {
   id: string;
   text: string;
@@ -25,9 +30,10 @@ export interface StoredAlert {
   detail: string;
   at: string;
 }
-/** The shape of jarvis-state.json, unchanged from the prototype. */
+/** Compatibility planning file; old records gain an empty durable timer outbox. */
 export interface JarvisState {
   timers: StoredTimer[];
+  timerOutbox: PendingTimerEvent[];
   lists: Record<string, StoredListItem[]>;
   alerts: StoredAlert[];
   active: Record<string, boolean>;
@@ -59,7 +65,8 @@ export const newId = () => crypto.randomBytes(4).toString("hex");
 export class JarvisStateStore {
   private state: JarvisState | null = null;
   private readonly listeners = new Set<(event: InfrastructureEvent) => void>();
-  private readonly log = new Logger("JarvisState");
+  private timerReceiver?: (event: InfrastructureEvent) => boolean;
+  private readonly log = new Logger("NOVA planning");
 
   constructor(
     private readonly config: NovaConfig,
@@ -80,6 +87,7 @@ export class JarvisStateStore {
     }
     const state = { ...parsed } as JarvisState;
     state.timers ||= [];
+    state.timerOutbox ||= [];
     state.lists ||= {};
     state.alerts ||= [];
     state.active ||= {};
@@ -99,7 +107,9 @@ export class JarvisStateStore {
 
   /** Commit planning changes only after the private candidate is persisted. */
   transaction(
-    mutate: (candidate: Pick<JarvisState, "timers" | "lists">) => void,
+    mutate: (
+      candidate: Pick<JarvisState, "timers" | "lists" | "timerOutbox">,
+    ) => void,
   ): void {
     const state = this.data;
     const candidate = structuredClone(state);
@@ -108,6 +118,7 @@ export class JarvisStateStore {
     // Watchdog rounds hold this root and system objects across asynchronous probes.
     state.timers = candidate.timers;
     state.lists = candidate.lists;
+    state.timerOutbox = candidate.timerOutbox;
   }
 
   private persist(state: JarvisState): void {
@@ -118,7 +129,19 @@ export class JarvisStateStore {
         mode: 0o600,
       });
       fs.chmodSync(temporary, 0o600);
+      const descriptor = fs.openSync(temporary, "r");
+      try {
+        fs.fsyncSync(descriptor);
+      } finally {
+        fs.closeSync(descriptor);
+      }
       fs.renameSync(temporary, this.file);
+      const directory = fs.openSync(path.dirname(this.file), "r");
+      try {
+        fs.fsyncSync(directory);
+      } finally {
+        fs.closeSync(directory);
+      }
     } catch {
       this.log.warn("Could not save planning state");
       throw new Error("Could not save planning state");
@@ -151,6 +174,24 @@ export class JarvisStateStore {
   onEvent(listener: (event: InfrastructureEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** Exactly one durable timer consumer; observers/MQTT are not acceptance authorities. */
+  onTimerEvent(receiver: (event: InfrastructureEvent) => boolean): () => void {
+    if (this.timerReceiver)
+      throw new Error("Timer receiver already registered");
+    this.timerReceiver = receiver;
+    return () => {
+      if (this.timerReceiver === receiver) this.timerReceiver = undefined;
+    };
+  }
+
+  acceptTimerEvent(event: InfrastructureEvent): boolean {
+    try {
+      return this.timerReceiver?.(event) === true;
+    } catch {
+      return false;
+    }
   }
 
   emit(event: InfrastructureEvent): void {

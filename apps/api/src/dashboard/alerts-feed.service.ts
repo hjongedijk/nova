@@ -17,6 +17,7 @@ import { WindowsPcService } from "../integrations/windows/windows-pc.service.js"
 import { PlanningService } from "../planning/planning.service.js";
 import { SpeechPresenceService } from "./speech-presence.service.js";
 import { NtfyPushService } from "./ntfy-push.service.js";
+import { TimerFeedJournal } from "./timer-feed-journal.js";
 import { SettingsStore } from "../settings/store/settings.store.js";
 
 const SEVERITIES = new Set(["info", "warning", "critical"]);
@@ -89,6 +90,9 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   private readonly speechClaims = new WeakSet<FeedEvent>();
   private sequence = 0;
   private stop?: () => void;
+  private stopTimers?: () => void;
+  private readonly timerJournal?: TimerFeedJournal;
+  private timerHistoryRestored = false;
   private stopPresence?: () => void;
   private deferredTimer?: NodeJS.Timeout;
   private readonly deferredWhileAway = new Map<number, number>();
@@ -117,11 +121,38 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       this.loadSpeechProgress();
       this.focusFile = config.dataFile("focus-mode.json");
       this.loadFocus();
+      this.timerJournal = new TimerFeedJournal(
+        config.dataFile("timer-feed.json"),
+      );
+      try {
+        this.restoreTimerHistory();
+      } catch {
+        this.logger.warn(
+          "Timer feed history unavailable; pending timers remain queued",
+        );
+      }
     }
   }
 
+  private restoreTimerHistory(): void {
+    if (!this.timerJournal || this.timerHistoryRestored) return;
+    for (const { event } of this.timerJournal.read().slice(-MAX_EVENTS)) {
+      // Recovery restores visible history without replaying speech/cues/native delivery.
+      this.feed.push({ ...event, speakAllowed: false, deliveryMode: "screen" });
+      this.sequence = Math.max(this.sequence, event.seq);
+    }
+    this.timerHistoryRestored = true;
+  }
+
   onModuleInit(): void {
-    this.stop = this.planning.onEvent((event) => this.record(event));
+    this.stop = this.planning.onEvent((event) => {
+      if (event.topic !== "jarvis/events/timer" || !this.planning.onTimerEvent)
+        this.record(event);
+    });
+    this.stopTimers = this.planning.onTimerEvent?.((event) => {
+      if (!this.timerJournal) return false;
+      return this.record(event) !== null;
+    });
     this.stopPresence = this.presence?.onSpeechAvailable(() =>
       this.releaseDeferred(),
     );
@@ -134,11 +165,23 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy(): void {
     this.stop?.();
+    this.stopTimers?.();
     this.stopPresence?.();
     if (this.deferredTimer) clearInterval(this.deferredTimer);
   }
 
   record(event: InfrastructureEvent, now = new Date()): FeedEvent | null {
+    const timerId =
+      event.topic === "jarvis/events/timer" &&
+      typeof event.payload?.deliveryId === "string"
+        ? event.payload.deliveryId
+        : null;
+    if (timerId && this.timerJournal) {
+      if (!/^[a-f0-9]{8}:\d+$/.test(timerId)) return null;
+      this.restoreTimerHistory();
+      const accepted = this.timerJournal.find(timerId);
+      if (accepted) return accepted;
+    }
     this.settleFocus(now);
     const entry = toFeedEvent(event, now);
     if (!entry) return null;
@@ -196,14 +239,16 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     }
     const voiceEligible = mode === "speak" && !focused;
     const presenceAllowsSpeech = this.presence?.maySpeak() !== false;
-    const withinSpeechBudget =
-      !voiceEligible || !presenceAllowsSpeech || this.reserveSpeech(timestamp);
     const stored: FeedEvent = {
       seq: ++this.sequence,
       ...entry,
-      speakAllowed: voiceEligible && presenceAllowsSpeech && withinSpeechBudget,
+      speakAllowed: false,
       deliveryMode: focused ? "screen" : mode,
     };
+    if (timerId && this.timerJournal) this.timerJournal.accept(timerId, stored);
+    // A failed durable acceptance must not spend speech budget on an unheard notice.
+    stored.speakAllowed =
+      voiceEligible && presenceAllowsSpeech && this.reserveSpeech(timestamp);
     this.feed.push(stored);
     if (voiceEligible && !presenceAllowsSpeech) {
       this.deferredWhileAway.set(stored.seq, timestamp);

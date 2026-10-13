@@ -17,6 +17,8 @@ import {
 
 export const MAX_TIMERS = 20;
 export const MAX_LIST_ITEMS = 100;
+const MAX_PENDING_TIMER_EVENTS = 100;
+const MAX_TIMER_RETRY_MS = 60_000;
 
 const listKey = (name: string) => name.trim().toLowerCase();
 
@@ -33,6 +35,10 @@ export function describeTimer(timer: StoredTimer, now = Date.now()): TimerInfo {
 @Injectable()
 export class PlanningService implements OnModuleInit, OnModuleDestroy {
   private pump?: NodeJS.Timeout;
+  private readonly retries = new Map<
+    string,
+    { attempts: number; nextAt: number; accepted: boolean }
+  >();
 
   constructor(private readonly store: JarvisStateStore) {}
 
@@ -48,6 +54,11 @@ export class PlanningService implements OnModuleInit, OnModuleDestroy {
   /** Listen for fired timers and alerts. Returns the unsubscribe function. */
   onEvent(listener: (event: InfrastructureEvent) => void): () => void {
     return this.store.onEvent(listener);
+  }
+
+  /** Durable feed acceptance, separate from best-effort observers and MQTT. */
+  onTimerEvent(receiver: (event: InfrastructureEvent) => boolean): () => void {
+    return this.store.onTimerEvent(receiver);
   }
 
   /** Active timers, soonest first. */
@@ -68,29 +79,80 @@ export class PlanningService implements OnModuleInit, OnModuleDestroy {
 
   fireDueTimers(now = Date.now()): void {
     const state = this.store.data;
-    const due = state.timers.filter((timer) => timer.fireAt <= now);
-    if (!due.length) return;
-    try {
-      this.store.transaction((candidate) => {
-        candidate.timers = candidate.timers.filter(
-          (timer) => timer.fireAt > now,
-        );
-      });
-    } catch {
-      // Retain due timers for the next pump; announce only persisted removals.
-      return;
+    const available = Math.max(
+      0,
+      MAX_PENDING_TIMER_EVENTS - state.timerOutbox.length,
+    );
+    const due = state.timers
+      .filter((timer) => timer.fireAt <= now)
+      .slice(0, available);
+    if (due.length) {
+      const ids = new Set(due.map((timer) => timer.id));
+      try {
+        this.store.transaction((candidate) => {
+          candidate.timers = candidate.timers.filter(
+            (timer) => !ids.has(timer.id),
+          );
+          candidate.timerOutbox.push(
+            ...due.map((timer) => ({
+              timer,
+              firedAt: new Date().toISOString(),
+              late: now - timer.fireAt > 5000,
+            })),
+          );
+        });
+      } catch {
+        // Keep active timers intact until their pending notifications are durable.
+        return;
+      }
     }
-    for (const timer of due)
-      this.store.emit({
+    for (const pending of [...state.timerOutbox]) {
+      const key = `${pending.timer.id}:${pending.timer.fireAt}`;
+      const retry = this.retries.get(key);
+      if (retry && now < retry.nextAt) {
+        if (retry.accepted) break;
+        continue;
+      }
+      const event: InfrastructureEvent = {
         topic: "jarvis/events/timer",
         payload: {
           type: "timer_fired",
-          id: timer.id,
-          label: timer.label,
-          firedAt: new Date().toISOString(),
-          late: now - timer.fireAt > 5000,
+          id: pending.timer.id,
+          deliveryId: key,
+          label: pending.timer.label,
+          firedAt: pending.firedAt,
+          late: pending.late,
         },
-      });
+      };
+      if (!this.store.acceptTimerEvent(event)) {
+        this.deferTimer(key, now);
+        continue;
+      }
+      try {
+        this.store.transaction((candidate) => {
+          candidate.timerOutbox = candidate.timerOutbox.filter(
+            (item) => `${item.timer.id}:${item.timer.fireAt}` !== key,
+          );
+        });
+      } catch {
+        // Feed acceptance is idempotent; leave this event queued for acknowledgement.
+        // Stop here so a failed acknowledgement cannot evict pending dedupe records.
+        this.deferTimer(key, now, true);
+        break;
+      }
+      this.retries.delete(key);
+      // External observers/MQTT are best effort; the durable visible feed owns recovery.
+      this.store.emit(event);
+    }
+  }
+
+  private deferTimer(key: string, now: number, accepted = false): void {
+    const attempts = Math.min(7, (this.retries.get(key)?.attempts ?? 0) + 1);
+    this.retries.set(key, {
+      attempts,
+      accepted: accepted || this.retries.get(key)?.accepted === true,
+      nextAt: now + Math.min(MAX_TIMER_RETRY_MS, 1000 * 2 ** (attempts - 1)),
+    });
   }
 
   setTimer(args: { seconds?: number; at?: string; label?: string }) {
