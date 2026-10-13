@@ -27,6 +27,7 @@ import {
   NodeRedManagement,
   type NodeRedFlowSnapshot,
 } from "./node-red-management.service.js";
+import { NodeRedFlowRevisions } from "./node-red-flow-revisions.service.js";
 
 const digest = (value: unknown) =>
   crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -76,6 +77,7 @@ export class SettingsBackupService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly connections?: ServiceConnectionsStore,
     @Optional() config?: NovaConfig,
     @Optional() private readonly nodeRed?: NodeRedManagement,
+    @Optional() private readonly nodeRedRevisions?: NodeRedFlowRevisions,
   ) {
     this.journal = config?.dataFile("settings-import-transaction.json");
   }
@@ -650,8 +652,25 @@ export class SettingsBackupService implements OnModuleInit, OnModuleDestroy {
               error:
                 "Import geannuleerd, maar Node-RED-herstel is nog niet bevestigd.",
             };
+          return { ...committed, importedFlows: 0 };
         }
-        return { ...committed, importedFlows: draft.summary.incomingFlows };
+        let historyWarning: string | undefined;
+        if (this.nodeRedRevisions) {
+          try {
+            const after = await this.nodeRed.flowSnapshot();
+            if (after.revision !== result.revision)
+              throw new Error("Flow revision changed after import");
+            this.nodeRedRevisions.recordVerifiedChange(live, after);
+          } catch {
+            historyWarning =
+              "Flows geïmporteerd, maar lokale versiegeschiedenis kon niet worden opgeslagen.";
+          }
+        }
+        return {
+          ...committed,
+          importedFlows: draft.summary.incomingFlows,
+          ...(historyWarning ? { historyWarning } : {}),
+        };
       }
       const current = await this.nodeRed.flowSnapshot().catch(() => null);
       const rollback = current

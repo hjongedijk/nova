@@ -86,4 +86,15 @@ describe("private Node-RED flow revisions", () => {
     ).toThrow();
     expect(store.list().revisions).toHaveLength(2);
   });
+
+  it("does not leave a half-history when a verified change contains secrets", () => {
+    const { store } = fixture();
+    expect(() =>
+      store.recordVerifiedChange(snapshot("rev-1", "Before"), {
+        revision: "rev-2",
+        flows: [{ id: "tab-a", type: "tab", password: "private" }],
+      }),
+    ).toThrow();
+    expect(store.list().revisions).toHaveLength(0);
+  });
 });

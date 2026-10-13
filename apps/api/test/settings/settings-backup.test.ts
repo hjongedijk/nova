@@ -16,6 +16,7 @@ import type {
   NodeRedManagement,
   NodeRedFlowSnapshot,
 } from "../../src/settings/node-red-management.service.js";
+import { NodeRedFlowRevisions } from "../../src/settings/node-red-flow-revisions.service.js";
 import { SettingsStore } from "../../src/settings/store/settings.store.js";
 import type { WallpaperPort } from "../../src/settings/wallpaper.port.js";
 import { ADMIN, createApp, playbook, webhook } from "./helpers.js";
@@ -79,13 +80,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function fixture(nodeRed?: NodeRedManagement) {
+function fixture(nodeRed?: NodeRedManagement, withHistory = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-settings-backup-"));
   const filename = path.join(dir, "settings.json");
   cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
   const config = {
     dataFile: (name: string) => path.join(dir, name),
   } as NovaConfig;
+  const flowHistory = withHistory
+    ? new NodeRedFlowRevisions(config)
+    : undefined;
   const store = new SettingsStore(config);
   store.update((next) => {
     next.persona = "Old private persona";
@@ -118,6 +122,7 @@ function fixture(nodeRed?: NodeRedManagement) {
     undefined,
     config,
     nodeRed,
+    flowHistory,
   );
   cleanups.push(() => backup.onModuleDestroy());
   const prepare = (body: unknown = requestBody()) => {
@@ -158,6 +163,7 @@ function fixture(nodeRed?: NodeRedManagement) {
       lists = structuredClone(next);
     },
     backup,
+    flowHistory,
     prepare,
     confirm,
     bytes,
@@ -186,7 +192,7 @@ describe("settings backup private approvals", () => {
         return { ok: true, revision: snapshot.revision };
       }),
     } as unknown as NodeRedManagement;
-    const f = fixture(nodeRed);
+    const f = fixture(nodeRed, true);
     const body = {
       ...requestBody(),
       data: {
@@ -208,6 +214,9 @@ describe("settings backup private approvals", () => {
     });
     expect(result).toMatchObject({ ok: true, importedFlows: 1 });
     expect(snapshot.flows).toEqual(body.data.nodeRedFlows);
+    expect(f.flowHistory?.list().revisions).toHaveLength(2);
+    expect(JSON.stringify(f.flowHistory?.list())).not.toContain("Old");
+    expect(JSON.stringify(f.flowHistory?.list())).not.toContain("New");
   });
 
   it("refuses stale Node-RED revisions without changing local settings", async () => {

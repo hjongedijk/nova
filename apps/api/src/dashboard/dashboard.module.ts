@@ -13,6 +13,7 @@ import { PlanningModule } from "../planning/planning.module.js";
 import { ProxmoxModule } from "../proxmox/proxmox.module.js";
 import { RoutingModule } from "../routing/routing.module.js";
 import { SettingsStoreModule } from "../settings/store/settings-store.module.js";
+import { NodeRedFlowRevisionsModule } from "../settings/node-red-flow-revisions.module.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
 import { DashboardController } from "./dashboard.controller.js";
 import { HostMetricsService } from "./host-metrics.service.js";
@@ -47,6 +48,7 @@ import { CalendarReminderService } from "./calendar-reminder.service.js";
     WindowsModule,
     BrowserAgentModule,
     SettingsStoreModule,
+    NodeRedFlowRevisionsModule,
   ],
   controllers: [DashboardController, NodeRedEventsController],
   providers: [

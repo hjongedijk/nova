@@ -68,7 +68,7 @@ import { NoteWidgetHistory } from "./note-widget-history.service.js";
 import { WidgetDisplayHistory } from "./widget-display-history.service.js";
 import { WallpaperHistory } from "./wallpaper-history.service.js";
 import { NodeRedManagement } from "./node-red-management.service.js";
-import { NodeRedFlowRevisions } from "./node-red-flow-revisions.service.js";
+import { NodeRedFlowRevisionsModule } from "./node-red-flow-revisions.module.js";
 import { SkillAssistantService } from "./ai/skill-assistant.service.js";
 import { PlaybooksService } from "./playbooks.service.js";
 import { PublicConfigService } from "./public-config.service.js";
@@ -111,6 +111,7 @@ import { HouseholdProfileHistory } from "./household-profile-history.service.js"
 @Module({
   imports: [
     SettingsStoreModule,
+    NodeRedFlowRevisionsModule,
     RoutingModule,
     ConfirmationsModule,
     PlanningModule,
@@ -203,7 +204,6 @@ import { HouseholdProfileHistory } from "./household-profile-history.service.js"
     WidgetDisplayHistory,
     WallpaperHistory,
     NodeRedManagement,
-    NodeRedFlowRevisions,
     SkillsSource,
     PlaybooksService,
     PublicConfigService,

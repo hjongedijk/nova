@@ -1,7 +1,8 @@
 import { createServer, type Server } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import { NodeRedFlowSource } from "../../src/dashboard/node-red-flow.source.js";
+import type { NodeRedFlowRevisions } from "../../src/settings/node-red-flow-revisions.service.js";
 
 const servers: Server[] = [];
 const token = "flow-token-012345678901234567890123456789";
@@ -161,6 +162,10 @@ describe("Node-RED flow tool", () => {
   });
 
   it("changes only the allow-listed tab state using revision-safe deployment", async () => {
+    const recordVerifiedChange = vi.fn((...values: unknown[]) => {
+      expect(values).toHaveLength(2);
+      throw new Error("private storage path");
+    });
     let rev = "rev-1";
     let flows: unknown[] = [
       { id: "tab-lights", type: "tab", label: "Lights", disabled: false },
@@ -193,19 +198,22 @@ describe("Node-RED flow tool", () => {
             .disabled,
         ).toBe(false);
         flows = body.flows;
-        rev = "rev-2";
+        rev = `rev-${Number(rev.slice(4)) + 1}`;
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ rev }));
       });
     });
     const port = await listen(server);
-    const tool = new NodeRedFlowSource({
-      nodeRedUrl: `http://127.0.0.1:${port}`,
-      nodeRedFlowToken: token,
-      nodeRedAdminToken: "admin-fixture-01234567890123456789",
-      nodeRedFlowAllowlist:
-        '[{"id":"lights","label":"Lights","risk":"CONFIRM","tabId":"tab-lights"}]',
-    } as NovaConfig);
+    const tool = new NodeRedFlowSource(
+      {
+        nodeRedUrl: `http://127.0.0.1:${port}`,
+        nodeRedFlowToken: token,
+        nodeRedAdminToken: "admin-fixture-01234567890123456789",
+        nodeRedFlowAllowlist:
+          '[{"id":"lights","label":"Lights","risk":"CONFIRM","tabId":"tab-lights"}]',
+      } as NovaConfig,
+      { recordVerifiedChange } as unknown as NodeRedFlowRevisions,
+    );
     expect(tool.definitions().map((item) => item.name)).toEqual([
       "node_red_flow",
       "node_red_flow_state",
@@ -229,10 +237,21 @@ describe("Node-RED flow tool", () => {
       ok: true,
       verified: true,
       result: "Flow disabled",
+      historyWarning:
+        "Flow gewijzigd, maar lokale versiegeschiedenis kon niet worden opgeslagen.",
+    });
+    expect(JSON.stringify(result)).not.toContain("private storage path");
+    expect(recordVerifiedChange).toHaveBeenCalledOnce();
+    expect(recordVerifiedChange.mock.calls[0]?.[0]).toMatchObject({
+      revision: "rev-1",
+    });
+    expect(recordVerifiedChange.mock.calls[0]?.[1]).toMatchObject({
+      revision: "rev-2",
     });
   });
 
   it("creates only the fixed error-alert node chain after allowlist preparation", async () => {
+    const recordVerifiedChange = vi.fn();
     const tabId = "tab-backup";
     let flows: unknown[] = [
       { id: tabId, type: "tab", label: "Backups", disabled: false },
@@ -279,13 +298,16 @@ describe("Node-RED flow tool", () => {
       });
     });
     const port = await listen(server);
-    const tool = new NodeRedFlowSource({
-      nodeRedUrl: `http://127.0.0.1:${port}`,
-      nodeRedAdminToken: "admin-fixture-01234567890123456789",
-      nodeRedEventToken: "event-fixture-01234567890123456789",
-      nodeRedFlowAllowlist:
-        '[{"id":"backup","label":"Backups","risk":"CONFIRM","tabId":"tab-backup"}]',
-    } as NovaConfig);
+    const tool = new NodeRedFlowSource(
+      {
+        nodeRedUrl: `http://127.0.0.1:${port}`,
+        nodeRedAdminToken: "admin-fixture-01234567890123456789",
+        nodeRedEventToken: "event-fixture-01234567890123456789",
+        nodeRedFlowAllowlist:
+          '[{"id":"backup","label":"Backups","risk":"CONFIRM","tabId":"tab-backup"}]',
+      } as NovaConfig,
+      { recordVerifiedChange } as unknown as NodeRedFlowRevisions,
+    );
     const prepared = await tool.prepare("node_red_flow_create", {
       flow: tabId,
       kind: "alert_on_error",
@@ -305,6 +327,7 @@ describe("Node-RED flow tool", () => {
       signal: AbortSignal.timeout(5000),
     });
     expect(result).toMatchObject({ ok: true, verified: true });
+    expect(recordVerifiedChange).toHaveBeenCalledOnce();
     expect((result as { result: string }).result).toContain("Backups");
   });
 
@@ -416,7 +439,7 @@ describe("Node-RED flow tool", () => {
         expect(added[3].rules[0].to).toContain("$substring(payload,0,240)");
         expect(added[3].rules[0].to).toContain('"category":"briefing"');
         flows = body.flows;
-        rev = "rev-2";
+        rev = `rev-${Number(rev.slice(4)) + 1}`;
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ rev }));
       });
@@ -478,13 +501,14 @@ describe("Node-RED flow tool", () => {
 
   it("creates a user-defined daily reminder from fixed safe Node-RED nodes", async () => {
     const tabId = "tab-routines";
+    let rev = "rev-1";
     let flows: unknown[] = [
       { id: tabId, type: "tab", label: "Routines", disabled: false },
     ];
     const server = createServer((request, response) => {
       if (request.method === "GET") {
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ rev: "rev-1", flows }));
+        response.end(JSON.stringify({ rev, flows }));
         return;
       }
       const chunks: Buffer[] = [];
@@ -506,8 +530,9 @@ describe("Node-RED flow tool", () => {
           added.some((node: { type: string }) => node.type === "function"),
         ).toBe(false);
         flows = body.flows;
+        rev = "rev-2";
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ rev: "rev-2" }));
+        response.end(JSON.stringify({ rev }));
       });
     });
     const port = await listen(server);

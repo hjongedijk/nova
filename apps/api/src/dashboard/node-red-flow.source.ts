@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { requestJson } from "../core/http/http-json.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
+import { NodeRedFlowRevisions } from "../settings/node-red-flow-revisions.service.js";
 import {
   ToolSourceProvider,
   type ToolDefinition,
@@ -78,8 +79,33 @@ export class NodeRedFlowSource implements ToolSource {
   readonly source = "node-red";
   private readonly flows: AllowedFlow[];
 
-  constructor(private readonly config: NovaConfig) {
+  constructor(
+    private readonly config: NovaConfig,
+    @Optional() private readonly revisions?: NodeRedFlowRevisions,
+  ) {
     this.flows = parseAllowlist(config.nodeRedFlowAllowlist);
+  }
+
+  private recordVerifiedChange(
+    before: { rev?: unknown; flows?: unknown },
+    after: { rev?: unknown; flows?: unknown },
+  ): string | undefined {
+    if (!this.revisions) return;
+    try {
+      if (
+        typeof before.rev !== "string" ||
+        !Array.isArray(before.flows) ||
+        typeof after.rev !== "string" ||
+        !Array.isArray(after.flows)
+      )
+        throw new Error("Missing verified flow revision");
+      this.revisions.recordVerifiedChange(
+        { revision: before.rev, flows: before.flows },
+        { revision: after.rev, flows: after.flows },
+      );
+    } catch {
+      return "Flow gewijzigd, maar lokale versiegeschiedenis kon niet worden opgeslagen.";
+    }
   }
 
   definitions(): ToolDefinition[] {
@@ -620,26 +646,35 @@ export class NodeRedFlowSource implements ToolSource {
         };
       if (deployed.status < 200 || deployed.status >= 300)
         return { ok: false, error: "Node-RED refused the flow change" };
-      const verified = await requestJson<{ flows?: unknown }>(
+      const verified = await requestJson<{ rev?: unknown; flows?: unknown }>(
         `${base.origin}/flows`,
         { headers, signal, timeoutMs: 4000 },
       );
       const after = Array.isArray(verified.data?.flows)
         ? (verified.data.flows as unknown[])
         : [];
-      const confirmed = created.every((node) =>
-        after.some(
-          (item) =>
-            item &&
-            typeof item === "object" &&
-            (item as Record<string, unknown>).id === node.id &&
-            (item as Record<string, unknown>).z === tabId,
-        ),
-      );
+      const confirmed =
+        verified.status >= 200 &&
+        verified.status < 300 &&
+        typeof verified.data?.rev === "string" &&
+        verified.data.rev !== current.data.rev &&
+        created.every((node) =>
+          after.some(
+            (item) =>
+              item &&
+              typeof item === "object" &&
+              (item as Record<string, unknown>).id === node.id &&
+              (item as Record<string, unknown>).z === tabId,
+          ),
+        );
+      const historyWarning = confirmed
+        ? this.recordVerifiedChange(current.data, verified.data ?? {})
+        : undefined;
       return confirmed
         ? {
             ok: true,
             verified: true,
+            ...(historyWarning ? { historyWarning } : {}),
             result: isError
               ? `Added the catchable-error template to ${label}: Catch → fixed JSONata formatter → NOVA notification.`
               : dailyReminder
@@ -755,7 +790,7 @@ export class NodeRedFlowSource implements ToolSource {
         };
       if (deployed.status < 200 || deployed.status >= 300)
         return { ok: false, error: "Node-RED refused the flow change" };
-      const verified = await requestJson<{ flows?: unknown }>(
+      const verified = await requestJson<{ rev?: unknown; flows?: unknown }>(
         `${base.origin}/flows`,
         { headers, signal, timeoutMs: 4000 },
       );
@@ -773,14 +808,22 @@ export class NodeRedFlowSource implements ToolSource {
           )
         : null;
       const confirmed = Boolean(
+        verified.status >= 200 &&
+        verified.status < 300 &&
+        typeof verified.data?.rev === "string" &&
+        verified.data.rev !== current.data.rev &&
         after &&
         typeof after === "object" &&
         ((after as Record<string, unknown>).disabled !== true) === enabled,
       );
+      const historyWarning = confirmed
+        ? this.recordVerifiedChange(current.data, verified.data ?? {})
+        : undefined;
       return confirmed
         ? {
             ok: true,
             verified: true,
+            ...(historyWarning ? { historyWarning } : {}),
             result: enabled ? "Flow enabled" : "Flow disabled",
           }
         : {

@@ -141,6 +141,21 @@ export class NodeRedFlowRevisions {
     return { id: row.id, at: row.at, nodeCount: flows.length };
   }
 
+  /** Called only after the upstream write has been independently verified. */
+  recordVerifiedChange(
+    before: { revision: string; flows: unknown },
+    after: { revision: string; flows: unknown },
+  ): void {
+    if (before.revision === after.revision)
+      throw new ConflictException("Node-RED-flowrevisie is niet gewijzigd.");
+    // Validate both before saving either revision; a rejected live snapshot never
+    // leaves a misleading half-history.
+    const beforeFlows = normalizeNodeRedBackupFlows(before.flows);
+    const afterFlows = normalizeNodeRedBackupFlows(after.flows);
+    this.record({ revision: before.revision, flows: beforeFlows });
+    this.record({ revision: after.revision, flows: afterFlows });
+  }
+
   /** Restore only while the current live revision matches the last recorded one. */
   async restore(
     id: string,
