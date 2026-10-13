@@ -589,6 +589,8 @@ export const rollbackWallpaper = (id: string) =>
   write<WallpaperState>("POST", `/wallpaper/history/${enc(id)}/rollback`, {});
 export const getNodeRedFlows = () =>
   read<NodeRedFlowInventory>("/node-red/flows");
+export const exportNodeRedFlows = () =>
+  write<Record<string, unknown>[]>("POST", "/node-red/flows/export", {});
 export interface NodeRedFlowRevision {
   id: string;
   at: string;

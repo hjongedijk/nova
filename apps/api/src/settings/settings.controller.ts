@@ -14,6 +14,7 @@ import { WidgetDisplayHistory } from "./widget-display-history.service.js";
 import { WallpaperHistory } from "./wallpaper-history.service.js";
 import {
   NodeRedManagement,
+  normalizeNodeRedBackupFlows,
   projectNodeRedFlowRuns,
 } from "./node-red-management.service.js";
 import { NodeRedFlowRevisions } from "./node-red-flow-revisions.service.js";
@@ -57,6 +58,7 @@ import { NovaConfig } from "../core/config/nova-config.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
+import { containsCodeSecret } from "../core/security/code-content.js";
 import { ToolsService } from "../tools/tools.service.js";
 import { groupTools } from "./abilities.js";
 import { SkillAssistantService } from "./ai/skill-assistant.service.js";
@@ -1280,6 +1282,37 @@ export class SettingsController {
       ),
       editorUrl: this.nodeRedManagement.editorUrl(),
     };
+  }
+
+  @Post("node-red/flows/export")
+  @HttpCode(200)
+  async exportNodeRedFlows(@Body() body: unknown) {
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).length > 0
+    )
+      throw new ValidationError(["Ongeldige flowexport-aanvraag."]);
+    const snapshot = await this.nodeRedManagement.flowSnapshot();
+    const flows = normalizeNodeRedBackupFlows(snapshot.flows);
+    const serialized = JSON.stringify(flows);
+    if (
+      Buffer.byteLength(serialized, "utf8") > 1_000_000 ||
+      containsCodeSecret(serialized)
+    )
+      throw new ValidationError([
+        "Flowexport bevat mogelijk geheimen of is te groot.",
+      ]);
+    this.audit.record({
+      sessionId: "settings",
+      tool: "node_red_flow_export",
+      risk: "READ_ONLY",
+      confirmation: "admin_ui",
+      arguments: { nodeCount: flows.length },
+      result: { ok: true },
+    });
+    return flows;
   }
 
   @Get("node-red/flow-revisions")

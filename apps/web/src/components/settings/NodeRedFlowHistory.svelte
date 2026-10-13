@@ -3,6 +3,7 @@
   import {
     captureNodeRedFlowRevision,
     confirmNodeRedFlowRestore,
+    exportNodeRedFlows,
     getNodeRedFlowRevisions,
     prepareNodeRedFlowRestore,
     type NodeRedFlowRevision,
@@ -54,6 +55,32 @@
         error instanceof Error
           ? error.message
           : "Flowversie opslaan is mislukt.";
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function download(): Promise<void> {
+    busy = true;
+    try {
+      const data = await exportNodeRedFlows();
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `nova-node-red-flows-${new Date().toISOString().slice(0, 10)}.json`;
+      try {
+        document.body.append(link);
+        link.click();
+      } finally {
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
+      message =
+        "Flowexport gedownload. Controleer het bestand vóór opslag in een repo.";
+    } catch (error) {
+      message = error instanceof Error ? error.message : "Flowexport mislukt.";
     } finally {
       busy = false;
     }
@@ -126,6 +153,7 @@
   </p>
   <Button disabled={busy} onclick={load}>Versies laden</Button>
   <Button disabled={busy} onclick={capture}>Huidige versie bewaren</Button>
+  <Button disabled={busy} onclick={download}>Flows downloaden</Button>
   {#if message}<p role="status">{message}</p>{/if}
   {#if loaded}
     {#if revisions.length}

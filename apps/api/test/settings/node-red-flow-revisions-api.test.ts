@@ -13,6 +13,73 @@ afterEach(() => {
 });
 
 describe("Node-RED flow revision settings API", () => {
+  it("exports bounded live flows only through PIN/admin and never audits content", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nova-flow-export-"));
+    roots.push(root);
+    const app = await createApp({
+      env: { NOVA_DATA_DIR: root, NOVA_ADMIN_PIN: "fixture-pin" },
+    });
+    const endpoint = "/api/settings/node-red/flows/export";
+    const pin = { ...ADMIN, "x-nova-pin": "fixture-pin" };
+    const snapshot = vi
+      .spyOn(app.app.get(NodeRedManagement), "flowSnapshot")
+      .mockResolvedValue({
+        revision: "rev-1",
+        flows: [
+          { id: "tab-a", type: "tab", label: "Private family automation" },
+        ],
+      });
+    try {
+      expect((await app.api.post(endpoint).set(ADMIN).send({})).status).toBe(
+        401,
+      );
+      expect(
+        (
+          await app.api
+            .post(endpoint)
+            .set({ "x-nova-pin": "fixture-pin" })
+            .send({})
+        ).status,
+      ).toBe(403);
+      const exported = await app.api.post(endpoint).set(pin).send({});
+      expect(exported.status).toBe(200);
+      expect(exported.body).toMatchObject([
+        { label: "Private family automation" },
+      ]);
+      expect(
+        JSON.stringify(
+          app.audits.filter((row) => row.tool === "node_red_flow_export"),
+        ),
+      ).not.toContain("Private family automation");
+
+      snapshot.mockResolvedValueOnce({
+        revision: "rev-2",
+        flows: [
+          { id: "tab-b", type: "tab", credentials: { password: "private" } },
+        ],
+      });
+      const blocked = await app.api.post(endpoint).set(pin).send({});
+      expect(blocked.status).toBeGreaterThanOrEqual(400);
+      expect(JSON.stringify(blocked.body)).not.toContain("private");
+      snapshot.mockResolvedValueOnce({
+        revision: "rev-3",
+        flows: [{ id: "tab-c", type: "tab", info: "password=privatevalue123" }],
+      });
+      const embedded = await app.api.post(endpoint).set(pin).send({});
+      expect(embedded.status).toBeGreaterThanOrEqual(400);
+      expect(JSON.stringify(embedded.body)).not.toContain("privatevalue123");
+      snapshot.mockResolvedValueOnce({
+        revision: "rev-4",
+        flows: [{ id: "tab-d", type: "tab", label: "x".repeat(810_000) }],
+      });
+      const oversized = await app.api.post(endpoint).set(pin).send({});
+      expect(oversized.status).toBeGreaterThanOrEqual(400);
+      expect(JSON.stringify(oversized.body)).not.toContain("x".repeat(100));
+    } finally {
+      await app.app.close();
+    }
+  });
+
   it("keeps captured flows private behind the settings guard", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nova-flow-api-"));
     roots.push(root);

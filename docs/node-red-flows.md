@@ -11,8 +11,11 @@ The deployment seed script copies the seed only into an empty persistent
 `/data` directory. It never replaces an existing `/data/flows.json`, so an
 upgrade cannot silently overwrite operator flows. Import reviewed updates into
 the live editor deliberately, or back up its persistent data before replacing
-flows. NOVA's Settings page exposes only tab names and counts; it never exports
-the live executable flow configuration.
+flows. NOVA's Settings page normally shows only tab names and counts. An
+explicit PIN/admin-protected download can export validated live flows as a
+bounded Node-RED JSON array; the server rejects credential fields and likely embedded
+secrets. Review the file before placing it in a repository. NOVA does not write
+live flows into the tracked deployment seed.
 
 The editor is not published by the production Compose stack. If you expose it
 through an authenticated reverse proxy or another trusted access path, set
