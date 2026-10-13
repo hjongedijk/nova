@@ -178,7 +178,19 @@ export class NodeRedManagement {
   }
 
   private async installedPalette(): Promise<
-    Map<string, { version: string | null; types: string[] }>
+    Map<
+      string,
+      {
+        version: string | null;
+        sets: {
+          id: string | null;
+          name: string | null;
+          enabled: boolean | null;
+          loaded: boolean | null;
+          types: string[];
+        }[];
+      }
+    >
   > {
     if (this.config.nodeRedAdminToken.length < 32)
       throw new ServiceUnavailableException(
@@ -207,7 +219,16 @@ export class NodeRedManagement {
       );
     const modules = new Map<
       string,
-      { version: string | null; types: string[] }
+      {
+        version: string | null;
+        sets: {
+          id: string | null;
+          name: string | null;
+          enabled: boolean | null;
+          loaded: boolean | null;
+          types: string[];
+        }[];
+      }
     >();
     for (const item of response.data) {
       if (!item || typeof item !== "object" || Array.isArray(item))
@@ -218,6 +239,12 @@ export class NodeRedManagement {
       if (
         typeof row.module !== "string" ||
         row.module.length > 120 ||
+        (row.id !== undefined &&
+          (typeof row.id !== "string" || row.id.length > 180)) ||
+        (row.name !== undefined &&
+          (typeof row.name !== "string" || row.name.length > 120)) ||
+        (row.enabled !== undefined && typeof row.enabled !== "boolean") ||
+        (row.loaded !== undefined && typeof row.loaded !== "boolean") ||
         !Array.isArray(row.types) ||
         row.types.length > 100 ||
         row.types.some((type) => typeof type !== "string" || type.length > 120)
@@ -225,13 +252,19 @@ export class NodeRedManagement {
         throw new ServiceUnavailableException(
           "Node-RED-palette gaf ongeldige gegevens.",
         );
-      const current = modules.get(row.module) ?? { version: null, types: [] };
+      const current = modules.get(row.module) ?? { version: null, sets: [] };
       if (
         typeof row.version === "string" &&
         /^[0-9A-Za-z.+_-]{1,60}$/.test(row.version)
       )
         current.version = row.version;
-      current.types.push(...(row.types as string[]));
+      current.sets.push({
+        id: typeof row.id === "string" ? row.id : null,
+        name: typeof row.name === "string" ? row.name : null,
+        enabled: typeof row.enabled === "boolean" ? row.enabled : null,
+        loaded: typeof row.loaded === "boolean" ? row.loaded : null,
+        types: [...(row.types as string[])].sort(),
+      });
       modules.set(row.module, current);
     }
     return modules;
@@ -242,7 +275,11 @@ export class NodeRedManagement {
     const installed = await this.installedPalette();
     const canonical = [...installed]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, value]) => [name, value.version, [...value.types].sort()]);
+      .map(([name, value]) => [
+        name,
+        value.version,
+        value.sets.map((set) => JSON.stringify(set)).sort(),
+      ]);
     return {
       revision: crypto
         .createHash("sha256")

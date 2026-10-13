@@ -18,6 +18,7 @@ afterEach(async () => {
 
 async function paletteServer() {
   let installed = false;
+  let enabled = true;
   let writes = 0;
   let failReadback = false;
   let failAfterWrite = false;
@@ -38,8 +39,10 @@ async function paletteServer() {
                   module: "node-red-node-suncalc",
                   version: "1.2.3",
                   types: ["suncalc"],
-                  enabled: true,
+                  enabled,
+                  loaded: true,
                   id: "node-red-node-suncalc/suncalc",
+                  name: "suncalc",
                 },
               ]
             : [],
@@ -80,6 +83,9 @@ async function paletteServer() {
   return {
     management,
     writes: () => writes,
+    setEnabled: (next: boolean) => {
+      enabled = next;
+    },
     failReadback: () => {
       failReadback = true;
     },
@@ -130,10 +136,21 @@ describe("Node-RED palette management", () => {
       ),
     ).rejects.toThrow("gewijzigd");
     expect(fixture.writes()).toBe(1);
+    fixture.setEnabled(false);
+    await expect(
+      fixture.management.changePalette(
+        "node-red-node-suncalc",
+        false,
+        after.revision,
+      ),
+    ).rejects.toThrow("gewijzigd");
+    expect(fixture.writes()).toBe(1);
+    const refreshed = await fixture.management.paletteState();
+    expect(refreshed.revision).not.toBe(after.revision);
     const removed = await fixture.management.changePalette(
       "node-red-node-suncalc",
       false,
-      after.revision,
+      refreshed.revision,
     );
     expect(removed.modules[0]?.installed).toBe(false);
     expect(fixture.writes()).toBe(2);
