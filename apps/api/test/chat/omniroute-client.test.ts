@@ -337,6 +337,77 @@ describe("OmniRoute HTTP failure cleanup and bounded fallback", () => {
     );
   });
 
+  it.each([
+    { error: { code: "context_length_exceeded" } },
+    {
+      errors: [
+        {
+          code: 8007,
+          message:
+            "Input token count and requested output exceed model context.",
+        },
+      ],
+    },
+  ])(
+    "tries the next verified model after a context rejection",
+    async (error) => {
+      const { client } = setup();
+      const rejectedResponse = Response.json(error, { status: 400 });
+      const fetcher = vi
+        .fn()
+        .mockResolvedValueOnce(rejectedResponse)
+        .mockImplementationOnce(async () => {
+          expect(rejectedResponse.bodyUsed).toBe(true);
+          return Response.json({
+            choices: [
+              {
+                message: { role: "assistant", content: "NOVA_OK" },
+                finish_reason: "stop",
+              },
+            ],
+          });
+        });
+      vi.stubGlobal("fetch", fetcher);
+      const answer = await client.call(messages, {
+        roleModel: { role: "conversation", modelId: preferred },
+        maxTokens: 2400,
+      });
+      expect(answer.assistant.content).toBe("NOVA_OK");
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      const bodies = fetcher.mock.calls.map((call) =>
+        JSON.parse(String(call[1]?.body)),
+      );
+      expect(bodies.map((body) => body.model)).toEqual([preferred, fallback]);
+      expect(bodies[0].messages).toEqual(bodies[1].messages);
+      expect(bodies[1].max_tokens).toBe(2400);
+    },
+  );
+
+  it.each([
+    { error: { code: "invalid_request", message: "Bad schema" } },
+    { errors: [{ code: 8007, message: "An unrelated model rejection" }] },
+    {
+      errors: [
+        { code: 8007, message: "context token output " + "x".repeat(8192) },
+      ],
+    },
+  ])(
+    "does not reinterpret other or oversized 400 errors as context overflow",
+    async (error) => {
+      const { client } = setup();
+      const fetcher = vi
+        .fn()
+        .mockResolvedValue(Response.json(error, { status: 400 }));
+      vi.stubGlobal("fetch", fetcher);
+      await expect(
+        client.call(messages, {
+          roleModel: { role: "conversation", modelId: preferred },
+        }),
+      ).rejects.toThrow("OmniRoute request failed (400)");
+      expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
+
   it("cancels every failed attempt and stops after the configured free choices", async () => {
     const first = vi.fn();
     const last = vi.fn();

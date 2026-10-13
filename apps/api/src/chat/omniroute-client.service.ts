@@ -23,6 +23,47 @@ function checkFinishReason(reason: unknown): void {
     throw new IncompleteModelResponseError(String(reason));
 }
 
+/** Recognize a bounded provider context rejection without shortening the user's request. */
+async function isContextRejection(response: Response): Promise<boolean> {
+  if (response.status !== 400) return false;
+  const reader = response.clone().body?.getReader();
+  if (!reader) return false;
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 8192) return false;
+      chunks.push(value);
+    }
+    const data = JSON.parse(Buffer.concat(chunks, size).toString("utf8")) as {
+      error?: { code?: unknown };
+      errors?: { code?: unknown; message?: unknown }[];
+    };
+    return (
+      data?.error?.code === "context_length_exceeded" ||
+      (Array.isArray(data?.errors) &&
+        data.errors.some(
+          (error) =>
+            error?.code === 8007 &&
+            typeof error.message === "string" &&
+            /context/i.test(error.message) &&
+            /token/i.test(error.message) &&
+            /output/i.test(error.message),
+        ))
+    );
+  } catch {
+    return false;
+  } finally {
+    // A cloned stream shares its source: do not await cancellation before the
+    // original branch is released by the caller.
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
 export interface ModelToolCall {
   id: string;
   type: "function";
@@ -221,11 +262,11 @@ export class OmniRouteClient {
           throw error;
         continue;
       }
+      if (response.ok || !options.roleModel || candidate === attempts.at(-1))
+        break;
       if (
-        response.ok ||
-        !options.roleModel ||
-        ![429, 500, 502, 503, 504].includes(response.status) ||
-        candidate === attempts.at(-1)
+        ![429, 500, 502, 503, 504].includes(response.status) &&
+        !(await isContextRejection(response))
       )
         break;
       // A rejected response can still have an open stream; release it before failover.
