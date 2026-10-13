@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ValidationError } from "../errors/validation.error.js";
+import { registerSecrets } from "../security/sanitize.js";
 import type { NovaConfig } from "./nova-config.js";
 
 export interface ConnectionField {
@@ -191,6 +192,14 @@ export function normalizeConnection(
       result[key] = text;
     }
   }
+  registerSecrets(
+    spec.fields.flatMap((definition) => {
+      const value = result[definition.key];
+      return definition.kind === "secret" && typeof value === "string"
+        ? [value]
+        : [];
+    }),
+  );
   return result;
 }
 

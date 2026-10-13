@@ -3,12 +3,23 @@
  * every *KEY/*SECRET/*TOKEN/*PASSWORD/*PIN variable, bearer tokens, API keys and JWTs, and object
  * fields with sensitive names. Token-usage counters are the one exception to the name rule.
  */
+// Keep replaced and cleared credentials private while older text remains in memory.
+// This registry is process-local and is never persisted or exposed.
+const registeredSecrets = new Set<string>();
+
+export function registerSecrets(values: Iterable<string>): void {
+  for (const value of values) if (value) registeredSecrets.add(value);
+}
+
 const secrets = () =>
-  Object.entries(process.env)
-    .filter(
-      ([key, value]) => /KEY|SECRET|TOKEN|PASSWORD|PIN/i.test(key) && value,
-    )
-    .map(([, value]) => value as string);
+  [
+    ...registeredSecrets,
+    ...Object.entries(process.env)
+      .filter(
+        ([key, value]) => /KEY|SECRET|TOKEN|PASSWORD|PIN/i.test(key) && value,
+      )
+      .map(([, value]) => value as string),
+  ].sort((left, right) => right.length - left.length);
 
 const USAGE_FIELD =
   /^(?:prompt|completion|input|output|total|cached|reasoning)_tokens(?:_details)?$/;

@@ -17,6 +17,20 @@ export interface ModelToolCall {
   function: { name: string; arguments: string };
 }
 
+/** Tool schemas need their sensitive parameter names; redact their text values only. */
+function redactToolStrings(value: unknown): unknown {
+  if (typeof value === "string") return sanitize(value);
+  if (Array.isArray(value)) return value.map(redactToolStrings);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        redactToolStrings(item),
+      ]),
+    );
+  return value;
+}
+
 export interface ModelMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
@@ -148,7 +162,7 @@ export class OmniRouteClient {
       stream,
     };
     if (tools.length) {
-      body.tools = tools;
+      body.tools = redactToolStrings(tools);
       body.tool_choice = toolChoice;
     }
     this.routing.assertFree();

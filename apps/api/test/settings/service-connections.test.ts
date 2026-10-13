@@ -7,6 +7,8 @@ import mqtt from "mqtt";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuditService } from "../../src/core/audit/audit.service.js";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
+import { sanitize } from "../../src/core/security/sanitize.js";
+import { SessionMemoryService } from "../../src/memory/session-memory.service.js";
 import { SemanticMemoryService } from "../../src/memory/semantic-memory.service.js";
 import { ServiceConnectionsStore } from "../../src/settings/services/service-connections.store.js";
 import { ServiceConnectionsAdapter } from "../../src/settings/services/service-connections.adapter.js";
@@ -50,6 +52,51 @@ const persisted = () =>
   JSON.parse(fs.readFileSync(path.join(directory, "services.json"), "utf8"));
 
 describe("service connection management", () => {
+  it("redacts saved credentials from text, memory and audit after replacement and clearing", async () => {
+    const previous = "saved-credential-privacy-original";
+    const replacement = "saved-credential-privacy-replacement";
+    expect(
+      (
+        await request("put", "/home-assistant", {
+          values: { token: previous },
+        })
+      ).status,
+    ).toBe(200);
+    expect(sanitize(`Value ${previous}`)).toBe("Value [redacted]");
+    expect(
+      (
+        await request("put", "/home-assistant", {
+          values: { token: replacement },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request("put", "/home-assistant", {
+          values: {},
+          clearSecrets: ["token"],
+        })
+      ).status,
+    ).toBe(200);
+
+    const text = `Values ${previous} and ${replacement}`;
+    const memory = nova.app.get(SessionMemoryService);
+    memory.add("credential-privacy", "user", text);
+    nova.app.get(AuditService).record({
+      sessionId: "credential-privacy",
+      result: { text },
+    });
+    expect(sanitize(text)).toBe("Values [redacted] and [redacted]");
+    expect(memory.recent("credential-privacy")[0]?.content).toBe(
+      "Values [redacted] and [redacted]",
+    );
+    for (const file of ["memory.json", "actions.jsonl"]) {
+      const stored = fs.readFileSync(path.join(directory, file), "utf8");
+      expect(stored).not.toContain(previous);
+      expect(stored).not.toContain(replacement);
+    }
+  });
+
   it("archives eligible Qdrant memories only from the PIN-protected settings route", async () => {
     const memory = nova.app.get(SemanticMemoryService);
     const maintain = vi.fn(async () => ({
