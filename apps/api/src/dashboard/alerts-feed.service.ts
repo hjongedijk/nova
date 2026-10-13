@@ -32,6 +32,7 @@ export interface FocusStatus {
   active: boolean;
   until: string | null;
   pending: number;
+  workBlock: boolean;
   needsReset?: boolean;
 }
 
@@ -95,7 +96,8 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   private readonly speechProgressFile?: string;
   private speechProgressUnavailable = false;
   private readonly focusFile?: string;
-  private focus: { until: number; count: number } | null = null;
+  private focus: { until: number; count: number; workBlock: boolean } | null =
+    null;
   private focusUnreadable = false;
   private readonly repeats = new Map<
     string,
@@ -318,11 +320,16 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       active: this.focusUnreadable || this.focus !== null,
       until: this.focus ? new Date(this.focus.until).toISOString() : null,
       pending: this.focus?.count ?? 0,
+      workBlock: this.focus?.workBlock ?? false,
       ...(this.focusUnreadable ? { needsReset: true } : {}),
     };
   }
 
-  startFocus(minutes: number, now = new Date()): FocusStatus {
+  startFocus(
+    minutes: number,
+    now = new Date(),
+    workBlock = false,
+  ): FocusStatus {
     if (
       !Number.isInteger(minutes) ||
       minutes < 5 ||
@@ -333,6 +340,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     const next = {
       until: now.getTime() + minutes * 60_000,
       count: this.focus?.count ?? 0,
+      workBlock,
     };
     this.saveFocus(next);
     this.focus = next;
@@ -342,13 +350,18 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     return this.focusStatus(now);
   }
 
-  endFocus(now = new Date()): FocusStatus {
+  startWorkBlock(now = new Date()): FocusStatus {
+    return this.startFocus(25, now, true);
+  }
+
+  endFocus(now = new Date(), completed = false): FocusStatus {
     if (this.focus) {
       const count = this.focus.count;
+      const workBlockCompleted = this.focus.workBlock && completed;
       this.saveFocus(null);
       this.focus = null;
       this.focusUnreadable = false;
-      this.focusSummary(count, now);
+      this.focusSummary(count, now, workBlockCompleted);
     } else if (this.focusUnreadable) {
       this.saveFocus(null);
       this.focusUnreadable = false;
@@ -359,15 +372,19 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   private settleFocus(now = new Date()): void {
     if (this.focus && now.getTime() >= this.focus.until) {
       try {
-        this.endFocus(now);
+        this.endFocus(now, true);
       } catch {
         // Storage failure keeps focus active and speech disabled.
       }
     }
   }
 
-  private focusSummary(count: number, now: Date): void {
-    if (!count) return;
+  private focusSummary(
+    count: number,
+    now: Date,
+    workBlockCompleted = false,
+  ): void {
+    if (!count && !workBlockCompleted) return;
     const mode =
       this.settings?.get().helperPreferences.notifications?.info ?? "helper";
     const wantsSpeech = mode === "speak";
@@ -378,9 +395,15 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       seq: ++this.sequence,
       kind: "alert",
       severity: "info",
-      key: "focus-summary",
-      title: `${count} ${count === 1 ? "melding" : "meldingen"} tijdens focus`,
-      detail: "Bekijk ze in Meldingen.",
+      key: workBlockCompleted ? "work-break" : "focus-summary",
+      title: workBlockCompleted
+        ? "Werkblok klaar — tijd om even te bewegen"
+        : `${count} ${count === 1 ? "melding" : "meldingen"} tijdens focus`,
+      detail: count
+        ? workBlockCompleted
+          ? `${count} ${count === 1 ? "melding" : "meldingen"} tijdens focus. Bekijk ze in Meldingen.`
+          : "Bekijk ze in Meldingen."
+        : "Neem rustig een korte pauze.",
       at: now.toISOString(),
       deliveryMode:
         mode === "screen" ? "screen" : speakAllowed ? "speak" : "helper",
@@ -397,16 +420,23 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       const data = JSON.parse(fs.readFileSync(this.focusFile!, "utf8")) as {
         until?: unknown;
         count?: unknown;
+        workBlock?: unknown;
       };
       if (
         !Number.isSafeInteger(data?.until) ||
         (data.until as number) < 0 ||
         !Number.isSafeInteger(data?.count) ||
         (data.count as number) < 0 ||
-        (data.count as number) > 100_000
+        (data.count as number) > 100_000 ||
+        (data.workBlock !== undefined && typeof data.workBlock !== "boolean")
       )
         throw new Error("Invalid focus status");
-      if (data.until) this.focus = data as { until: number; count: number };
+      if (data.until)
+        this.focus = {
+          until: data.until as number,
+          count: data.count as number,
+          workBlock: data.workBlock === true,
+        };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       this.focusUnreadable = true;
@@ -414,7 +444,9 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private saveFocus(value: { until: number; count: number } | null): void {
+  private saveFocus(
+    value: { until: number; count: number; workBlock: boolean } | null,
+  ): void {
     if (!this.focusFile) return;
     const temporary = `${this.focusFile}.tmp`;
     try {

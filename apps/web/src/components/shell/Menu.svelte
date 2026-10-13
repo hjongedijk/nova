@@ -7,6 +7,7 @@
     endFocus,
     getFocusStatus,
     startFocus,
+    startWorkBlock,
     type FocusStatus,
   } from "#lib/api/shell.ts";
   import { showToast } from "#lib/stores/toasts.svelte.ts";
@@ -22,11 +23,17 @@
         .catch(() => undefined);
   });
 
-  async function changeFocus(minutes?: 25 | 60 | 120) {
+  async function changeFocus(minutes?: 25 | 60 | 120 | "pomodoro") {
     if (focusBusy) return;
     focusBusy = true;
     try {
-      focus = minutes ? await startFocus(minutes) : await endFocus();
+      focus =
+        minutes === "pomodoro"
+          ? await startWorkBlock()
+          : minutes
+            ? await startFocus(minutes)
+            : await endFocus();
+      window.dispatchEvent(new Event("nova-focus-updated"));
     } catch {
       showToast({
         severity: "warning",
@@ -102,7 +109,7 @@
   <hr />
   {#if focus?.active}
     <p class="menu-status" role="status">
-      Focus aan{focus.until
+      {focus.workBlock ? "Werkblok" : "Focus"} aan{focus.until
         ? ` tot ${new Date(focus.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
         : ""} · {focus.pending} meldingen bewaard
     </p>
@@ -114,6 +121,13 @@
       onclick={() => void changeFocus()}>Focus afronden</button
     >
   {:else}
+    <button
+      class="menu-item"
+      role="menuitem"
+      type="button"
+      disabled={focusBusy}
+      onclick={() => void changeFocus("pomodoro")}>Werkblok 25 minuten</button
+    >
     <button
       class="menu-item"
       role="menuitem"

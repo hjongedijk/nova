@@ -129,6 +129,76 @@ describe("focus mode", () => {
     expect(notifyHelper).not.toHaveBeenCalled();
   });
 
+  it("finishes a work block with one gentle break reminder and the collected count", () => {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nova-work-block-"),
+    );
+    try {
+      const config = { dataFile: (name: string) => path.join(directory, name) };
+      const now = new Date();
+      const first = new AlertsFeed(
+        planning,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        config as never,
+      );
+      expect(first.startWorkBlock(now)).toMatchObject({
+        active: true,
+        workBlock: true,
+        until: new Date(now.getTime() + 25 * 60_000).toISOString(),
+      });
+      first.record(warning("Private title"), now);
+      const restarted = new AlertsFeed(
+        planning,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        config as never,
+      );
+      expect(restarted.focusStatus(now).workBlock).toBe(true);
+      expect(
+        restarted.focusStatus(new Date(now.getTime() + 25 * 60_000)),
+      ).toMatchObject({ active: false, workBlock: false });
+      expect(restarted.recent().events).toMatchObject([
+        {
+          key: "work-break",
+          title: "Werkblok klaar — tijd om even te bewegen",
+          detail: "1 melding tijdens focus. Bekijk ze in Meldingen.",
+          deliveryMode: "helper",
+        },
+      ]);
+      restarted.focusStatus(new Date(now.getTime() + 26 * 60_000));
+      expect(restarted.recent().events).toHaveLength(1);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not issue a break reminder when a work block is stopped early", () => {
+    const feed = new AlertsFeed(planning);
+    const now = new Date();
+    feed.startWorkBlock(now);
+    feed.endFocus(now);
+    expect(feed.recent().events).toHaveLength(0);
+  });
+
+  it("reminds about a break even when the work block had no alerts", () => {
+    const feed = new AlertsFeed(planning);
+    const now = new Date();
+    feed.startWorkBlock(now);
+    feed.focusStatus(new Date(now.getTime() + 25 * 60_000));
+    expect(feed.recent().events).toMatchObject([
+      {
+        key: "work-break",
+        detail: "Neem rustig een korte pauze.",
+        speakAllowed: false,
+      },
+    ]);
+  });
+
   it("fails silent on damaged state until explicitly reset", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nova-focus-"));
     try {

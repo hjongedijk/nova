@@ -66,6 +66,17 @@ header {
   justify-content: flex-end;
 }
 
+.focus-clock {
+  color: var(--glow);
+  font: 500 12px/1 var(--sans);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 8px 10px;
+  background: rgba(233, 230, 245, 0.04);
+}
+
 .code-btn {
   font: 500 13px/1 var(--sans);
   color: var(--mist);

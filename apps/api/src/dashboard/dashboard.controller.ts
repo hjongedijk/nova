@@ -89,6 +89,11 @@ export class DashboardController {
     return this.alerts.focusStatus();
   }
 
+  @Post("pomodoro/start")
+  startWorkBlock(): FocusStatus {
+    return this.alerts.startWorkBlock();
+  }
+
   @Post("focus/:minutes/start")
   startFocus(@Param("minutes") minutes: string): FocusStatus {
     const duration = Number(minutes);

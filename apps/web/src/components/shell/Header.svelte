@@ -1,9 +1,43 @@
 <script lang="ts">
   import { shell } from "#lib/stores/shell.svelte.ts";
+  import { getFocusStatus, type FocusStatus } from "#lib/api/shell.ts";
+  import { onMount } from "svelte";
   import Menu from "./Menu.svelte";
 
   let menuButton: HTMLButtonElement;
   let menu: HTMLElement | undefined = $state();
+  let focus: FocusStatus | null = $state(null);
+  let now = $state(Date.now());
+  function remainingSeconds(status: FocusStatus | null, at: number): number {
+    return status?.active && status.until
+      ? Math.max(0, Math.ceil((Date.parse(status.until) - at) / 1000))
+      : 0;
+  }
+  const remaining = $derived(remainingSeconds(focus, now));
+  const countdown = $derived(
+    `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`,
+  );
+
+  onMount(() => {
+    let alive = true;
+    const refresh = () => {
+      void getFocusStatus()
+        .then((value) => {
+          if (alive) focus = value;
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const clock = setInterval(() => (now = Date.now()), 1000);
+    const poll = setInterval(refresh, 30_000);
+    window.addEventListener("nova-focus-updated", refresh);
+    return () => {
+      alive = false;
+      clearInterval(clock);
+      clearInterval(poll);
+      window.removeEventListener("nova-focus-updated", refresh);
+    };
+  });
 
   function onDocumentClick(event: MouseEvent) {
     const target = event.target as Node;
@@ -37,6 +71,14 @@
 <header>
   <h1 class="wordmark">NOVA</h1>
   <div class="head-right">
+    {#if focus?.active && remaining > 0}
+      <span
+        class="focus-clock"
+        aria-label={`${focus.workBlock ? "Werkblok" : "Focus"}: ${countdown} resterend`}
+        title={focus.workBlock ? "Werkblok loopt" : "Focusmodus actief"}
+        >{focus.workBlock ? "Werkblok" : "Focus"} {countdown}</span
+      >
+    {/if}
     <button
       type="button"
       class="code-btn"

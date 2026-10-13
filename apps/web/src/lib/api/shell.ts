@@ -19,9 +19,12 @@ export interface FocusStatus {
   active: boolean;
   until: string | null;
   pending: number;
+  workBlock: boolean;
   needsReset?: boolean;
 }
 export const getFocusStatus = () => getJson<FocusStatus>("/focus");
 export const startFocus = (minutes: 25 | 60 | 120) =>
   sendJson<FocusStatus>("POST", `/focus/${minutes}/start`);
+export const startWorkBlock = () =>
+  sendJson<FocusStatus>("POST", "/pomodoro/start");
 export const endFocus = () => sendJson<FocusStatus>("POST", "/focus/end");
