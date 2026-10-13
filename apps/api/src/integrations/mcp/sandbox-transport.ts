@@ -8,7 +8,7 @@ import {
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 const MAX_MESSAGE_BYTES = 1024 * 1024;
-const CONNECT_TIMEOUT_MS = 20_000;
+const CONNECT_TIMEOUT_MS = 90_000;
 export type IsolatedMcpServer =
   "sequential-thinking" | "filesystem" | "workspace-git" | "context7";
 

@@ -1,7 +1,7 @@
 import http from "node:http";
 
 const MAX_BYTES = 1024 * 1024;
-const PREPARE_TIMEOUT_MS = 20_000;
+const PREPARE_TIMEOUT_MS = 75_000;
 const SESSION_TIMEOUT_MS = 30 * 60_000;
 const SERVERS = new Set([
   "sequential-thinking",

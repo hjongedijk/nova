@@ -49,8 +49,8 @@ function fixture() {
     deleteError: null,
     createError: null,
   };
-  const docker = async (url, method = "GET", body) => {
-    calls.push({ url, method, body });
+  const docker = async (url, method = "GET", body, options) => {
+    calls.push({ url, method, body, ...(options ? { options } : {}) });
     if (url.startsWith("/containers/json?")) return state.rows;
     if (url === "/containers/nova-id/json") return nova;
     if (url === "/containers/broker-id/json") return broker;
@@ -59,6 +59,7 @@ function fixture() {
       return { Id: `mcp-${++nextId}` };
     }
     if (method === "DELETE") {
+      if (state.deleteFailures?.length) throw state.deleteFailures.shift();
       if (state.deleteError) throw state.deleteError;
       return null;
     }
@@ -70,7 +71,12 @@ function fixture() {
     calls,
     state,
     docker,
-    sandbox: createMcpSandbox({ docker, workspaceRoot, relayRoot }),
+    sandbox: createMcpSandbox({
+      docker,
+      workspaceRoot,
+      relayRoot,
+      wait: async () => {},
+    }),
   };
 }
 
@@ -84,6 +90,7 @@ test("fixed offline containers have exact restricted configuration and are never
     assert.match(result.containerId, /^mcp-\d+$/);
     const create = f.calls.at(-1);
     assert.equal(create.method, "POST");
+    assert.deepEqual(create.options, { timeoutMs: 60_000 });
     assert.match(
       create.url,
       /^\/containers\/create\?name=nova-mcp-[a-f0-9-]+$/,
@@ -306,6 +313,7 @@ test("cleanup only removes owned containers, deduplicates closes and tolerates r
         url: `/containers/${containerId}?force=1&v=1`,
         method: "DELETE",
         body: undefined,
+        options: { timeoutMs: 60_000 },
       },
     ],
   );
@@ -343,5 +351,58 @@ test("failed preparation releases capacity and hides Docker errors", async () =>
       message: "MCP sandbox unavailable",
     });
   f.state.createError = null;
+  await f.sandbox.prepare({ server: "filesystem" });
+});
+
+test("timed-out creation retries exact reserved name after early 404 and releases only on removal", async () => {
+  const f = fixture();
+  f.state.createError = new Error("Docker timeout");
+  f.state.deleteFailures = [
+    new Error("Docker API status 404"),
+    new Error("Docker API status 404"),
+  ];
+  await assert.rejects(f.sandbox.prepare({ server: "filesystem" }), {
+    message: "MCP sandbox unavailable",
+  });
+  await new Promise(setImmediate);
+  const creation = f.calls.find(({ method }) => method === "POST");
+  const name = new URL(creation.url, "http://docker").searchParams.get("name");
+  const deletes = f.calls.filter(({ method }) => method === "DELETE");
+  assert.equal(deletes.length, 3);
+  assert.ok(
+    deletes.every(({ url }) => url === `/containers/${name}?force=1&v=1`),
+  );
+  f.state.createError = null;
+  for (let i = 0; i < 8; i += 1)
+    await f.sandbox.prepare({ server: "filesystem" });
+});
+
+test("missing late creations exhaust bounded polling and retain all eight reservations", async () => {
+  const f = fixture();
+  f.state.createError = new Error("Docker timeout");
+  f.state.deleteError = new Error("Docker API status 404");
+  for (let i = 0; i < 8; i += 1)
+    await assert.rejects(f.sandbox.prepare({ server: "filesystem" }), {
+      message: "MCP sandbox unavailable",
+    });
+  await new Promise(setImmediate);
+  const names = f.calls
+    .filter(({ method }) => method === "POST")
+    .map(({ url }) => new URL(url, "http://docker").searchParams.get("name"));
+  for (const name of names)
+    assert.equal(
+      f.calls.filter(
+        ({ method, url }) =>
+          method === "DELETE" && url === `/containers/${name}?force=1&v=1`,
+      ).length,
+      12,
+    );
+  f.state.createError = null;
+  await assert.rejects(f.sandbox.prepare({ server: "filesystem" }), {
+    message: "MCP sandbox capacity reached",
+  });
+  // Explicit later cleanup can release a retained slot only after verified removal.
+  f.state.deleteError = null;
+  await f.sandbox.close(names[0]);
   await f.sandbox.prepare({ server: "filesystem" });
 });

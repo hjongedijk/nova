@@ -10,6 +10,10 @@ const SERVERS = new Set([
   "context7",
 ]);
 const MAX_CONTAINERS = 8;
+const CREATE_TIMEOUT_MS = 60_000;
+const CLEANUP_ATTEMPTS = 12;
+const waitForCleanup = () =>
+  new Promise((resolve) => setTimeout(resolve, 5000));
 
 function fail(message) {
   throw new Error(message);
@@ -43,12 +47,59 @@ export function createMcpSandbox({
   docker,
   workspaceRoot = "/workspace-host",
   relayRoot = "/relay-host",
+  wait = waitForCleanup,
 }) {
   if (typeof docker !== "function")
     throw new TypeError("docker adapter required");
   const createdIds = new Set();
+  const pendingNames = new Set();
   const closing = new Map();
   let slots = 0;
+
+  async function closeOwned(containerId) {
+    if (!createdIds.has(containerId)) return;
+    if (closing.has(containerId)) return closing.get(containerId);
+    const cleanup = (async () => {
+      try {
+        await docker(
+          `/containers/${encodeURIComponent(containerId)}?force=1&v=1`,
+          "DELETE",
+          undefined,
+          { timeoutMs: CREATE_TIMEOUT_MS },
+        );
+      } catch (error) {
+        const missing =
+          error?.statusCode === 404 ||
+          error?.message === "Docker API status 404";
+        // A timed-out create may still finish after an early 404. Only a
+        // successful DELETE verifies cleanup of an unconfirmed worker name.
+        if (!missing || pendingNames.has(containerId))
+          fail("MCP sandbox cleanup failed");
+      }
+      createdIds.delete(containerId);
+      pendingNames.delete(containerId);
+      slots -= 1;
+    })();
+    closing.set(containerId, cleanup);
+    try {
+      await cleanup;
+    } finally {
+      closing.delete(containerId);
+    }
+  }
+
+  async function recoverPending(name) {
+    for (let attempt = 0; attempt < CLEANUP_ATTEMPTS; attempt += 1) {
+      try {
+        await closeOwned(name);
+        return;
+      } catch {
+        if (attempt + 1 < CLEANUP_ATTEMPTS) await wait();
+      }
+    }
+    // Keep ownership and the slot if Docker never confirms removal. Unknown
+    // outcomes must not permit unbounded replacement workers.
+  }
 
   return {
     async prepare(input) {
@@ -68,6 +119,7 @@ export function createMcpSandbox({
         fail("invalid MCP sandbox request");
       if (slots >= MAX_CONTAINERS) fail("MCP sandbox capacity reached");
       slots += 1;
+      let workerName;
       try {
         realDirectory(workspaceRoot);
         if (input.server === "workspace-git")
@@ -125,8 +177,11 @@ export function createMcpSandbox({
             : context7
               ? ["node", "/app/stack-control/mcp-proxy-stdio.mjs", "context7"]
               : ["mcp-server-sequential-thinking"];
+        workerName = `nova-mcp-${crypto.randomUUID()}`;
+        createdIds.add(workerName);
+        pendingNames.add(workerName);
         const created = await docker(
-          `/containers/create?name=${encodeURIComponent(`nova-mcp-${crypto.randomUUID()}`)}`,
+          `/containers/create?name=${encodeURIComponent(workerName)}`,
           "POST",
           {
             Image: novaInfo.Image,
@@ -189,43 +244,22 @@ export function createMcpSandbox({
               },
             },
           },
+          { timeoutMs: CREATE_TIMEOUT_MS },
         );
         if (typeof created?.Id !== "string" || !created.Id)
           fail("MCP sandbox unavailable");
+        createdIds.delete(workerName);
+        pendingNames.delete(workerName);
         createdIds.add(created.Id);
         return { containerId: created.Id };
       } catch (error) {
-        slots -= 1;
+        if (workerName) void recoverPending(workerName).catch(() => {});
+        else slots -= 1;
         if (error?.message === "workspace unavailable") throw error;
         fail("MCP sandbox unavailable");
       }
     },
 
-    async close(containerId) {
-      if (!createdIds.has(containerId)) return;
-      if (closing.has(containerId)) return closing.get(containerId);
-      const cleanup = (async () => {
-        try {
-          await docker(
-            `/containers/${encodeURIComponent(containerId)}?force=1&v=1`,
-            "DELETE",
-          );
-        } catch (error) {
-          if (
-            error?.statusCode !== 404 &&
-            error?.message !== "Docker API status 404"
-          )
-            fail("MCP sandbox cleanup failed");
-        }
-        createdIds.delete(containerId);
-        slots -= 1;
-      })();
-      closing.set(containerId, cleanup);
-      try {
-        await cleanup;
-      } finally {
-        closing.delete(containerId);
-      }
-    },
+    close: closeOwned,
   };
 }

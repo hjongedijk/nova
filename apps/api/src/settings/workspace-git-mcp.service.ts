@@ -59,7 +59,9 @@ export class WorkspaceGitMcp {
           stderr: "ignore",
         });
     try {
-      await client.connect(transport, { timeout: TIMEOUT_MS });
+      await client.connect(transport, {
+        timeout: isolated ? 90_000 : TIMEOUT_MS,
+      });
       const result = await client.callTool(
         {
           name: tool,

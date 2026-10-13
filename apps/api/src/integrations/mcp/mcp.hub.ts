@@ -361,7 +361,12 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
           });
     transport.onclose = () => this.drop(id, client);
     try {
-      await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
+      await client.connect(transport, {
+        timeout:
+          process.env.NODE_ENV !== "test" && isolated
+            ? 90_000
+            : CONNECT_TIMEOUT_MS,
+      });
       const { tools } = await client.listTools(undefined, {
         timeout: CONNECT_TIMEOUT_MS,
       });

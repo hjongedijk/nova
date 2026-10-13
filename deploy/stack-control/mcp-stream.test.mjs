@@ -317,7 +317,7 @@ test("Docker disconnect closes the client and removes its container", async (t) 
   assert.equal(f.stream.destroyed, true);
 });
 
-test("20-second preparation timeout closes the request and cleans a late container", async (t) => {
+test("75-second preparation timeout closes the request and cleans a late container", async (t) => {
   let finishPrepare;
   let ready;
   const preparing = new Promise((resolve) => {
@@ -336,7 +336,7 @@ test("20-second preparation timeout closes the request and cleans a late contain
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const connection = f.connect();
   await preparing;
-  t.mock.timers.tick(20_000);
+  t.mock.timers.tick(75_000);
   assert.equal((await connection).status, 503);
   t.mock.timers.reset();
   finishPrepare({ containerId: "timeout-id" });
@@ -398,7 +398,7 @@ test("Docker attach has a bounded timeout with sanitized errors", async (t) => {
   t.mock.method(http, "request", () => request);
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const attachment = dockerAttach("fixed");
-  t.mock.timers.tick(20_000);
+  t.mock.timers.tick(75_000);
   await assert.rejects(attachment, /^Error: MCP attachment unavailable$/);
   assert.equal(destroyed, true);
 });
