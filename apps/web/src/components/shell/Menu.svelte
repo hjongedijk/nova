@@ -54,12 +54,12 @@
 
   function toggleVoiceAlerts() {
     shell.voiceAlerts = !shell.voiceAlerts;
-    storage.set("jarvisVoiceAlerts", shell.voiceAlerts ? "on" : "off");
+    storage.set("novaVoiceAlerts", shell.voiceAlerts ? "on" : "off");
   }
 
   function togglePanels() {
     shell.panels = !shell.panels;
-    storage.set("jarvisPanels", shell.panels ? "on" : "off");
+    storage.set("novaPanels", shell.panels ? "on" : "off");
   }
 </script>
 

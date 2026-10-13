@@ -81,8 +81,8 @@
   });
 
   onMount(() => {
-    shell.voiceAlerts = storage.get("jarvisVoiceAlerts", "on") !== "off";
-    shell.panels = storage.get("jarvisPanels", "on") !== "off";
+    shell.voiceAlerts = storage.get("novaVoiceAlerts", "on") !== "off";
+    shell.panels = storage.get("novaPanels", "on") !== "off";
     let stopped = false;
     let stops: (() => void)[] = [];
     void checkAppAccess().then(() => {

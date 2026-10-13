@@ -1,13 +1,13 @@
 import { storage } from "#lib/util/storage.ts";
 
-/** The browser's conversation id, the same one the chat uses (localStorage jarvisSessionId). */
+/** The browser's conversation id, the same one the chat uses (localStorage novaSessionId). */
 export function sessionId(): string {
-  let id = storage.get("jarvisSessionId", "");
+  let id = storage.get("novaSessionId", "");
   if (!id) {
     id = crypto?.randomUUID
       ? crypto.randomUUID()
-      : `jarvis-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    storage.set("jarvisSessionId", id);
+      : `nova-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    storage.set("novaSessionId", id);
   }
   return id;
 }

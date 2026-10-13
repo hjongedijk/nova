@@ -1,8 +1,25 @@
-/** localStorage that never throws (private mode, blocked storage). */
+const legacyKeys: Readonly<Record<string, string>> = {
+  novaSessionId: "jarvisSessionId",
+  novaWake: "jarvisWake",
+  novaPanels: "jarvisPanels",
+  novaVoiceAlerts: "jarvisVoiceAlerts",
+};
+
+/** localStorage that never throws; legacy copies retain rollback compatibility. */
 export const storage = {
   get(key: string, fallback: string): string {
     try {
-      return localStorage.getItem(key) ?? fallback;
+      const current = localStorage.getItem(key);
+      if (current !== null) return current;
+      const legacy = legacyKeys[key];
+      const previous = legacy ? localStorage.getItem(legacy) : null;
+      if (previous === null) return fallback;
+      try {
+        localStorage.setItem(key, previous);
+      } catch {
+        /* Reading existing preferences remains possible when writes are blocked. */
+      }
+      return previous;
     } catch {
       return fallback;
     }
@@ -12,6 +29,14 @@ export const storage = {
       localStorage.setItem(key, value);
     } catch {
       /* this visit only */
+    }
+    const legacy = legacyKeys[key];
+    if (legacy) {
+      try {
+        localStorage.setItem(legacy, value);
+      } catch {
+        /* A failed rollback copy must not invalidate the current value. */
+      }
     }
   },
 };

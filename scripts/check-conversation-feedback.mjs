@@ -18,7 +18,7 @@ try {
     if (message.type() === "error")
       console.error("Dashboard console error:", message.text());
   });
-  await page.addInitScript(() => localStorage.setItem("jarvisWake", "off"));
+  await page.addInitScript(() => localStorage.setItem("novaWake", "off"));
   const requests = [];
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;

@@ -268,7 +268,7 @@ async function startWake(): Promise<void> {
       error.error === "service-not-allowed"
     ) {
       shell.wakeEnabled = false;
-      storage.set("jarvisWake", "off");
+      storage.set("novaWake", "off");
       stopWake();
       showToast({
         severity: "warning",
@@ -343,7 +343,7 @@ async function startWake(): Promise<void> {
 /** Switch "Hey NOVA" on or off (the menu toggle); remembered in this browser. */
 export function setWake(on: boolean): void {
   shell.wakeEnabled = on && !!Ctor;
-  storage.set("jarvisWake", shell.wakeEnabled ? "on" : "off");
+  storage.set("novaWake", shell.wakeEnabled ? "on" : "off");
   if (shell.wakeEnabled) startWake();
   else stopWake();
 }
@@ -354,7 +354,7 @@ export function initWake(): () => void {
   shell.wakeEnabled =
     !!Ctor &&
     !quietWallpaper &&
-    storage.get("jarvisWake", IS_MOBILE ? "off" : "on") !== "off";
+    storage.get("novaWake", IS_MOBILE ? "off" : "on") !== "off";
   // Some browsers only start the microphone after a first touch of the page.
   const onFirstTouch = () => {
     if (shell.wakeEnabled && !wakeRec) startWake();

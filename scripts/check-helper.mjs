@@ -19,8 +19,8 @@ import assert from "node:assert/strict";
       const page = await context.newPage();
       await page.clock.install();
       await page.addInitScript(() => {
-        if (!localStorage.getItem("jarvisWake"))
-          localStorage.setItem("jarvisWake", "off");
+        if (!localStorage.getItem("novaWake"))
+          localStorage.setItem("novaWake", "off");
         window.__testMicRequests = [];
         window.__testMicStopped = 0;
         window.__testRecognitionTrack = null;
@@ -523,7 +523,7 @@ import assert from "node:assert/strict";
       );
       await page.evaluate(() => window.__testRecognition.abort());
       await page.waitForFunction(() => window.__testMicStopped === 3);
-      await page.evaluate(() => localStorage.setItem("jarvisWake", "on"));
+      await page.evaluate(() => localStorage.setItem("novaWake", "on"));
       await page.reload();
       await page.waitForFunction(
         () => window.__testRecognitionTrack === "selected-mic-track",

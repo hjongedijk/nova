@@ -3,7 +3,7 @@ import { storage } from "#lib/util/storage.ts";
 function createSessionId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID)
     return crypto.randomUUID();
-  return "jarvis-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+  return "nova-" + Date.now() + "-" + Math.random().toString(16).slice(2);
 }
 
 let sessionId = "";
@@ -25,13 +25,13 @@ export function setConversationLanguage(
   return language;
 }
 
-/** The id of this browser's conversation, kept in localStorage ("jarvisSessionId"). */
+/** The id of this browser's conversation, kept in localStorage ("novaSessionId"). */
 export function getSessionId(): string {
   if (!sessionId) {
-    sessionId = storage.get("jarvisSessionId", "");
+    sessionId = storage.get("novaSessionId", "");
     if (!sessionId) {
       sessionId = createSessionId();
-      storage.set("jarvisSessionId", sessionId);
+      storage.set("novaSessionId", sessionId);
     }
   }
   return sessionId;
@@ -40,5 +40,5 @@ export function getSessionId(): string {
 /** Start a fresh server conversation when the user explicitly clears chat. */
 export function resetSession(): void {
   sessionId = createSessionId();
-  storage.set("jarvisSessionId", sessionId);
+  storage.set("novaSessionId", sessionId);
 }
