@@ -589,6 +589,17 @@ export const rollbackWallpaper = (id: string) =>
   write<WallpaperState>("POST", `/wallpaper/history/${enc(id)}/rollback`, {});
 export const getNodeRedFlows = () =>
   read<NodeRedFlowInventory>("/node-red/flows");
+export interface NodeRedFlowRevision {
+  id: string;
+  at: string;
+  nodeCount: number;
+}
+export const getNodeRedFlowRevisions = () =>
+  read<{ revisions: NodeRedFlowRevision[]; truncated: boolean }>(
+    "/node-red/flow-revisions",
+  );
+export const captureNodeRedFlowRevision = () =>
+  write<NodeRedFlowRevision>("POST", "/node-red/flow-revisions/capture", {});
 
 export const getHelper = () => read<HelperState>("/helper");
 export const getWindowsAgentStatus = () =>

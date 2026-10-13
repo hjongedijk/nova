@@ -16,6 +16,7 @@ import {
   NodeRedManagement,
   projectNodeRedFlowRuns,
 } from "./node-red-management.service.js";
+import { NodeRedFlowRevisions } from "./node-red-flow-revisions.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
@@ -135,6 +136,7 @@ export class SettingsController {
     private readonly widgetDisplayHistory: WidgetDisplayHistory,
     private readonly wallpaperHistory: WallpaperHistory,
     private readonly nodeRedManagement: NodeRedManagement,
+    private readonly nodeRedFlowRevisions: NodeRedFlowRevisions,
     private readonly homeAssistant: HomeAssistantService,
     private readonly proxmox: ProxmoxService,
     private readonly termix: TermixService,
@@ -1276,6 +1278,20 @@ export class SettingsController {
       ),
       editorUrl: this.nodeRedManagement.editorUrl(),
     };
+  }
+
+  @Get("node-red/flow-revisions")
+  listNodeRedFlowHistory() {
+    return this.nodeRedFlowRevisions.list();
+  }
+
+  @Post("node-red/flow-revisions/capture")
+  @HttpCode(200)
+  async captureNodeRedFlowRevision() {
+    const snapshot = await this.nodeRedManagement.flowSnapshot();
+    const revision = this.nodeRedFlowRevisions.record(snapshot);
+    this.log("node_red_flow_capture", { revision: revision.id });
+    return revision;
   }
 
   /* ---------- the helper overlay on the Windows PC ---------- */
