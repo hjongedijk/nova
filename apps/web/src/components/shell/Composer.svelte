@@ -5,6 +5,7 @@
     prepareClipboardText,
   } from "#lib/chat/clipboard.ts";
   import { friendlyChatError } from "#lib/chat/error-copy.ts";
+  import { captureScreen } from "#lib/chat/screen-capture.ts";
   import { onMount } from "svelte";
   import { cards } from "#lib/chat/cards.svelte.ts";
   import { installReveal } from "#lib/modes/reveal.ts";
@@ -39,6 +40,42 @@
   let clipboardReading = $state(false);
   let clipboardTruncated = $state(false);
   let clipboardError = $state("");
+  let screenImage = $state<Awaited<ReturnType<typeof captureScreen>> | null>(
+    null,
+  );
+  let screenBusy = $state(false);
+  let screenError = $state("");
+  let screenQuestion = $state("");
+
+  function clearScreen(): void {
+    screenImage = null;
+    screenError = "";
+    screenQuestion = "";
+  }
+
+  async function takeScreen(): Promise<void> {
+    clearScreen();
+    clearClipboard();
+    screenBusy = true;
+    showChrome();
+    try {
+      screenImage = await captureScreen();
+    } catch {
+      screenError =
+        "Schermopname mislukt of geweigerd. Sta schermdeling toe in je browser en probeer opnieuw.";
+    } finally {
+      screenBusy = false;
+    }
+  }
+
+  async function sendScreen(): Promise<void> {
+    if (!screenImage || chat.busy || screenBusy) return;
+    const attachment = screenImage.attachment;
+    const question =
+      screenQuestion.trim() || "Wat staat er op deze schermopname?";
+    clearScreen();
+    await ask(question, [attachment], "text", "vision");
+  }
 
   function clearClipboard(): void {
     clipboardText = "";
@@ -49,6 +86,7 @@
 
   async function readClipboard(): Promise<void> {
     clearClipboard();
+    clearScreen();
     clipboardReading = true;
     showChrome();
     try {
@@ -151,6 +189,9 @@
         clipboardReading ||
         clipboardOpen ||
         !!clipboardError ||
+        screenBusy ||
+        !!screenImage ||
+        !!screenError ||
         !!fileError ||
         shell.menuOpen ||
         cards.length > 0 ||
@@ -216,6 +257,19 @@
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <rect x="5" y="5" width="14" height="16" rx="2" />
       <path d="M9 5V3h6v2M8 10h8M8 14h8" />
+    </svg>
+  </button>
+  <button
+    class="icon"
+    type="button"
+    aria-label="Een schermopname maken"
+    title="Kies een scherm of venster; NOVA maakt één momentopname"
+    disabled={chat.busy || reading || screenBusy}
+    onclick={takeScreen}
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="13" rx="2" />
+      <path d="M8 21h8M12 17v4M8 8h8" />
     </svg>
   </button>
   <button
@@ -321,6 +375,38 @@
       {/if}
     </div>
   {/if}
+  {#if screenBusy || screenError || screenImage}
+    <div class="screen-help" aria-live="polite">
+      {#if screenBusy}<p>Eén schermbeeld maken…</p>{/if}
+      {#if screenError}<p role="alert">{screenError}</p>{/if}
+      {#if screenImage}
+        <p>
+          <strong>Schermopname klaar.</strong> Controleer het beeld. Er wordt pas
+          iets verzonden als je hieronder kiest.
+        </p>
+        <img
+          src={screenImage.preview}
+          alt="Voorbeeld van de gekozen schermopname"
+        />
+        <input
+          aria-label="Vraag over schermopname"
+          placeholder="Wat wil je weten over dit beeld?"
+          maxlength="500"
+          bind:value={screenQuestion}
+        />
+        <div class="screen-actions">
+          <button type="button" disabled={chat.busy} onclick={sendScreen}
+            >Vraag NOVA</button
+          >
+          <button type="button" onclick={clearScreen}>Annuleren</button>
+        </div>
+        <p>
+          Het beeld gaat alleen voor deze vraag naar de ingestelde geverifieerd
+          gratis vision-route. Verberg gevoelige gegevens vóór de opname.
+        </p>
+      {/if}
+    </div>
+  {/if}
 </form>
 <button
   id="reveal"
@@ -338,7 +424,7 @@
   .composer {
     flex-wrap: wrap;
   }
-  .composer:has(.clipboard-help) {
+  .composer:has(.clipboard-help, .screen-help) {
     border-radius: 18px;
   }
   .role-select {
@@ -400,6 +486,46 @@
     gap: 6px;
   }
   .clipboard-actions button {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 10px;
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .screen-help {
+    flex-basis: 100%;
+    padding: 8px 12px 10px;
+    color: var(--mist);
+    font-size: 13px;
+  }
+  .screen-help p {
+    margin: 4px 0 8px;
+  }
+  .screen-help img {
+    display: block;
+    max-width: 100%;
+    max-height: 240px;
+    object-fit: contain;
+    margin-bottom: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .screen-help input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px;
+    background: var(--panel);
+    color: var(--text);
+  }
+  .screen-actions {
+    display: flex;
+    gap: 6px;
+  }
+  .screen-actions button {
     border: 1px solid var(--line);
     border-radius: 8px;
     padding: 6px 10px;

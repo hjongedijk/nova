@@ -135,6 +135,12 @@ Click the clipboard button next to chat input to read copied text. Browser clipb
 
 The browser masks recognizable credentials, including password fields, API keys, bearer tokens and JWTs, before the preview and request. Review the preview: masking cannot recognize every private detail. Only the prepared text is sent as a temporary text attachment through the normal chat route, up to 12,000 characters. The attachment body is not saved in conversation history or local storage; chat keeps the task and the resulting answer as usual. Clearing the panel or sending the request discards the browser copy held by this feature. The selected conversation language determines the translation target. Clipboard help needs a secure browser context and clipboard access.
 
+## Screen help
+
+Click the screen button beside chat input, then choose a screen or window in the browser's sharing prompt. NOVA captures one frame, stops every capture track immediately, and shows the frame for review. Add an optional question and click **Vraag NOVA** to send it; **Annuleren** discards the frame. There is no background capture or continuous stream to NOVA.
+
+The browser bounds the image to 1,600 pixels on its longest side. The chosen frame travels as a temporary image attachment through the existing chat route. The server requires a model configured for the `vision` role and today's verified-free model set; otherwise it blocks inference. The image body is not saved to conversation history or browser storage, but your question and NOVA's answer follow normal chat history. Hide sensitive information before capture: image text cannot be reliably redacted automatically. Browser screen sharing needs a secure context and browser support.
+
 ## Conversation style
 
 NOVA aims to be a calm, attentive personal assistant: understand the intention, act within the request, and explain the useful result. It can acknowledge a difficult day without launching unrelated tools, and suggest a relevant next step without appending an offer to every answer. Actions and claims of success still follow the backend's existing verification and confirmation rules.

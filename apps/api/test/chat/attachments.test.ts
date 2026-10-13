@@ -322,6 +322,10 @@ describe("chat attachments", () => {
 
   it("sends images using vision content parts, with the user's question last", async () => {
     model.mockClear();
+    vi.spyOn(
+      app.get(RoutingService),
+      "preferredModelForRole",
+    ).mockReturnValueOnce("fixture");
     const response = await request(app.getHttpServer())
       .post("/api/chat")
       .send({
@@ -349,6 +353,30 @@ describe("chat attachments", () => {
     expect(last.content.at(-1).text).toContain(
       "User's question: What is in this picture?",
     );
+  });
+
+  it("does not send an image through another model role", async () => {
+    model.mockClear();
+    const response = await request(app.getHttpServer())
+      .post("/api/chat-stream")
+      .send({
+        sessionId: "vision-role-required",
+        message: "Describe this image",
+        modelRole: "conversation",
+        attachments: [
+          {
+            name: "screen.png",
+            encoding: "base64",
+            mimeType: "image/png",
+            content: png.toString("base64"),
+          },
+        ],
+      })
+      .expect(201);
+    expect(response.text).toContain(
+      "Geen geverifieerde gratis AI-route beschikbaar.",
+    );
+    expect(model).not.toHaveBeenCalled();
   });
 
   it("accepts larger files and announces bounded text excerpts in the stream", async () => {

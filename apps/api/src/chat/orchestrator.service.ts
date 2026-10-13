@@ -16,7 +16,10 @@ import type {
 import { NovaConfig } from "../core/config/nova-config.js";
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { confirmationQuestion } from "../confirmations/confirmation-words.js";
-import { RoutingService } from "../routing/routing.service.js";
+import {
+  FreeRoutingBlockedError,
+  RoutingService,
+} from "../routing/routing.service.js";
 import { parseToolArguments } from "../tools/tool-arguments.js";
 import { ToolsService } from "../tools/tools.service.js";
 import {
@@ -317,6 +320,13 @@ export class OrchestratorService {
     this.routing.assertFree();
     const role = modelRole ?? classifyModelRole(message, input.attachments);
     const preferredModel = this.routing.preferredModelForRole(role);
+    if (
+      input.attachments?.some((item) => item.mimeType?.startsWith("image/")) &&
+      (role !== "vision" || !preferredModel)
+    )
+      throw new FreeRoutingBlockedError(
+        "No verified free vision model is configured for image input",
+      );
     const roleModel = preferredModel
       ? { role, modelId: preferredModel }
       : undefined;
