@@ -45,19 +45,24 @@ import assert from "node:assert/strict";
         };
         Object.defineProperty(navigator, "mediaDevices", {
           configurable: true,
-          value: {
-            enumerateDevices: async () => [
-              {
-                kind: "audioinput",
-                deviceId: "microphone-one",
-                label: "Test microphone",
-              },
-              {
-                kind: "audiooutput",
-                deviceId: "speaker-one",
-                label: "Test speaker",
-              },
-            ],
+          value: Object.assign(new EventTarget(), {
+            enumerateDevices: async () =>
+              [
+                {
+                  kind: "audioinput",
+                  deviceId: "microphone-one",
+                  label: "Test microphone",
+                },
+                {
+                  kind: "audiooutput",
+                  deviceId: "speaker-one",
+                  label: "Test speaker",
+                },
+              ].filter(
+                (device) =>
+                  device.kind !== "audioinput" ||
+                  window.__testInputAvailable !== false,
+              ),
             getUserMedia: async (constraints) => {
               window.__testMicRequests.push(constraints);
               const track = {
@@ -65,15 +70,17 @@ import assert from "node:assert/strict";
                 kind: "audio",
                 readyState: "live",
                 stop() {
+                  this.readyState = "ended";
                   window.__testMicStopped++;
                 },
               };
+              window.__testInputTrack = track;
               return {
                 getTracks: () => [track],
                 getAudioTracks: () => [track],
               };
             },
-          },
+          }),
         });
         Object.defineProperty(globalThis.AudioContext.prototype, "setSinkId", {
           configurable: true,
@@ -254,6 +261,15 @@ import assert from "node:assert/strict";
                     },
                   ],
                 ];
+        // All successfully completed production streams end with done, including
+        // choices and confirmation requests. EOF alone is now an interruption.
+        if (!events.some(([event]) => event === "done")) {
+          const token = events.findLast(([event]) => event === "token");
+          events.push([
+            "done",
+            { reply: token?.[1].text ?? "", model: "gratis-testmodel" },
+          ]);
+        }
         return route.fulfill(
           fail
             ? { status: 400, json: { error: "Test upload geweigerd" } }
@@ -313,13 +329,80 @@ import assert from "node:assert/strict";
           `helper size differs from viewport: ${JSON.stringify(bounds)}`,
         );
         await page.screenshot({
-          path: path.join(root, `docs/img/helper-${name}-${scale}x.png`),
+          path: path.join(
+            process.env.NOVA_HELPER_SCREENSHOT_DIR ||
+              path.join(root, "docs/img"),
+            `helper-${name}-${scale}x.png`,
+          ),
         });
       };
+      await page.setViewportSize({ width: 1280, height: 900 });
+      const dimensions = () =>
+        page.locator(".hp").evaluate((panel) => ({
+          width: panel.offsetWidth,
+          height: panel.offsetHeight,
+        }));
+      const assertFullscreen = async () => {
+        await page
+          .getByRole("button", { name: "Volledig scherm", exact: true })
+          .click();
+        await page.waitForFunction(() => !!document.fullscreenElement);
+        assert.deepEqual(
+          await dimensions(),
+          await page.evaluate(() => ({
+            width: window.innerWidth,
+            height: window.innerHeight,
+          })),
+        );
+        await page.clock.fastForward(13000);
+        assert.equal(
+          await page.locator(".hp.expanded").count(),
+          1,
+          "Fullscreen must survive the idle-collapse timer",
+        );
+        await page
+          .getByRole("button", {
+            name: "Volledig scherm verlaten",
+            exact: true,
+          })
+          .click();
+        await page.waitForFunction(() => !document.fullscreenElement);
+      };
+      assert.deepEqual(await dimensions(), { width: 360, height: 44 });
+      await page
+        .getByRole("button", { name: "Uitklappen", exact: true })
+        .click();
+      assert.deepEqual(await dimensions(), { width: 640, height: 180 });
+      assert.equal(await page.evaluate(() => document.fullscreenElement), null);
+      await page
+        .getByRole("button", { name: "Volledig scherm", exact: true })
+        .click();
+      await page.waitForFunction(() => !!document.fullscreenElement);
+      assert.deepEqual(
+        await dimensions(),
+        await page.evaluate(() => ({
+          width: window.innerWidth,
+          height: window.innerHeight,
+        })),
+      );
+      await page
+        .getByRole("button", { name: "Volledig scherm verlaten", exact: true })
+        .click();
+      await page.waitForFunction(() => !document.fullscreenElement);
+      assert.deepEqual(await dimensions(), { width: 640, height: 180 });
+      await page
+        .getByRole("button", { name: "Helper verbergen", exact: true })
+        .click();
+      assert.deepEqual(await dimensions(), { width: 360, height: 3 });
+      await page.locator(".hp").dispatchEvent("pointermove");
+      assert.deepEqual(await dimensions(), { width: 360, height: 44 });
+      await page.setViewportSize({ width: 280, height: 44 });
+      assert.deepEqual(await dimensions(), { width: 280, height: 44 });
       await snap("compact", 360, 44);
       await page
         .getByRole("button", { name: "Uitklappen", exact: true })
         .click();
+      await page.setViewportSize({ width: 640, height: 180 });
       await page.getByRole("button", { name: /Timers 0 actief/ }).click();
       await page.getByText("Geen actieve timers.").waitFor();
       await page.getByRole("button", { name: /Timers 0 actief/ }).click();
@@ -402,6 +485,34 @@ import assert from "node:assert/strict";
       assert.deepEqual(await page.evaluate(() => window.__testMicRequests[0]), {
         audio: true,
       });
+      await page.evaluate(() => {
+        window.__testInputAvailable = false;
+      });
+      await page
+        .getByRole("button", { name: "Microfoons zoeken", exact: true })
+        .click();
+      await page.waitForFunction(() => window.__testMicRequests.length === 2);
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem("novaAudioInput")),
+        "microphone-one",
+      );
+      assert.equal(
+        await page.getByLabel("Invoerapparaat").inputValue(),
+        "microphone-one",
+      );
+      await page.evaluate(() => {
+        window.__testInputAvailable = true;
+        navigator.mediaDevices.dispatchEvent(new Event("devicechange"));
+      });
+      await page.waitForFunction(
+        () =>
+          document.querySelector('select option[value="microphone-one"]')
+            .textContent === "Test microphone",
+      );
+      assert.equal(
+        await page.evaluate(() => window.__testMicRequests.length),
+        2,
+      );
       await page.getByRole("button", { name: "Spreek met NOVA" }).click();
       await page.waitForFunction(
         () => window.__testRecognitionTrack === "selected-mic-track",
@@ -411,7 +522,7 @@ import assert from "node:assert/strict";
         { audio: { deviceId: { exact: "microphone-one" } } },
       );
       await page.evaluate(() => window.__testRecognition.abort());
-      await page.waitForFunction(() => window.__testMicStopped === 2);
+      await page.waitForFunction(() => window.__testMicStopped === 3);
       await page.evaluate(() => localStorage.setItem("jarvisWake", "on"));
       await page.reload();
       await page.waitForFunction(
@@ -468,6 +579,7 @@ import assert from "node:assert/strict";
         false,
       );
       await snap("chat", 640, 340);
+      await assertFullscreen();
       assert.match(
         await page.locator(".hp-ticker").innerText(),
         /afgerond|gecontroleerd/,
@@ -607,6 +719,7 @@ import assert from "node:assert/strict";
       await page.getByRole("button", { name: "Verstuur", exact: true }).click();
       await page.waitForSelector(".hc");
       await snap("confirmation", 640, 170);
+      await assertFullscreen();
       assert.equal(
         await page.getByRole("button", { name: "Altijd", exact: true }).count(),
         1,
@@ -642,8 +755,20 @@ import assert from "node:assert/strict";
         .getByRole("button", { name: "Inklappen", exact: true })
         .click();
       await page.clock.fastForward(13000);
-      assert.equal(await page.locator(".hp.hidden").count(), 1);
-      await page.mouse.move(1, 1);
+      assert.equal(
+        await page.locator(".hp.hidden").count(),
+        1,
+        JSON.stringify(
+          await page.evaluate(() => ({
+            className: document.querySelector(".hp").className,
+            active: document.activeElement?.outerHTML,
+            draft: document.querySelector(".hp-form input:not([type=file])")
+              ?.value,
+            footer: document.querySelector(".hp-ticker")?.textContent,
+          })),
+        ),
+      );
+      await page.locator(".hp").hover();
       await page.waitForFunction(() => !document.querySelector(".hp.hidden"));
       assert.equal(
         maxResizeActive,
@@ -657,7 +782,7 @@ import assert from "node:assert/strict";
     await browser.close();
   }
   console.log(
-    "Helper browser checks passed at 1x/2x: views, speech meter, input/output selection, chosen track for tap-to-talk and wake, microphone stream cleanup, ticker/model, notices/snooze, attachment retry/cleanup, choices, confirmations and N shortcut.",
+    "Helper browser checks passed at 1x/2x: compact/fullscreen/hide/responsive sizing, views, speech meter, persisted input/output selection, temporary missing microphone/reconnect, chosen track for tap-to-talk and wake, stream cleanup, ticker/model, notices/snooze, attachment retry/cleanup, choices, confirmations and N shortcut.",
   );
 })().catch((error) => {
   console.error(error.stack);

@@ -1,7 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SpeechResultEvent } from "./speech-types.ts";
 
-const { ask, chat, shell } = vi.hoisted(() => ({
+const {
+  ask,
+  chat,
+  shell,
+  selectedInputDevice,
+  openSelectedInputStream,
+  onInputDeviceChange,
+  stopInputStream,
+} = vi.hoisted(() => ({
+  selectedInputDevice: vi.fn(() => ""),
+  openSelectedInputStream: vi.fn(),
+  onInputDeviceChange: vi.fn<(listener: () => void) => () => void>(
+    () => () => {},
+  ),
+  stopInputStream: vi.fn(),
   ask: vi.fn(),
   chat: { busy: false, uiState: "ready", you: "", hint: "" },
   shell: {
@@ -45,13 +59,13 @@ vi.mock("./wake-matcher.ts", () => ({
   WAKE_STRICT: [],
 }));
 vi.mock("./input-device.ts", () => ({
-  onInputDeviceChange: vi.fn(() => () => {}),
-  openSelectedInputStream: vi.fn(),
-  selectedInputDevice: () => "",
-  stopInputStream: vi.fn(),
+  onInputDeviceChange,
+  openSelectedInputStream,
+  selectedInputDevice,
+  stopInputStream,
 }));
 
-import { cancelAwait, handleWakeResult, setWake } from "./wake.ts";
+import { cancelAwait, handleWakeResult, initWake, setWake } from "./wake.ts";
 
 function result(text: string, isFinal: boolean): SpeechResultEvent {
   return {
@@ -65,6 +79,10 @@ beforeEach(() => {
   ask.mockReset();
   chat.busy = false;
   shell.awaiting = false;
+  selectedInputDevice.mockReturnValue("");
+  openSelectedInputStream.mockReset();
+  stopInputStream.mockReset();
+  onInputDeviceChange.mockClear();
 });
 
 afterEach(() => {
@@ -72,6 +90,7 @@ afterEach(() => {
   cancelAwait();
   vi.clearAllTimers();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("wake transcript settling", () => {
@@ -100,5 +119,140 @@ describe("wake transcript settling", () => {
     setWake(false);
     vi.advanceTimersByTime(650);
     expect(ask).not.toHaveBeenCalled();
+  });
+});
+
+describe("wake microphone reconnects", () => {
+  function setup() {
+    const instances: Array<{
+      onstart: (() => void) | null;
+      onend: (() => void) | null;
+      onerror: ((event: { error: string }) => void) | null;
+      onresult: ((event: SpeechResultEvent) => void) | null;
+      start: ReturnType<typeof vi.fn>;
+      stop: ReturnType<typeof vi.fn>;
+    }> = [];
+    class Recognition {
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: ((event: { error: string }) => void) | null = null;
+      onresult: ((event: SpeechResultEvent) => void) | null = null;
+      start = vi.fn(() => this.onstart?.());
+      stop = vi.fn(() => this.onend?.());
+      constructor() {
+        instances.push(this);
+      }
+    }
+    vi.stubGlobal(
+      "window",
+      Object.assign(new EventTarget(), {
+        isSecureContext: true,
+        SpeechRecognition: Recognition,
+      }),
+    );
+    selectedInputDevice.mockReturnValue("saved-mic");
+    const cleanup = initWake();
+    return { instances, cleanup };
+  }
+  const stream = (readyState = "live") => {
+    const track = { readyState };
+    return { track, value: { getAudioTracks: () => [track] } };
+  };
+
+  it("reopens an ended track when recognition restarts", async () => {
+    const first = stream();
+    const second = stream();
+    openSelectedInputStream
+      .mockResolvedValueOnce(first.value)
+      .mockResolvedValueOnce(second.value);
+    const { instances, cleanup } = setup();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(instances[0]!.start).toHaveBeenCalledWith(first.track);
+    first.track.readyState = "ended";
+    instances[0]!.onend?.();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(instances[1]!.start).toHaveBeenCalledWith(second.track);
+    expect(stopInputStream).toHaveBeenCalledWith(first.value);
+    cleanup();
+  });
+
+  it("keeps wake enabled through device loss and restarts on reconnect", async () => {
+    openSelectedInputStream.mockRejectedValueOnce(
+      new DOMException("unplugged", "NotFoundError"),
+    );
+    const { instances, cleanup } = setup();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(shell.wakeEnabled).toBe(true);
+    expect(shell.wakeActive).toBe(false);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(openSelectedInputStream).toHaveBeenCalledOnce();
+    const reconnected = stream();
+    openSelectedInputStream.mockResolvedValue(reconnected.value);
+    onInputDeviceChange.mock.calls.at(-1)?.[0]();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(instances.at(-1)?.start).toHaveBeenCalledWith(reconnected.track);
+    expect(shell.wakeActive).toBe(true);
+    cleanup();
+  });
+
+  it("preserves wake preference after audio-capture error and releases its stream", async () => {
+    const first = stream();
+    openSelectedInputStream.mockResolvedValue(first.value);
+    const { instances, cleanup } = setup();
+    await vi.advanceTimersByTimeAsync(400);
+    instances[0]!.onerror?.({ error: "audio-capture" });
+    expect(shell.wakeEnabled).toBe(true);
+    expect(shell.wakeActive).toBe(false);
+    expect(stopInputStream).toHaveBeenCalledWith(first.value);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(openSelectedInputStream).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it("ignores delayed events from the old recognizer after device reconnect", async () => {
+    const first = stream();
+    const second = stream();
+    openSelectedInputStream
+      .mockResolvedValueOnce(first.value)
+      .mockResolvedValueOnce(second.value);
+    const { instances, cleanup } = setup();
+    await vi.advanceTimersByTimeAsync(400);
+    const old = instances[0]!;
+    // Real Web Speech stop ends asynchronously, after replacement may start.
+    old.stop.mockImplementation(() => {});
+    onInputDeviceChange.mock.calls.at(-1)?.[0]();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(instances[1]!.start).toHaveBeenCalledWith(second.track);
+    old.onend?.();
+    old.onerror?.({ error: "not-allowed" });
+    old.onresult?.(result("Hey NOVA doe de lamp aan", true));
+    expect(shell.wakeEnabled).toBe(true);
+    expect(shell.wakeActive).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(openSelectedInputStream).toHaveBeenCalledTimes(2);
+    expect(instances).toHaveLength(2);
+    expect(ask).not.toHaveBeenCalled();
+    cleanup();
+    instances[1]!.onresult?.(result("Hey NOVA doe de lamp aan", true));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(ask).not.toHaveBeenCalled();
+  });
+  it("does not request another stream while the previous start is pending", async () => {
+    let resolve: (value: unknown) => void = () => {};
+    openSelectedInputStream.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const { cleanup } = setup();
+    await vi.advanceTimersByTimeAsync(400);
+    window.dispatchEvent(new Event("pointerdown"));
+    setWake(true);
+    expect(openSelectedInputStream).toHaveBeenCalledOnce();
+    cleanup();
+    const late = stream();
+    resolve(late.value);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stopInputStream).toHaveBeenCalledWith(late.value);
   });
 });

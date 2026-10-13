@@ -113,6 +113,8 @@
   let initialized = $state(false);
   let view: View = $state("overview");
   let expanded = $state(false);
+  let fullscreen = $state(false);
+  let panel = $state<HTMLDivElement>();
   let hidden = $state(false);
   let autohide = $state(true);
   let contrast = $state(false);
@@ -242,6 +244,7 @@
     },
   ]);
   const busy = () =>
+    fullscreen ||
     chat.busy ||
     waiting ||
     shell.awaiting ||
@@ -273,6 +276,7 @@
   }
   function close() {
     if (waiting) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
     expanded = false;
     input?.blur();
     activity();
@@ -413,7 +417,7 @@
     if (chat.reply) open("chat");
   });
   $effect(() => {
-    if (!initialized) return;
+    if (!initialized || fullscreen) return;
     void requestHelperSize(
       waiting
         ? "confirmation"
@@ -692,10 +696,15 @@
 </script>
 
 <svelte:window onkeydown={onKey} />
+<svelte:document
+  onfullscreenchange={() => (fullscreen = !!document.fullscreenElement)}
+/>
 <svelte:head><title>NOVA helper</title></svelte:head>
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="hp"
+  bind:this={panel}
+  data-view={waiting ? "confirmation" : view}
   class:expanded
   class:contrast
   class:dragging
@@ -749,6 +758,25 @@
         open("overview");
       }}>⚙</HelperUi
     >
+    {#if expanded}
+      <HelperUi
+        class="hp-button"
+        aria-label={fullscreen ? "Volledig scherm verlaten" : "Volledig scherm"}
+        onclick={() => {
+          if (document.fullscreenElement) void document.exitFullscreen();
+          else void panel?.requestFullscreen().catch(() => undefined);
+        }}>⛶</HelperUi
+      >
+      <HelperUi
+        class="hp-button"
+        aria-label="Helper verbergen"
+        disabled={waiting}
+        onclick={() => {
+          close();
+          hidden = true;
+        }}>×</HelperUi
+      >
+    {/if}
     <HelperUi
       class="hp-button"
       aria-label={expanded ? "Inklappen" : "Uitklappen"}

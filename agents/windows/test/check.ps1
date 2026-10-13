@@ -95,7 +95,9 @@ if (-not $failed) {
   if (@('wallpaper', 'helper', 'both') -notcontains [string]$example.mode) { $failed = $true; Write-Host 'agent.example.json: mode must be wallpaper, helper or both' }
   else { Write-Host "agent.example.json: mode '$($example.mode)'" }
   if ($text -match 'SetWindowRgn|CreateRoundRectRgn|GetWindowRgn|Reasserted|static Thread keeper') { $failed = $true; Write-Host 'NovaHelper: region clipping and its guard must be absent' }
-  if ($text -notmatch "'--edge-kiosk-type=fullscreen'") { $failed = $true; Write-Host 'NovaHelper: browser must launch without chrome' }
+  if ($openHelperText -notmatch '--app=\$baseUrl/helper' -or $openHelperText -match '--kiosk|--edge-kiosk-type|--start-fullscreen|--use-fake-ui-for-media-stream') {
+    $failed = $true; Write-Host 'NovaHelper: use bounded app mode with real microphone permissions, never fullscreen kiosk'
+  } else { Write-Host 'NovaHelper: bounded app launch preserves browser permission prompts' }
   $sizesAssignment = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$helperSizes' }, $true) | Select-Object -First 1
   if (-not $sizesAssignment) { throw 'Helper sizes assignment missing' }
   . ([scriptblock]::Create($sizesAssignment.Extent.Text))

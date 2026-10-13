@@ -51,6 +51,7 @@ let insecureWarned = false;
 let wakeInputStream: MediaStream | null = null;
 let wakeInputDevice = "";
 let wakeStartAttempt = 0;
+let wakeStarting = false;
 
 /** The wake word handler needs to know NOVA is not busy answering. */
 const busyTalking = () =>
@@ -211,6 +212,7 @@ export function afterSpeech(): void {
 
 function stopWake(): void {
   wakeStartAttempt++;
+  wakeStarting = false;
   clearTimeout(restartTimer);
   clearTimeout(settleTimer);
   pendingFinalIndex = -1;
@@ -229,7 +231,7 @@ function stopWake(): void {
 }
 
 async function startWake(): Promise<void> {
-  if (!Ctor || !shell.wakeEnabled || wakeRec) return;
+  if (!Ctor || !shell.wakeEnabled || wakeRec || wakeStarting) return;
   if (!window.isSecureContext) {
     if (!insecureWarned) {
       insecureWarned = true;
@@ -242,19 +244,25 @@ async function startWake(): Promise<void> {
     return;
   }
   const attempt = ++wakeStartAttempt;
+  wakeStarting = true;
   const rec = new Ctor();
   rec.lang = "nl-NL";
   rec.continuous = true;
   rec.interimResults = true;
   rec.maxAlternatives = 3;
   rec.onstart = () => {
+    if (attempt !== wakeStartAttempt) return;
     sentIndex = -1;
     shell.wakeActive = true;
     startedAt = Date.now();
     lastLength = 0;
   };
-  rec.onresult = handleWakeResult;
+  rec.onresult = (event) => {
+    if (attempt !== wakeStartAttempt || !shell.wakeEnabled) return;
+    handleWakeResult(event);
+  };
   rec.onerror = (error) => {
+    if (attempt !== wakeStartAttempt) return;
     if (
       error.error === "not-allowed" ||
       error.error === "service-not-allowed"
@@ -274,12 +282,13 @@ async function startWake(): Promise<void> {
         title: "Geen microfoon gevonden",
         detail: "Sluit een microfoon aan.",
       });
-      shell.wakeEnabled = false;
-      storage.set("jarvisWake", "off");
+      // Device loss is temporary. Preserve the user's wake preference and wait
+      // for devicechange instead of polling or switching microphones silently.
       stopWake();
     }
   };
   rec.onend = () => {
+    if (attempt !== wakeStartAttempt) return;
     shell.wakeActive = false;
     wakeRec = null;
     if (!shell.wakeEnabled || attempt !== wakeStartAttempt) return;
@@ -290,7 +299,11 @@ async function startWake(): Promise<void> {
   };
   try {
     const input = selectedInputDevice();
-    if (input && input !== wakeInputDevice) {
+    const cachedTrack = wakeInputStream?.getAudioTracks()[0];
+    if (
+      wakeInputStream &&
+      (input !== wakeInputDevice || cachedTrack?.readyState !== "live")
+    ) {
       stopInputStream(wakeInputStream);
       wakeInputStream = null;
       wakeInputDevice = "";
@@ -316,14 +329,14 @@ async function startWake(): Promise<void> {
     stopInputStream(wakeInputStream);
     wakeInputStream = null;
     wakeInputDevice = "";
-    shell.wakeEnabled = false;
-    storage.set("jarvisWake", "off");
     showToast({
       severity: "warning",
       title: "Gekozen microfoon niet beschikbaar",
       detail:
-        "Hey NOVA is uitgezet. Controleer de microfoon in de helperinstellingen en zet Hey NOVA daarna weer aan.",
+        "Je keuze blijft bewaard. Sluit de microfoon opnieuw aan of controleer de browsertoestemming in de helperinstellingen.",
     });
+  } finally {
+    if (attempt === wakeStartAttempt) wakeStarting = false;
   }
 }
 

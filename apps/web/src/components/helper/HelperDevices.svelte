@@ -11,6 +11,7 @@
   import { audioContext, ttsElement } from "#lib/voice/audio.ts";
   import {
     discoverInputDevices,
+    onInputDeviceChange,
     selectedInputDevice,
     setSelectedInputDevice,
     supportsSpeechInputSelection,
@@ -84,10 +85,8 @@
     try {
       inputs = await discoverInputDevices();
       if (input && !inputs.some((device) => device.deviceId === input)) {
-        input = "";
-        setSelectedInputDevice("");
         note =
-          "Opgeslagen microfoon niet gevonden; de standaardmicrofoon wordt weer gebruikt.";
+          "De gekozen microfoon is tijdelijk niet beschikbaar. Je keuze blijft bewaard; sluit hem opnieuw aan of kies een andere microfoon.";
       } else {
         note = inputs.length
           ? "Microfoons gevonden. Je keuze geldt voor spreken en Hey NOVA."
@@ -115,6 +114,18 @@
       })
       .catch(() => undefined);
     void devices();
+    // Enumeration is passive: reloads and reconnects must not request permission.
+    const refreshInputs = () => {
+      input = selectedInputDevice();
+      void navigator.mediaDevices
+        ?.enumerateDevices()
+        .then((all) => {
+          inputs = all.filter((device) => device.kind === "audioinput");
+        })
+        .catch(() => undefined);
+    };
+    refreshInputs();
+    return onInputDeviceChange(refreshInputs);
   });
 </script>
 

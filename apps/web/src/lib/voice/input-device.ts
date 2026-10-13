@@ -48,6 +48,15 @@ export function stopInputStream(stream: MediaStream | null): void {
 }
 
 export function onInputDeviceChange(listener: () => void): () => void {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === DEVICE_KEY || event.key === null) listener();
+  };
   window.addEventListener(CHANGE_EVENT, listener);
-  return () => window.removeEventListener(CHANGE_EVENT, listener);
+  window.addEventListener("storage", onStorage);
+  navigator.mediaDevices?.addEventListener("devicechange", listener);
+  return () => {
+    window.removeEventListener(CHANGE_EVENT, listener);
+    window.removeEventListener("storage", onStorage);
+    navigator.mediaDevices?.removeEventListener("devicechange", listener);
+  };
 }

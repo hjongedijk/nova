@@ -21,7 +21,7 @@ param(
   [string]$ConfigPath = (Join-Path $PSScriptRoot 'agent.json')
 )
 $ErrorActionPreference = 'Stop'
-$agentVersion = '2026-10-11.1'
+$agentVersion = '2026-10-13.1'
 
 # However the agent is started (task, double-click, a terminal), it runs on without a window: this copy starts
 # a hidden one and ends. (conhost --headless also keeps Windows Terminal from opening a window.)
@@ -780,7 +780,7 @@ public class NovaClick {
     } catch (Exception) { }
   }
 }
-// Rectangular helper. Browser fullscreen content removes Edge's own title bar; Win32 controls the outer bounds.
+// Rectangular app window. Win32 removes the caption and controls the outer bounds.
 public class NovaHelper {
   [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
   [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int index, int value);
@@ -809,7 +809,7 @@ public class NovaHelper {
     return 1.0;
   }
   public static void Setup(IntPtr h) {
-    // Remove caption, sizing frame, controls and maximized state without leaving browser fullscreen mode.
+    // Remove caption, sizing frame, controls and maximized state from the app window.
     int style = GetWindowLong(h, -16) & ~(0x00C00000 | 0x00040000 | 0x00020000 | 0x00010000 | 0x00080000 | 0x01000000);
     SetWindowLong(h, -16, style);
     ShowWindow(h, 0);
@@ -1380,15 +1380,17 @@ function Open-Helper([string]$baseUrl, [int]$display) {
   $profileDir = Join-Path $PSScriptRoot 'helper-profile\nova-helper'
   New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
   # Its own profile; the page may use the microphone and play speech without a click (it answers "Hey NOVA").
-  # Fullscreen kiosk content has no browser caption. The native window is then sized as a rectangular panel.
-  # See https://learn.microsoft.com/en-us/deployedge/microsoft-edge-configure-kiosk-mode.
-  # Native resizing in this mode needs verification on Windows; CDP reports any unexpected remaining chrome.
+  # App mode respects panel dimensions; fullscreen kiosk can reclaim the entire monitor after native resizing.
+  # Kiosk is InPrivate: its site data disappears on close, including the saved microphone.
+  # https://learn.microsoft.com/en-us/deployedge/microsoft-edge-configure-kiosk-mode
+  # Win32 removes the app caption. CDP measures any remaining chrome for diagnostics.
+  # Keep the persistent profile and normal browser microphone permission prompts.
   Start-Process -FilePath $edgeExe -ArgumentList (@(
-    '--kiosk', "$baseUrl/helper?view=$view", '--edge-kiosk-type=fullscreen', "--user-data-dir=`"$profileDir`"",
+    "--app=$baseUrl/helper?view=$view", "--user-data-dir=`"$profileDir`"",
     "--window-position=$($rect.x),$($rect.y)", "--window-size=$($rect.w),$($rect.h)",
     '--no-first-run', '--no-default-browser-check', '--disable-extensions',
     '--disable-session-crashed-bubble', '--hide-crash-restore-bubble',
-    '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required',
+    '--autoplay-policy=no-user-gesture-required',
     "--remote-debugging-port=$helperPort", '--remote-debugging-address=127.0.0.1'
   ) + @(Get-EdgeSecurityArgs $baseUrl)) | Out-Null
   $handle = [IntPtr]::Zero
