@@ -3,7 +3,11 @@ import type { HomeAssistantService } from "../../src/home/home-assistant.service
 import type { WindowsPcService } from "../../src/integrations/windows/windows-pc.service.js";
 import { SpeechPresenceService } from "../../src/dashboard/speech-presence.service.js";
 
-function service(states: string[], helperOpen: boolean | null) {
+function service(
+  states: string[],
+  helperOpen: boolean | null,
+  personIds: string[] = [],
+) {
   const home = {
     configured: true,
     sync: vi.fn(async () => undefined),
@@ -11,7 +15,7 @@ function service(states: string[], helperOpen: boolean | null) {
     visibleEntities: () =>
       states.map((state, index) => ({
         domain: "person",
-        entity_id: `person.user_${index}`,
+        entity_id: personIds[index] ?? `person.user_${index}`,
         state,
       })),
   } as unknown as HomeAssistantService;
@@ -66,6 +70,33 @@ describe("SpeechPresenceService", () => {
     expect(transitions).toEqual([
       ["away", "home"],
       ["home", "away"],
+    ]);
+  });
+
+  it("does not report arrival when the sole visible person changes", async () => {
+    const states = ["not_home"];
+    const personIds = ["person.alex"];
+    const presence = service(states, false, personIds);
+    const transitions: Array<[string, string]> = [];
+    const speechAvailable = vi.fn();
+    presence.onTransition((from, to) => transitions.push([from, to]));
+    presence.onSpeechAvailable(speechAvailable);
+
+    await presence.refresh();
+    personIds[0] = "person.sam";
+    states[0] = "home";
+    await presence.refresh();
+    expect(transitions).toEqual([]);
+    expect(presence.maySpeak()).toBe(true);
+    expect(speechAvailable).toHaveBeenCalledTimes(1);
+
+    states[0] = "not_home";
+    await presence.refresh();
+    states[0] = "home";
+    await presence.refresh();
+    expect(transitions).toEqual([
+      ["home", "away"],
+      ["away", "home"],
     ]);
   });
 

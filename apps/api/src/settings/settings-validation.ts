@@ -288,6 +288,8 @@ export function normalizeHelperPreferences(
     Record<string, unknown> | undefined;
   const smallSurprises = rituals?.smallSurprises as
     Record<string, unknown> | undefined;
+  const welcomeHome = rituals?.welcomeHome as
+    Record<string, unknown> | undefined;
   const calendarReminders = rituals?.calendarReminders as
     Record<string, unknown> | undefined;
   if (
@@ -303,6 +305,7 @@ export function normalizeHelperPreferences(
             key !== "weeklyOverview" &&
             key !== "dailyHighlight" &&
             key !== "smallSurprises" &&
+            key !== "welcomeHome" &&
             key !== "calendarReminders",
         )
         .sort()
@@ -319,6 +322,10 @@ export function normalizeHelperPreferences(
         (!smallSurprises ||
           typeof smallSurprises !== "object" ||
           Array.isArray(smallSurprises))) ||
+      (rituals.welcomeHome !== undefined &&
+        (!welcomeHome ||
+          typeof welcomeHome !== "object" ||
+          Array.isArray(welcomeHome))) ||
       (rituals.calendarReminders !== undefined &&
         (!calendarReminders ||
           typeof calendarReminders !== "object" ||
@@ -361,6 +368,13 @@ export function normalizeHelperPreferences(
       )
         throw new ValidationError(["Ongeldige ritueelinstellingen."]);
     }
+    if (welcomeHome) {
+      if (
+        Object.keys(welcomeHome).join(",") !== "enabled" ||
+        typeof welcomeHome.enabled !== "boolean"
+      )
+        throw new ValidationError(["Ongeldige ritueelinstellingen."]);
+    }
     if (calendarReminders) {
       if (
         Object.keys(calendarReminders).sort().join(",") !==
@@ -378,6 +392,7 @@ export function normalizeHelperPreferences(
     weeklyOverview,
     dailyHighlight,
     smallSurprises,
+    welcomeHome,
     calendarReminders,
   ])
     if (item && item.enabled !== undefined && typeof item.enabled !== "boolean")
@@ -483,6 +498,7 @@ export function normalizeHelperPreferences(
         time: ritualTime(dailyHighlight?.time, "20:00"),
       },
       smallSurprises: { enabled: smallSurprises?.enabled === true },
+      welcomeHome: { enabled: welcomeHome?.enabled === true },
       calendarReminders: {
         enabled: calendarReminders?.enabled === true,
         minutesBefore: (calendarReminders?.minutesBefore === undefined

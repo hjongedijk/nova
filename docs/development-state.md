@@ -6,6 +6,7 @@ Do not record credentials, personal messages or actual deployment configuration 
 
 ## Current work
 
+- I2 partial: opt-in welcome on same-person HA away-to-home transition, daily private dedupe, focus/quiet guards, a single permitted thermostat reading with explicit unit or fixed fallback, one helper wave per feed seq including native bridge. HA polling can lag ~60s; real Windows/home arrival/audio check remains. Focused API/settings/PowerShell checks pass.
 - I14 follow-up: quick-action save/reset/rollback now produce fixed, secret-free action cards with ordered overview readback and a link to history. Other settings classes and direct card recovery remain open; focused web tests and Svelte-check pass.
 - E18 follow-up: absolute timer timestamps require an explicit `Z` or UTC offset; missing-offset times fail with the existing safe validation text. Focused 16 planning tests, API typecheck, lint and format pass. Live natural-language interpretation/audio remain open.
 - F6 follow-up: Node-RED flow HTTP-2xx error envelopes no longer project raw diagnostics to model/chat; tool and Home Assistant sync logs use fixed text. Focused API tests, typecheck and lint pass. Other free-form integration fields remain open.

@@ -155,6 +155,11 @@ if (-not $failed) {
   $notification = @{ seq = 1; severity = 'warning'; title = 'Server offline'; detail = "Quoted ' content remains data"; at = '2026-10-09T12:00:00Z' }
   $clean = ConvertTo-HelperNotification $notification
   if ($clean.seq -ne 1 -or $clean.detail -ne $notification.detail) { $failed = $true; Write-Host 'Notification: validated content differs' }
+  $withWelcome = $notification.Clone()
+  $withWelcome.key = 'welcome-home'
+  if ((ConvertTo-HelperNotification $withWelcome).key -ne 'welcome-home') { $failed = $true; Write-Host 'Notification: welcome key lost' }
+  $withWelcome.key = 'untrusted-key'
+  if ((ConvertTo-HelperNotification $withWelcome).ContainsKey('key')) { $failed = $true; Write-Host 'Notification: unknown key passed through' }
   foreach ($invalid in @(@{ seq = 0 }, @{ seq = 1.5 }, @{ seq = '1' }, @{ seq = $true }, @{ severity = 'danger' }, @{ title = ('x' * 121) }, @{ detail = ('x' * 241) }, @{ at = 'invalid' })) {
     $candidate = $notification.Clone()
     foreach ($key in $invalid.Keys) { $candidate[$key] = $invalid[$key] }

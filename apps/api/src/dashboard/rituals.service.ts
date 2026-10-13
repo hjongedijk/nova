@@ -7,6 +7,7 @@ import {
 import fs from "node:fs";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
+import { HomeAssistantService } from "../home/home-assistant.service.js";
 import { SettingsStore } from "../settings/store/settings.store.js";
 import { normalizeHelperPreferences } from "../settings/settings-validation.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
@@ -67,6 +68,7 @@ interface RitualProgress {
   morning: boolean;
   evening: boolean;
   checkIn: boolean;
+  welcomeHome: boolean;
 }
 
 /** Opt-in, local-time greetings routed through the ordinary quiet/presence/speech policy. */
@@ -77,6 +79,7 @@ export class RitualsService implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private running = false;
   private paused = false;
+  private stopArrival?: () => void;
 
   constructor(
     private readonly config: NovaConfig,
@@ -84,18 +87,85 @@ export class RitualsService implements OnModuleInit, OnModuleDestroy {
     private readonly session: SessionMemoryService,
     private readonly presence: SpeechPresenceService,
     private readonly alerts: AlertsFeed,
+    private readonly home: HomeAssistantService,
   ) {
     this.progressFile = config.dataFile("rituals-progress.json");
   }
 
   onModuleInit(): void {
     void this.checkSchedule();
+    this.stopArrival = this.presence.onTransition((from, to) => {
+      if (from === "away" && to === "home") this.onArrival();
+    });
     this.timer = setInterval(() => void this.checkSchedule(), CHECK_MS);
     this.timer.unref();
   }
 
   onModuleDestroy(): void {
     if (this.timer) clearInterval(this.timer);
+    this.stopArrival?.();
+  }
+
+  /** A confirmed transition for the same visible person; never infer arrival from an unknown state. */
+  onArrival(now = new Date()): void {
+    if (this.paused) return;
+    try {
+      const preferences = normalizeHelperPreferences(
+        this.settings.get().helperPreferences as unknown as Record<
+          string,
+          unknown
+        >,
+      );
+      if (!preferences.rituals?.welcomeHome.enabled) return;
+      const parts = localParts(now, this.config.timezone);
+      const day = `${parts.year}-${parts.month}-${parts.day}`;
+      const time = `${parts.hour}:${parts.minute}`;
+      const quiet = preferences.cues.quiet;
+      if (
+        (quiet.enabled && inQuietHours(time, quiet.start, quiet.end)) ||
+        this.alerts.focusStatus(now).active
+      )
+        return;
+      const progress = this.readProgress(day);
+      if (progress.welcomeHome || this.paused) return;
+      const climates = this.home.visibleEntities().filter((entity) => {
+        const value = entity.attributes?.current_temperature;
+        const unit = entity.attributes?.temperature_unit;
+        return (
+          entity.domain === "climate" &&
+          typeof value === "number" &&
+          Number.isFinite(value) &&
+          (((unit === "°C" || unit === "C") && value >= -20 && value <= 50) ||
+            ((unit === "°F" || unit === "F") && value >= -4 && value <= 122))
+        );
+      });
+      const climate = climates.length === 1 ? climates[0] : undefined;
+      const value = climate?.attributes?.current_temperature as
+        number | undefined;
+      const unit = climate?.attributes?.temperature_unit as string | undefined;
+      const detail =
+        value === undefined
+          ? "Vraag me wat er vandaag op de planning staat."
+          : `Volgens je thermostaat is het nu ${Math.round(value * 10) / 10} ${unit === "C" || unit === "°C" ? "°C" : "°F"}.`;
+      progress.welcomeHome = true;
+      this.saveProgress(progress);
+      if (this.paused) return;
+      this.alerts.record(
+        {
+          topic: "jarvis/alerts",
+          payload: {
+            title: "Welkom thuis",
+            detail,
+            severity: "info",
+            key: "welcome-home",
+            at: now.toISOString(),
+          },
+        },
+        now,
+      );
+    } catch {
+      this.logger.warn("Welcome-home greeting unavailable");
+    }
   }
 
   async checkSchedule(now = new Date()): Promise<void> {
@@ -193,12 +263,19 @@ export class RitualsService implements OnModuleInit, OnModuleDestroy {
           morning: value.morning === true,
           evening: value.evening === true,
           checkIn: value.checkIn === true,
+          welcomeHome: value.welcomeHome === true,
         };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT")
         this.paused = true;
     }
-    return { day, morning: false, evening: false, checkIn: false };
+    return {
+      day,
+      morning: false,
+      evening: false,
+      checkIn: false,
+      welcomeHome: false,
+    };
   }
 
   private saveProgress(progress: RitualProgress): void {

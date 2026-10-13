@@ -5,6 +5,7 @@
     persistHelperPreferences,
   } from "#lib/api/settings.ts";
   import { onMount } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import type { FeedEvent, NotificationModes } from "@nova/contracts";
   import Orb from "#components/helper/Orb.svelte";
   import HelperUi from "#components/helper/HelperUi.svelte";
@@ -571,6 +572,13 @@
         cuePlayer?.play(cue as (typeof HELPER_CUE_NAMES)[number]);
     };
     window.addEventListener("nova-helper-cue", orbCue);
+    const welcomed = new SvelteSet<number>();
+    const waveForWelcome = (notice: FeedEvent) => {
+      if (notice.key !== "welcome-home" || welcomed.has(notice.seq)) return;
+      welcomed.add(notice.seq);
+      if (welcomed.size > 50) welcomed.delete(welcomed.values().next().value!);
+      animateHelper("wave");
+    };
     const nativeNotice = (event: Event) => {
       if (paused) return;
       const notice = (event as CustomEvent<FeedEvent>).detail;
@@ -580,6 +588,7 @@
         typeof notice.title !== "string"
       )
         return;
+      waveForWelcome(notice);
       notices = [
         notice,
         ...notices.filter((item) => item.seq !== notice.seq),
@@ -623,6 +632,7 @@
       startDashboard(),
       onFeedEvents((events) => {
         if (paused) return;
+        for (const event of events) waveForWelcome(event);
         notices = [
           ...events,
           ...notices.filter(
@@ -982,6 +992,12 @@
                 type="checkbox"
                 bind:checked={helper.rituals.smallSurprises.enabled}
               /> Kleine verrassingen bij een gelegenheid</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                bind:checked={helper.rituals.welcomeHome.enabled}
+              /> Welkom thuis na Home Assistant-thuiskomst</label
             >
             <label
               ><input

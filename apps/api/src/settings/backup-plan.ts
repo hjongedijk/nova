@@ -234,6 +234,7 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
         "weeklyOverview",
         "dailyHighlight",
         "smallSurprises",
+        "welcomeHome",
         "calendarReminders",
       ],
     );
@@ -246,6 +247,8 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
       exactKeys(object(rituals.dailyHighlight), ["enabled", "time"]);
     if (Object.hasOwn(rituals, "smallSurprises"))
       exactKeys(object(rituals.smallSurprises), ["enabled"]);
+    if (Object.hasOwn(rituals, "welcomeHome"))
+      exactKeys(object(rituals.welcomeHome), ["enabled"]);
     if (Object.hasOwn(rituals, "calendarReminders"))
       exactKeys(object(rituals.calendarReminders), [
         "enabled",

@@ -1263,7 +1263,9 @@ function ConvertTo-HelperNotification($value) {
   if ($value.at -isnot [string] -or $value.at.Length -gt 40 -or $value.at -notmatch '^\d{4}-\d{2}-\d{2}T') { throw 'Invalid notification timestamp' }
   $timestamp = [DateTimeOffset]::MinValue
   if (-not [DateTimeOffset]::TryParse($value.at, [ref]$timestamp)) { throw 'Invalid notification timestamp' }
-  return @{ seq = [long]$sequence; severity = [string]$value.severity; title = [string]$value.title; detail = [string]$value.detail; at = [string]$value.at }
+  $result = @{ seq = [long]$sequence; severity = [string]$value.severity; title = [string]$value.title; detail = [string]$value.detail; at = [string]$value.at }
+  if ($value.key -eq 'welcome-home') { $result.key = 'welcome-home' }
+  return $result
 }
 function Send-HelperNotification($value) {
   $event = ConvertTo-HelperNotification $value

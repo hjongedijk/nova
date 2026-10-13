@@ -2531,6 +2531,7 @@ describe("the helper overlay choice", () => {
         weeklyOverview: { enabled: false, time: "18:00" },
         dailyHighlight: { enabled: false, time: "20:00" },
         smallSurprises: { enabled: false },
+        welcomeHome: { enabled: false },
         calendarReminders: { enabled: false, minutesBefore: 15 },
       },
       cues: {

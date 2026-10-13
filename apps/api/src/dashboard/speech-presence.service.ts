@@ -14,6 +14,7 @@ const REFRESH_MS = 30_000;
 @Injectable()
 export class SpeechPresenceService implements OnModuleInit, OnModuleDestroy {
   private home: HomePresence = "unknown";
+  private personId: string | null = null;
   private helperOpen: boolean | null = null;
   private timer?: NodeJS.Timeout;
   private refreshing: Promise<void> | null = null;
@@ -71,13 +72,13 @@ export class SpeechPresenceService implements OnModuleInit, OnModuleDestroy {
     const previousSpeech = this.maySpeak();
     const homeTask = (async () => {
       if (!this.homeAssistant.configured) {
-        this.home = "unknown";
+        this.setHome("unknown");
         return;
       }
       try {
         await this.homeAssistant.sync();
         if (!this.homeAssistant.health().online) {
-          this.home = "unknown";
+          this.setHome("unknown");
           return;
         }
         const people = this.homeAssistant
@@ -93,7 +94,11 @@ export class SpeechPresenceService implements OnModuleInit, OnModuleDestroy {
                 ? "away"
                 : "unknown";
         else next = "unknown";
-        this.setHome(next);
+        const personId =
+          people.length === 1 && typeof people[0]?.entity_id === "string"
+            ? people[0].entity_id
+            : null;
+        this.setHome(next, personId);
       } catch {
         this.setHome("unknown");
       }
@@ -117,11 +122,15 @@ export class SpeechPresenceService implements OnModuleInit, OnModuleDestroy {
       }
   }
 
-  private setHome(next: HomePresence): void {
+  private setHome(next: HomePresence, personId: string | null = null): void {
     const previous = this.home;
+    const previousPersonId = this.personId;
     this.home = next;
+    this.personId = personId;
     if (
       previous === next ||
+      !personId ||
+      previousPersonId !== personId ||
       (previous !== "home" && previous !== "away") ||
       (next !== "home" && next !== "away")
     )
