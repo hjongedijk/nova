@@ -20,6 +20,19 @@ export interface SkillOutcome {
   };
 }
 
+function isErrorEnvelope(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const envelope = value as Record<string, unknown>;
+  return (
+    envelope.ok === false ||
+    envelope.success === false ||
+    (envelope.error !== undefined &&
+      envelope.error !== null &&
+      envelope.error !== false &&
+      envelope.error !== "")
+  );
+}
+
 /** Run a webhook skill. Shared by the tool, the "Test" button and the data panels. */
 export async function runSkill(
   skill: StoredWebhookSkill,
@@ -69,6 +82,12 @@ export async function runSkill(
       data = null;
     }
   }
+  if (isErrorEnvelope(data))
+    return {
+      ok: false,
+      error: "De dienst meldde dat de aanroep is mislukt.",
+      result: { status: response.status, untrusted: true, response: null },
+    };
   const picked = skill.http.extract ? pick(data, skill.http.extract) : data;
   const shown =
     picked !== undefined && picked !== null

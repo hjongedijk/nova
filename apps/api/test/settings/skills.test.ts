@@ -457,6 +457,44 @@ describe.skipIf(!lan)("running a skill against a real server", () => {
     }
   });
 
+  it("treats HTTP 200 error envelopes as failures without exposing upstream diagnostics", async () => {
+    const diagnostic = "private-host.local /data/private/webhook.json";
+    const fake = await service((entry, response) => {
+      if (entry.url === "/ok")
+        return json(response, 200, { ok: true, error: null, value: "ready" });
+      if (entry.url === "/flag")
+        return json(response, 200, { success: false, detail: diagnostic });
+      return json(response, 200, { error: { message: diagnostic } });
+    });
+    try {
+      const make = (tail: string, extract?: string) =>
+        hook({
+          type: "webhook",
+          name: "Test dienst",
+          description: "Een test van een dienst",
+          parameters: [],
+          http: {
+            method: "GET",
+            url: onLan(fake.port, tail),
+            allowPrivate: true,
+            ...(extract ? { extract } : {}),
+          },
+        });
+      const envelope = await runSkill(make("/error", "error.message"), {});
+      expect(envelope).toEqual({
+        ok: false,
+        error: "De dienst meldde dat de aanroep is mislukt.",
+        result: { status: 200, untrusted: true, response: null },
+      });
+      const flagged = await runSkill(make("/flag"), {});
+      expect(flagged.ok).toBe(false);
+      expect(JSON.stringify([envelope, flagged])).not.toContain(diagnostic);
+      expect((await runSkill(make("/ok"), {})).ok).toBe(true);
+    } finally {
+      fake.close();
+    }
+  });
+
   it("offers enabled webhook skills as tools and runs them", async () => {
     const fake = await service((_entry, response) =>
       json(response, 200, { ok: true }),
