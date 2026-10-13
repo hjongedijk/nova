@@ -2,7 +2,11 @@ import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
 import { XMLParser } from "fast-xml-parser";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { calendarEventStartInstant } from "./calendar-day.js";
+import {
+  calendarDateKey,
+  calendarEventStartInstant,
+  wallTimeAsInstant,
+} from "./calendar-day.js";
 
 export interface CalendarEvent {
   summary: string;
@@ -66,7 +70,10 @@ function eventDate(value: string): { value: string; allDay: boolean } | null {
   };
 }
 
-function parseCalendarData(ics: string): CalendarRecord[] {
+function parseCalendarData(
+  ics: string,
+  maxEvents = MAX_EVENTS,
+): CalendarRecord[] {
   const unfolded = ics.replace(/\r?\n[ \t]/g, "");
   const lines = unfolded.split(/\r?\n/);
   const events: CalendarRecord[] = [];
@@ -95,7 +102,7 @@ function parseCalendarData(ics: string): CalendarRecord[] {
         }
       }
       fields = null;
-      if (events.length >= MAX_EVENTS) break;
+      if (events.length >= maxEvents) break;
       continue;
     }
     if (!fields) continue;
@@ -220,12 +227,47 @@ export class CalDavService {
       return propstat.flatMap((item) => {
         const prop = item.prop as Record<string, unknown> | undefined;
         const data = prop?.["calendar-data"];
-        return typeof data === "string" ? parseCalendarData(data) : [];
+        return typeof data === "string"
+          ? parseCalendarData(data, Number.POSITIVE_INFINITY)
+          : [];
       });
     });
+    const today = wallTimeAsInstant(
+      `${calendarDateKey(now, this.config.timezone)}T00:00:00`,
+      this.config.timezone,
+    )?.getTime();
     return events
-      .sort((a, b) => a.start.localeCompare(b.start))
-      .slice(0, MAX_EVENTS);
+      .map((event) => ({
+        event,
+        instant: event.allDay
+          ? wallTimeAsInstant(
+              `${event.start}T00:00:00`,
+              this.config.timezone,
+            )?.getTime()
+          : calendarEventStartInstant(event, this.config.timezone)?.getTime(),
+        endInstant: event.end
+          ? event.allDay
+            ? wallTimeAsInstant(
+                `${event.end}T00:00:00`,
+                this.config.timezone,
+              )?.getTime()
+            : calendarEventStartInstant(
+                { ...event, start: event.end },
+                this.config.timezone,
+              )?.getTime()
+          : undefined,
+      }))
+      .filter(
+        ({ event, instant, endInstant }) =>
+          instant !== undefined &&
+          (instant >=
+            (event.allDay ? (today ?? start.getTime()) : start.getTime()) ||
+            (endInstant !== undefined && endInstant > start.getTime())) &&
+          instant < end.getTime(),
+      )
+      .sort((a, b) => a.instant! - b.instant!)
+      .slice(0, MAX_EVENTS)
+      .map(({ event }) => event);
   }
 
   async createEvent(input: {

@@ -549,3 +549,5 @@ L2.4-kandidaatbeoordeling aangescherpt: `@ni-c/imap-mcp` schrijft onder `list_ne
 2026-10-13 — D4-hercontrole: het nachtelijke samenvattingsvenster vult de 12.000-tekengrens nu vanuit de nieuwste berichten en zet die daarna chronologisch voor het model. Daardoor verdringen lange vroege gesprekken geen late beslissingen meer. De regressie faalde vóór de fix en slaagt nu; drie gerichte tests en API-typecheck groen.
 
 2026-10-13 — D1-hercontrole: de rollende limiet van vijf automatische gesproken meldingen overleeft nu een API-herstart via een privé, atomaire tijdstempelopslag. Beschadigde of onbeschrijfbare voortgang blokkeert alleen automatische spraak; de feed blijft zichtbaar. Twaalf gerichte feedtests en API-typecheck slagen.
+
+2026-10-13 — E1-hercontrole: CalDAV leest nu alle gebeurtenissen binnen de begrensde REPORT-respons vóór tijdsortering en kiest daarna de vroegste veertig relevante afspraken. Daardoor kan een omgekeerd aangeleverde lange reeks geen afspraak binnen zeven dagen wegdrukken. Acht gerichte tests, lint, format en API-typecheck slagen.

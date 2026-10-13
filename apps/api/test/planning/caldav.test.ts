@@ -70,6 +70,70 @@ describe("CalDavService", () => {
     expect(JSON.stringify(events)).not.toContain('"uid"');
   });
 
+  it("selects the earliest 40 upcoming events from a reverse-ordered expanded resource", async () => {
+    const entries = Array.from({ length: 45 }, (_, index) => {
+      const start = new Date(Date.UTC(2026, 9, 12, index));
+      const stamp = start.toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
+      return [
+        "BEGIN:VEVENT",
+        `UID:private-${index}`,
+        `DTSTART:${stamp}`,
+        `SUMMARY:Afspraak ${index}`,
+        "END:VEVENT",
+      ].join("\n");
+    }).reverse();
+    entries.unshift(
+      "BEGIN:VEVENT\nUID:outside\nDTSTART:20261101T090000Z\nSUMMARY:Later\nEND:VEVENT",
+    );
+    const xml = `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:propstat><d:prop><c:calendar-data>BEGIN:VCALENDAR\n${entries.join("\n")}\nEND:VCALENDAR</c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(xml, { status: 207 })),
+    );
+
+    const events = await service().upcoming(new Date("2026-10-11T00:00:00Z"));
+
+    expect(events).toHaveLength(40);
+    expect(events[0]).toMatchObject({
+      summary: "Afspraak 0",
+      start: "2026-10-12T00:00:00Z",
+    });
+    expect(events.at(-1)).toMatchObject({
+      summary: "Afspraak 39",
+      start: "2026-10-13T15:00:00Z",
+    });
+    expect(events.map((event) => event.summary)).not.toContain("Later");
+    expect(JSON.stringify(events)).not.toContain("private-");
+  });
+
+  it("keeps events already in progress and today's all-day events", async () => {
+    const xml = `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:propstat><d:prop><c:calendar-data>BEGIN:VCALENDAR
+BEGIN:VEVENT
+DTSTART:20261011T080000Z
+DTEND:20261011T120000Z
+SUMMARY:Bezig
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20261011
+DTEND;VALUE=DATE:20261012
+SUMMARY:Hele dag
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20261011T070000Z
+DTEND:20261011T080000Z
+SUMMARY:Voorbij
+END:VEVENT
+END:VCALENDAR</c:calendar-data></d:prop></d:propstat></d:response></d:multistatus>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(xml, { status: 207 })),
+    );
+
+    const events = await service().upcoming(new Date("2026-10-11T10:00:00Z"));
+
+    expect(events.map((event) => event.summary)).toEqual(["Hele dag", "Bezig"]);
+  });
+
   it("returns no events while unconfigured and rejects non-HTTPS URLs before network access", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
