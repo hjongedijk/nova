@@ -21,3 +21,12 @@ Production keeps the editor reachable only on the internal Compose network.
 `settings.js` is deliberately minimal; do not put credentials or fixed secrets in
 this repository. Configure authentication and other deployment-specific values
 through secrets in the persistent runtime configuration when the editor is exposed.
+
+When app access is enabled, Compose passes `NOVA_APP_TOKEN` privately to Node-RED.
+Ordinary chat and speech nodes exchange it for an in-memory API session; the token
+never enters flow JSON or outgoing node messages. After an API restart, only an
+explicit pre-controller access rejection permits session renewal and one retry.
+Network failures and other forbidden responses are not replayed automatically.
+The event and proactive question nodes retain their narrower bearer-only route.
+Recreate both NOVA and Node-RED when changing the app token. Local node package
+version 0.1.2 provides this integration; update the seed sources before restarting.

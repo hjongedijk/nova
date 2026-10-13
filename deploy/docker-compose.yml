@@ -176,6 +176,7 @@ services:
       TZ: ${TZ:-Europe/Amsterdam}
       NODE_RED_EVENT_TOKEN: ${NODE_RED_EVENT_TOKEN:-}
       NODE_RED_FLOW_TOKEN: ${NODE_RED_FLOW_TOKEN:-}
+      NOVA_APP_TOKEN: ${NOVA_APP_TOKEN:-}
     volumes:
       - ./nodered-data:/data
       - ./nodered:/opt/nova/nodered-seed:ro

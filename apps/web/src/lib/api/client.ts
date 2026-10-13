@@ -21,13 +21,20 @@ async function parse<T>(response: Response, path: string): Promise<T> {
     details?: string[];
     pinRequired?: boolean;
   };
-  if (!response.ok)
+  if (!response.ok) {
+    if (
+      response.status === 403 &&
+      response.headers.get("x-nova-app-access") === "required" &&
+      typeof window !== "undefined"
+    )
+      window.dispatchEvent(new Event("nova-app-access-required"));
     throw new ApiError(
       data.error || `${path}: HTTP ${response.status}`,
       response.status,
       undefined,
       data.pinRequired === true,
     );
+  }
   return data as T;
 }
 

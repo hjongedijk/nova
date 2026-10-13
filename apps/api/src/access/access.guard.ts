@@ -1,6 +1,6 @@
 import { CanActivate, ForbiddenException, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 import { AppAccessService } from "./access.service.js";
 import { APP_ACCESS_PUBLIC } from "./access-public.js";
 
@@ -22,8 +22,14 @@ export class AppAccessGuard implements CanActivate {
     if (!this.access.required) return true;
 
     const request = context.switchToHttp().getRequest<Request>();
-    if (!this.access.isAuthorized(request))
+    if (!this.access.isAuthorized(request)) {
+      // Machine clients may renew only when rejection happened before the controller ran.
+      context
+        .switchToHttp()
+        .getResponse<Response>()
+        .setHeader("X-Nova-App-Access", "required");
       throw new ForbiddenException("App-toegang vereist.");
+    }
 
     if (request.method !== "GET" && request.method !== "HEAD") {
       const origin = request.get("origin");

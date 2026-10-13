@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import AccessGate from "#components/access/AccessGate.svelte";
   import AdminDialog from "#components/admin/AdminDialog.svelte";
   import Column from "#components/hud/Column.svelte";
   import Composer from "#components/shell/Composer.svelte";
@@ -123,4 +122,3 @@
   <WorkspaceCodePanel />
   <CookingMode />
 {/if}
-<AccessGate />

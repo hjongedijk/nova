@@ -1,5 +1,7 @@
 "use strict";
 
+const { createHash } = require("node:crypto");
+
 const MAX_EVENT_BYTES = 4096;
 const MAX_AUDIO_BYTES = 2 * 1024 * 1024;
 
@@ -22,16 +24,75 @@ function apiBase() {
   return url.origin;
 }
 
+let appSession;
+let appLogin;
+
+async function sessionCookie(base, token, rejectedCookie) {
+  const scope = `${base}:${createHash("sha256").update(token).digest("hex")}`;
+  if (rejectedCookie && appSession?.cookie === rejectedCookie)
+    appSession = undefined;
+  if (appSession?.scope === scope && appSession.expiresAt > Date.now())
+    return appSession.cookie;
+  if (appLogin?.scope === scope) return appLogin.promise;
+  const login = { scope, promise: null };
+  login.promise = (async () => {
+    const response = await fetch(`${base}/api/access/unlock`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+      signal: AbortSignal.timeout(12000),
+    });
+    const cookie = /(?:^|,\s*)nova_access=([A-Za-z0-9_-]{32,128})(?:;|$)/.exec(
+      response.headers.get("set-cookie") || "",
+    )?.[1];
+    await response.body?.cancel().catch(() => {});
+    if (!response.ok || !cookie)
+      throw new Error("NOVA app access could not be established");
+    const value = `nova_access=${cookie}`;
+    appSession = {
+      scope,
+      cookie: value,
+      expiresAt: Date.now() + 11 * 60 * 60 * 1000,
+    };
+    return value;
+  })();
+  appLogin = login;
+  try {
+    return await login.promise;
+  } finally {
+    if (appLogin === login) appLogin = undefined;
+  }
+}
+
 async function request(path, body, options = {}) {
+  const base = apiBase();
   const headers = {};
   if (body !== undefined) headers["content-type"] = "application/json";
   if (options.token) headers.authorization = `Bearer ${options.token}`;
-  const response = await fetch(`${apiBase()}${path}`, {
-    method: body === undefined ? "GET" : "POST",
-    headers,
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(options.timeoutMs || 12000),
-  });
+  // Event/proactive bearer credentials keep their narrower independent scope.
+  const appToken = options.token ? "" : process.env.NOVA_APP_TOKEN || "";
+  if (appToken) {
+    headers.cookie = await sessionCookie(base, appToken);
+    if (body !== undefined) headers.origin = base.replace(/^http:/, "https:");
+  }
+  const send = () =>
+    fetch(`${base}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(options.timeoutMs || 12000),
+    });
+  let response = await send();
+  if (
+    appToken &&
+    response.status === 403 &&
+    response.headers.get("x-nova-app-access") === "required"
+  ) {
+    // The API guard guarantees the original action never reached its controller.
+    await response.body?.cancel().catch(() => {});
+    headers.cookie = await sessionCookie(base, appToken, headers.cookie);
+    response = await send();
+  }
   if (!response.ok) throw new Error(`NOVA returned HTTP ${response.status}`);
   const length = Number(response.headers.get("content-length") || 0);
   if (length > (options.maxBytes || MAX_EVENT_BYTES))

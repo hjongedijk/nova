@@ -30,7 +30,9 @@ describe("app-wide access gate", () => {
       required: true,
       unlocked: false,
     });
-    expect((await nova.api.get("/api/settings/public")).status).toBe(403);
+    const locked = await nova.api.get("/api/settings/public");
+    expect(locked.status).toBe(403);
+    expect(locked.headers["x-nova-app-access"]).toBe("required");
     expect((await nova.api.get("/api/nova/health")).status).toBe(200);
 
     const denied = await nova.api

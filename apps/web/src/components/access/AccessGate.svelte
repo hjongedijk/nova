@@ -10,7 +10,17 @@
     typeof navigator !== "undefined" &&
     navigator.language.toLowerCase().startsWith("en");
 
-  onMount(() => void checkAppAccess());
+  onMount(() => {
+    const lock = () => {
+      appAccess.required = true;
+      appAccess.unlocked = false;
+      appAccess.checking = false;
+      appAccess.error = "";
+    };
+    window.addEventListener("nova-app-access-required", lock);
+    void checkAppAccess();
+    return () => window.removeEventListener("nova-app-access-required", lock);
+  });
 
   async function unlock(event: SubmitEvent) {
     event.preventDefault();
@@ -63,6 +73,11 @@
         <input
           id="app-access-token"
           bind:value={token}
+          placeholder={english ? "App access token" : "App-toegangscode"}
+          aria-invalid={Boolean(error || appAccess.error)}
+          aria-describedby={error || appAccess.error
+            ? "app-access-error"
+            : undefined}
           type="password"
           autocomplete="current-password"
           required
@@ -148,5 +163,39 @@
 
   .access-error {
     color: #ff9b91;
+  }
+  @media (max-height: 240px) {
+    .access-shade {
+      padding: 2px;
+    }
+    .access-card {
+      padding: 2px;
+      gap: 6px;
+      width: min(100%, 420px);
+    }
+    form.access-card {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    form.access-card h1,
+    form.access-card p,
+    form.access-card label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      margin: 0;
+    }
+    .access-card input,
+    .access-card button {
+      min-width: 0;
+      min-height: 34px;
+      height: 34px;
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+    .access-card input[aria-invalid="true"] {
+      border-color: #ff9b91;
+    }
   }
 </style>
