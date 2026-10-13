@@ -334,6 +334,10 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
       throw new Error("server identity is not in the reviewed catalog");
     if (!RISKS.includes(spec.risk as Risk))
       throw new Error("missing or invalid risk; set risk explicitly");
+    const isolated =
+      id === "sequential-thinking" || id === "filesystem" || id === "context7";
+    if (process.env.NODE_ENV !== "test" && !isolated)
+      throw new Error("server requires an isolated source relay");
     const envSource =
       id === "github"
         ? this.secrets.environmentFor(id)
@@ -343,8 +347,7 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
       throw new Error(`missing ${resolved.missing.join(", ")}`);
     const client = new Client({ name: "nova", version: "1.0.0" });
     const transport =
-      process.env.NODE_ENV !== "test" &&
-      (id === "sequential-thinking" || id === "filesystem" || id === "context7")
+      process.env.NODE_ENV !== "test" && isolated
         ? new SandboxMcpTransport(
             this.config.stackControlUrl,
             this.config.stackControlToken,

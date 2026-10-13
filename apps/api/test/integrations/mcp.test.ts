@@ -104,6 +104,40 @@ describe("MCP hub", () => {
     }
   });
 
+  it("blocks network servers before process start or resolving private credentials", async () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    const connect = vi.spyOn(Client.prototype, "connect");
+    const environment = vi.fn(() => ({}));
+    const environmentFor = vi.fn(() => ({}));
+    const servers = Object.fromEntries(
+      ["arxiv", "caldav", "imap", "github"].map((id) => [
+        id,
+        { ...reviewedMcpServerSpec(id), enabled: true },
+      ]),
+    );
+    const file = configFile(servers, "unisolated-network.json");
+    const before = fs.readFileSync(file, "utf8");
+    const hub = new McpHub(
+      { mcpConfig: file } as NovaConfig,
+      { environment, environmentFor } as never,
+    );
+    try {
+      await hub.sync();
+      expect(connect).not.toHaveBeenCalled();
+      expect(environment).not.toHaveBeenCalled();
+      expect(environmentFor).not.toHaveBeenCalled();
+      expect(hub.health().servers).toEqual([]);
+      expect(hub.definitions()).toEqual([]);
+      expect(fs.readFileSync(file, "utf8")).toBe(before);
+    } finally {
+      await hub.stop();
+      connect.mockRestore();
+      if (previous === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previous;
+    }
+  });
+
   it("allows only exact, source-reviewed server identities in production", async () => {
     expect(
       isReviewedMcpServer("filesystem", {

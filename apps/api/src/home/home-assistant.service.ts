@@ -232,9 +232,7 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     if (!this.configured) return;
     const refresh = () =>
-      void this.sync(true).catch(() =>
-        this.log.warn("catalog sync failed"),
-      );
+      void this.sync(true).catch(() => this.log.warn("catalog sync failed"));
     refresh();
     this.timer = setInterval(refresh, CACHE_MS);
     this.timer.unref();
