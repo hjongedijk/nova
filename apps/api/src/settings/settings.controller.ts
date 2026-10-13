@@ -17,6 +17,7 @@ import {
   projectNodeRedFlowRuns,
 } from "./node-red-management.service.js";
 import { NodeRedFlowRevisions } from "./node-red-flow-revisions.service.js";
+import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
@@ -137,6 +138,7 @@ export class SettingsController {
     private readonly wallpaperHistory: WallpaperHistory,
     private readonly nodeRedManagement: NodeRedManagement,
     private readonly nodeRedFlowRevisions: NodeRedFlowRevisions,
+    private readonly confirmations: ConfirmationsService,
     private readonly homeAssistant: HomeAssistantService,
     private readonly proxmox: ProxmoxService,
     private readonly termix: TermixService,
@@ -1292,6 +1294,131 @@ export class SettingsController {
     const revision = this.nodeRedFlowRevisions.record(snapshot);
     this.log("node_red_flow_capture", { revision: revision.id });
     return revision;
+  }
+
+  @Post("node-red/flow-revisions/:id/prepare-restore")
+  @HttpCode(200)
+  async prepareNodeRedFlowRestore(
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    if (
+      !/^[0-9a-f-]{36}$/i.test(id) ||
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).length > 0
+    )
+      throw new ValidationError(["Ongeldige flowversie."]);
+    if (this.config.nodeRedAdminToken.length < 32)
+      throw new ValidationError([
+        "Stel NODE_RED_ADMIN_TOKEN met flows.write in.",
+      ]);
+    const live = await this.nodeRedManagement.flowSnapshot();
+    const fingerprint = this.nodeRedFlowRevisions.prepareRestore(id, live);
+    const sessionId = `settings-node-red-flow-restore:${crypto.randomUUID()}`;
+    const action = this.confirmations.create(
+      sessionId,
+      "node_red_flow_restore",
+      { id, fingerprint },
+      "DANGEROUS",
+      fingerprint,
+      false,
+    );
+    this.audit.record({
+      sessionId,
+      tool: "node_red_flow_restore",
+      risk: "DANGEROUS",
+      confirmation: "pending_admin_ui",
+      arguments: { revision: id },
+    });
+    return {
+      ok: true as const,
+      warning:
+        "Herstellen vervangt de huidige Node-RED-flows. Actieve automatiseringen kunnen veranderen.",
+      action,
+    };
+  }
+
+  @Post("node-red/flow-revisions/:id/confirm-restore")
+  @HttpCode(200)
+  async confirmNodeRedFlowRestore(
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    if (
+      !/^[0-9a-f-]{36}$/i.test(id) ||
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).some(
+        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
+      )
+    )
+      throw new ValidationError(["Ongeldige flowbevestiging."]);
+    const value = body as Record<string, unknown>;
+    if (
+      typeof value.sessionId !== "string" ||
+      !/^settings-node-red-flow-restore:[0-9a-f-]{36}$/i.test(
+        value.sessionId,
+      ) ||
+      typeof value.confirmationId !== "string" ||
+      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
+      typeof value.approve !== "boolean"
+    )
+      throw new ValidationError(["Ongeldige flowbevestiging."]);
+    const pending = this.confirmations.peek(value.sessionId);
+    if (
+      pending?.confirmationId !== value.confirmationId ||
+      pending.expiresAt <= Date.now() ||
+      pending.tool !== "node_red_flow_restore" ||
+      pending.risk !== "DANGEROUS" ||
+      pending.args.id !== id ||
+      typeof pending.args.fingerprint !== "string"
+    )
+      return {
+        ok: false as const,
+        error: "Bevestiging verlopen. Kies opnieuw.",
+      };
+    if (!value.approve) {
+      this.confirmations.cancel(value.sessionId, "rejected_admin_ui");
+      return { ok: true as const, cancelled: true as const };
+    }
+    const action = this.confirmations.take(
+      value.sessionId,
+      value.confirmationId,
+    );
+    if (!action)
+      return {
+        ok: false as const,
+        error: "Bevestiging verlopen. Kies opnieuw.",
+      };
+    try {
+      const revision = await this.nodeRedFlowRevisions.restore(
+        id,
+        String(action.args.fingerprint),
+        this.nodeRedManagement,
+      );
+      this.audit.record({
+        sessionId: value.sessionId,
+        tool: "node_red_flow_restore",
+        risk: "DANGEROUS",
+        confirmation: "approved_admin_ui",
+        arguments: { revision: id },
+        result: { ok: true },
+      });
+      return { ok: true as const, revision };
+    } catch (error) {
+      this.audit.record({
+        sessionId: value.sessionId,
+        tool: "node_red_flow_restore",
+        risk: "DANGEROUS",
+        confirmation: "approved_admin_ui",
+        arguments: { revision: id },
+        result: { ok: false },
+      });
+      throw error;
+    }
   }
 
   /* ---------- the helper overlay on the Windows PC ---------- */

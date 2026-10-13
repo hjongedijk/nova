@@ -600,6 +600,30 @@ export const getNodeRedFlowRevisions = () =>
   );
 export const captureNodeRedFlowRevision = () =>
   write<NodeRedFlowRevision>("POST", "/node-red/flow-revisions/capture", {});
+export const prepareNodeRedFlowRestore = (id: string) =>
+  write<{
+    ok: true;
+    warning: string;
+    action: PendingConfirmation;
+  }>("POST", `/node-red/flow-revisions/${enc(id)}/prepare-restore`, {});
+export const confirmNodeRedFlowRestore = (
+  id: string,
+  sessionId: string,
+  confirmationId: string,
+  approve: boolean,
+) =>
+  write<
+    | { ok: true; cancelled: true }
+    | {
+        ok: true;
+        revision: NodeRedFlowRevision & { historyWarning?: string };
+      }
+    | { ok: false; error: string }
+  >("POST", `/node-red/flow-revisions/${enc(id)}/confirm-restore`, {
+    sessionId,
+    confirmationId,
+    approve,
+  });
 
 export const getHelper = () => read<HelperState>("/helper");
 export const getWindowsAgentStatus = () =>
