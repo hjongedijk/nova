@@ -25,6 +25,9 @@ import { nextToolInterjection } from "./tool-interjection.ts";
 import { readCommunicationPreferences } from "./communication-preferences.ts";
 import { friendlyChatError } from "./error-copy.ts";
 import { handleCookingCommand } from "#lib/cooking/session.svelte.ts";
+import { animateHelper } from "#lib/stores/helper.svelte.ts";
+import { speak } from "#lib/voice/speaker.ts";
+import { easterEgg } from "./easter-eggs.ts";
 
 // A few words about what NOVA is doing, so a long task never looks stuck.
 const TOOL_HINTS: [RegExp, { nl: string; en: string }][] = [
@@ -95,6 +98,17 @@ export async function ask(
     (attachments.length ? "Bekijk de bijgevoegde bestanden." : "");
   if (!text || chat.busy) return false;
   if (!attachments.length && handleCookingCommand(text)) return true;
+  const egg =
+    !attachments.length && !chat.confirmations.length ? easterEgg(text) : null;
+  if (egg) {
+    stopSpeaking();
+    addMessage("user", text);
+    addMessage("assistant", egg.reply);
+    showStage(text, egg.reply, false);
+    animateHelper(egg.event);
+    void speak(egg.reply).catch(() => setState("ready"));
+    return true;
+  }
 
   stopSpeaking();
   chat.model = "";
