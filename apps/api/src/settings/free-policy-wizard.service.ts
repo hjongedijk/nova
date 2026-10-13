@@ -736,7 +736,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
       digest(settings.blockedProviders) !== digest(plan.blockedProviders) ||
       snapshot.key.model_access_mode !== "restricted" ||
       digest(JSON.parse(snapshot.key.allowed_models || "[]")) !==
-        digest(["auto"]) ||
+        digest(["auto", ...plan.enabledModels]) ||
       digest(JSON.parse(snapshot.key.allowed_connections || "[]")) !==
         digest(plan.verifiedConnectionIds) ||
       digest(JSON.parse(snapshot.key.allowed_combos || "[]")) !== digest([]) ||
@@ -917,7 +917,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
             body: {
               modelAccessMode: "restricted",
               connectionAccessMode: "restricted",
-              allowedModels: ["auto"],
+              allowedModels: ["auto", ...plan.enabledModels],
               allowedCombos: [],
               allowedConnections: plan.verifiedConnectionIds,
               allowAutoCombos: true,

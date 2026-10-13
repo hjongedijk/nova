@@ -196,7 +196,7 @@ function fixture() {
         if (body.modelAccessMode === "restricted")
           expect(body).toMatchObject({
             modelAccessMode: "restricted",
-            allowedModels: ["auto"],
+            allowedModels: ["auto", canonical],
             allowedConnections: [connectionId],
             allowAutoCombos: true,
           });
@@ -772,7 +772,7 @@ describe("free policy wizard confirmation and proof failures", () => {
           {
             modelAccessMode: "restricted",
             connectionAccessMode: "restricted",
-            allowedModels: ["auto"],
+            allowedModels: ["auto", canonical],
             allowedCombos: [],
             allowedConnections: [connectionId],
             allowAutoCombos: true,

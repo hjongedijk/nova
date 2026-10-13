@@ -234,6 +234,62 @@ describe("RoutingService verified SQLite policy", () => {
     );
   });
 
+  it("accepts explicit free models only within the credential-bound auto pool", () => {
+    writePolicy(boundPolicy());
+    db.prepare("UPDATE api_keys SET allowed_models=?").run(
+      JSON.stringify(["auto", model]),
+    );
+    expect(routing.assertFree().ready).toBe(true);
+    expect(routing.assertFreeModel(model)).toBe(model);
+  });
+
+  it.each([
+    ["missing auto", [model]],
+    ["duplicate auto", ["auto", "auto"]],
+    ["duplicate model", ["auto", model, model]],
+    ["unlisted model", ["auto", "fixture-provider/other"]],
+    ["combo bypass", ["auto", "custom-combo"]],
+  ])("blocks expanded key scope with %s", (_name, models) => {
+    writePolicy(boundPolicy());
+    db.prepare("UPDATE api_keys SET allowed_models=?").run(
+      JSON.stringify(models),
+    );
+    expect(routing.status()).toMatchObject({
+      ready: false,
+      policyVerified: false,
+    });
+  });
+
+  it.each([
+    "unbound",
+    "unattested",
+    "missing allowlist",
+    "excluded",
+    "paid",
+    "local",
+    "exhausted",
+  ])("blocks explicit scope when its model is %s", (change) => {
+    const changed = boundPolicy();
+    const row = changed.catalog[0]!;
+    if (change === "unbound")
+      Object.assign(changed, { verifiedConnections: undefined });
+    if (change === "unattested") row.accountFreeVerified = false;
+    if (change === "missing allowlist")
+      Object.assign(changed, { nativeModelAllowlist: undefined });
+    if (change === "excluded") Object.assign(row, { modelExcluded: true });
+    if (change === "paid") Object.assign(row, { paid: true });
+    if (change === "local") Object.assign(row, { local: true });
+    if (change === "exhausted") row.nativeQuota.status = "EXHAUSTED";
+    writePolicy(changed);
+    db.prepare("UPDATE api_keys SET allowed_models=?").run(
+      JSON.stringify(["auto", model]),
+    );
+    expect(routing.status()).toMatchObject({
+      ready: false,
+      policyVerified: false,
+    });
+  });
+
   it("only permits role-selected models that remain in the verified free policy and saved role list", () => {
     writePolicy(boundPolicy());
     fs.writeFileSync(

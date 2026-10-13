@@ -201,6 +201,27 @@ export class RoutingService {
           policy.catalog?.find(
             (item) => `${item.provider}/${item.modelId}` === id,
           );
+        // Explicit role models can use only the same attested, credential-bound
+        // pool as auto. Older auto-only keys remain valid without a migration.
+        const validModelRestrictions =
+          Array.isArray(allowed) &&
+          allowed.includes("auto") &&
+          new Set(allowed).size === allowed.length &&
+          allowed.every((id) => {
+            if (id === "auto") return true;
+            const candidate = candidateOf(id);
+            return (
+              bound &&
+              validBindings &&
+              typeof id === "string" &&
+              policy.enabledModels.includes(id) &&
+              policy.nativeModelAllowlist?.includes(id) === true &&
+              candidate?.accountFreeVerified === true &&
+              policy.verifiedProviders.includes(candidate.provider) &&
+              candidate.nativeAutoEligible === true &&
+              classifyFreeAccess(candidate).allowed
+            );
+          });
         const strict =
           settings.freeAccessPolicy ===
             (policy.nativeFreeAccessPolicy || "strict") &&
@@ -228,8 +249,7 @@ export class RoutingService {
           this.config.omniModel === policy.route &&
           this.config.omniModel === "auto" &&
           key?.model_access_mode === "restricted" &&
-          allowed?.length === 1 &&
-          allowed[0] === "auto" &&
+          validModelRestrictions &&
           validBindings &&
           (connections?.length ?? 0) > 0 &&
           connections!.every((id) => {
