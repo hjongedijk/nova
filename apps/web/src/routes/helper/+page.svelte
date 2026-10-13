@@ -45,6 +45,11 @@
     saveHelperPreferences,
   } from "#lib/stores/helper.svelte.ts";
   import { audioLevel } from "#lib/stores/audio-level.svelte.ts";
+  import {
+    lightSync,
+    setLightSync,
+    startLightSync,
+  } from "#lib/stores/light-sync.svelte.ts";
   const MODEL_ROLE_LABELS: Record<string, string> = {
     conversation: "Gesprek",
     code: "Code",
@@ -614,6 +619,7 @@
     const stops = [
       installAudioUnlock(),
       initWake(),
+      startLightSync(),
       startDashboard(),
       onFeedEvents((events) => {
         if (paused) return;
@@ -818,6 +824,38 @@
               ><option value="gold">Goud</option></select
             ></label
           >
+          <label
+            ><input
+              type="checkbox"
+              checked={lightSync.enabled}
+              onchange={(event) => setLightSync(event.currentTarget.checked)}
+            /> Orbkleur volgt kamerlampen</label
+          >
+          <label
+            >Kamer
+            <select
+              aria-label="Kamer voor orbkleur"
+              value={lightSync.areaId}
+              disabled={!lightSync.enabled}
+              onchange={(event) =>
+                setLightSync(true, event.currentTarget.value)}
+            >
+              <option value="">Kies een kamer</option>
+              {#each lightSync.areas as area (area.areaId)}
+                <option value={area.areaId}>{area.areaName}</option>
+              {/each}
+            </select></label
+          >
+          {#if lightSync.enabled && lightSync.unavailable}
+            <p class="hint">
+              Home Assistant is nu niet bereikbaar. De gewone orbkleur blijft
+              zichtbaar.
+            </p>
+          {:else if lightSync.enabled && lightSync.areas.length === 0}
+            <p class="hint">
+              Geen ingeschakelde kleurenlamp in een toegestane kamer gevonden.
+            </p>
+          {/if}
           <label
             ><input type="checkbox" bind:checked={helper.wardrobe.seasonal} /> Seizoensaccenten</label
           >

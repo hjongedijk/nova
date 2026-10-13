@@ -18,6 +18,8 @@ export interface EntityHost {
   state(): UiState;
   /** Open confirmations plus open warnings: the entity turns red and beats while this is above zero. */
   intensity(): number;
+  /** Optional room-light colour while idle; alert and speaking colours keep their meaning. */
+  hue?(): number | null;
   /** The invisible button over the sphere; it follows the body. */
   core?(): HTMLElement | null;
   /** The speech stage; the sphere lifts away as the answer grows. */
@@ -226,6 +228,7 @@ export function startEntity(host: EntityHost): () => void {
     const freq = spectrum?.freq ?? null;
     const base = STATES[uiState] || STATES.ready;
     const mod = compact ? compact.life.update(t, dt, audioLevel) : null;
+    const roomHue = host.hue?.();
     const target: Look = {
       ...(intensity > 0
         ? {
@@ -237,6 +240,13 @@ export function startEntity(host: EntityHost): () => void {
           }
         : base),
       ...(mod?.look ?? {}),
+      ...(uiState === "ready" &&
+      intensity <= 0 &&
+      roomHue !== null &&
+      roomHue !== undefined &&
+      Number.isFinite(roomHue)
+        ? { h: roomHue }
+        : {}),
     };
     const k = 1 - Math.exp(-dt * 3);
     for (const key of Object.keys(target) as (keyof Look)[]) {

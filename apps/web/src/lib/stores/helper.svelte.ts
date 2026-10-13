@@ -1,5 +1,6 @@
 import { SvelteDate } from "svelte/reactivity";
 import { storage } from "#lib/util/storage.ts";
+import { lightSync } from "./light-sync.svelte.ts";
 import type { OrbEvent } from "#lib/entity/orb.ts";
 import type { NotificationModes } from "@nova/contracts";
 import type { HelperPreferences } from "@nova/contracts";
@@ -192,6 +193,7 @@ export function saveHelperPreferences(): void {
 
 /** Optional date accents use only a birthday explicitly supplied in settings. */
 export function helperHue(now = new SvelteDate()): number {
+  if (lightSync.enabled && lightSync.hue !== null) return lightSync.hue;
   const base = { nova: 190, violet: 270, gold: 42 }[helper.wardrobe.theme];
   if (!helper.wardrobe.seasonal) return base;
   const date = `${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
