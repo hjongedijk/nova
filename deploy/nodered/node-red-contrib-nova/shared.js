@@ -3,7 +3,8 @@
 const { createHash } = require("node:crypto");
 
 const MAX_EVENT_BYTES = 4096;
-const MAX_AUDIO_BYTES = 2 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 20_000_000;
+const MAX_CHAT_RESPONSE_BYTES = 1024 * 1024;
 
 function apiBase() {
   let url;
@@ -93,14 +94,36 @@ async function request(path, body, options = {}) {
     headers.cookie = await sessionCookie(base, appToken, headers.cookie);
     response = await send();
   }
-  if (!response.ok) throw new Error(`NOVA returned HTTP ${response.status}`);
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(`NOVA returned HTTP ${response.status}`);
+  }
+  const maxBytes = options.maxBytes || MAX_EVENT_BYTES;
   const length = Number(response.headers.get("content-length") || 0);
-  if (length > (options.maxBytes || MAX_EVENT_BYTES))
+  if (length > maxBytes) {
+    await response.body?.cancel().catch(() => {});
     throw new Error("NOVA response is too large");
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length > (options.maxBytes || MAX_EVENT_BYTES))
-    throw new Error("NOVA response is too large");
-  if (options.audio) return bytes;
+  }
+  const chunks = [];
+  let size = 0;
+  if (response.body) {
+    for await (const chunk of response.body) {
+      size += chunk.length;
+      if (size > maxBytes) throw new Error("NOVA response is too large");
+      chunks.push(chunk);
+    }
+  }
+  const bytes = Buffer.concat(chunks, size);
+  if (options.audio) {
+    if (!options.audioMetadata) return bytes;
+    const contentType = (response.headers.get("content-type") || "audio/mpeg")
+      .split(";", 1)[0]
+      .trim()
+      .toLowerCase();
+    if (!["audio/mpeg", "audio/wav"].includes(contentType))
+      throw new Error("NOVA returned an unsupported audio format");
+    return { audio: bytes, contentType };
+  }
   try {
     return JSON.parse(bytes.toString("utf8"));
   } catch {
@@ -146,6 +169,7 @@ function eventPayload(type, input) {
 
 module.exports = {
   MAX_AUDIO_BYTES,
+  MAX_CHAT_RESPONSE_BYTES,
   eventPayload,
   eventToken,
   request,

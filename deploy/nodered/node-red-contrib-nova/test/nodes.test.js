@@ -115,6 +115,85 @@ describe("node-red-contrib-nova", () => {
     assert.deepEqual(result.errors, []);
   });
 
+  it("preserves a complete answer beyond the event payload limit", async () => {
+    const reply = "Volledig antwoord. ".repeat(1200);
+    installFetch(async (_url, options) => {
+      assert.ok(options.signal);
+      return Response.json({ reply });
+    });
+    const result = await invoke("nova-ask", { payload: "Leg dit uit" });
+    assert.equal(result.doneError, undefined);
+    assert.equal(result.sent.payload, reply);
+  });
+
+  it("rejects oversized chat responses instead of forwarding a partial answer", async () => {
+    installFetch(async () => Response.json({ reply: "x".repeat(1024 * 1024) }));
+    const result = await invoke("nova-ask", { payload: "Status?" });
+    assert.equal(result.sent, undefined);
+    assert.match(result.doneError.message, /response is too large/);
+  });
+
+  it(
+    "cancels oversized streaming replies without waiting for the body to finish",
+    { timeout: 1000 },
+    async () => {
+      let cancelled = false;
+      installFetch(
+        async () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new Uint8Array(1024 * 1024 + 1));
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+          ),
+      );
+      const result = await invoke("nova-ask", { payload: "Status?" });
+      assert.equal(result.sent, undefined);
+      assert.match(result.doneError.message, /response is too large/);
+      assert.equal(cancelled, true);
+    },
+  );
+
+  it("preserves Piper WAV bytes and MIME beyond the former 2MB limit", async () => {
+    const audio = Buffer.alloc(2 * 1024 * 1024 + 100);
+    audio.write("RIFF");
+    audio.write("WAVE", 8);
+    installFetch(
+      async () =>
+        new Response(audio, { headers: { "content-type": "audio/wav" } }),
+    );
+    const result = await invoke("nova-say", { payload: "Lange lokale spraak" });
+    assert.equal(result.doneError, undefined);
+    assert.deepEqual(result.sent.payload, audio);
+    assert.equal(result.sent.nova.contentType, "audio/wav");
+  });
+
+  it("retains audio size and format bounds", async () => {
+    installFetch(
+      async () =>
+        new Response("x", {
+          headers: {
+            "content-type": "audio/wav",
+            "content-length": "20000001",
+          },
+        }),
+    );
+    let result = await invoke("nova-say", { payload: "Hallo" });
+    assert.equal(result.sent, undefined);
+    assert.match(result.doneError.message, /response is too large/);
+    installFetch(
+      async () =>
+        new Response("x", { headers: { "content-type": "text/html" } }),
+    );
+    result = await invoke("nova-say", { payload: "Hallo" });
+    assert.equal(result.sent, undefined);
+    assert.match(result.doneError.message, /unsupported audio format/);
+  });
+
   it("routes proactive asks through the token-protected read-only endpoint", async () => {
     process.env.NODE_RED_EVENT_TOKEN =
       "fixture-event-token-that-is-32-characters";

@@ -15,10 +15,15 @@ module.exports = function registerSay(RED) {
         const speech = await request(
           "/api/tts",
           { text, ...(config.voice ? { voice: config.voice } : {}) },
-          { audio: true, maxBytes: MAX_AUDIO_BYTES, timeoutMs: 25000 },
+          {
+            audio: true,
+            audioMetadata: true,
+            maxBytes: MAX_AUDIO_BYTES,
+            timeoutMs: 25000,
+          },
         );
-        msg.payload = speech;
-        msg.nova = { text, contentType: "audio/mpeg" };
+        msg.payload = speech.audio;
+        msg.nova = { text, contentType: speech.contentType };
         send(msg);
         done?.();
       } catch (error) {

@@ -1,6 +1,6 @@
 "use strict";
 
-const { eventToken, request } = require("./shared");
+const { MAX_CHAT_RESPONSE_BYTES, eventToken, request } = require("./shared");
 
 module.exports = function registerAsk(RED) {
   function NovaAsk(config) {
@@ -27,7 +27,11 @@ module.exports = function registerAsk(RED) {
               ? { modelRole: "summary", responseLanguage: "nl" }
               : {}),
           },
-          proactive ? { token: eventToken() } : {},
+          {
+            ...(proactive ? { token: eventToken() } : {}),
+            maxBytes: MAX_CHAT_RESPONSE_BYTES,
+            timeoutMs: 120000,
+          },
         );
         msg.payload = result.reply;
         msg.nova = result;
