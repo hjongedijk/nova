@@ -37,13 +37,22 @@
     busy = true;
     error = "";
     try {
-      [report, catalog] = await Promise.all([
+      const [statusResult, catalogResult] = await Promise.allSettled([
         getMcpServerStatus(),
         getMcpServerCatalog(),
       ]);
-    } catch (cause) {
-      error =
-        cause instanceof Error ? cause.message : "MCP-status niet beschikbaar.";
+      if (statusResult.status === "fulfilled") report = statusResult.value;
+      else {
+        report = null;
+        error = "MCP-status niet beschikbaar.";
+      }
+      if (catalogResult.status === "fulfilled") catalog = catalogResult.value;
+      else {
+        catalog = null;
+        error =
+          error ||
+          "De MCP-catalogus is niet lokaal beheerbaar. Verbindingsstatus blijft beschikbaar.";
+      }
     } finally {
       busy = false;
     }

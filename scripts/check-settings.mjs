@@ -5208,6 +5208,32 @@ try {
       ),
     });
 
+    const catalogUrl = "**/api/settings/mcp/servers/catalog";
+    await page.route(catalogUrl, (route) =>
+      route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Catalog not locally editable" }),
+      }),
+    );
+    await mcp.getByRole("button", { name: "Status ophalen" }).click();
+    await mcp
+      .getByText(
+        "De MCP-catalogus is niet lokaal beheerbaar. Verbindingsstatus blijft beschikbaar.",
+        { exact: true },
+      )
+      .waitFor();
+    assert.equal(
+      await workers.isVisible(),
+      true,
+      "catalog failure must preserve worker connection status",
+    );
+    await workers
+      .getByRole("row", { name: /filesystem.*Actief.*1.*Verbonden/ })
+      .waitFor();
+    await page.unroute(catalogUrl);
+    await mcp.getByRole("button", { name: "Status ophalen" }).click();
+
     await mcp.getByText("echo", { exact: true }).waitFor();
     const imap = mcp
       .getByRole("list")
