@@ -335,19 +335,21 @@
               {#each report.workers as worker (worker.server)}
                 <tr class:duplicate={worker.workerCount > 1}>
                   <th scope="row">{worker.server}</th>
-                  <td
+                  <td data-label="Proces"
                     >{worker.workerCount === 0
                       ? worker.server === "workspace-git"
                         ? "Op aanvraag"
                         : "Niet gestart"
                       : workerStateLabel(worker.state)}</td
                   >
-                  <td
+                  <td data-label="Aantal"
                     >{worker.workerCount}{#if worker.workerCount > 1}<span
                         class="mcp-worker-warning">Meerdere workers</span
                       >{/if}</td
                   >
-                  <td class:worker-connected={worker.connected === true}
+                  <td
+                    data-label="Verbinding"
+                    class:worker-connected={worker.connected === true}
                     >{worker.connected === null
                       ? "Op aanvraag"
                       : worker.connected
@@ -556,5 +558,42 @@
   .mcp-worker-warning {
     display: block;
     font-size: 12px;
+  }
+  @media (max-width: 600px) {
+    .mcp-workers table,
+    .mcp-workers tbody {
+      display: block;
+    }
+    .mcp-workers thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      clip-path: inset(50%);
+      overflow: hidden;
+    }
+    .mcp-workers tr {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      padding-block: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .mcp-workers tbody th {
+      grid-column: 1 / -1;
+    }
+    .mcp-workers th,
+    .mcp-workers td {
+      border: 0;
+      padding: 6px 10px;
+    }
+    .mcp-workers td:last-child {
+      grid-column: 1 / -1;
+    }
+    .mcp-workers td::before {
+      content: attr(data-label);
+      display: block;
+      color: var(--dim);
+      font-size: 11px;
+      margin-bottom: 3px;
+    }
   }
 </style>

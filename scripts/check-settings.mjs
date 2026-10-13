@@ -5193,13 +5193,12 @@ try {
       exact: true,
     });
     await workers
-      .getByRole("row", { name: "filesystem Actief 1 Verbonden", exact: true })
+      .getByRole("row", { name: /filesystem.*Actief.*1.*Verbonden/ })
       .waitFor();
     await workers.getByText("Meerdere workers", { exact: true }).waitFor();
     await workers
       .getByRole("row", {
-        name: "workspace-git Op aanvraag 0 Op aanvraag",
-        exact: true,
+        name: /workspace-git.*Op aanvraag.*0.*Op aanvraag/,
       })
       .waitFor();
     await workers.screenshot({
