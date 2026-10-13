@@ -240,7 +240,11 @@ export class ServiceConnectionsAdapter {
       } else if (id === "windows") {
         endpoint = "/v1/status";
         if (values.token) headers.authorization = `Bearer ${values.token}`;
-      } else if (id === "node-red") endpoint = "/settings";
+      } else if (id === "node-red") {
+        endpoint = "/settings";
+        if (values.adminToken)
+          headers.authorization = `Bearer ${values.adminToken}`;
+      }
       const response = await requestJson(base + endpoint, {
         headers,
         timeoutMs: 5000,

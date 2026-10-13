@@ -64,7 +64,14 @@ export const CONNECTIONS: ConnectionSpec[] = [
       field("password", "Wachtwoord", "secret"),
     ],
   },
-  { id: "node-red", label: "Node-RED", fields: [field("url", "Adres", "url")] },
+  {
+    id: "node-red",
+    label: "Node-RED",
+    fields: [
+      field("url", "Adres", "url"),
+      field("adminToken", "Beheertoken", "secret"),
+    ],
+  },
   {
     id: "windows",
     label: "Windows-agent",
@@ -268,7 +275,10 @@ export function connectionDefaults(
       username: mqttUser,
       password: mqttPassword,
     },
-    "node-red": { url: config.nodeRedUrl },
+    "node-red": {
+      url: config.nodeRedUrl,
+      adminToken: config.nodeRedAdminToken,
+    },
     windows: { ...config.windowsAgent },
     termix: { ...config.termix },
     pangolin: { ...config.pangolin },
@@ -301,6 +311,7 @@ export function applyConnectionOverrides(config: NovaConfig): void {
     qdrantCollection: qdrant.collection,
     mqttUrl,
     nodeRedUrl: service("node-red").url,
+    nodeRedAdminToken: service("node-red").adminToken,
     homeAssistant: service("home-assistant"),
     proxmox: service("proxmox"),
     windowsAgent: service("windows"),

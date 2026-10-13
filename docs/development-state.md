@@ -6,6 +6,7 @@ Do not record credentials, personal messages or actual deployment configuration 
 
 ## Current work
 
+- J4.3 partial: Node-RED admin token now uses the existing masked connection editor, 0600 replacement/clear lifecycle and restart-only bootstrap override. The read-only `/settings` probe authenticates with the effective token without persisting test inputs or projecting credentials. All 43 connection tests, API typecheck and scoped lint pass. Node-specific credentials and Node-RED runtime settings remain open.
 - F6 follow-up: Proxmox storage now projects only validated identifiers, fixed status and numeric capacities; unknown diagnostics and malformed rows are discarded. TTS stream and planning-save logs no longer include raw exceptions. Focused Proxmox/TTS tests (20), API typecheck and scoped lint pass.
 - I2 partial: opt-in welcome on same-person HA away-to-home transition, daily private dedupe, focus/quiet guards, a single permitted thermostat reading with explicit unit or fixed fallback, one helper wave per feed seq including native bridge. HA polling can lag ~60s; real Windows/home arrival/audio check remains. Focused API/settings/PowerShell checks pass.
 - I14 follow-up: quick-action save/reset/rollback now produce fixed, secret-free action cards with ordered overview readback and a link to history. Other settings classes and direct card recovery remain open; focused web tests and Svelte-check pass.

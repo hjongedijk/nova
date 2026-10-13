@@ -238,6 +238,11 @@ override environment bootstrap values on the next NOVA start. This private file 
 at mode 0600. Blank replacement-secret fields keep their old value; an explicit erase checkbox clears it.
 Credentials are never returned to the browser or stored in the visible history.
 
+The Node-RED connection includes a masked admin-token replacement field. Its saved value overrides
+`NODE_RED_ADMIN_TOKEN` after NOVA restarts. The read-only connection test sends the effective token
+to `/settings`; it does not change Node-RED or prove permission to edit flows or install nodes.
+Node-specific credentials and Node-RED runtime settings are not managed by this connection editor.
+
 Connection tests use unsaved input without persisting it. They issue bounded read-only HTTP requests
 or open and close an MQTT connection without publishing. A successful response proves reachability,
 not free billing, complete tool access or action verification. The screen distinguishes saved values

@@ -21,6 +21,7 @@ beforeEach(async () => {
       NOVA_DATA_DIR: directory,
       HOME_ASSISTANT_URL: "http://fixture.invalid:8123",
       HOME_ASSISTANT_TOKEN: "environment-secret",
+      NODE_RED_ADMIN_TOKEN: "environment-node-red-token",
       NOVA_ADMIN_PIN: "",
     },
   });
@@ -471,6 +472,56 @@ describe("service connection management", () => {
     const rebootStore = new ServiceConnectionsStore(reboot, nova.audit);
     expect(home({ services: rebootStore.list() }).restartRequired).toBe(false);
     expect(reboot.freeOnly).toBe(true);
+  });
+
+  it("stores Node-RED admin-token replacements privately and applies them only after restart", async () => {
+    const running = nova.app.get(NovaConfig);
+    const saved = await request("put", "/node-red", {
+      values: { adminToken: "replacement-node-red-token" },
+    });
+    expect(saved.status).toBe(200);
+    const connection = saved.body.services.find(
+      (item: { id: string }) => item.id === "node-red",
+    );
+    expect(connection.restartRequired).toBe(true);
+    expect(
+      connection.fields.find(
+        (item: { key: string }) => item.key === "adminToken",
+      ),
+    ).toMatchObject({ kind: "secret", set: true });
+    expect(
+      connection.fields.find(
+        (item: { key: string }) => item.key === "adminToken",
+      ),
+    ).not.toHaveProperty("value");
+    expect(running.nodeRedAdminToken).toBe("environment-node-red-token");
+    expect(persisted().services["node-red"].adminToken).toBe(
+      "replacement-node-red-token",
+    );
+    expect(
+      fs.statSync(path.join(directory, "services.json")).mode & 0o777,
+    ).toBe(0o600);
+    await request("put", "/node-red", { values: { adminToken: "" } });
+    expect(persisted().services["node-red"].adminToken).toBe(
+      "replacement-node-red-token",
+    );
+    const history = await request("get", "/history");
+    const exported = await nova.api.get("/api/settings/export").set(ADMIN);
+    expect(exported.body.connections["node-red"]).not.toHaveProperty(
+      "adminToken",
+    );
+    expect(
+      JSON.stringify([saved.body, history.body, exported.body, nova.audits]),
+    ).not.toMatch(/replacement-node-red-token|environment-node-red-token/);
+    vi.stubEnv("NOVA_DATA_DIR", directory);
+    expect(new NovaConfig().nodeRedAdminToken).toBe(
+      "replacement-node-red-token",
+    );
+    await request("put", "/node-red", {
+      values: {},
+      clearSecrets: ["adminToken"],
+    });
+    expect(new NovaConfig().nodeRedAdminToken).toBe("");
   });
 
   it("requires fresh dangerous confirmation to roll back and refuses secret revisions", async () => {
@@ -1022,7 +1073,10 @@ describe("read-only connection probes", () => {
     );
     try {
       const result = await request("post", "/node-red/test", {
-        values: { url: `http://127.0.0.1:${fake.port}` },
+        values: {
+          url: `http://127.0.0.1:${fake.port}`,
+          adminToken: "test-node-red-token",
+        },
       });
       expect(result.status).toBe(200);
       expect(result.body).toMatchObject({ ok: true, status: 200 });
@@ -1031,9 +1085,13 @@ describe("read-only connection probes", () => {
         method: "GET",
         url: "/settings",
         body: "",
+        headers: { authorization: "Bearer test-node-red-token" },
       });
       expect(JSON.stringify([result.body, nova.audits])).not.toContain(
         "private-response-body",
+      );
+      expect(JSON.stringify([result.body, nova.audits])).not.toContain(
+        "test-node-red-token",
       );
       expect(fs.existsSync(path.join(directory, "services.json"))).toBe(false);
     } finally {
