@@ -2,6 +2,25 @@
 
 This policy applies before NOVA adds or updates an MCP server. MCP tools run as external programs and their output is untrusted data. A server is an optional integration: if a requirement cannot be verified, NOVA must leave it disabled.
 
+## Process isolation work in progress
+
+`deploy/stack-control/mcp-sandbox.mjs` creates fixed offline containers for sequential-thinking,
+filesystem and workspace Git. It accepts only a reviewed server identifier and, for Git, a project ID.
+Commands, image, environment, mounts and network policy are constructed by the trusted broker.
+The container has no external network, capabilities or credentials; its root is readonly and its
+memory, CPU and process count are bounded. Git can read only its selected project. Filesystem access
+stays confined to the configured workspace. Creation precedes transport attachment and start.
+
+Run `npm run test:mcp-sandbox` for policy and lifecycle tests. Run
+`npm run test:mcp-sandbox:runtime` to use the already cached image of the running `nova` container,
+or set `NOVA_MCP_SANDBOX_TEST_IMAGE` to another cached NOVA image. The runtime gate uses a temporary
+workspace and container; it neither pulls images nor edits the running stack. It checks a real MCP
+initialization alongside failed direct internet/provider connections and then removes the container.
+
+This runner is not yet integrated with the application's MCP transports. It does not prove that
+production MCP processes are isolated. Both launch paths and the destination-bound relay for
+network servers still need implementation and end-to-end proof before L1.2 can be completed.
+
 ## Admission checks
 
 Record the package/repository, exact version, source URL, license, review date, release/maintenance evidence, requested permissions, required configuration, expected network destinations, telemetry behavior, and each tool's proposed risk. Recheck this information immediately before installation; an older review is not approval for a new version.
