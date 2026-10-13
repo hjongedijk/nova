@@ -311,9 +311,9 @@ export class TermixService implements ToolSource {
           outcome: {
             ok: false,
             error: loginRejected
-              ? `Termix kon niet inloggen op ${host.name}: de server weigerde de login.`
+              ? "Termix kon niet inloggen: de server weigerde de login."
               : reason
-                ? `Termix kon geen verbinding maken met ${host.name}.`
+                ? "Termix kon geen verbinding maken met de server."
                 : `Termix execution failed (${run.status})`,
           },
           // A non-200 reply may arrive after the command ran; never execute it twice.

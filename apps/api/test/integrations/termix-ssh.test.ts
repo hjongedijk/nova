@@ -13,6 +13,7 @@ const blob = (
 const ran: string[] = [];
 let snippetWorks = false;
 let executeFails = false;
+let hostName = "vm-test";
 let fingerprint = blob.toString("hex");
 let sshServer: Server;
 let fake: Awaited<ReturnType<typeof listen>>;
@@ -53,7 +54,7 @@ beforeAll(async () => {
       return send(200, [
         {
           id: 5,
-          name: "vm-test",
+          name: hostName,
           ip: "127.0.0.1",
           port: sshPort,
           username: "root",
@@ -143,6 +144,26 @@ describe("Termix direct SSH fallback", () => {
     } finally {
       executeFails = false;
       snippetWorks = false;
+    }
+  });
+
+  it("does not echo an upstream host label in a failed command error", async () => {
+    hostName = "vm-test bearer sensitive-host-label";
+    snippetWorks = true;
+    executeFails = true;
+    try {
+      const result = await termix.execute(
+        "termix_run_command",
+        { host: hostName, command: "uptime" },
+        call(),
+      );
+      expect(result.ok).toBe(false);
+      expect(JSON.stringify(result)).not.toContain(hostName);
+      expect(result.error).toMatch(/server weigerde de login/);
+    } finally {
+      hostName = "vm-test";
+      snippetWorks = false;
+      executeFails = false;
     }
   });
 
