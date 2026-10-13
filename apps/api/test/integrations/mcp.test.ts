@@ -713,6 +713,180 @@ describe("MCP hub", () => {
     expect(hub.health().servers).toEqual([]);
   });
 
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  };
+
+  const trackedConnections = () => {
+    const live = new Set<Client>();
+    let maximum = 0;
+    const opened = (client: Client) => {
+      live.add(client);
+      maximum = Math.max(maximum, live.size);
+    };
+    const connect = vi
+      .spyOn(Client.prototype, "connect")
+      .mockImplementation(async function (this: Client) {
+        opened(this);
+      });
+    const tools = vi
+      .spyOn(Client.prototype, "listTools")
+      .mockResolvedValue({ tools: [] });
+    const close = vi
+      .spyOn(Client.prototype, "close")
+      .mockImplementation(async function (this: Client) {
+        live.delete(this);
+      });
+    return {
+      live,
+      opened,
+      maximum: () => maximum,
+      connect,
+      close,
+      restore: () => {
+        connect.mockRestore();
+        tools.mockRestore();
+        close.mockRestore();
+      },
+    };
+  };
+
+  it.each(["refresh", "sync"] as const)(
+    "serializes refresh/%s ownership until the previous worker finishes closing",
+    async (operation) => {
+      const tracked = trackedConnections();
+      const closing = deferred();
+      const release = deferred();
+      const hub = hubFor(
+        configFile({ echo: { command: process.execPath, risk: "CONFIRM" } }),
+      );
+      hubs.push(hub);
+      try {
+        await hub.sync();
+        tracked.close.mockImplementationOnce(async function (this: Client) {
+          closing.resolve();
+          await release.promise;
+          tracked.live.delete(this);
+        });
+        const refresh = hub.refresh("echo");
+        await closing.promise;
+        const overlap =
+          operation === "refresh" ? hub.refresh("echo") : hub.sync();
+        await Promise.resolve();
+        await Promise.resolve();
+        const startsBeforeClose = tracked.connect.mock.calls.length;
+        release.resolve();
+        await Promise.all([refresh, overlap]);
+        expect(startsBeforeClose).toBe(1);
+        expect(tracked.maximum()).toBe(1);
+        expect(tracked.live.size).toBe(1);
+        expect(hub.health().servers).toEqual(["echo"]);
+        await hub.stop();
+        expect(tracked.live.size).toBe(0);
+      } finally {
+        release.resolve();
+        await hub.stop();
+        tracked.restore();
+      }
+    },
+  );
+
+  it("serializes reconfigure/sync when a server is enabled again during cleanup", async () => {
+    const tracked = trackedConnections();
+    const closing = deferred();
+    const release = deferred();
+    const file = configFile({
+      echo: { command: process.execPath, risk: "CONFIRM" },
+    });
+    const hub = hubFor(file);
+    hubs.push(hub);
+    try {
+      await hub.sync();
+      tracked.close.mockImplementationOnce(async function (this: Client) {
+        closing.resolve();
+        await release.promise;
+        tracked.live.delete(this);
+      });
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          servers: {
+            echo: {
+              command: process.execPath,
+              risk: "CONFIRM",
+              enabled: false,
+            },
+          },
+        }),
+      );
+      const reconfigure = hub.reconfigure();
+      await closing.promise;
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          servers: { echo: { command: process.execPath, risk: "CONFIRM" } },
+        }),
+      );
+      const syncing = hub.sync();
+      await Promise.resolve();
+      await Promise.resolve();
+      const startsBeforeClose = tracked.connect.mock.calls.length;
+      release.resolve();
+      await Promise.all([reconfigure, syncing]);
+      expect(startsBeforeClose).toBe(1);
+      expect(tracked.maximum()).toBe(1);
+      expect(tracked.live.size).toBe(1);
+      await hub.stop();
+      expect(tracked.live.size).toBe(0);
+    } finally {
+      release.resolve();
+      await hub.stop();
+      tracked.restore();
+    }
+  });
+
+  it("shutdown drains an admitted refresh and closes its pending worker", async () => {
+    const tracked = trackedConnections();
+    const connecting = deferred();
+    const release = deferred();
+    const hub = hubFor(
+      configFile({ echo: { command: process.execPath, risk: "CONFIRM" } }),
+    );
+    hubs.push(hub);
+    try {
+      await hub.sync();
+      tracked.connect.mockImplementationOnce(async function (this: Client) {
+        tracked.opened(this);
+        connecting.resolve();
+        await release.promise;
+      });
+      const refresh = hub.refresh("echo");
+      await connecting.promise;
+      let stopped = false;
+      const stopping = hub.stop().then(() => {
+        stopped = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      const stoppedBeforeConnect = stopped;
+      release.resolve();
+      await Promise.all([refresh, stopping]);
+      expect(stoppedBeforeConnect).toBe(false);
+      expect(tracked.maximum()).toBe(1);
+      expect(tracked.live.size).toBe(0);
+      expect(hub.health().servers).toEqual([]);
+    } finally {
+      release.resolve();
+      await hub.stop();
+      tracked.restore();
+    }
+  });
+
   it("the module starts in the background, offers a tool source and shuts down", async () => {
     const file = configFile({
       echo: { command: process.execPath, args: [fixture], risk: "CONFIRM" },

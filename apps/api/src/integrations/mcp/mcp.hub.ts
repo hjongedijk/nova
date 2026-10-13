@@ -82,6 +82,7 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
   private untrackedActivityDrops = false;
   private timer: NodeJS.Timeout | null = null;
   private syncing: Promise<void> | null = null;
+  private lifecycle: Promise<void> = Promise.resolve();
   private stopped = false;
 
   constructor(
@@ -98,66 +99,84 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
     await this.stop();
   }
 
-  async start(): Promise<void> {
-    this.stopped = false;
-    this.timer ??= setInterval(
-      () => void this.sync().catch(() => {}),
-      RESYNC_MS,
-    ).unref();
-    await this.sync();
+  start(): Promise<void> {
+    return this.enqueueLifecycle(async () => {
+      this.stopped = false;
+      this.timer ??= setInterval(
+        () => void this.sync().catch(() => {}),
+        RESYNC_MS,
+      ).unref();
+      await this.connectAll();
+    });
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    // Invalidate an in-flight connection immediately, then drain admitted work
+    // before taking the final snapshot of owned clients.
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    await this.syncing?.catch(() => {});
-    const clients = [...this.clients.values()];
-    this.clients.clear();
-    this.tools.clear();
-    await Promise.allSettled(clients.map((client) => client.close()));
+    return this.enqueueLifecycle(async () => {
+      this.stopped = true;
+      if (this.timer) clearInterval(this.timer);
+      this.timer = null;
+      const clients = [...this.clients.values()];
+      this.clients.clear();
+      this.tools.clear();
+      await Promise.allSettled(clients.map((client) => client.close()));
+    });
   }
 
   /** Apply local enable/disable edits without restarting NOVA. */
-  async reconfigure(): Promise<void> {
-    const configured = readMcpServers(this.config.mcpConfig);
-    const toClose = [...this.clients.entries()].filter(
-      ([id]) => !configured[id] || configured[id]?.enabled === false,
-    );
-    for (const [id, client] of toClose) {
-      this.clients.delete(id);
-      for (const [name, tool] of this.tools)
-        if (tool.server === id) this.tools.delete(name);
-      this.recordActivity(id, "disconnected");
-      await client.close().catch(() => {});
-    }
-    await this.sync();
+  reconfigure(): Promise<void> {
+    return this.enqueueLifecycle(async () => {
+      const configured = readMcpServers(this.config.mcpConfig);
+      const toClose = [...this.clients.entries()].filter(
+        ([id]) => !configured[id] || configured[id]?.enabled === false,
+      );
+      for (const [id, client] of toClose) {
+        this.clients.delete(id);
+        for (const [name, tool] of this.tools)
+          if (tool.server === id) this.tools.delete(name);
+        this.recordActivity(id, "disconnected");
+        await client.close().catch(() => {});
+      }
+      await this.connectAll();
+    });
   }
 
   /** Restart one locally configured server so reviewed tool-risk changes take effect. */
-  async refresh(server: string): Promise<void> {
-    await this.syncing?.catch(() => {});
-    const client = this.clients.get(server);
-    if (client) {
-      this.clients.delete(server);
-      for (const [name, tool] of this.tools)
-        if (tool.server === server) this.tools.delete(name);
-      this.recordActivity(server, "disconnected");
-      await client.close().catch(() => {});
-    }
-    const spec = readMcpServers(this.config.mcpConfig)[server];
-    if (this.stopped || !spec || spec.enabled === false) return;
-    try {
-      await this.connect(server, spec);
-      this.lastFailure.delete(server);
-    } catch (error) {
-      this.lastFailure.set(
-        server,
-        error instanceof Error ? error.name.slice(0, 80) : "Error",
-      );
-      this.recordActivity(server, "connection_failed");
-      this.log.warn(`${server} unavailable: MCP connection failed`);
-    }
+  refresh(server: string): Promise<void> {
+    return this.enqueueLifecycle(async () => {
+      const client = this.clients.get(server);
+      if (client) {
+        this.clients.delete(server);
+        for (const [name, tool] of this.tools)
+          if (tool.server === server) this.tools.delete(name);
+        this.recordActivity(server, "disconnected");
+        await client.close().catch(() => {});
+      }
+      const spec = readMcpServers(this.config.mcpConfig)[server];
+      if (this.stopped || !spec || spec.enabled === false) return;
+      try {
+        await this.connect(server, spec);
+        this.lastFailure.delete(server);
+      } catch (error) {
+        this.lastFailure.set(
+          server,
+          error instanceof Error ? error.name.slice(0, 80) : "Error",
+        );
+        this.recordActivity(server, "connection_failed");
+        this.log.warn(`${server} unavailable: MCP connection failed`);
+      }
+    });
+  }
+
+  /** Serialize ownership changes while allowing each sync's servers to connect in parallel. */
+  private enqueueLifecycle(operation: () => Promise<void>): Promise<void> {
+    const pending = this.lifecycle.then(operation);
+    this.lifecycle = pending.catch(() => {});
+    return pending;
   }
 
   /** Send a harmless MCP ping to an already connected local server; never starts a process. */
@@ -298,9 +317,11 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
 
   /** Connect every enabled server that is not connected yet. Never throws. */
   sync(): Promise<void> {
-    this.syncing ??= this.connectAll().finally(() => {
-      this.syncing = null;
-    });
+    this.syncing ??= this.enqueueLifecycle(() => this.connectAll()).finally(
+      () => {
+        this.syncing = null;
+      },
+    );
     return this.syncing;
   }
 
