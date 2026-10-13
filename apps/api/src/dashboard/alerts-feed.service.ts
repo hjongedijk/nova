@@ -368,8 +368,9 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
 
   private focusSummary(count: number, now: Date): void {
     if (!count) return;
-    const wantsSpeech =
-      this.settings?.get().helperPreferences.notifications?.info === "speak";
+    const mode =
+      this.settings?.get().helperPreferences.notifications?.info ?? "helper";
+    const wantsSpeech = mode === "speak";
     const maySpeak = this.presence?.maySpeak() !== false;
     const speakAllowed =
       wantsSpeech && maySpeak && this.reserveSpeech(now.getTime());
@@ -381,12 +382,13 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       title: `${count} ${count === 1 ? "melding" : "meldingen"} tijdens focus`,
       detail: "Bekijk ze in Meldingen.",
       at: now.toISOString(),
-      deliveryMode: speakAllowed ? "speak" : "helper",
+      deliveryMode:
+        mode === "screen" ? "screen" : speakAllowed ? "speak" : "helper",
       speakAllowed,
     };
     this.feed.push(summary);
     if (this.feed.length > MAX_EVENTS) this.feed.shift();
-    if (this.windows?.configured)
+    if (mode !== "screen" && this.windows?.configured)
       void this.windows.notifyHelper(summary).catch(() => undefined);
   }
 

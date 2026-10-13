@@ -105,6 +105,30 @@ describe("focus mode", () => {
     }
   });
 
+  it("keeps the focus summary on screen when info notifications are screen-only", () => {
+    const notifyHelper = vi.fn(async () => ({ ok: true as const }));
+    const feed = new AlertsFeed(
+      planning,
+      { configured: true, notifyHelper } as unknown as WindowsPcService,
+      undefined,
+      undefined,
+      {
+        get: () => ({
+          helperPreferences: { notifications: { info: "screen" } },
+        }),
+      } as never,
+    );
+    const now = new Date();
+    feed.startFocus(25, now);
+    feed.record(warning("Tijdens focus"), now);
+    feed.endFocus(now);
+    expect(feed.recent().events.at(-1)).toMatchObject({
+      deliveryMode: "screen",
+      speakAllowed: false,
+    });
+    expect(notifyHelper).not.toHaveBeenCalled();
+  });
+
   it("fails silent on damaged state until explicitly reset", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nova-focus-"));
     try {
