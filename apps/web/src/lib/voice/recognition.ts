@@ -6,6 +6,8 @@ import { IS_IOS } from "#lib/stores/device.ts";
 import { recognizerCtor, type Recognizer } from "./speech-types.ts";
 import { ttsLocale } from "./voice-preference.ts";
 import { getConversationLanguage } from "../chat/session.ts";
+import { saveQuickNote } from "#lib/api/notes.ts";
+import { stopSpeaking } from "./speaker.ts";
 import {
   onInputDeviceChange,
   openSelectedInputStream,
@@ -18,6 +20,30 @@ let recognition: Recognizer | null = null;
 let inputStream: MediaStream | null = null;
 let listenAttempt = 0;
 let transcriptSettleTimer: ReturnType<typeof setTimeout> | undefined;
+let quickNoteArmed = false;
+
+async function storeQuickNote(text: string): Promise<void> {
+  try {
+    const note = await saveQuickNote(text);
+    const date = new Date(note.createdAt);
+    showToast({
+      severity: "info",
+      title: "Snelle notitie opgeslagen",
+      detail: Number.isNaN(date.getTime())
+        ? "De notitie staat in je notitieboek."
+        : date.toLocaleString("nl-NL", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          }),
+    });
+  } catch {
+    showToast({
+      severity: "warning",
+      title: "Notitie niet opgeslagen",
+      detail: "Controleer de verbinding en probeer F9 opnieuw.",
+    });
+  }
+}
 
 function sendVoiceWhenReady(text: string): void {
   const deadline = Date.now() + 10_000;
@@ -73,6 +99,7 @@ export function initRecognition(): boolean {
   };
 
   rec.onerror = (event) => {
+    quickNoteArmed = false;
     console.error("Speech recognition:", event.error);
     setState("ready");
     releaseInput();
@@ -117,10 +144,16 @@ export function initRecognition(): boolean {
     clearTimeout(micTimer);
     if (!text) return;
     clearTimeout(transcriptSettleTimer);
+    if (quickNoteArmed) {
+      quickNoteArmed = false;
+      void storeQuickNote(text);
+      return;
+    }
     transcriptSettleTimer = setTimeout(() => sendVoiceWhenReady(text), 650);
   };
 
   rec.onend = () => {
+    quickNoteArmed = false;
     clearTimeout(micTimer);
     releaseInput();
     if (chat.uiState === "listening") setState("ready");
@@ -161,6 +194,7 @@ function startWithSelectedInput(
           }, 350);
         } else {
           setState("ready");
+          quickNoteArmed = false;
           showToast({
             severity: "warning",
             title: "Spraakherkenning kon niet starten",
@@ -172,6 +206,7 @@ function startWithSelectedInput(
     .catch(() => {
       if (attempt !== listenAttempt) return;
       setState("ready");
+      quickNoteArmed = false;
       showToast({
         severity: "warning",
         title: "Gekozen microfoon niet beschikbaar",
@@ -182,7 +217,7 @@ function startWithSelectedInput(
 }
 
 /** Start listening for one phrase; the sphere and the mic button do this. */
-export function startListening(): void {
+export function startListening(): boolean {
   const rec = recognition;
   if (!rec) {
     showToast({
@@ -192,7 +227,7 @@ export function startListening(): void {
         ? "Open NOVA in Safari (niet in een andere app) of typ je vraag."
         : "Gebruik Chrome of typ je vraag.",
     });
-    return;
+    return false;
   }
   if (!window.isSecureContext) {
     showToast({
@@ -200,13 +235,13 @@ export function startListening(): void {
       title: "De microfoon vraagt een beveiligde verbinding",
       detail: `Open NOVA via ${secureBase()} en accepteer het certificaat één keer.`,
     });
-    return;
+    return false;
   }
   const attempt = ++listenAttempt;
   rec.lang = ttsLocale(getConversationLanguage());
   if (selectedInputDevice()) {
     startWithSelectedInput(rec, attempt);
-    return;
+    return true;
   }
   try {
     rec.start();
@@ -223,13 +258,41 @@ export function startListening(): void {
         rec.start();
       } catch {
         setState("ready");
+        quickNoteArmed = false;
       }
     }, 350);
   }
+  return true;
+}
+
+/** F9 captures exactly one short phrase for the existing private notes store. */
+export function startQuickNoteCapture(): void {
+  if (
+    chat.busy ||
+    quickNoteArmed ||
+    chat.uiState === "listening" ||
+    shell.awaiting
+  )
+    return;
+  stopSpeaking();
+  clearTimeout(transcriptSettleTimer);
+  transcriptSettleTimer = undefined;
+  quickNoteArmed = true;
+  if (!startListening()) {
+    quickNoteArmed = false;
+    return;
+  }
+  showToast({
+    severity: "info",
+    title: "Snelle notitie",
+    detail:
+      "Spreek nu één korte zin. NOVA bewaart die direct in je notitieboek.",
+  });
 }
 
 /** Stop the explicit recognizer when the native agent pauses. */
 export function stopListening(): void {
+  quickNoteArmed = false;
   listenAttempt++;
   clearTimeout(transcriptSettleTimer);
   transcriptSettleTimer = undefined;

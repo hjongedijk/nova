@@ -12,6 +12,7 @@
   } from "#lib/api/shell.ts";
   import { showToast } from "#lib/stores/toasts.svelte.ts";
   import { cooking } from "#lib/cooking/session.svelte.ts";
+  import { startQuickNoteCapture } from "#lib/voice/recognition.ts";
 
   let { element = $bindable() }: { element?: HTMLElement } = $props();
   let focus: FocusStatus | null = $state(null);
@@ -113,6 +114,12 @@
     role="menuitem"
     type="button"
     onclick={() => (cooking.open = true)}>Kookmodus</button
+  >
+  <button
+    class="menu-item"
+    role="menuitem"
+    type="button"
+    onclick={startQuickNoteCapture}>Snelle notitie · F9</button
   >
   <hr />
   {#if focus?.active}

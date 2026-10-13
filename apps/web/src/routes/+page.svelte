@@ -26,13 +26,35 @@
   import { shell } from "#lib/stores/shell.svelte.ts";
   import { appAccess, checkAppAccess } from "#lib/stores/access.svelte.ts";
   import { storage } from "#lib/util/storage.ts";
-  import { initRecognition } from "#lib/voice/recognition.ts";
+  import {
+    initRecognition,
+    startQuickNoteCapture,
+  } from "#lib/voice/recognition.ts";
   import { installAudioUnlock } from "#lib/voice/unlock.ts";
   import { initWake } from "#lib/voice/wake.ts";
   import { beginPushToTalk, finishListening } from "#lib/voice/core.ts";
   let pushToTalkHeld = false;
 
   function handleKeyDown(event: KeyboardEvent): void {
+    if (
+      event.code === "F9" &&
+      !event.repeat &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      if (appAccess.checking || (appAccess.required && !appAccess.unlocked))
+        return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("input, textarea, [contenteditable='true']")
+      )
+        return;
+      event.preventDefault();
+      startQuickNoteCapture();
+      return;
+    }
     if (event.code !== "F8" || event.repeat || pushToTalkHeld) return;
     pushToTalkHeld = true;
     event.preventDefault();
