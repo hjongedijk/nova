@@ -31,6 +31,7 @@ export interface RoutingStatus {
   status: string;
   route?: string;
   enabledModels?: string[];
+  explicitModels?: string[];
   verifiedProviders?: string[];
   reason?: string;
   quotaSource?: string;
@@ -297,6 +298,7 @@ export class RoutingService {
           route: this.config.omniModel,
           status: strict ? (policy.status ?? "OK") : "POLICY_DRIFT_BLOCKED",
           enabledModels: policy.enabledModels,
+          explicitModels: strict ? allowed!.filter((id) => id !== "auto") : [],
           verifiedProviders: policy.verifiedProviders,
           reason: strict
             ? policy.reason
@@ -334,9 +336,9 @@ export class RoutingService {
   /** Explicit-model callers must still select from today's verified-free model set. */
   assertFreeModel(modelId: string): string {
     const status = this.assertFree();
-    if (!status.enabledModels?.includes(modelId))
+    if (!status.explicitModels?.includes(modelId))
       throw new FreeRoutingBlockedError(
-        "Selected model is outside the verified free route",
+        "Selected model is outside the verified free key scope",
       );
     return modelId;
   }
@@ -397,7 +399,7 @@ export class RoutingService {
       const models = [...new Set(requested)].filter(
         (item): item is string =>
           typeof item === "string" &&
-          status.enabledModels?.includes(item) === true,
+          status.explicitModels?.includes(item) === true,
       );
       if (requested.length && !models.length)
         throw new FreeRoutingBlockedError(

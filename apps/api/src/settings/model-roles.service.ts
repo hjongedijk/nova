@@ -54,7 +54,7 @@ export class ModelRolesService {
   private eligible(): string[] {
     const status = this.routing.status();
     return status.ready && status.freeOnly && status.policyVerified
-      ? [...new Set(status.enabledModels ?? [])].filter(
+      ? [...new Set(status.explicitModels ?? [])].filter(
           (item) => typeof item === "string" && item.length <= 200,
         )
       : [];

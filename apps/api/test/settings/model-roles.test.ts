@@ -9,7 +9,10 @@ import { ModelRolesService } from "../../src/settings/model-roles.service.js";
 import { SettingsStore } from "../../src/settings/store/settings.store.js";
 
 const dirs: string[] = [];
-function fixture(available = true) {
+function fixture(
+  available = true,
+  explicitModels = ["free/provider-a", "free/provider-b"],
+) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-model-roles-"));
   dirs.push(dir);
   const config = { dataFile: (name: string) => path.join(dir, name) };
@@ -20,6 +23,7 @@ function fixture(available = true) {
       freeOnly: true,
       policyVerified: available,
       enabledModels: available ? ["free/provider-a", "free/provider-b"] : [],
+      explicitModels: available ? explicitModels : [],
     }),
   };
   const audit = { record: vi.fn() };
@@ -62,6 +66,25 @@ describe("model role preferences", () => {
       expect.objectContaining({ tool: "model_roles_update", risk: "SAFE" }),
     );
     expect(f.service.get().roles).toEqual(next);
+  });
+
+  it("offers only the explicit key scope and refuses a free model without a grant", () => {
+    const f = fixture(true, ["free/provider-a"]);
+    expect(f.service.get().verifiedFreeModels).toEqual(["free/provider-a"]);
+    const next = structuredClone(f.service.get().roles);
+    next.code = { preferred: ["free/provider-b"], fallback: null };
+    expect(() => f.service.save(next)).toThrow(
+      "actuele geverifieerde gratis lijst",
+    );
+    expect(f.settings.get().modelRoles.code.preferred).toEqual([]);
+  });
+
+  it("does not offer role models for an auto-only key", () => {
+    const f = fixture(true, []);
+    expect(f.service.get()).toMatchObject({
+      available: false,
+      verifiedFreeModels: [],
+    });
   });
 
   it("rejects models outside the currently verified free list", () => {

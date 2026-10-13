@@ -37,6 +37,7 @@ describe("RoutingService", () => {
       policyVerified: true,
       status: "OK",
       enabledModels: ["provider/free-embed"],
+      explicitModels: ["provider/free-embed"],
     });
     expect(routing.assertFreeModel("provider/free-embed")).toBe(
       "provider/free-embed",
@@ -234,6 +235,24 @@ describe("RoutingService verified SQLite policy", () => {
     );
   });
 
+  it("keeps auto ready but rejects explicit dispatch for a legacy auto-only key", () => {
+    expect(routing.assertFree()).toMatchObject({
+      ready: true,
+      enabledModels: [model],
+      explicitModels: [],
+    });
+    expect(() => routing.assertFreeModel(model)).toThrow(
+      FreeRoutingBlockedError,
+    );
+    fs.writeFileSync(
+      path.join(directory, "settings.json"),
+      JSON.stringify({
+        modelRoles: { code: { preferred: [model], fallback: null } },
+      }),
+    );
+    expect(() => routing.roleModels("code")).toThrow(FreeRoutingBlockedError);
+  });
+
   it("accepts explicit free models only within the credential-bound auto pool", () => {
     writePolicy(boundPolicy());
     db.prepare("UPDATE api_keys SET allowed_models=?").run(
@@ -292,6 +311,9 @@ describe("RoutingService verified SQLite policy", () => {
 
   it("only permits role-selected models that remain in the verified free policy and saved role list", () => {
     writePolicy(boundPolicy());
+    db.prepare("UPDATE api_keys SET allowed_models=?").run(
+      JSON.stringify(["auto", model]),
+    );
     fs.writeFileSync(
       path.join(directory, "settings.json"),
       JSON.stringify({
