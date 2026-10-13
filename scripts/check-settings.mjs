@@ -17,6 +17,7 @@ const sections = [
   "skills",
   "automation",
   "connections",
+  "services",
   "devices",
   "memory",
   "safety",
@@ -681,6 +682,32 @@ try {
         };
       } else if (endpoint === "/settings/mcp/servers") {
         data = {
+          workers: [
+            {
+              server: "filesystem",
+              state: "running",
+              workerCount: 1,
+              connected: true,
+            },
+            {
+              server: "sequential-thinking",
+              state: "running",
+              workerCount: 1,
+              connected: true,
+            },
+            {
+              server: "context7",
+              state: "mixed",
+              workerCount: 2,
+              connected: false,
+            },
+            {
+              server: "workspace-git",
+              state: "missing",
+              workerCount: 0,
+              connected: null,
+            },
+          ],
           servers: [
             {
               id: "echo",
@@ -5161,6 +5188,27 @@ try {
     stackRestartResult = { ok: true, service: "qdrant" };
     const mcp = page.getByRole("region", { name: "MCP-servers" });
     await mcp.getByRole("button", { name: "Status ophalen" }).click();
+    const workers = mcp.getByRole("region", {
+      name: "MCP-workers",
+      exact: true,
+    });
+    await workers
+      .getByRole("row", { name: "filesystem Actief 1 Verbonden", exact: true })
+      .waitFor();
+    await workers.getByText("Meerdere workers", { exact: true }).waitFor();
+    await workers
+      .getByRole("row", {
+        name: "workspace-git Op aanvraag 0 Op aanvraag",
+        exact: true,
+      })
+      .waitFor();
+    await workers.screenshot({
+      path: path.join(
+        screenshots,
+        `settings-mcp-workers-${width === 390 ? "mobile" : `${scale}x`}.png`,
+      ),
+    });
+
     await mcp.getByText("echo", { exact: true }).waitFor();
     const imap = mcp
       .getByRole("list")

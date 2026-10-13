@@ -276,6 +276,15 @@
     }
   }
 
+  const workerStateLabel = (state: string) =>
+    ({
+      running: "Actief",
+      starting: "Start bezig",
+      stopped: "Gestopt",
+      missing: "Niet gestart",
+      mixed: "Gemengde status",
+    })[state] ?? "Onbekend";
+
   const activityLabel = (kind: McpServerActivity["events"][number]["kind"]) =>
     ({
       connected: "verbonden",
@@ -300,6 +309,58 @@
   >
   {#if error}<p role="alert">{error}</p>{/if}
   {#if report}
+    {#if report.workers}
+      <section class="mcp-workers" aria-label="MCP-workers">
+        <h3>Geïsoleerde MCP-workers</h3>
+        <p class="hint">
+          Deze processen voeren gereedschappen uit. Een actief proces en een
+          werkende MCP-verbinding worden apart gecontroleerd.
+        </p>
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users must be able to scroll the status table.) -->
+        <div
+          class="mcp-worker-scroll"
+          tabindex="0"
+          role="region"
+          aria-label="Workerstatus"
+        >
+          <table>
+            <thead
+              ><tr
+                ><th scope="col">Worker</th><th scope="col">Proces</th><th
+                  scope="col">Aantal</th
+                ><th scope="col">Verbinding</th></tr
+              ></thead
+            >
+            <tbody>
+              {#each report.workers as worker (worker.server)}
+                <tr class:duplicate={worker.workerCount > 1}>
+                  <th scope="row">{worker.server}</th>
+                  <td
+                    >{worker.workerCount === 0
+                      ? worker.server === "workspace-git"
+                        ? "Op aanvraag"
+                        : "Niet gestart"
+                      : workerStateLabel(worker.state)}</td
+                  >
+                  <td
+                    >{worker.workerCount}{#if worker.workerCount > 1}<span
+                        class="mcp-worker-warning">Meerdere workers</span
+                      >{/if}</td
+                  >
+                  <td class:worker-connected={worker.connected === true}
+                    >{worker.connected === null
+                      ? "Op aanvraag"
+                      : worker.connected
+                        ? "Verbonden"
+                        : "Niet verbonden"}</td
+                  >
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {/if}
     {#if report.servers.length}
       <ul>
         {#each report.servers as server (server.id)}
@@ -457,3 +518,43 @@
     {/if}
   {/if}
 </section>
+
+<style>
+  .mcp-workers {
+    margin-block: 24px;
+  }
+  .mcp-worker-scroll {
+    overflow-x: auto;
+  }
+  .mcp-workers table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 13px;
+  }
+  .mcp-workers th,
+  .mcp-workers td {
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  .mcp-workers thead th {
+    color: var(--dim);
+    font-weight: 500;
+  }
+  .mcp-workers tbody th {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+  .worker-connected {
+    color: var(--good);
+  }
+  .duplicate,
+  .mcp-worker-warning {
+    color: var(--amber);
+  }
+  .mcp-worker-warning {
+    display: block;
+    font-size: 12px;
+  }
+</style>
