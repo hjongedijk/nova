@@ -94,8 +94,8 @@ export class JarvisStateStore {
     try {
       fs.writeFileSync(tmp, JSON.stringify(this.data, null, 1));
       fs.renameSync(tmp, this.file);
-    } catch (error) {
-      this.log.warn(`could not save state: ${(error as Error).message}`);
+    } catch {
+      this.log.warn("Could not save planning state");
     }
   }
 

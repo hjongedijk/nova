@@ -86,6 +86,34 @@ function taskView(value: unknown): ProxmoxTaskView | null {
   };
 }
 
+/** Storage tools expose only documented identifiers, status and capacity fields. */
+function storageView(value: unknown): PveResource | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const resource = value as Record<string, unknown>;
+  const identifier = (value: unknown) =>
+    typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(value)
+      ? value
+      : undefined;
+  const capacity = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0
+      ? value
+      : undefined;
+  const storage = identifier(resource.storage);
+  if (!storage) return null;
+  return {
+    storage,
+    node: identifier(resource.node),
+    type: "storage",
+    plugintype: identifier(resource.plugintype),
+    status:
+      resource.status === "available" || resource.status === "unavailable"
+        ? resource.status
+        : "unknown",
+    disk: capacity(resource.disk),
+    maxdisk: capacity(resource.maxdisk),
+  };
+}
+
 const round1 = (value: number) => Math.round(value * 10) / 10;
 
 export function guestView(g: PveResource): GuestView {
@@ -278,14 +306,23 @@ export class ProxmoxService {
       .sort((a, b) => a.vmid - b.vmid);
   }
 
-  /** Raw storage resources (what proxmox_storage answers). */
+  /** Bounded storage projection shared by tools and the dashboard. */
   rawStorage(signal?: AbortSignal): Promise<PveResource[]> {
-    return this.track(async () =>
-      (await this.resources("storage", signal)).filter(
-        (item) =>
-          this.targetAccess?.allows("proxmoxNodeIds", item.node ?? "") ?? true,
-      ),
-    );
+    return this.track(async () => {
+      const resources: unknown = await this.resources("storage", signal);
+      if (!Array.isArray(resources))
+        throw new Error("Invalid storage response");
+      return resources
+        .flatMap((value: unknown) => {
+          const item = storageView(value);
+          return item ? [item] : [];
+        })
+        .filter(
+          (item) =>
+            this.targetAccess?.allows("proxmoxNodeIds", item.node ?? "") ??
+            true,
+        );
+    });
   }
 
   /** Storage with a known size for the dashboard, biggest first. */

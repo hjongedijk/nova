@@ -6,6 +6,7 @@ Do not record credentials, personal messages or actual deployment configuration 
 
 ## Current work
 
+- F6 follow-up: Proxmox storage now projects only validated identifiers, fixed status and numeric capacities; unknown diagnostics and malformed rows are discarded. TTS stream and planning-save logs no longer include raw exceptions. Focused Proxmox/TTS tests (20), API typecheck and scoped lint pass.
 - I2 partial: opt-in welcome on same-person HA away-to-home transition, daily private dedupe, focus/quiet guards, a single permitted thermostat reading with explicit unit or fixed fallback, one helper wave per feed seq including native bridge. HA polling can lag ~60s; real Windows/home arrival/audio check remains. Focused API/settings/PowerShell checks pass.
 - I14 follow-up: quick-action save/reset/rollback now produce fixed, secret-free action cards with ordered overview readback and a link to history. Other settings classes and direct card recovery remain open; focused web tests and Svelte-check pass.
 - E18 follow-up: absolute timer timestamps require an explicit `Z` or UTC offset; missing-offset times fail with the existing safe validation text. Focused 16 planning tests, API typecheck, lint and format pass. Live natural-language interpretation/audio remain open.

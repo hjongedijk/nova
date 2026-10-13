@@ -59,8 +59,17 @@ beforeAll(async () => {
           disk: 5,
           maxdisk: 10,
           plugintype: "dir",
+          error: "password=private-storage-secret",
+          diagnostics: { path: "/private/storage" },
         },
-        { storage: "empty", disk: 0, maxdisk: 0 },
+        {
+          storage: "empty",
+          disk: 0,
+          maxdisk: 0,
+          status: "ERROR /private/storage",
+        },
+        null,
+        { storage: { error: "private-storage-secret" } },
       ];
     else if (url.startsWith("/api2/json/cluster/tasks"))
       data = [
@@ -197,6 +206,33 @@ describe("ProxmoxSource", () => {
     expect(JSON.stringify((await run("proxmox_tasks")).result)).not.toContain(
       "privateSecretType123",
     );
+  });
+
+  it("projects storage without upstream diagnostics or malformed rows", async () => {
+    const result = (await run("proxmox_storage")).result;
+    expect(result).toEqual({
+      storage: [
+        {
+          storage: "local",
+          type: "storage",
+          status: "available",
+          plugintype: "dir",
+          disk: 5,
+          maxdisk: 10,
+        },
+        {
+          storage: "empty",
+          type: "storage",
+          status: "unknown",
+          disk: 0,
+          maxdisk: 0,
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toMatch(/private|error|diagnostics/i);
+    expect(await service.storage()).toEqual([
+      { name: "local", type: "dir", used: 5, total: 10 },
+    ]);
   });
 
   it("uses the fixed action path for both guest types and verifies the result", async () => {

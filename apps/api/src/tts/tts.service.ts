@@ -195,7 +195,7 @@ export class TtsService {
     try {
       for await (const chunk of audioStream) chunks.push(Buffer.from(chunk));
     } catch (error) {
-      this.log.warn(`synthesis failed: ${(error as Error).message}`);
+      this.log.warn("Speech synthesis stream failed");
       throw error;
     } finally {
       tts.close();
