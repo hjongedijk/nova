@@ -105,7 +105,7 @@ describe("OmniRoute prompt privacy boundary", () => {
         },
       },
     ]);
-    expect(tools[0].function.parameters.properties.password.default).toBe(
+    expect(tools[0]?.function.parameters.properties.password.default).toBe(
       savedSecret,
     );
   });
