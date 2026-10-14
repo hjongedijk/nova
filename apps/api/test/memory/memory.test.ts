@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -482,6 +483,7 @@ describe("OmniRouteMemory", () => {
         if (endpoint === "/api/memory" && options.method === "POST") {
           rows.set(id, {
             id,
+            key: options.body.key,
             content: options.body.content,
             apiKeyId: options.body.apiKeyId,
             metadata: options.body.metadata,
@@ -491,9 +493,21 @@ describe("OmniRouteMemory", () => {
           return { success: true, id: rows.get(id) };
         }
         if (endpoint.startsWith("/api/memory?")) {
-          const found = [...rows.values()];
+          const params = new URLSearchParams(endpoint.split("?")[1]);
+          const query = params.get("q") ?? "";
+          const found = [...rows.values()].filter((row) =>
+            /^[0-9a-f]{64}$/.test(query)
+              ? String(row.key ?? "").includes(query)
+              : true,
+          );
           return {
-            data: endpoint.includes("q=unmatched") ? [] : found,
+            data: endpoint.includes("q=unmatched")
+              ? []
+              : found.slice(
+                  Number(params.get("offset") ?? 0),
+                  Number(params.get("offset") ?? 0) +
+                    Number(params.get("limit") ?? 100),
+                ),
             total: found.length,
           };
         }
@@ -521,13 +535,14 @@ describe("OmniRouteMemory", () => {
       (await memory.write("Onthoud mijn voorkeur is zacht volume")).ok,
     ).toBe(true);
     await memory.write("Onthoud mijn voorkeur is zacht volume");
-    expect(calls[0]!.options?.body.key).toBe(calls[1]!.options.body.key);
-    expect(calls[0]!.options?.body.key).toMatch(/^jarvis:/);
-    expect(calls[0]!.options?.body.metadata).toMatchObject({
-      application: "jarvis",
-      jarvis: { text: "mijn voorkeur is zacht volume" },
+    const writes = calls.filter((call) => call.options.method === "POST");
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.options.body.key).toMatch(/^nova:[0-9a-f]{64}$/);
+    expect(writes[0]!.options.body.metadata).toMatchObject({
+      application: "nova",
+      nova: { text: "mijn voorkeur is zacht volume" },
     });
-    expect(calls[0]!.options?.body.apiKeyId).toBe("jarvis-owner");
+    expect(writes[0]!.options.body.apiKeyId).toBe("jarvis-owner");
     expect((await memory.list()).memories).toHaveLength(1);
     expect(await memory.search("volume")).toHaveLength(1);
     const query = calls.find((c) => c.endpoint.includes("q=volume"))!.endpoint;
@@ -545,6 +560,197 @@ describe("OmniRouteMemory", () => {
     expect(rows.has(id)).toBe(false);
     expect((await memory.health()).ready).toBe(true);
     expect(memory.embeddings.configured).toBe(false);
+  });
+
+  const repeatText = "Onthoud mijn voorkeur is zacht volume";
+  const repeatCandidate = memoryCandidate(repeatText)!;
+  const repeatHash = crypto
+    .createHash("sha256")
+    .update(
+      `${repeatCandidate.type}:${repeatCandidate.text.toLowerCase().replace(/\s+/g, " ")}`,
+    )
+    .digest("hex");
+  const repeatRow = (prefix = "jarvis") => ({
+    id,
+    key: `${prefix}:${repeatHash}`,
+    content: repeatCandidate.text,
+    apiKeyId: "jarvis-owner",
+    metadata: { application: prefix, [prefix]: repeatCandidate },
+    createdAt: "2026-10-04",
+    updatedAt: "2026-10-04",
+  });
+
+  it.each(["jarvis", "nova"])(
+    "reuses existing %s records without writes or changed timestamps",
+    async (prefix) => {
+      const { client, calls, rows } = fakeClient();
+      const existing = repeatRow(prefix);
+      rows.set(id, existing);
+      const memory = new OmniRouteMemory(client as never);
+      expect(await memory.write(repeatText)).toMatchObject({ ok: true, id });
+      expect(rows.get(id)).toEqual(existing);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.options.method).toBeUndefined();
+      const params = new URLSearchParams(calls[0]!.endpoint.split("?")[1]);
+      expect(Object.fromEntries(params)).toEqual({
+        apiKeyId: client.scope,
+        q: repeatHash,
+        limit: "100",
+        offset: "0",
+      });
+    },
+  );
+
+  it("prefers canonical records while preserving legacy records", async () => {
+    const { client, calls, rows } = fakeClient();
+    rows.set(id, repeatRow());
+    rows.set(foreign, { ...repeatRow("nova"), id: foreign });
+    expect(
+      await new OmniRouteMemory(client as never).write(repeatText),
+    ).toMatchObject({ ok: true, id: foreign });
+    expect(calls).toHaveLength(1);
+    expect(rows.get(id)).toEqual(repeatRow());
+  });
+
+  it("finds exact matches on later pages and ignores substring matches", async () => {
+    const { client, calls, rows } = fakeClient();
+    rows.clear();
+    for (let index = 0; index < 100; index++) {
+      const rowId = `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, "0")}`;
+      rows.set(rowId, {
+        ...repeatRow(),
+        id: rowId,
+        key: `other:${repeatHash}:suffix`,
+        content: "unrelated",
+      });
+    }
+    rows.set(id, repeatRow());
+    expect(
+      await new OmniRouteMemory(client as never).write(repeatText),
+    ).toMatchObject({ ok: true, id });
+    expect(calls).toHaveLength(2);
+    expect(
+      new URLSearchParams(calls[1]!.endpoint.split("?")[1]).get("offset"),
+    ).toBe("100");
+  });
+
+  it.each(["foreign owner", "unrelated application", "conflicting content"])(
+    "blocks exact reserved key collisions: %s",
+    async (conflict) => {
+      const { client, calls, rows } = fakeClient();
+      const existing = {
+        ...repeatRow("nova"),
+        ...(conflict === "foreign owner" ? { apiKeyId: "someone-else" } : {}),
+        ...(conflict === "unrelated application"
+          ? { metadata: { application: "other" } }
+          : {}),
+        ...(conflict === "conflicting content"
+          ? { content: "different fact" }
+          : {}),
+      };
+      rows.set(id, existing);
+      expect(
+        await new OmniRouteMemory(client as never).write(repeatText),
+      ).toEqual({ ok: false, error: "Native memory write unavailable" });
+      expect(calls).toHaveLength(1);
+      expect(rows.get(id)).toEqual(existing);
+    },
+  );
+
+  it.each([
+    { total: 1, data: [] },
+    { total: Number.POSITIVE_INFINITY, data: [] },
+    { total: 501, data: [] },
+    { total: 0, data: "invalid" },
+    { total: 0, data: [], page: 2 },
+    { total: 0, data: [], limit: 200 },
+    { total: 0, data: [], totalPages: 1 },
+  ])(
+    "blocks incomplete or malformed lookup pagination: %j",
+    async (response) => {
+      const { client } = fakeClient();
+      const request = vi
+        .spyOn(client, "request")
+        .mockResolvedValue(response as never);
+      expect(
+        (await new OmniRouteMemory(client as never).write(repeatText)).ok,
+      ).toBe(false);
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(request.mock.calls[0]![1]).toBeUndefined();
+    },
+  );
+
+  it("fails closed on lookup errors", async () => {
+    const { client } = fakeClient();
+    const request = vi
+      .spyOn(client, "request")
+      .mockRejectedValue(new Error("private upstream detail"));
+    expect(
+      await new OmniRouteMemory(client as never).write(repeatText),
+    ).toEqual({ ok: false, error: "Native memory write unavailable" });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report a canonical write successful when its response claims legacy ownership", async () => {
+    const { client } = fakeClient();
+    const request = vi
+      .spyOn(client, "request")
+      .mockResolvedValueOnce({ total: 0, data: [] } as never)
+      .mockResolvedValueOnce({
+        success: true,
+        id: { ...repeatRow(), key: `nova:${repeatHash}` },
+      } as never);
+    expect(
+      await new OmniRouteMemory(client as never).write(repeatText),
+    ).toEqual({
+      ok: false,
+      error: "Native memory write unavailable",
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[1]![1]?.method).toBe("POST");
+  });
+
+  it("checks later pages for collisions even after finding a reusable record", async () => {
+    const { client, rows, calls } = fakeClient();
+    rows.clear();
+    rows.set(id, repeatRow());
+    for (let index = 0; index < 99; index++) {
+      const rowId = `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, "0")}`;
+      rows.set(rowId, {
+        ...repeatRow(),
+        id: rowId,
+        key: `other:${repeatHash}`,
+      });
+    }
+    rows.set(foreign, {
+      ...repeatRow("nova"),
+      id: foreign,
+      content: "conflicting fact",
+    });
+    expect(
+      (await new OmniRouteMemory(client as never).write(repeatText)).ok,
+    ).toBe(false);
+    expect(calls).toHaveLength(2);
+    expect(calls.every((call) => !call.options.method)).toBe(true);
+  });
+
+  it("rejects a server repeating the same page instead of advancing", async () => {
+    const { client } = fakeClient();
+    const data = Array.from({ length: 100 }, (_, index) => ({
+      ...repeatRow(),
+      id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, "0")}`,
+      key: `other:${repeatHash}`,
+    }));
+    const request = vi
+      .spyOn(client, "request")
+      .mockResolvedValue({ total: 200, data } as never);
+    expect(
+      (await new OmniRouteMemory(client as never).write(repeatText)).ok,
+    ).toBe(false);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls.every((call) => call[1] === undefined)).toBe(
+      true,
+    );
   });
 
   it("reads and deletes mixed NOVA and legacy rows only within the exact owner scope", async () => {

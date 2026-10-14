@@ -18,6 +18,7 @@ export type MemoryManagementClient = Pick<
 
 interface Row {
   id: string;
+  key?: string;
   content: string;
   apiKeyId?: string;
   metadata?: {
@@ -70,6 +71,72 @@ export class OmniRouteMemory implements SemanticBackend {
       `/api/memory/${id}`,
     );
     return data.memory ?? data;
+  }
+
+  private async existing(
+    hash: string,
+    content: string,
+  ): Promise<Row | undefined> {
+    let total: number | undefined;
+    let canonical: Row | undefined;
+    let legacy: Row | undefined;
+    const seen = new Set<string>();
+    for (let offset = 0, page = 1; page <= 5; page++) {
+      const query = new URLSearchParams({
+        apiKeyId: this.client.scope,
+        q: hash,
+        limit: "100",
+        offset: String(offset),
+      });
+      const result = await this.client.request<{
+        data: Row[];
+        total: number;
+        page?: number;
+        limit?: number;
+        totalPages?: number;
+      }>(`/api/memory?${query}`);
+      if (
+        !Array.isArray(result?.data) ||
+        !Number.isSafeInteger(result.total) ||
+        result.total < 0 ||
+        result.total > 500 ||
+        (total !== undefined && total !== result.total) ||
+        result.data.length > 100 ||
+        offset + result.data.length > result.total ||
+        (result.page !== undefined && result.page !== page) ||
+        (result.limit !== undefined && result.limit !== 100) ||
+        (result.totalPages !== undefined &&
+          result.totalPages !== Math.ceil(result.total / 100))
+      )
+        throw new Error("Invalid memory lookup pagination");
+      total = result.total;
+      for (const row of result.data) {
+        if (
+          !row ||
+          typeof row !== "object" ||
+          !validMemoryId(row.id) ||
+          seen.has(row.id)
+        )
+          throw new Error("Invalid memory lookup row");
+        seen.add(row.id);
+        if (row.key !== `nova:${hash}` && row.key !== `jarvis:${hash}`)
+          continue;
+        if (
+          !this.owned(row) ||
+          !validMemoryId(row.id) ||
+          typeof row.content !== "string" ||
+          row.content.toLowerCase().replace(/\s+/g, " ").trim() !== content
+        )
+          throw new Error("Memory key collision");
+        if (row.key === `nova:${hash}`) canonical ??= row;
+        else legacy ??= row;
+      }
+      offset += result.data.length;
+      if (offset === total) return canonical ?? legacy;
+      if (!result.data.length || result.data.length !== 100)
+        throw new Error("Incomplete memory lookup");
+    }
+    throw new Error("Truncated memory lookup");
   }
 
   async search(text: string, { limit = 6 } = {}): Promise<MemoryRecord[]> {
@@ -129,14 +196,23 @@ export class OmniRouteMemory implements SemanticBackend {
         error: "Memory rejected: not durable or contains secrets",
       };
     try {
-      const key =
-        "jarvis:" +
-        crypto
-          .createHash("sha256")
-          .update(
-            `${candidate.type}:${candidate.text.toLowerCase().replace(/\s+/g, " ")}`,
-          )
-          .digest("hex");
+      const normalized = candidate.text.toLowerCase().replace(/\s+/g, " ");
+      const hash = crypto
+        .createHash("sha256")
+        .update(`${candidate.type}:${normalized}`)
+        .digest("hex");
+      const existing = await this.existing(hash, normalized);
+      if (existing) {
+        this.lastError = null;
+        return {
+          ok: true,
+          id: existing.id,
+          operation: "upserted",
+          memory: this.map(existing),
+          backend: "omniroute",
+        };
+      }
+      const key = `nova:${hash}`;
       const created = await this.client.request<Row & { id: string | Row }>(
         "/api/memory",
         {
@@ -146,7 +222,7 @@ export class OmniRouteMemory implements SemanticBackend {
             key,
             type: candidate.type === "PROCEDURE" ? "procedural" : "factual",
             apiKeyId: this.client.scope,
-            metadata: { application: "jarvis", jarvis: candidate },
+            metadata: { application: "nova", nova: candidate },
             expiresAt: null,
           },
         },
@@ -154,7 +230,14 @@ export class OmniRouteMemory implements SemanticBackend {
       const row = (
         typeof created.id === "object" ? created.id : created
       ) as Row;
-      if (!validMemoryId(row.id) || !this.owned(row))
+      if (
+        !validMemoryId(row.id) ||
+        !this.owned(row) ||
+        row.metadata?.application !== "nova" ||
+        row.key !== key ||
+        typeof row.content !== "string" ||
+        row.content.toLowerCase().replace(/\s+/g, " ").trim() !== normalized
+      )
         throw new Error("Invalid memory ownership");
       this.lastError = null;
       return {

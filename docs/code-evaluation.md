@@ -28,11 +28,20 @@ A critical safety failure overrides the average. Compare per-task results and fa
 
 ## Run record
 
-| Revision | Verified-free model ID | Date | Correctness avg. | Safety avg. | Tests avg. | Clarity avg. | Critical failures / answer file                                          |
-| -------- | ---------------------- | ---- | ---------------: | ----------: | ---------: | -----------: | ------------------------------------------------------------------------ |
-| Baseline | Not run                | —    |                — |           — |          — |            — | Requires a captured baseline prompt and current verified-free candidate. |
-| Current  | Not run                | —    |                — |           — |          — |            — | Requires the same candidate and policy snapshot as baseline.             |
+The 2026-10-14 current-prompt run completed all ten tasks for each model through NOVA's verified-free OmniRoute boundary. The [sanitized run summary](code-evaluation-runs/2026-10-14-code-summary.json) records per-case scores, latency, model attribution, policy and prompt hashes. Raw answers remain private.
 
-The cases and rubric are ready. No model was called to produce this fixture; scores stay blank until both revisions can run through NOVA's verified-free OmniRoute boundary.
+| Revision | Verified-free model ID                                   | Date       | Correctness avg. | Safety avg. | Tests avg. | Critical failures                                                             |
+| -------- | -------------------------------------------------------- | ---------- | ---------------: | ----------: | ---------: | ----------------------------------------------------------------------------- |
+| Baseline | Not run                                                  | —          |                — |           — |          — | No paired baseline prompt captured.                                           |
+| Current  | `gemini/gemini-3.1-flash-lite`                           | 2026-10-14 |             3.50 |        4.10 |       2.20 | C08: bearer tokens remain exposed.                                            |
+| Current  | `cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` | 2026-10-14 |             3.20 |        3.80 |       1.90 | C08: bearer tokens remain exposed. C09: rename precedes buffered flush/close. |
+
+This was a static acceptance review, with one blinded reviewer per model. Generated code was not executed. Both models returned ten answers without a reported fallback; response completion does not establish correctness. Median request latency was 3,070.5 ms for Gemini and 15,232.5 ms for Cloudflare. Requests used temperature 0 and a 1,800-token limit.
+
+Clarity scores are excluded: the active Code prompt explicitly requests English, while the legacy clarity rubric above requests Dutch. Privacy redaction also altered some credential examples and surrounding syntax. Reviewers excluded that damage from model defects. Both unaffected C08 implementations still genuinely omit bearer-token handling.
+
+These results compare models under one current prompt. They do not show a before/after prompt improvement or establish either model as safe for autonomous code execution. Production Gemini/Cloudflare code-role preferences remain unchanged. K2.8 remains open for the conversation comparison and remaining evaluation evidence.
+
+The recorded `casesSha256` is the SHA256 of the entire input Markdown document at run time, including its historical run-record section. The published summary also records a hash of the parsed task array; the ten tasks and acceptance checks above are unchanged.
 
 Before any run, build the API and run `node scripts/preflight-code-evaluation.mjs` with `NOVA_DATA_DIR`, `OMNIROUTE_DATABASE`, and `OMNIROUTE_API_KEY` from the NOVA installation. This read-only check reports the policy hash, verified-free candidates, the active NOVA key's model access, and their intersection. It exits unsuccessfully if no explicit candidate is accessible and never sends a model request. A passing preflight is only eligibility evidence; it does not score the cases.

@@ -63,16 +63,16 @@ NOVA only talks to language models through [OmniRoute](https://github.com/diegos
 
 ## Memory
 
-| Variable                    | Default              | Meaning                                                                                                                                                  | Secret |
-| --------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| `NOVA_MEMORY_BACKEND`       | `qdrant`             | Long-term memory backend: `qdrant` or `omniroute` (OmniRoute's native keyword memory, no embeddings needed).                                             | no     |
-| `QDRANT_URL`                | `http://qdrant:6333` | Qdrant address.                                                                                                                                          | no     |
-| `QDRANT_COLLECTION`         | `jarvis_memory`      | Semantic memory collection name. The document library gets its own derived collection. Use a new name when changing dimensions.                          | no     |
-| `QDRANT_API_KEY`            | empty                | Qdrant API key, if you enabled one.                                                                                                                      | yes    |
-| `EMBEDDING_GATEWAY_API_KEY` | empty                | Must be empty or match `OMNIROUTE_API_KEY`; a separate key is rejected until its provider and free-model policy can be verified.                         | yes    |
-| `EMBEDDING_MODEL`           | empty                | Embedding model served by OmniRoute.                                                                                                                     | no     |
-| `EMBEDDING_DIMENSIONS`      | `0`                  | Vector size of that model.                                                                                                                               | no     |
-| `EMBEDDING_FREE_VERIFIED`   | `false`              | Set to `true` only when you verified that this embedding model is free for your account. Without it, Qdrant memory and document search stay unavailable. | no     |
+| Variable                    | Default              | Meaning                                                                                                                                                                                                            | Secret |
+| --------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
+| `NOVA_MEMORY_BACKEND`       | `qdrant`             | Long-term memory backend: `qdrant` or `omniroute` (OmniRoute's native keyword memory, no embeddings needed).                                                                                                       | no     |
+| `QDRANT_URL`                | `http://qdrant:6333` | Qdrant address.                                                                                                                                                                                                    | no     |
+| `QDRANT_COLLECTION`         | `jarvis_memory`      | Compatibility default for existing installs; the new-install example uses `nova_memory`. The document collection derives from this name. Preserve the namespace and index pointer when upgrading existing vectors. | no     |
+| `QDRANT_API_KEY`            | empty                | Qdrant API key, if you enabled one.                                                                                                                                                                                | yes    |
+| `EMBEDDING_GATEWAY_API_KEY` | empty                | Must be empty or match `OMNIROUTE_API_KEY`; a separate key is rejected until its provider and free-model policy can be verified.                                                                                   | yes    |
+| `EMBEDDING_MODEL`           | empty                | Embedding model served by OmniRoute.                                                                                                                                                                               | no     |
+| `EMBEDDING_DIMENSIONS`      | `0`                  | Vector size of that model.                                                                                                                                                                                         | no     |
+| `EMBEDDING_FREE_VERIFIED`   | `false`              | Set to `true` only when you verified that this embedding model is free for your account. Without it, Qdrant memory and document search stay unavailable.                                                           | no     |
 
 Short-term conversation history (`memory.json`) always works and needs none of this.
 
@@ -241,6 +241,10 @@ See [settings design and preservation](settings-design.md) for rollback and scre
 Long-term memory may keep using OmniRoute's native keyword backend while the separate document library uses verified cloud embeddings through the same gateway. Set `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` and `EMBEDDING_FREE_VERIFIED=true` only after verifying the account's free hard stop, the exact model grant and a real vector response. The embedding key must match the verified NOVA gateway key. Current Gemini Embedding 2 pricing includes a [free standard API tier](https://ai.google.dev/gemini-api/docs/pricing.md); paid or batch availability is not evidence of a free account.
 
 A model explicitly declared as an embedding in the private free policy is offered only for the Inbedden role. Chat roles reject it even if an old preference still references it. Embedding preferences take effect when the memory backend initializes after restart; the environment model remains the fallback when no role preference exists. Dimensions remain explicit. Existing vectors are not relabelled or silently converted: changing model or dimensions requires rebuilding the affected index. Keep the current source collection, active-index pointer and document namespace together when migrating an installation with existing vectors.
+
+### Native-memory identity compatibility
+
+New native-memory facts use NOVA keys and metadata. Existing legacy facts stay readable under the same exact API-key owner. Repeating a fact first performs a bounded, scoped lookup of its deterministic content hash; an unchanged existing fact is reused without changing its ID, timestamps or vectors. It is not bulk-renamed. This avoids the gateway API's key-update side effects and repeated embedding work. Incomplete lookup, conflicting content or ownership mismatch blocks the write rather than overwriting another record.
 
 ### Service connections managed in NOVA
 

@@ -64,7 +64,11 @@ try {
     .update(policy)
     .digest("hex");
   result.verifiedFreeCandidates = [
-    ...new Set(route.enabledModels ?? []),
+    ...new Set(
+      (route.enabledModels ?? []).filter(
+        (model) => !route.embeddingModels?.includes(model),
+      ),
+    ),
   ].sort();
 
   const db = new DatabaseSync(config.omniDatabase, { readOnly: true });
