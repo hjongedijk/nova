@@ -209,4 +209,166 @@ describe("confirmation changes after approval", () => {
     expect(JSON.stringify(response)).not.toContain("ECONNREFUSED");
     expect(JSON.stringify(response)).not.toContain("10.0.0.7");
   });
+
+  describe.each(["nl", "en"] as const)(
+    "evidence-bound %s confirmation replies",
+    (language) => {
+      const replies =
+        language === "en"
+          ? {
+              notExecuted: "The action was not executed.",
+              failedCheck:
+                "The check did not confirm that the action succeeded.",
+              unverified:
+                "The action was requested, but I could not verify that it completed.",
+              failed: "That did not work. The action was not completed.",
+            }
+          : {
+              notExecuted: "De actie is niet uitgevoerd.",
+              failedCheck:
+                "De controle heeft niet bevestigd dat de actie is gelukt.",
+              unverified:
+                "De actie is aangevraagd, maar ik kon niet controleren of die is voltooid.",
+              failed: "Dat is niet gelukt. De actie is niet uitgevoerd.",
+            };
+      const cases: Array<{ name: string; result: ToolResult; reply: string }> =
+        [
+          {
+            name: "not executed despite positive flags",
+            result: {
+              ok: true,
+              executed: false,
+              verified: true,
+              accepted: true,
+            },
+            reply: replies.notExecuted,
+          },
+          {
+            name: "not executed despite failed verification",
+            result: { ok: false, executed: false, verified: false },
+            reply: replies.notExecuted,
+          },
+          {
+            name: "verification failed after accepted execution",
+            result: { ok: true, accepted: true, verified: false },
+            reply: replies.failedCheck,
+          },
+          {
+            name: "failed execution with failed verification",
+            result: { ok: false, verified: false },
+            reply: replies.failedCheck,
+          },
+          {
+            name: "explicitly unknown verification",
+            result: { ok: true, verified: null },
+            reply: replies.unverified,
+          },
+          {
+            name: "accepted without verification",
+            result: { ok: true, accepted: true },
+            reply: replies.unverified,
+          },
+          {
+            name: "accepted despite unsuccessful status",
+            result: { ok: false, accepted: true },
+            reply: replies.unverified,
+          },
+          {
+            name: "failed status despite verified flag",
+            result: { ok: false, verified: true },
+            reply: replies.failed,
+          },
+        ];
+      describe.each([false, true])("with output=%s", (withOutput) => {
+        it.each(cases)(
+          "reports $name without contradictory model narration",
+          async ({ result, reply }) => {
+            const { tools, handler, original, outcome } = fixture();
+            const raw: ToolResult = {
+              ...result,
+              error: "ECONNREFUSED private diagnostic 10.0.0.7",
+              ...(withOutput
+                ? { result: { output: "Contradictory successful output." } }
+                : {}),
+            };
+            const before = structuredClone(raw);
+            tools.execute.mockResolvedValue(raw);
+            outcome.describe.mockResolvedValue(
+              "Done, successfully verified everything.",
+            );
+            const response = await handler.handle(
+              "chat",
+              "yes",
+              original.confirmationId,
+              false,
+              language,
+            );
+            expect(response?.reply).toBe(reply);
+            expect(outcome.describe).not.toHaveBeenCalled();
+            expect(response?.result).toEqual(
+              Object.fromEntries(
+                Object.entries(raw).filter(([key]) => key !== "error"),
+              ),
+            );
+            expect(JSON.stringify(response)).not.toContain("ECONNREFUSED");
+            expect(raw).toEqual(before);
+          },
+        );
+      });
+
+      it.each([undefined, true])(
+        "preserves success for verified=%s with no output",
+        async (verified) => {
+          const { tools, handler, original, outcome } = fixture();
+          tools.execute.mockResolvedValue({
+            ok: true,
+            ...(verified === true ? { verified } : {}),
+          });
+          const response = await handler.handle(
+            "chat",
+            "yes",
+            original.confirmationId,
+            false,
+            language,
+          );
+          expect(response?.reply).toBe(
+            language === "en"
+              ? verified
+                ? "Done, and I verified it."
+                : "Done."
+              : verified
+                ? "Gelukt, en ik heb het gecontroleerd."
+                : "Is gedaan.",
+          );
+          expect(outcome.describe).not.toHaveBeenCalled();
+        },
+      );
+
+      it.each([undefined, true])(
+        "preserves output narration for verified=%s",
+        async (verified) => {
+          const { tools, handler, original, outcome } = fixture();
+          const result = {
+            ok: true,
+            ...(verified === true ? { verified } : {}),
+            result: { output: "Verified output." },
+          };
+          tools.execute.mockResolvedValue(result);
+          outcome.describe.mockResolvedValue("The actual result.");
+          const response = await handler.handle(
+            "chat",
+            "yes",
+            original.confirmationId,
+            false,
+            language,
+          );
+          expect(response).toEqual({ reply: "The actual result.", result });
+          expect(outcome.describe).toHaveBeenCalledOnce();
+          expect(outcome.describe).toHaveBeenCalledWith(
+            expect.objectContaining({ result, language }),
+          );
+        },
+      );
+    },
+  );
 });

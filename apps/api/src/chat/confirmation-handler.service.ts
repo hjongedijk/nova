@@ -118,6 +118,36 @@ export class ConfirmationHandler {
       delete failed.action;
       return { reply, result: failed };
     }
+    const userResult = { ...result };
+    delete userResult.error;
+    // Explicit execution evidence takes precedence over output and model narration.
+    if (result.executed === false)
+      return {
+        reply:
+          language === "en"
+            ? "The action was not executed."
+            : "De actie is niet uitgevoerd.",
+        result: userResult,
+      };
+    if (result.verified === false)
+      return {
+        reply:
+          language === "en"
+            ? "The check did not confirm that the action succeeded."
+            : "De controle heeft niet bevestigd dat de actie is gelukt.",
+        result: userResult,
+      };
+    if (
+      (result.ok && result.verified === null) ||
+      (result.accepted === true && result.verified !== true)
+    )
+      return {
+        reply:
+          language === "en"
+            ? "The action was requested, but I could not verify that it completed."
+            : "De actie is aangevraagd, maar ik kon niet controleren of die is voltooid.",
+        result: userResult,
+      };
     // Something to read came back (command output): say what it was, not just that it is done.
     if (result.ok && hasOutput(result))
       return {
@@ -129,19 +159,17 @@ export class ConfirmationHandler {
         }),
         result,
       };
-    const userResult = { ...result };
-    delete userResult.error;
     return {
       reply:
         language === "en"
-          ? result.verified === true
+          ? result.ok && result.verified === true
             ? "Done, and I verified it."
             : result.accepted
               ? "Accepted, but I could not verify that it completed."
               : result.ok
                 ? "Done."
                 : "That did not work. The action was not completed."
-          : result.verified === true
+          : result.ok && result.verified === true
             ? "Gelukt, en ik heb het gecontroleerd."
             : result.accepted
               ? "Aangenomen, maar of het echt gelukt is weet ik nog niet."
