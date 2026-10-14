@@ -31,7 +31,7 @@
     "method": "GET",
     "ret": "obj",
     "paytoqs": "ignore",
-    "url": "http://nova:8080/api/health",
+    "url": "http://nova:8080/api/nova/health",
     "tls": "",
     "persist": false,
     "proxy": "",

@@ -127,6 +127,7 @@ test("fixed offline containers have exact restricted configuration and are never
       AttachStderr: true,
       Tty: false,
       HostConfig: {
+        AutoRemove: true,
         NetworkMode: "none",
         ReadonlyRootfs: true,
         CapDrop: ["ALL"],
@@ -342,6 +343,34 @@ test("eight concurrent preparations reserve slots, and failed cleanup retains ca
   f.state.deleteError = null;
   await f.sandbox.close(prepared[0].containerId);
   await f.sandbox.prepare({ server: "filesystem" });
+});
+
+test("auto-removed workers release each confirmed reservation exactly once on Docker 404", async () => {
+  const f = fixture();
+  const workers = await Promise.all(
+    Array.from({ length: 8 }, () =>
+      f.sandbox.prepare({ server: "sequential-thinking" }),
+    ),
+  );
+  for (const call of f.calls.filter(({ method }) => method === "POST"))
+    assert.equal(call.body.HostConfig.AutoRemove, true);
+  f.state.deleteError = new Error("Docker API status 404");
+  await Promise.all(
+    workers.flatMap(({ containerId }) => [
+      f.sandbox.close(containerId),
+      f.sandbox.close(containerId),
+    ]),
+  );
+  assert.equal(f.calls.filter(({ method }) => method === "DELETE").length, 8);
+  f.state.deleteError = null;
+  await Promise.all(
+    Array.from({ length: 8 }, () =>
+      f.sandbox.prepare({ server: "sequential-thinking" }),
+    ),
+  );
+  await assert.rejects(f.sandbox.prepare({ server: "filesystem" }), {
+    message: "MCP sandbox capacity reached",
+  });
 });
 
 test("failed preparation releases capacity and hides Docker errors", async () => {

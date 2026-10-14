@@ -70,6 +70,7 @@ function stdoutFrames(bytes) {
 
 const sandbox = createMcpSandbox({ docker, workspaceRoot });
 let containerId;
+let autoRemovalId;
 let stream;
 const token = crypto.randomBytes(32).toString("hex");
 const server = http.createServer();
@@ -255,12 +256,52 @@ try {
     providerConnection: false,
     mcpHandshake: true,
   });
+  const disposable = await sandbox.prepare({ server: "sequential-thinking" });
+  autoRemovalId = disposable.containerId;
+  const disposableInfo = await dockerRequest(
+    `/containers/${autoRemovalId}/json`,
+  );
+  assert.equal(disposableInfo.HostConfig.AutoRemove, true);
+  await dockerRequest(`/containers/${autoRemovalId}/start`, "POST");
+  await dockerRequest(
+    `/containers/${autoRemovalId}/kill?signal=SIGKILL`,
+    "POST",
+  );
+  let autoRemoved = false;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      await dockerRequest(`/containers/${autoRemovalId}/json`);
+    } catch (error) {
+      if (error?.message !== "Docker API status 404") throw error;
+      autoRemoved = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.equal(
+    autoRemoved,
+    true,
+    "Docker must remove an exited worker before broker cleanup",
+  );
+  // Confirmed ownership permits 404 cleanup to release the reservation.
+  await sandbox.close(autoRemovalId);
+  autoRemovalId = undefined;
   console.log(
-    "Real broker stream, MCP handshake and offline container isolation passed.",
+    "Real broker stream, MCP handshake, offline isolation and independent Docker auto-removal passed.",
   );
 } finally {
   stream?.destroy();
-  await new Promise((resolve) => server.close(resolve));
-  if (containerId) await sandbox.close(containerId);
-  fs.rmSync(dataRoot, { recursive: true, force: true });
+  try {
+    await new Promise((resolve) => server.close(resolve));
+  } finally {
+    try {
+      await Promise.all(
+        [containerId, autoRemovalId]
+          .filter(Boolean)
+          .map((id) => sandbox.close(id)),
+      );
+    } finally {
+      fs.rmSync(dataRoot, { recursive: true, force: true });
+    }
+  }
 }

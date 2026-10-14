@@ -61,6 +61,7 @@ services:
 
   # Optional local voice runtime. No host port: only NOVA can reach it on the stack network.
   piper:
+    <<: *restart
     profiles: [personal-voice]
     build: ./piper
     container_name: nova-piper

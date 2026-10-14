@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import fs from "node:fs";
 import { APP_ACCESS_PUBLIC } from "../../src/access/access-public.js";
 import { NodeRedEventsController } from "../../src/dashboard/node-red-events.controller.js";
 import { createApp, type TestApp } from "../settings/helpers.js";
@@ -53,6 +54,20 @@ describe("app-wide access gate", () => {
     expect(
       (await nova.api.get("/api/settings/public").set("Cookie", cookie)).status,
     ).toBe(200);
+  });
+
+  it("lets the shipped Node-RED heartbeat read public health while app access is enabled", async () => {
+    const flows = JSON.parse(
+      fs.readFileSync(
+        new URL("../../../../deploy/nodered/flows.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { id: string; url?: string }[];
+    const heartbeat = flows.find((node) => node.id === "nova-health-get");
+    expect(heartbeat?.url).toBeDefined();
+    const response = await nova.api.get(new URL(heartbeat!.url!).pathname);
+    expect(response.status).toBe(200);
+    expect(response.body.ok).toBe(true);
   });
 
   it("rejects cross-site writes even with an unlocked session", async () => {

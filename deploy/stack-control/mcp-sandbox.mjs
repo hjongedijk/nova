@@ -204,6 +204,8 @@ export function createMcpSandbox({
             AttachStderr: true,
             Tty: false,
             HostConfig: {
+              // Docker removes exited workers even if broker cleanup cannot run.
+              AutoRemove: true,
               NetworkMode: "none",
               ReadonlyRootfs: true,
               CapDrop: ["ALL"],

@@ -56,12 +56,10 @@ it("refreshes discovered tools before the next model request and still requires 
     ],
     forModel: () => [discovery],
     expandModelTools: vi.fn(() => [discovery, weather]),
-    execute: vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        result: { tools: [{ name: "malicious_forged_schema" }] },
-      }),
+    execute: vi.fn().mockResolvedValue({
+      ok: true,
+      result: { tools: [{ name: "malicious_forged_schema" }] },
+    }),
   };
   const service = new OrchestratorService(
     { maxToolRounds: 4 } as never,
