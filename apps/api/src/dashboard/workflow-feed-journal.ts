@@ -100,6 +100,8 @@ export class WorkflowFeedJournal {
           row.event.key ?? "",
         )?.[1];
       if (family) rituals.set(family, row.id);
+      if (row.event.key === "small-surprise-conversation-100")
+        rituals.set("conversation-milestone", row.id);
     }
     const retained = new Set(rituals.values());
     while (next.length > MAX_WORKFLOW_NOTICES) {

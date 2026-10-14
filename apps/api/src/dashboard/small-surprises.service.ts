@@ -1,10 +1,13 @@
 import {
   Injectable,
   Logger,
+  Optional,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
 import fs from "node:fs";
+import crypto from "node:crypto";
+import { ConversationMilestoneService } from "../memory/conversation-milestone.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { normalizeHelperPreferences } from "../settings/settings-validation.js";
 import { SettingsStore } from "../settings/store/settings.store.js";
@@ -34,6 +37,7 @@ export class SmallSurprisesService implements OnModuleInit, OnModuleDestroy {
     private readonly settings: SettingsStore,
     private readonly alerts: AlertsFeed,
     private readonly presence: SpeechPresenceService,
+    @Optional() private readonly milestone?: ConversationMilestoneService,
   ) {
     this.progressFile = config.dataFile("small-surprises-progress.json");
   }
@@ -75,7 +79,11 @@ export class SmallSurprisesService implements OnModuleInit, OnModuleDestroy {
           : `${parts.month}-${parts.day}` === "01-01"
             ? "newYear"
             : null;
-      if (!occasion || this.completedDay() === day || this.paused) return;
+      if (!occasion) {
+        this.deliverMilestone(day, now);
+        return;
+      }
+      if (this.completedDay() === day || this.paused) return;
       // At most once matters more than retrying a non-essential greeting after a crash.
       if (!this.saveCompletedDay(day)) return;
       const copy = OCCASIONS[occasion];
@@ -95,6 +103,39 @@ export class SmallSurprisesService implements OnModuleInit, OnModuleDestroy {
     } catch {
       this.logger.warn("Small surprise schedule unavailable");
     }
+  }
+
+  private deliverMilestone(day: string, now: Date): void {
+    if (!this.milestone?.pending()) return;
+    const workflowId = `nova-workflow:${crypto.createHash("sha256").update("nova:conversation-milestone:100").digest("hex")}`;
+    let accepted = this.alerts.findWorkflowEvent(workflowId);
+    if (!accepted) {
+      if (this.completedDay() === day || this.paused) return;
+      accepted =
+        this.alerts.record(
+          {
+            topic: "jarvis/alerts",
+            payload: {
+              title: "Honderd chatbeurten",
+              detail:
+                "We hebben honderd chatbeurten afgerond. Bedankt voor het vertrouwen.",
+              severity: "info",
+              key: "small-surprise-conversation-100",
+              at: now.toISOString(),
+            },
+          },
+          now,
+          workflowId,
+        ) ?? undefined;
+    }
+    if (!accepted) return;
+    const at = localParts(new Date(accepted.at), this.config.timezone);
+    if (
+      `${at.year}-${at.month}-${at.day}` === day &&
+      !this.saveCompletedDay(day)
+    )
+      return;
+    this.milestone.delivered();
   }
 
   private completedDay(): string | null {

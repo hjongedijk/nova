@@ -9,6 +9,8 @@ import {
   ConflictException,
   Controller,
   Headers,
+  Logger,
+  Optional,
   HttpException,
   HttpStatus,
   Post,
@@ -21,6 +23,7 @@ import type { Response } from "express";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { AppAccessPublic } from "../access/access-public.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { ConversationMilestoneService } from "../memory/conversation-milestone.service.js";
 import { publishableConversation } from "./conversation-events.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { FreeRoutingBlockedError } from "../routing/routing.service.js";
@@ -143,6 +146,8 @@ function check(body: ChatBody): {
 
 @Controller()
 export class ChatController {
+  private readonly logger = new Logger(ChatController.name);
+  private milestoneWarning = false;
   private proactiveWindowStartedAt = Date.now();
   private proactiveRequests = 0;
 
@@ -153,6 +158,7 @@ export class ChatController {
     private readonly client: OmniRouteClient,
     private readonly mqtt: MqttService,
     private readonly config: NovaConfig,
+    @Optional() private readonly milestone?: ConversationMilestoneService,
   ) {}
 
   private remember(
@@ -163,6 +169,14 @@ export class ChatController {
   ): void {
     this.memory.add(sessionId, "user", message);
     this.memory.add(sessionId, "assistant", result.reply);
+    try {
+      this.milestone?.completedTurn();
+      this.milestoneWarning = false;
+    } catch {
+      if (!this.milestoneWarning)
+        this.logger.warn("Conversation milestone unavailable");
+      this.milestoneWarning = true;
+    }
     this.mqtt.publish(
       "jarvis/events/conversation",
       publishableConversation(sessionId, result, startedAt),

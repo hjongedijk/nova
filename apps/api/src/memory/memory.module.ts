@@ -1,3 +1,5 @@
+import { ConversationMilestoneService } from "./conversation-milestone.service.js";
+import { SettingsStoreModule } from "../settings/store/settings-store.module.js";
 import { Module } from "@nestjs/common";
 import { RoutingModule } from "../routing/routing.module.js";
 import { MemoryController } from "./memory.controller.js";
@@ -14,15 +16,20 @@ import { DocumentsSource } from "./documents/documents.source.js";
  * SessionMemoryService and SemanticMemoryService (health() for the dashboard).
  */
 @Module({
-  imports: [RoutingModule],
+  imports: [RoutingModule, SettingsStoreModule],
   controllers: [MemoryController, DocumentsController],
   providers: [
     SessionMemoryService,
+    ConversationMilestoneService,
     SemanticMemoryService,
     MemorySource,
     DocumentIndexService,
     DocumentsSource,
   ],
-  exports: [SessionMemoryService, SemanticMemoryService],
+  exports: [
+    SessionMemoryService,
+    SemanticMemoryService,
+    ConversationMilestoneService,
+  ],
 })
 export class MemoryModule {}
