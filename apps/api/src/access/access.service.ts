@@ -43,6 +43,11 @@ export class AppAccessService {
     return this.config.appToken.length > 0;
   }
 
+  /** Privacy boundary asserted by configuration only; incoming headers are never trusted. */
+  get privacyProtected(): boolean {
+    return this.required || this.config.reverseProxyAuth;
+  }
+
   isAuthorized(request: Request): boolean {
     if (!this.required) return true;
     const value = cookieValue(request);

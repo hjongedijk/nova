@@ -22,6 +22,7 @@ Notes on the tables below:
 | `NOVA_PUBLIC_URL`          | empty                                             | The address people use behind a reverse proxy, for example `https://nova.example.com`. Only the origin is used. It is the address the Windows agent opens for the wallpaper and helper.                                                                                                  | no     |
 | `NOVA_ADMIN_PIN`           | empty                                             | PIN for the Settings screen. When set, every settings route needs it. Empty means no PIN.                                                                                                                                                                                                | yes    |
 | `NOVA_APP_TOKEN`           | empty                                             | Optional app-wide access token. When set, API routes require a 12-hour Secure, HttpOnly, SameSite=Strict browser session, except access bootstrap, health, and Node-RED's separately bearer-authenticated ingress and read-only proactive ask route. Use a long random secret and HTTPS. | yes    |
+| `NOVA_REVERSE_PROXY_AUTH`  | false                                             | Explicit operator assertion that an authenticated reverse proxy protects every route. Allows private calendar display without NOVA's optional browser unlock. This does not validate proxy credentials or trust request headers; leave `NOVA_APP_TOKEN` empty to avoid the second login. | no     |
 | `TZ`                       | `Europe/Amsterdam`                                | Time zone of NOVA and of the Node-RED and Home Assistant containers.                                                                                                                                                                                                                     | no     |
 | `NOVA_DEFAULT_LANGUAGE`    | `nl-NL`                                           | Default language NOVA reports to the interface (`/api/health`).                                                                                                                                                                                                                          | no     |
 | `PORT`                     | `3000` (`8080` in the image)                      | HTTP port of the API and the web app.                                                                                                                                                                                                                                                    | no     |
@@ -225,6 +226,11 @@ stays in memory only until unlock succeeds and is never stored in browser storag
 Sessions live in API memory, so restarting NOVA logs browsers out. The health probe, access bootstrap
 and separately bearer-authenticated Node-RED event ingress and read-only proactive ask route remain
 available without this session.
+
+For an already authenticated reverse proxy, leave `NOVA_APP_TOKEN` empty and explicitly set
+`NOVA_REVERSE_PROXY_AUTH=true`. NOVA then opens without a second unlock and keeps calendar display
+available behind that deployment boundary. This flag does not configure or authenticate the proxy.
+Node-RED event and proactive tokens remain separate.
 
 The page transition keeps one private, server-local snapshot named `settings.json.before-settings-page-v1`.
 It is readable only by NOVA, includes existing private skill configuration and is never part of a download.

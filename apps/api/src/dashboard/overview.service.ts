@@ -152,7 +152,7 @@ export class OverviewService {
         () => null,
       );
     const calendarAvailable =
-      this.appAccess.required && this.calendar.configured;
+      this.appAccess.privacyProtected && this.calendar.configured;
     const [
       guests,
       storage,
@@ -184,7 +184,7 @@ export class OverviewService {
     const lists = settle(Promise.resolve(this.planning.lists()));
     const alerts = settle(Promise.resolve(this.checks.alerts()));
     const visibleHomeEntities = entities ? this.home.visibleEntities() : null;
-    const calendarStatus = !this.appAccess.required
+    const calendarStatus = !this.appAccess.privacyProtected
       ? "protected"
       : !this.calendar.configured
         ? "not-configured"

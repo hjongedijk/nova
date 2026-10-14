@@ -76,6 +76,8 @@ export class NovaConfig {
   readonly adminPin = text("NOVA_ADMIN_PIN");
   /** Optional app-wide token; users exchange it for a short-lived HTTP-only session. */
   readonly appToken = text("NOVA_APP_TOKEN");
+  /** Explicit operator assertion that an authenticated reverse proxy protects every app route. */
+  readonly reverseProxyAuth = flag("NOVA_REVERSE_PROXY_AUTH", false);
   /** Permit a graceful process restart only when an external supervisor restarts this process. */
   readonly restartEnabled = flag("NOVA_RESTART_ENABLED", false);
   readonly stackControlUrl = url(

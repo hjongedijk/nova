@@ -5,6 +5,7 @@ import { OverviewService } from "../../src/dashboard/overview.service.js";
 function fixture(options: {
   required: boolean;
   configured: boolean;
+  reverseProxyAuth?: boolean;
   fail?: boolean;
 }) {
   const upcoming = vi.fn(async () => {
@@ -40,7 +41,9 @@ function fixture(options: {
       moon: () => null,
     } as never,
     { configured: options.configured, upcoming } as never,
-    { required: options.required } as never,
+    {
+      privacyProtected: options.required || options.reverseProxyAuth === true,
+    } as never,
   );
   return { service, upcoming };
 }
@@ -74,7 +77,7 @@ describe("overview calendar privacy", () => {
       "Overzicht is tijdelijk niet beschikbaar.",
     );
   });
-  it("does not request or expose appointments without app access enabled", async () => {
+  it("does not request or expose appointments without a configured access boundary", async () => {
     const { service, upcoming } = fixture({
       required: false,
       configured: true,
@@ -85,6 +88,19 @@ describe("overview calendar privacy", () => {
     expect(upcoming).not.toHaveBeenCalled();
     expect(overview.calendarStatus).toBe("protected");
     expect(overview.nextAppointment).toBeNull();
+  });
+
+  it("shows the calendar behind an explicitly configured authenticated reverse proxy", async () => {
+    const { service, upcoming } = fixture({
+      required: false,
+      reverseProxyAuth: true,
+      configured: true,
+    });
+    const overview = await service.overview();
+    expect(upcoming).toHaveBeenCalledOnce();
+    expect(overview.calendarStatus).toBe("ready");
+    expect(overview.nextAppointment?.summary).toBe("Tandarts");
+    expect(JSON.stringify(overview)).not.toContain("privateData");
   });
 
   it("returns only the next appointment's display fields behind app access", async () => {

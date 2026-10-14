@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import { APP_ACCESS_PUBLIC } from "../../src/access/access-public.js";
+import { AppAccessService } from "../../src/access/access.service.js";
 import { NodeRedEventsController } from "../../src/dashboard/node-red-events.controller.js";
 import { createApp, type TestApp } from "../settings/helpers.js";
 
@@ -21,8 +22,25 @@ describe("app-wide access gate", () => {
         unlocked: true,
       });
       expect((await open.api.get("/api/settings/public")).status).toBe(200);
+      expect(open.app.get(AppAccessService).privacyProtected).toBe(false);
     } finally {
       await open.app.close();
+    }
+  });
+
+  it("allows proxy-protected deployments without a second browser unlock", async () => {
+    const proxied = await createApp({
+      env: { NOVA_REVERSE_PROXY_AUTH: "true" },
+    });
+    try {
+      expect((await proxied.api.get("/api/access/status")).body).toEqual({
+        required: false,
+        unlocked: true,
+      });
+      expect((await proxied.api.get("/api/settings/public")).status).toBe(200);
+      expect(proxied.app.get(AppAccessService).privacyProtected).toBe(true);
+    } finally {
+      await proxied.app.close();
     }
   });
 
