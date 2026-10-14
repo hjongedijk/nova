@@ -21,6 +21,7 @@
 | [Routes and travel time](routes.md)                 | Optional free route source, setup, attribution and current limits                             |
 | [Local plugins](local-plugins.md)                   | Private JSON webhook manifests, limits and safety rules                                       |
 | [Conversation language](conversation-language.md)   | Switch one conversation between Dutch and English, including voice                            |
+| [Conversation milestone](conversation-milestone.md) | Opt-in completed-turn counter, quiet delivery, restart recovery and privacy                   |
 | [Conversation handoff](conversation-handoff.md)     | Save a small local handoff card and resume a conversation later                               |
 | [Urgent phone notifications](push-notifications.md) | Private ntfy setup and what NOVA sends to the phone                                           |
 
