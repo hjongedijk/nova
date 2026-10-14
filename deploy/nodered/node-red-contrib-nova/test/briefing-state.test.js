@@ -254,3 +254,122 @@ test("oversized generated briefing is clearly marked shortened within the feed l
   assert(f.deliveries[0].reply.length <= 240);
   assert.match(f.deliveries[0].reply, /… \(ingekort\)$/);
 });
+
+test("event identity and saved reply survive clock/timezone edits without another model call", async (t) => {
+  const f = fixture(t, { time: "" });
+  let attempts = 0;
+  f.options.deliver = async (job) => {
+    f.deliveries.push(job);
+    if (++attempts === 1) throw new Error("ack lost");
+  };
+  let engine = f.open();
+  engine.event("stable-clock-event");
+  await engine.tick();
+  const id = engine.jobs[0].id;
+  await engine.close();
+  f.options.time = "00:01";
+  f.options.timezone = "UTC";
+  f.advance(30000);
+  engine = f.open();
+  assert.equal(engine.event("stable-clock-event"), false);
+  await engine.tick();
+  assert.equal(f.asks, 1);
+  assert.equal(engine.jobs[0].status, "complete");
+  assert.deepEqual(
+    f.deliveries.map((job) => job.id),
+    [id, id],
+  );
+});
+
+test("known-owner v1 events upgrade durably before clock edit and preserve legacy IDs", async (t) => {
+  const { createHash } = require("node:crypto");
+  const f = fixture(t, { time: "" });
+  let engine = f.open();
+  engine.event("legacy-event");
+  const old = JSON.parse(fs.readFileSync(f.options.file, "utf8"));
+  old.version = 1;
+  delete old.jobs[0].eventOwner;
+  old.jobs[0].id = `nova-workflow:${createHash("sha256")
+    .update(`${engine.fingerprint}:event:legacy-event`)
+    .digest("hex")}`;
+  await engine.close();
+  fs.writeFileSync(f.options.file, JSON.stringify(old));
+  engine = f.open();
+  const upgraded = JSON.parse(fs.readFileSync(f.options.file, "utf8"));
+  assert.equal(upgraded.version, 2);
+  assert.equal(upgraded.jobs[0].eventOwner, engine.eventIdentity);
+  assert.equal(upgraded.jobs[0].id, old.jobs[0].id);
+  assert.equal(f.asks, 0);
+  await engine.close();
+  f.options.time = "00:01";
+  f.options.timezone = "UTC";
+  engine = f.open();
+  assert.equal(engine.event("legacy-event"), false);
+  await engine.tick();
+  assert.equal(f.asks, 1);
+  assert.equal(f.deliveries[0].id, old.jobs[0].id);
+});
+
+test("unknown-owner legacy events fail closed while edited scheduled jobs stay cancelled", async (t) => {
+  const f = fixture(t);
+  let engine = f.open();
+  engine.event("legacy-unknown");
+  engine.schedule();
+  await engine.close();
+  const old = JSON.parse(fs.readFileSync(f.options.file, "utf8"));
+  old.version = 1;
+  delete old.jobs[0].eventOwner;
+  fs.writeFileSync(f.options.file, JSON.stringify(old));
+  f.options.time = "00:01";
+  engine = f.open();
+  assert.equal(engine.jobs[0].status, "failed");
+  assert.equal(engine.jobs[0].eventOwner, undefined);
+  assert.equal(JSON.parse(fs.readFileSync(f.options.file, "utf8")).version, 2);
+  await engine.tick();
+  assert.equal(engine.jobs[1].status, "failed");
+  assert.equal(f.asks, 0);
+});
+
+test("v2 pending events without an owner are rejected and failed unowned events remain retained", async (t) => {
+  const f = fixture(t, { time: "" });
+  let engine = f.open();
+  engine.event("owner-required");
+  await engine.close();
+  const data = JSON.parse(fs.readFileSync(f.options.file, "utf8"));
+  delete data.jobs[0].eventOwner;
+  fs.writeFileSync(f.options.file, JSON.stringify(data));
+  assert.throws(() => f.open(), /state unavailable/);
+  data.jobs[0].status = "failed";
+  fs.writeFileSync(f.options.file, JSON.stringify(data));
+  engine = f.open();
+  await engine.tick();
+  assert.equal(engine.jobs.length, 1);
+  assert.equal(f.asks, 0);
+});
+
+test("failed v1 upgrade cannot claim ownership or run work before durable migration", async (t) => {
+  const f = fixture(t, { time: "" });
+  let engine = f.open();
+  engine.event("upgrade-retry");
+  await engine.close();
+  const old = JSON.parse(fs.readFileSync(f.options.file, "utf8"));
+  old.version = 1;
+  delete old.jobs[0].eventOwner;
+  fs.writeFileSync(f.options.file, JSON.stringify(old));
+  const original = fs.fsyncSync;
+  fs.fsyncSync = () => {
+    throw new Error("synthetic storage failure");
+  };
+  try {
+    assert.throws(() => f.open(), /state unavailable/);
+  } finally {
+    fs.fsyncSync = original;
+  }
+  assert.equal(f.asks, 0);
+  assert.equal(JSON.parse(fs.readFileSync(f.options.file, "utf8")).version, 1);
+  engine = f.open();
+  assert.equal(JSON.parse(fs.readFileSync(f.options.file, "utf8")).version, 2);
+  await engine.tick();
+  assert.equal(f.asks, 1);
+  assert.equal(f.deliveries[0].id, old.jobs[0].id);
+});

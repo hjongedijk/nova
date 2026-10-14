@@ -11,7 +11,7 @@ The deployment seed script copies the seed only into an empty persistent
 `/data` directory. It never replaces an existing `/data/flows.json`, so an
 upgrade cannot silently overwrite operator flows. Import reviewed updates into
 the live editor deliberately, or back up its persistent data before replacing
-flows. NOVA's Settings page normally shows only tab names and counts. An
+flows. NOVA's Settings page shows tab names, counts and validated fixed briefing schedules. An
 explicit PIN/admin-protected download can export validated live flows as a
 bounded Node-RED JSON array; the server rejects credential fields and likely embedded
 secrets. Review the file before placing it in a repository. NOVA does not write
@@ -35,14 +35,21 @@ melding`. The status watcher is scoped to existing nodes in the selected tab.
 NOVA creates no Function-node code or arbitrary nodes. The Node-RED revision is
 checked before deployment and every new node is verified afterward. The
 Settings flow list offers these templates. “Ochtendbriefing” and “Avondoverzicht”
-add a daily cron Inject, a fixed request to NOVA's normal chat route, and a
-bounded alert to NOVA's active clients. Settings defaults to 07:30 and 20:30 and
+add the durable `NOVA briefing` node. Settings defaults to07:30 and20:30 and
 lets the user choose the local time before confirmation. The evening overview
-uses up to 12 successful action names and times from NOVA's local action log,
-open lists, timers, alerts, and tomorrow's appointments. It never includes
-action arguments or results and does not infer details from tool names. An open, unpaused,
-idle NOVA helper speaks the summary (up to 360 characters); quiet hours leave it visible but silent.
-The regular dashboard does not speak it. If the helper is busy or absent, the
-summary is not spoken later. Agenda content is
-included only when an agenda integration is available. Arbitrary flow
-generation and backup-specific failure detection remain unsupported.
+uses up to12 successful action names and times from NOVA's local action log,
+open lists, timers, alerts and tomorrow's appointments; arguments/results are
+excluded. Daily slots catch up within four hours, pending replies survive
+restarts and bounded retries reuse the same acceptance ID. Speech follows the
+existing briefing, presence, focus, quiet-hour and claim settings. Restarted
+history stays silent; physical receipt is not guaranteed.
+
+Existing fixed briefing schedules appear in the flow inventory. Changing their
+time or IANA timezone uses a dedicated DANGEROUS action with fresh confirmation,
+whole-flow revision checks and exact post-write verification. Empty daily time
+keeps event triggers and disables the daily schedule. This operation does not
+require an executable HTTP-flow mapping. It sends the configured admin bearer
+when present; a protected Node-RED API still rejects missing/invalid credentials.
+Only the local Node-RED service is reachable, and no flow contents or credentials
+are shown. Other flow creation, arbitrary code generation and backup-specific
+failure detection remain unsupported.

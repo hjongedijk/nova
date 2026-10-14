@@ -1275,6 +1275,10 @@ export class SettingsController {
           manageable:
             flowTools.includes("node_red_flow_state") &&
             this.nodeRedManagement.canSetFlowEnabled(flow.id),
+          briefings: (flow.briefings ?? []).map((briefing) => ({
+            ...briefing,
+            manageable: flowTools.includes("node_red_briefing_schedule"),
+          })),
           templates: flowTools.includes("node_red_flow_create")
             ? this.nodeRedManagement.availableTemplates(flow.id)
             : [],

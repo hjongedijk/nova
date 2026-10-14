@@ -1,3 +1,4 @@
+import { projectBriefingInventory } from "../dashboard/node-red-briefing.js";
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
 import crypto from "node:crypto";
 import { requestJson } from "../core/http/http-json.js";
@@ -75,6 +76,12 @@ export interface NodeRedFlowTab {
   label: string;
   disabled: boolean;
   nodeCount: number;
+  briefings?: {
+    id: string;
+    kind: "morning_briefing" | "evening_review";
+    time: string;
+    timezone: string;
+  }[];
   lastRun: string | null;
   lastError: string | null;
 }
@@ -602,6 +609,7 @@ export class NodeRedManagement {
       if (typeof row.z === "string" && tabIds.has(row.z))
         nodeCounts.set(row.z, (nodeCounts.get(row.z) ?? 0) + 1);
     }
+    const briefingInventory = projectBriefingInventory(flows);
     const tabs = flows.flatMap((item): NodeRedFlowTab[] => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
       const row = item as Record<string, unknown>;
@@ -622,6 +630,7 @@ export class NodeRedManagement {
           label,
           disabled: row.disabled === true,
           nodeCount: nodeCounts.get(row.id) ?? 0,
+          briefings: briefingInventory.get(row.id) ?? [],
           lastRun: null,
           lastError: null,
         },

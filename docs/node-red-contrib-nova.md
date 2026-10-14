@@ -54,8 +54,9 @@ Pending runs and sanitized replies live in private 0600 files under Node-RED's
 `/data/.nova-workflows`. Up to 32 jobs are retained per node; deduplication keeps
 at least seven days of history. A full queue rejects new events. Daily slots
 catch up within four hours, including after a restart, and a repeated autumn
-clock slot runs once. A changed schedule or briefing kind cancels older pending
-runs instead of executing them under different settings. Corrupt state is never
+clock slot runs once. A changed schedule cancels older pending scheduled runs. Stable-ID event runs
+and their deduplication survive clock/timezone edits; changing briefing kind
+cancels pending runs instead of executing them under different settings. Corrupt state is never
 silently overwritten.
 
 Each model/delivery phase has at most six attempts with exponential waits from
@@ -74,3 +75,21 @@ stops its work; retained state supports redeploying the same node ID.
 network and isolated data. It proves automatic schedule/event triggers, temporary
 503 recovery across a restart, lost-acknowledgement reply reuse and no replay
 after another restart. Its synthetic API is not live provider/audio evidence.
+
+Settings → Automation → Flows shows existing fixed morning/evening schedules.
+Change the daily time/timezone or select event-only operation, then approve the
+specific fresh confirmation. Concurrent flow edits invalidate that confirmation;
+reload before retrying. Only `time` and `timezone` on the selected existing
+`nova-briefing` node can change. Other nodes and credentials are preserved.
+
+Module0.1.5 upgrades known v1 event ownership to its v2 journal before making
+network calls. Deploy/restart this module with existing schedules unchanged
+before the first schedule edit. Existing event IDs remain valid and deduplicated.
+An old v1 event with an unmatched schedule fingerprint cannot prove its original
+kind; it is retained as failed instead of executing under an inferred identity.
+
+Rollback: retain module0.1.5 if rolling the NOVA API back to29; its workflow
+endpoint and acceptance IDs remain compatible. Module0.1.4 cannot read v2
+outboxes. Do not downgrade that module against upgraded data. A full runtime
+rollback instead needs the matching private Node-RED backup, with any newer
+work explicitly reconciled first; never replace live data blindly.

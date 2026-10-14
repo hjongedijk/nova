@@ -65,6 +65,19 @@ function describe(action: Pick<PendingConfirmation, "tool" | "args">): {
     VERBS[action.tool.replace(/^proxmox_/, "").replace(/_guest$/, "")];
   if (verb && a.vmid)
     return { nl: `VM ${a.vmid} ${verb[0]}`, en: `${verb[1]} VM ${a.vmid}` };
+  if (action.tool === "node_red_briefing_schedule") {
+    const title =
+      a.kind === "evening_review" ? "het avondoverzicht" : "de ochtendbriefing";
+    return a.time === ""
+      ? {
+          nl: `${title} alleen op gekoppelde gebeurtenissen laten reageren`,
+          en: "make this briefing event-only",
+        }
+      : {
+          nl: `${title} dagelijks om ${a.time} plannen (${a.timezone})`,
+          en: `schedule this briefing daily at ${a.time} (${a.timezone})`,
+        };
+  }
   if (action.tool === "termix_run_command")
     return {
       nl: `\`${a.command}\` uitvoeren op ${a.host}`,

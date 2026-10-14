@@ -173,6 +173,16 @@ describe("Node-RED flow inventory", () => {
           flows: [
             { id: "tab-a", type: "tab", label: "Kitchen", disabled: true },
             { id: "node-a", type: "function", z: "tab-a", func: "secret code" },
+            {
+              id: "briefing-a",
+              type: "nova-briefing",
+              z: "tab-a",
+              kind: "morning_briefing",
+              time: "07:30",
+              timezone: "Europe/Amsterdam",
+              credentials: { password: "private-fixture" },
+              unexpected: "hidden fixture",
+            },
             { id: "tab-b", type: "tab", label: "Garden" },
           ],
         }),
@@ -190,7 +200,15 @@ describe("Node-RED flow inventory", () => {
           id: "tab-a",
           label: "Kitchen",
           disabled: true,
-          nodeCount: 1,
+          nodeCount: 2,
+          briefings: [
+            {
+              id: "briefing-a",
+              kind: "morning_briefing",
+              time: "07:30",
+              timezone: "Europe/Amsterdam",
+            },
+          ],
           lastRun: null,
           lastError: null,
         },
@@ -199,6 +217,7 @@ describe("Node-RED flow inventory", () => {
           label: "Garden",
           disabled: false,
           nodeCount: 0,
+          briefings: [],
           lastRun: null,
           lastError: null,
         },
@@ -206,7 +225,7 @@ describe("Node-RED flow inventory", () => {
       truncated: false,
     });
     expect(JSON.stringify(report)).not.toMatch(
-      /secret code|function|credentials/,
+      /secret code|function|credentials|private-fixture|hidden fixture/,
     );
   });
 

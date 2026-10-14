@@ -45,6 +45,7 @@
   import Button from "#components/ui/Button.svelte";
   import StackControl from "./StackControl.svelte";
   import NodeRedFlowHistory from "./NodeRedFlowHistory.svelte";
+  import NodeRedBriefing from "./NodeRedBriefing.svelte";
   import NodeRedPalette from "./NodeRedPalette.svelte";
   import AdminConfirmation from "#components/admin/AdminConfirmation.svelte";
   import { sessionId } from "#components/admin/session.ts";
@@ -1061,8 +1062,8 @@
         >
           <h4>Flows</h4>
           <p class="hint">
-            Toont alleen tabnamen en aantallen. Nodeconfiguratie en credentials
-            blijven verborgen.
+            Toont flows en de planning van vaste NOVA-briefings. Overige
+            nodeconfiguratie en credentials blijven verborgen.
           </p>
           {#if nodeRedFlows?.editorUrl}<p>
               <a href={nodeRedFlows.editorUrl} target="_blank" rel="noreferrer"
@@ -1102,6 +1103,9 @@
                       >
                         · bevat de gemelde fout</span
                       >{/if}
+                    {#each flow.briefings ?? [] as briefing (briefing.id)}
+                      <NodeRedBriefing {briefing} onSaved={loadNodeRedFlows} />
+                    {/each}
                     {#if flow.runnableFlowId}<Button
                         disabled={nodeRedRunBusy || flow.disabled}
                         onclick={() => runNodeRedFlow(flow)}>Nu starten</Button

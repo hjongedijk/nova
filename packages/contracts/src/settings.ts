@@ -996,6 +996,13 @@ export interface WallpaperHistory {
   revisions: WallpaperRevision[];
   truncated: boolean;
 }
+export interface NodeRedBriefingSchedule {
+  id: string;
+  kind: "morning_briefing" | "evening_review";
+  time: string;
+  timezone: string;
+  manageable: boolean;
+}
 export interface NodeRedFlowInventory {
   revision: string | null;
   flows: {
@@ -1008,6 +1015,7 @@ export interface NodeRedFlowInventory {
     runnableFlowId: string | null;
     manageable: boolean;
     templates: string[];
+    briefings?: NodeRedBriefingSchedule[];
   }[];
   truncated: boolean;
   editorUrl: string | null;

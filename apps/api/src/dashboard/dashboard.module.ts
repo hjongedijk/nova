@@ -22,6 +22,7 @@ import { OverviewService } from "./overview.service.js";
 import { SystemSource } from "./system.source.js";
 import { NodeRedHealth } from "./node-red-health.service.js";
 import { NodeRedEventsController } from "./node-red-events.controller.js";
+import { NodeRedBriefingSource } from "./node-red-briefing.source.js";
 import { NodeRedFlowSource } from "./node-red-flow.source.js";
 import { DataBackupService } from "./data-backup.service.js";
 import { SpeechPresenceService } from "./speech-presence.service.js";
@@ -61,6 +62,7 @@ import { SmallSurprisesService } from "./small-surprises.service.js";
     SystemSource,
     NodeRedHealth,
     NodeRedFlowSource,
+    NodeRedBriefingSource,
     DataBackupService,
     SpeechPresenceService,
     WeatherDepartureAlertService,

@@ -40,6 +40,7 @@ class BriefingState {
     this.kind = kind;
     this.time = time;
     this.fingerprint = hash(JSON.stringify([nodeId, kind, time, timezone]));
+    this.eventIdentity = hash(JSON.stringify([nodeId, kind]));
     this.ask = ask;
     this.deliver = deliver;
     this.now = now;
@@ -47,6 +48,7 @@ class BriefingState {
     this.running = null;
     if (owners.has(file)) throw new Error("Briefing owner already active");
     this.jobs = this.load();
+    if (this.needsUpgrade) this.save();
     owners.add(file);
   }
 
@@ -62,7 +64,7 @@ class BriefingState {
         throw new Error();
       const state = JSON.parse(fs.readFileSync(descriptor, "utf8"));
       if (
-        state.version !== 1 ||
+        ![1, 2].includes(state.version) ||
         !Array.isArray(state.jobs) ||
         state.jobs.length > MAX_JOBS ||
         state.jobs.some(
@@ -82,12 +84,32 @@ class BriefingState {
               (typeof job.reply !== "string" ||
                 !job.reply.trim() ||
                 job.reply.length > 240)) ||
-            (job.status === "reply" && !job.reply),
+            (job.status === "reply" && !job.reply) ||
+            (state.version === 2 &&
+              job.source === "event" &&
+              !(
+                typeof job.eventOwner === "string" &&
+                /^[a-f0-9]{64}$/.test(job.eventOwner)
+              ) &&
+              !(job.eventOwner === undefined && job.status === "failed")),
         )
       )
         throw new Error();
       if (new Set(state.jobs.map((job) => job.id)).size !== state.jobs.length)
         throw new Error();
+      this.needsUpgrade = state.version === 1;
+      if (this.needsUpgrade) {
+        for (const job of state.jobs) {
+          if (job.source !== "event") continue;
+          if (job.fingerprint === this.fingerprint)
+            job.eventOwner = this.eventIdentity;
+          else {
+            // Legacy records contain no recoverable kind: never infer ownership.
+            delete job.eventOwner;
+            job.status = "failed";
+          }
+        }
+      }
       return state.jobs;
     } catch (error) {
       if (error.code === "ENOENT") return [];
@@ -112,7 +134,7 @@ class BriefingState {
       );
       fs.writeFileSync(
         descriptor,
-        JSON.stringify({ version: 1, jobs: this.jobs }),
+        JSON.stringify({ version: 2, jobs: this.jobs }),
       );
       fs.fsyncSync(descriptor);
       fs.closeSync(descriptor);
@@ -120,6 +142,7 @@ class BriefingState {
       fs.renameSync(temporary, this.file);
       descriptor = fs.openSync(path.dirname(this.file), "r");
       fs.fsyncSync(descriptor);
+      this.needsUpgrade = false;
     } catch {
       this.needsReload = true;
       throw new Error("Briefing state unavailable");
@@ -135,8 +158,20 @@ class BriefingState {
       this.jobs = this.load();
       this.needsReload = false;
     }
-    const id = `nova-workflow:${hash(`${this.fingerprint}:${source}:${key}`)}`;
-    if (this.jobs.some((job) => job.id === id)) return false;
+    const identity = source === "event" ? this.eventIdentity : this.fingerprint;
+    const id = `nova-workflow:${hash(`${identity}:${source}:${key}`)}`;
+    if (
+      this.jobs.some(
+        (job) =>
+          job.id === id ||
+          (source === "event" &&
+            job.source === "event" &&
+            job.eventOwner === this.eventIdentity &&
+            job.id ===
+              `nova-workflow:${hash(`${job.fingerprint}:event:${key}`)}`),
+      )
+    )
+      return false;
     // Retain at least seven days of deduplication, including failed jobs.
     this.jobs = this.jobs.filter(
       (job) => job.expiresAt + 7 * 86400000 > this.now(),
@@ -145,6 +180,7 @@ class BriefingState {
     const job = {
       id,
       fingerprint: this.fingerprint,
+      ...(source === "event" ? { eventOwner: this.eventIdentity } : {}),
       source,
       status: "pending",
       attempts: 0,
@@ -213,7 +249,9 @@ class BriefingState {
       if (this.closed) return;
       if (!["pending", "reply"].includes(job.status)) continue;
       if (
-        job.fingerprint !== this.fingerprint ||
+        (job.source === "event"
+          ? job.eventOwner !== this.eventIdentity
+          : job.fingerprint !== this.fingerprint) ||
         this.now() > job.expiresAt ||
         job.attempts >= MAX_ATTEMPTS
       ) {
