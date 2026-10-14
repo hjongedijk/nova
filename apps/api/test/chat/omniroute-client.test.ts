@@ -3,6 +3,7 @@ import { NovaConfig } from "../../src/core/config/nova-config.js";
 import {
   IncompleteModelResponseError,
   OmniRouteClient,
+  type ModelInputMessage,
 } from "../../src/chat/omniroute-client.service.js";
 import { RoutingService } from "../../src/routing/routing.service.js";
 import fs from "node:fs";
@@ -437,5 +438,129 @@ describe("OmniRoute HTTP failure cleanup and bounded fallback", () => {
     );
     expect(cancel).toHaveBeenCalledOnce();
     expect(fetcher).toHaveBeenCalledOnce();
+  });
+});
+
+describe("OmniRoute tool-result transport compatibility", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function client() {
+    const config = new NovaConfig();
+    const routing = new RoutingService(config);
+    vi.spyOn(routing, "assertFree").mockReturnValue({
+      freeOnly: true,
+      ready: true,
+      policyVerified: true,
+      status: "OK",
+    });
+    return new OmniRouteClient(config, routing);
+  }
+
+  it("completes a tool round when the provider rejects null assistant content", async () => {
+    const toolCall = {
+      id: "fixture-call-1",
+      type: "function" as const,
+      function: { name: "fixture_lookup", arguments: '{"day":"today"}' },
+    };
+    const wires: ModelInputMessage[][] = [];
+    const fetcher = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const messages = JSON.parse(String(init?.body))
+        .messages as ModelInputMessage[];
+      wires.push(messages);
+      if (
+        messages.some(
+          (message) =>
+            message.role === "assistant" &&
+            message.content === null &&
+            message.tool_calls?.length,
+        )
+      )
+        return Response.json(
+          { error: "assistant.content must be a string" },
+          { status: 400 },
+        );
+      return Response.json({
+        choices: [
+          {
+            finish_reason: wires.length === 1 ? "tool_calls" : "stop",
+            message:
+              wires.length === 1
+                ? { role: "assistant", content: null, tool_calls: [toolCall] }
+                : { role: "assistant", content: "Gevonden." },
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const api = client();
+    const first = await api.call([{ role: "user", content: "Zoek vandaag." }]);
+    const followup: ModelInputMessage[] = [
+      { role: "user", content: "Zoek vandaag. password: fixture-private" },
+      first.assistant,
+      {
+        role: "tool",
+        tool_call_id: toolCall.id,
+        name: "fixture_lookup",
+        content: "today",
+      },
+    ];
+    const original = structuredClone(followup);
+    Object.freeze(first.assistant);
+    const answer = await api.call(followup);
+    expect(answer.assistant.content).toBe("Gevonden.");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(wires[1]).toEqual([
+      { role: "user", content: "Zoek vandaag. password: [redacted]" },
+      { ...original[1], content: "" },
+      original[2],
+    ]);
+    expect(followup).toEqual(original);
+    expect(first.assistant.content).toBeNull();
+  });
+
+  it("preserves real content, non-assistant messages and null without tool calls", async () => {
+    const toolCall = {
+      id: "fixture-call-2",
+      type: "function" as const,
+      function: { name: "fixture_lookup", arguments: '{"limit":2}' },
+    };
+    const messages: ModelInputMessage[] = [
+      { role: "assistant", content: "Even kijken.", tool_calls: [toolCall] },
+      { role: "assistant", content: null },
+      { role: "assistant", content: null, tool_calls: [] },
+      { role: "tool", content: null, tool_call_id: "fixture-call-2" },
+      { role: "user", content: null },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [toolCall],
+        name: "nova",
+      },
+    ];
+    const original = structuredClone(messages);
+    let wire: ModelInputMessage[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: RequestInit) => {
+        wire = JSON.parse(String(init?.body)).messages;
+        return Response.json({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: { role: "assistant", content: "Klaar." },
+            },
+          ],
+        });
+      }),
+    );
+    await client().call(messages);
+    expect(wire).toEqual([
+      ...original.slice(0, -1),
+      { ...original.at(-1), content: "" },
+    ]);
+    expect(messages).toEqual(original);
   });
 });

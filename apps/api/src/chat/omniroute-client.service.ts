@@ -211,7 +211,18 @@ export class OmniRouteClient {
       : [model];
     const body: Record<string, unknown> = {
       model,
-      messages: sanitize(messages),
+      // Some tool-capable providers require string content even for tool-only
+      // assistant messages. Preserve the caller's history and all tool metadata.
+      messages: sanitize(
+        messages.map((message) =>
+          message.role === "assistant" &&
+          message.content === null &&
+          Array.isArray(message.tool_calls) &&
+          message.tool_calls.length > 0
+            ? { ...message, content: "" }
+            : message,
+        ),
+      ),
       temperature,
       max_tokens: maxTokens,
       reasoning_effort: "none",
