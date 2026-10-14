@@ -155,64 +155,13 @@ const generatedFixture = [
     disabled: false,
   },
   {
-    id: "nova-generated-briefing-inject-test",
-    type: "inject",
+    id: "nova-generated-briefing-node-test",
+    type: "nova-briefing",
     z: "nova-generated-briefing-test",
     name: "NOVA generated morning_briefing",
-    props: [{ p: "payload" }],
-    repeat: "",
-    crontab: "45 7 * * *",
-    once: false,
-    onceDelay: 0.1,
-    topic: "",
-    payload: "",
-    payloadType: "str",
-    wires: [["nova-generated-briefing-prompt-test"]],
-  },
-  {
-    id: "nova-generated-briefing-prompt-test",
-    type: "change",
-    z: "nova-generated-briefing-test",
-    name: "Prepare briefing request",
-    rules: [
-      {
-        t: "set",
-        p: "payload",
-        pt: "msg",
-        to: "Give me a short Dutch morning briefing for today. Use daily_briefing, current weather and relevant news. Include agenda items only if an agenda is connected; say plainly if agenda data is unavailable. Return a natural spoken summary in at most 240 characters.",
-        tot: "str",
-      },
-    ],
-    wires: [["nova-generated-briefing-ask-test"]],
-  },
-  {
-    id: "nova-generated-briefing-ask-test",
-    type: "nova-ask",
-    z: "nova-generated-briefing-test",
-    name: "Ask NOVA for morning briefing",
-    wires: [["nova-generated-briefing-format-test"]],
-  },
-  {
-    id: "nova-generated-briefing-format-test",
-    type: "change",
-    z: "nova-generated-briefing-test",
-    name: "Format NOVA briefing alert",
-    rules: [
-      {
-        t: "set",
-        p: "payload",
-        pt: "msg",
-        to: '{"title":"Ochtendbriefing","detail":$substring(payload,0,240),"severity":"info"}',
-        tot: "jsonata",
-      },
-    ],
-    wires: [["nova-generated-briefing-notify-test"]],
-  },
-  {
-    id: "nova-generated-briefing-notify-test",
-    type: "nova-notify",
-    z: "nova-generated-briefing-test",
-    name: "Send morning briefing to NOVA",
+    kind: "morning_briefing",
+    time: "",
+    timezone: "Europe/Amsterdam",
     wires: [[]],
   },
 ];
@@ -339,9 +288,13 @@ try {
     `Node-RED /nodes returned ${nodesResponse.status}`,
   );
   const nodeTypes = await nodesResponse.text();
-  const missing = ["nova-say", "nova-ask", "nova-notify", "nova-event"].filter(
-    (type) => !nodeTypes.includes(type),
-  );
+  const missing = [
+    "nova-say",
+    "nova-ask",
+    "nova-notify",
+    "nova-event",
+    "nova-briefing",
+  ].filter((type) => !nodeTypes.includes(type));
   if (missing.length) {
     console.error(docker(["logs", "--tail", "80", container]));
     console.error(
@@ -368,7 +321,7 @@ try {
     severity: "warning",
   });
   console.log(
-    `Node-RED imported ${expectedIds.length} flow nodes, registered all four NOVA nodes, and delivered a notification to the NOVA API boundary.`,
+    `Node-RED imported ${expectedIds.length} flow nodes, registered all five NOVA nodes, and delivered a notification to the NOVA API boundary.`,
   );
 } finally {
   if (container) spawnSync("docker", ["stop", container], { encoding: "utf8" });

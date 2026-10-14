@@ -1,0 +1,68 @@
+<script type="text/javascript">
+  RED.nodes.registerType("nova-briefing", {
+    category: "NOVA",
+    color: "#7656a8",
+    defaults: {
+      name: { value: "" },
+      kind: { value: "morning_briefing", required: true },
+      time: {
+        value: "07:30",
+        validate: function (v) {
+          return v === "" || /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+        },
+      },
+      timezone: { value: "Europe/Amsterdam", required: true },
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-clock-o",
+    label: function () {
+      return this.name || "NOVA briefing";
+    },
+    paletteLabel: "NOVA briefing",
+  });
+</script>
+<script type="text/html" data-template-name="nova-briefing">
+  <div class="form-row">
+    <label for="node-input-name">Naam</label
+    ><input type="text" id="node-input-name" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-kind">Overzicht</label
+    ><select id="node-input-kind">
+      <option value="morning_briefing">Ochtendbriefing</option>
+      <option value="evening_review">Avondoverzicht</option>
+    </select>
+  </div>
+  <div class="form-row">
+    <label for="node-input-time">Dagelijks</label
+    ><input
+      type="text"
+      id="node-input-time"
+      placeholder="07:30 (leeg voor alleen gebeurtenissen)"
+    />
+  </div>
+  <div class="form-row">
+    <label for="node-input-timezone">Tijdzone</label
+    ><input type="text" id="node-input-timezone" />
+  </div>
+</script>
+<script type="text/html" data-help-name="nova-briefing">
+  <p>
+    Maakt automatisch een alleen-lezen briefing en levert die aan NOVA. Opslag
+    en retries blijven behouden na een herstart.
+  </p>
+  <p>
+    Een gemiste dagelijkse briefing wordt tot vier uur later ingehaald. Maximaal
+    zes pogingen per fase, met oplopende wachttijd.
+  </p>
+  <p>
+    Een inkomend bericht kan dezelfde vaste briefing starten. Geef een unieke,
+    stabiele <code>msg.novaEventId</code> mee; herhaling met hetzelfde ID maakt
+    geen nieuw overzicht. Inkomende payload wordt niet als opdracht gebruikt.
+  </p>
+  <p>
+    Verbind de uitgang niet met NOVA melding: deze node levert zelf af. Het
+    uitvoerbericht bevestigt alleen de ontvangst.
+  </p>
+</script>

@@ -81,7 +81,12 @@ async function request(path, body, options = {}) {
       method: body === undefined ? "GET" : "POST",
       headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(options.timeoutMs || 12000),
+      signal: options.signal
+        ? AbortSignal.any([
+            options.signal,
+            AbortSignal.timeout(options.timeoutMs || 12000),
+          ])
+        : AbortSignal.timeout(options.timeoutMs || 12000),
     });
   let response = await send();
   if (

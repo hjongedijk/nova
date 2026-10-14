@@ -27,6 +27,7 @@ jobs:
       - run: npm test --prefix deploy/nodered/node-red-contrib-nova
       - run: npm run test:nodered-seed
       - run: node scripts/test-nodered-flows.mjs
+      - run: node scripts/test-briefing-runtime.mjs
       - run: npm run test:compose-notification
       - run: npm run test:mcp-sandbox
       # The Windows agent cannot run here, but its syntax and embedded C# can be checked.

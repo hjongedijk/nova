@@ -454,24 +454,14 @@ describe("Node-RED flow tool", () => {
             !flows.some((before) => (before as { id: string }).id === flow.id),
         );
         expect(added.map((node: { type: string }) => node.type)).toEqual([
-          "inject",
-          "change",
-          "nova-ask",
-          "change",
-          "nova-notify",
+          "nova-briefing",
         ]);
-        expect(added[0].crontab).toBe(evening ? "30 20 * * *" : "45 7 * * *");
-        expect(added[2].name).toBe(
-          evening
-            ? "Ask NOVA for evening review"
-            : "Ask NOVA for morning briefing",
-        );
-        expect(added[2].proactive).toBe(true);
-        expect(added[1].rules[0].to).toContain(
-          evening ? "daily_briefing.activity.entries" : "ochtendbriefing",
-        );
-        expect(added[3].rules[0].to).toContain("$substring(payload,0,240)");
-        expect(added[3].rules[0].to).toContain('"category":"briefing"');
+        expect(added[0]).toMatchObject({
+          kind: evening ? "evening_review" : "morning_briefing",
+          time: evening ? "20:30" : "07:45",
+          timezone: "Europe/Amsterdam",
+          wires: [[]],
+        });
         flows = body.flows;
         rev = `rev-${Number(rev.slice(4)) + 1}`;
         response.writeHead(200, { "content-type": "application/json" });

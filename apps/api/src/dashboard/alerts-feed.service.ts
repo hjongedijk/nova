@@ -17,6 +17,7 @@ import { WindowsPcService } from "../integrations/windows/windows-pc.service.js"
 import { PlanningService } from "../planning/planning.service.js";
 import { SpeechPresenceService } from "./speech-presence.service.js";
 import { NtfyPushService } from "./ntfy-push.service.js";
+import { WorkflowFeedJournal } from "./workflow-feed-journal.js";
 import { TimerFeedJournal } from "./timer-feed-journal.js";
 import { SettingsStore } from "../settings/store/settings.store.js";
 
@@ -93,6 +94,8 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
   private stopTimers?: () => void;
   private readonly timerJournal?: TimerFeedJournal;
   private timerHistoryRestored = false;
+  private readonly workflowJournal?: WorkflowFeedJournal;
+  private workflowHistoryRestored = false;
   private stopPresence?: () => void;
   private deferredTimer?: NodeJS.Timeout;
   private readonly deferredWhileAway = new Map<number, number>();
@@ -124,6 +127,16 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       this.timerJournal = new TimerFeedJournal(
         config.dataFile("timer-feed.json"),
       );
+      this.workflowJournal = new WorkflowFeedJournal(
+        config.dataFile("workflow-feed.json"),
+      );
+      try {
+        this.restoreWorkflowHistory();
+      } catch {
+        this.logger.warn(
+          "Workflow feed history unavailable; workflows remain queued",
+        );
+      }
       try {
         this.restoreTimerHistory();
       } catch {
@@ -138,10 +151,25 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     if (!this.timerJournal || this.timerHistoryRestored) return;
     for (const { event } of this.timerJournal.read().slice(-MAX_EVENTS)) {
       // Recovery restores visible history without replaying speech/cues/native delivery.
-      this.feed.push({ ...event, speakAllowed: false, deliveryMode: "screen" });
+      this.restoreEvent(event);
       this.sequence = Math.max(this.sequence, event.seq);
     }
     this.timerHistoryRestored = true;
+  }
+
+  private restoreEvent(event: FeedEvent): void {
+    this.feed.push({ ...event, speakAllowed: false, deliveryMode: "screen" });
+    this.feed.sort((a, b) => a.seq - b.seq);
+    if (this.feed.length > MAX_EVENTS)
+      this.feed.splice(0, this.feed.length - MAX_EVENTS);
+    this.sequence = Math.max(this.sequence, event.seq);
+  }
+
+  private restoreWorkflowHistory(): void {
+    if (!this.workflowJournal || this.workflowHistoryRestored) return;
+    for (const { event } of this.workflowJournal.read().slice(-MAX_EVENTS))
+      this.restoreEvent(event);
+    this.workflowHistoryRestored = true;
   }
 
   onModuleInit(): void {
@@ -170,7 +198,25 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     if (this.deferredTimer) clearInterval(this.deferredTimer);
   }
 
-  record(event: InfrastructureEvent, now = new Date()): FeedEvent | null {
+  record(
+    event: InfrastructureEvent,
+    now = new Date(),
+    workflowId?: string,
+  ): FeedEvent | null {
+    if (workflowId) {
+      if (
+        !/^nova-workflow:[a-f0-9]{64}$/.test(workflowId) ||
+        !this.workflowJournal
+      )
+        throw new Error("Workflow feed history unavailable");
+      this.restoreWorkflowHistory();
+      const accepted = this.workflowJournal.find(workflowId);
+      if (accepted) {
+        if (!this.feed.some((event) => event.seq === accepted.seq))
+          this.restoreEvent(accepted);
+        return accepted;
+      }
+    }
     const timerId =
       event.topic === "jarvis/events/timer" &&
       typeof event.payload?.deliveryId === "string"
@@ -196,7 +242,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     const mode =
       notifications?.[category] ?? (category === "info" ? "helper" : "speak");
     const focused = this.focusUnreadable || this.focus !== null;
-    if (focused && this.focus) {
+    if (focused && this.focus && !workflowId) {
       this.focus.count = Math.min(100_000, this.focus.count + 1);
       try {
         this.saveFocus(this.focus);
@@ -204,7 +250,11 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
         // The alert must stay visible and silent even when focus storage fails.
       }
     }
-    if (entry.kind === "alert" && entry.severity !== "critical") {
+    if (
+      !workflowId &&
+      entry.kind === "alert" &&
+      entry.severity !== "critical"
+    ) {
       for (const [key, value] of this.repeats)
         if (
           timestamp - value.firstAt >= REPEAT_WINDOW_MS ||
@@ -246,6 +296,17 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
       deliveryMode: focused ? "screen" : mode,
     };
     if (timerId && this.timerJournal) this.timerJournal.accept(timerId, stored);
+    if (workflowId) {
+      this.workflowJournal!.accept(workflowId, stored);
+      if (focused && this.focus) {
+        this.focus.count = Math.min(100_000, this.focus.count + 1);
+        try {
+          this.saveFocus(this.focus);
+        } catch {
+          /* accepted alert stays visible and silent */
+        }
+      }
+    }
     // A failed durable acceptance must not spend speech budget on an unheard notice.
     stored.speakAllowed =
       voiceEligible && presenceAllowsSpeech && this.reserveSpeech(timestamp);
@@ -258,7 +319,11 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
         );
     }
     if (this.feed.length > MAX_EVENTS) this.feed.shift();
-    if (entry.kind === "alert" && entry.severity !== "critical") {
+    if (
+      !workflowId &&
+      entry.kind === "alert" &&
+      entry.severity !== "critical"
+    ) {
       if (this.repeats.size >= MAX_REPEAT_KEYS)
         this.repeats.delete(this.repeats.keys().next().value!);
       this.repeats.set(
@@ -280,17 +345,22 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     severity?: "info" | "warning" | "critical";
     category?: "briefing";
     at?: string;
+    deliveryId?: string;
   }): FeedEvent | null {
-    return this.record({
-      topic: "jarvis/alerts",
-      payload: {
-        title: input.title,
-        detail: input.detail ?? "",
-        severity: input.severity ?? "info",
-        key: input.category === "briefing" ? "briefing" : "node-red",
-        at: input.at,
+    return this.record(
+      {
+        topic: "jarvis/alerts",
+        payload: {
+          title: input.title,
+          detail: input.detail ?? "",
+          severity: input.severity ?? "info",
+          key: input.category === "briefing" ? "briefing" : "node-red",
+          at: input.at,
+        },
       },
-    });
+      new Date(),
+      input.deliveryId,
+    );
   }
 
   recent(since = 0): AlertsResponse {

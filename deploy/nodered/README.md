@@ -7,7 +7,7 @@ never replaced during an upgrade.
 
 The initial flow set contains the NOVA health heartbeat, built from Node-RED's
 built-in nodes. The local `node-red-contrib-nova` module adds the NOVA chat,
-TTS, alert and runtime-event nodes; the seed entrypoint installs it from the
+TTS, alert, runtime-event and durable briefing nodes; the seed entrypoint installs it from the
 read-only mount without using a public registry. See
 [`docs/node-red-contrib-nova.md`](../../docs/node-red-contrib-nova.md) for its
 contracts and limits and [`docs/node-red-health-heartbeat.md`](../../docs/node-red-health-heartbeat.md)
@@ -29,4 +29,4 @@ explicit pre-controller access rejection permits session renewal and one retry.
 Network failures and other forbidden responses are not replayed automatically.
 The event and proactive question nodes retain their narrower bearer-only route.
 Recreate both NOVA and Node-RED when changing the app token. Local node package
-version 0.1.2 provides this integration; update the seed sources before restarting.
+version 0.1.4 provides this integration; update the seed sources before restarting.

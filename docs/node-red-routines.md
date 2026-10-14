@@ -17,3 +17,10 @@ action. Existing fixed flow templates also support catchable errors, offline
 node status and briefings. Arbitrary event/action combinations are not
 available yet. Routine text is omitted from durable action logs; deleting a
 routine can be done from the flow in Node-RED.
+
+Morning/evening briefing templates use `NOVA briefing` rather than a volatile
+cron/ask chain. Its schedule, bounded retries and reply outbox survive Node-RED
+restarts. Read-only generation remains behind NOVA's free-routing and tool-risk
+gates. See [durable briefings](node-red-contrib-nova.md#durable-briefings).
+Existing operator-authored flows remain unchanged; replace an old briefing chain
+explicitly to enable this recovery behavior.

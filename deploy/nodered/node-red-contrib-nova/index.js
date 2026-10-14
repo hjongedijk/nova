@@ -5,4 +5,5 @@ module.exports = function registerNOVA(RED) {
   require("./ask")(RED);
   require("./notify")(RED);
   require("./event")(RED);
+  require("./briefing")(RED);
 };

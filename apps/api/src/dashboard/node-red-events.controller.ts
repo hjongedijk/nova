@@ -32,6 +32,7 @@ type IncomingEvent = {
   category?: unknown;
   at?: unknown;
   flowId?: unknown;
+  deliveryId?: unknown;
 };
 
 /** Authenticated, bounded ingress for plain notifications from trusted flows. */
@@ -79,6 +80,14 @@ export class NodeRedEventsController {
     if (Buffer.byteLength(JSON.stringify(body), "utf8") > MAX_BODY_BYTES)
       throw new BadRequestException("Node-RED event is too large");
 
+    if (
+      body.deliveryId !== undefined &&
+      (body.type !== "alert" ||
+        typeof body.deliveryId !== "string" ||
+        !/^nova-workflow:[a-f0-9]{64}$/.test(body.deliveryId))
+    )
+      throw new BadRequestException("Invalid workflow delivery id");
+
     if (body.type === "alert") {
       if (typeof body.title !== "string" || !body.title.trim())
         throw new BadRequestException("Alert title is required");
@@ -101,17 +110,26 @@ export class NodeRedEventsController {
       const diagnostic =
         RAW_DIAGNOSTIC.test(body.title) ||
         (typeof body.detail === "string" && RAW_DIAGNOSTIC.test(body.detail));
-      const result = this.alerts.recordNodeRedAlert({
-        title: diagnostic ? "Node-RED meldt een fout" : rawTitle,
-        detail: diagnostic
-          ? "Een flow meldde een fout. Controleer de flow in Node-RED."
-          : rawDetail,
-        severity: body.severity as "info" | "warning" | "critical" | undefined,
-        category: diagnostic
-          ? undefined
-          : (body.category as "briefing" | undefined),
-        at,
-      });
+      let result;
+      try {
+        result = this.alerts.recordNodeRedAlert({
+          title: diagnostic ? "Node-RED meldt een fout" : rawTitle,
+          detail: diagnostic
+            ? "Een flow meldde een fout. Controleer de flow in Node-RED."
+            : rawDetail,
+          severity: body.severity as
+            "info" | "warning" | "critical" | undefined,
+          category: diagnostic
+            ? undefined
+            : (body.category as "briefing" | undefined),
+          at,
+          deliveryId: body.deliveryId as string | undefined,
+        });
+      } catch {
+        throw new ServiceUnavailableException(
+          "Node-RED alert acceptance unavailable",
+        );
+      }
       if (!result) throw new BadRequestException("Node-RED alert was rejected");
     } else if (body.type === "runtime_error") {
       if (typeof body.detail !== "string" || !body.detail.trim())
