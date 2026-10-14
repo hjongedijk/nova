@@ -1,4 +1,10 @@
-import { Injectable, Optional } from "@nestjs/common";
+import {
+  Injectable,
+  Optional,
+  ServiceUnavailableException,
+} from "@nestjs/common";
+import crypto from "node:crypto";
+import { ModelCooldown } from "./model-cooldown.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { ModelMetricsService } from "../routing/model-metrics.service.js";
@@ -145,6 +151,23 @@ export interface CallOptions {
  */
 @Injectable()
 export class OmniRouteClient {
+  private cooldown = new ModelCooldown();
+  private cooldownIdentity = "";
+
+  private roleAvailability(): ModelCooldown {
+    const identity = crypto
+      .createHash("sha256")
+      .update(this.config.omniUrl)
+      .update("\0")
+      .update(this.config.omniKey)
+      .digest("hex");
+    if (identity !== this.cooldownIdentity) {
+      this.cooldownIdentity = identity;
+      this.cooldown = new ModelCooldown();
+    }
+    return this.cooldown;
+  }
+
   constructor(
     private readonly config: NovaConfig,
     private readonly routing: RoutingService,
@@ -241,6 +264,13 @@ export class OmniRouteClient {
           options.roleModel.role,
           candidate,
         );
+      signal?.throwIfAborted();
+      const availability = options.roleModel
+        ? this.roleAvailability()
+        : undefined;
+      const lease = availability?.acquire(candidate);
+      if (availability && !lease) continue;
+      response = undefined;
       try {
         response = await fetch(`${this.config.omniUrl}/chat/completions`, {
           method: "POST",
@@ -264,6 +294,7 @@ export class OmniRouteClient {
             : AbortSignal.timeout(60_000),
         });
       } catch (error) {
+        if (!signal?.aborted) availability?.failure(candidate);
         lastFailure = error;
         if (
           !options.roleModel ||
@@ -272,7 +303,12 @@ export class OmniRouteClient {
         )
           throw error;
         continue;
+      } finally {
+        lease?.release();
       }
+      if (response.ok) availability?.success(candidate);
+      else if ([429, 500, 502, 503, 504].includes(response.status))
+        availability?.failure(candidate, response.headers.get("retry-after"));
       if (response.ok || !options.roleModel || candidate === attempts.at(-1))
         break;
       if (
@@ -283,8 +319,15 @@ export class OmniRouteClient {
       // A rejected response can still have an open stream; release it before failover.
       await response.body?.cancel().catch(() => {});
       lastFailure = new Error(`OmniRoute request failed (${response.status})`);
+      response = undefined;
     }
-    if (!response) throw lastFailure ?? new Error("OmniRoute request failed");
+    if (!response)
+      throw (
+        lastFailure ??
+        new ServiceUnavailableException(
+          "OmniRoute models are temporarily cooling down. Please retry later.",
+        )
+      );
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
       if (
