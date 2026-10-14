@@ -127,6 +127,8 @@ export function projectNodeRedFlowRuns<T extends { id: string }>(
 /** PIN-gated, projected Node-RED flow inventory. Never returns executable node data. */
 @Injectable()
 export class NodeRedManagement {
+  private paletteChanging = false;
+
   constructor(private readonly config: NovaConfig) {}
 
   private baseUrl(): URL {
@@ -199,10 +201,6 @@ export class NodeRedManagement {
       }
     >
   > {
-    if (this.config.nodeRedAdminToken.length < 32)
-      throw new ServiceUnavailableException(
-        "Stel NODE_RED_ADMIN_TOKEN met nodes.read en nodes.write in.",
-      );
     let response;
     try {
       response = await requestJson<unknown>(`${this.baseUrl().origin}/nodes`, {
@@ -305,54 +303,65 @@ export class NodeRedManagement {
     install: boolean,
     expectedRevision: string,
   ): Promise<NodeRedPaletteState> {
-    if (!this.allowedPaletteModules().includes(name))
+    if (this.paletteChanging)
       throw new ServiceUnavailableException(
-        "Deze Node-RED-module is niet toegestaan.",
+        "Er is al een Node-RED-palettewijziging bezig. Laad opnieuw.",
       );
-    const before = await this.paletteState();
-    if (before.revision !== expectedRevision)
-      throw new ServiceUnavailableException(
-        "Node-RED-palette is gewijzigd. Laad opnieuw.",
-      );
-    if (before.modules.find((row) => row.name === name)?.installed === install)
-      throw new ServiceUnavailableException(
-        "Node-RED-palette is gewijzigd. Laad opnieuw.",
-      );
-    let response;
+    this.paletteChanging = true;
     try {
-      response = await requestJson<unknown>(
-        `${this.baseUrl().origin}/nodes${install ? "" : `/${name}`}`,
-        {
-          method: install ? "POST" : "DELETE",
-          headers: this.flowHeaders(),
-          ...(install ? { body: { module: name } } : {}),
-          timeoutMs: 30_000,
-          maxResponseBytes: 100_000,
-          signal: AbortSignal.timeout(31_000),
-        },
-      );
-    } catch {
-      throw new ServiceUnavailableException(
-        "Node-RED-wijziging heeft geen bevestigde uitkomst. Controleer de palette.",
-      );
+      if (!this.allowedPaletteModules().includes(name))
+        throw new ServiceUnavailableException(
+          "Deze Node-RED-module is niet toegestaan.",
+        );
+      const before = await this.paletteState();
+      if (before.revision !== expectedRevision)
+        throw new ServiceUnavailableException(
+          "Node-RED-palette is gewijzigd. Laad opnieuw.",
+        );
+      if (
+        before.modules.find((row) => row.name === name)?.installed === install
+      )
+        throw new ServiceUnavailableException(
+          "Node-RED-palette is gewijzigd. Laad opnieuw.",
+        );
+      let response;
+      try {
+        response = await requestJson<unknown>(
+          `${this.baseUrl().origin}/nodes${install ? "" : `/${name}`}`,
+          {
+            method: install ? "POST" : "DELETE",
+            headers: this.flowHeaders(),
+            ...(install ? { body: { module: name } } : {}),
+            timeoutMs: 30_000,
+            maxResponseBytes: 100_000,
+            signal: AbortSignal.timeout(31_000),
+          },
+        );
+      } catch {
+        throw new ServiceUnavailableException(
+          "Node-RED-wijziging heeft geen bevestigde uitkomst. Controleer de palette.",
+        );
+      }
+      if (response.status !== (install ? 200 : 204))
+        throw new ServiceUnavailableException(
+          "Node-RED heeft de palettewijziging geweigerd.",
+        );
+      let after: NodeRedPaletteState;
+      try {
+        after = await this.paletteState();
+      } catch {
+        throw new ServiceUnavailableException(
+          "Palettewijziging is mogelijk uitgevoerd maar kon niet worden gecontroleerd.",
+        );
+      }
+      if (after.modules.find((row) => row.name === name)?.installed !== install)
+        throw new ServiceUnavailableException(
+          "Node-RED heeft de palettewijziging niet bevestigd.",
+        );
+      return after;
+    } finally {
+      this.paletteChanging = false;
     }
-    if (response.status !== (install ? 200 : 204))
-      throw new ServiceUnavailableException(
-        "Node-RED heeft de palettewijziging geweigerd.",
-      );
-    let after: NodeRedPaletteState;
-    try {
-      after = await this.paletteState();
-    } catch {
-      throw new ServiceUnavailableException(
-        "Palettewijziging is mogelijk uitgevoerd maar kon niet worden gecontroleerd.",
-      );
-    }
-    if (after.modules.find((row) => row.name === name)?.installed !== install)
-      throw new ServiceUnavailableException(
-        "Node-RED heeft de palettewijziging niet bevestigd.",
-      );
-    return after;
   }
 
   async flowSnapshot(): Promise<NodeRedFlowSnapshot> {

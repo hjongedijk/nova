@@ -16,16 +16,27 @@ afterEach(async () => {
   );
 });
 
-async function paletteServer() {
+async function paletteServer(
+  token = "fixture-admin-token-01234567890123456789",
+) {
   let installed = false;
   let enabled = true;
   let writes = 0;
   let failReadback = false;
   let failAfterWrite = false;
+  let failNextWrite = false;
+  let deniedStatus = 0;
+  const readAuthorizations: Array<string | undefined> = [];
   const leak = "private upstream token";
   const server = http.createServer((request, response) => {
     response.setHeader("content-type", "application/json");
     if (request.url === "/nodes" && request.method === "GET") {
+      readAuthorizations.push(request.headers.authorization);
+      if (deniedStatus) {
+        response.statusCode = deniedStatus;
+        response.end(JSON.stringify({ message: leak }));
+        return;
+      }
       if (failReadback) {
         response.statusCode = 503;
         response.end(JSON.stringify({ message: leak }));
@@ -52,6 +63,12 @@ async function paletteServer() {
     }
     if (request.url === "/nodes" && request.method === "POST") {
       writes++;
+      if (failNextWrite) {
+        failNextWrite = false;
+        response.statusCode = 503;
+        response.end(JSON.stringify({ message: leak }));
+        return;
+      }
       installed = true;
       if (failAfterWrite) failReadback = true;
       response.end(JSON.stringify({ name: "node-red-node-suncalc" }));
@@ -77,11 +94,15 @@ async function paletteServer() {
     throw new Error("test server unavailable");
   const management = new NodeRedManagement({
     nodeRedUrl: `http://127.0.0.1:${address.port}`,
-    nodeRedAdminToken: "fixture-admin-token-01234567890123456789",
+    nodeRedAdminToken: token,
     nodeRedPaletteAllowlist: '["node-red-node-suncalc"]',
   } as NovaConfig);
   return {
     management,
+    readAuthorizations,
+    denyReads: (status: number) => {
+      deniedStatus = status;
+    },
     writes: () => writes,
     setEnabled: (next: boolean) => {
       enabled = next;
@@ -92,11 +113,140 @@ async function paletteServer() {
     failAfterWrite: () => {
       failAfterWrite = true;
     },
+    failNextWrite: () => {
+      failNextWrite = true;
+    },
     leak,
   };
 }
 
 describe("Node-RED palette management", () => {
+  it.each(["", "short-fixture-token"])(
+    "uses actual HTTP authorization for token=%s",
+    async (token) => {
+      const fixture = await paletteServer(token);
+      expect(
+        (await fixture.management.paletteState()).modules[0]?.installed,
+      ).toBe(false);
+      expect(fixture.readAuthorizations).toEqual([
+        token ? `Bearer ${token}` : undefined,
+      ]);
+      expect(fixture.writes()).toBe(0);
+    },
+  );
+
+  it.each([401, 403])(
+    "rejects actual Node-RED authorization status %s",
+    async (status) => {
+      const fixture = await paletteServer("");
+      fixture.denyReads(status);
+      await expect(fixture.management.paletteState()).rejects.toThrow(
+        "niet veilig worden gelezen",
+      );
+      expect(fixture.readAuthorizations).toEqual([undefined]);
+      expect(fixture.writes()).toBe(0);
+      await expect(fixture.management.paletteState()).rejects.not.toThrow(
+        fixture.leak,
+      );
+    },
+  );
+
+  it("rejects an overlapping mutation before delayed preflight and allows a fresh later change", async () => {
+    const fixture = await paletteServer();
+    const before = await fixture.management.paletteState();
+    const original = fixture.management.paletteState.bind(fixture.management);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let released = false;
+    const snapshot = vi
+      .spyOn(fixture.management, "paletteState")
+      .mockImplementation(async () => {
+        if (!released) {
+          await pending;
+          return before;
+        }
+        return original();
+      });
+    const first = fixture.management.changePalette(
+      "node-red-node-suncalc",
+      true,
+      before.revision,
+    );
+    const second = fixture.management
+      .changePalette("node-red-node-suncalc", true, before.revision)
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    released = true;
+    release();
+    const after = await first;
+    const rejected = await second;
+    expect(fixture.writes()).toBe(1);
+    expect(rejected).toBeInstanceOf(Error);
+    expect((rejected as Error).message).toContain("bezig");
+    expect(snapshot).toHaveBeenCalledTimes(2);
+    await fixture.management.changePalette(
+      "node-red-node-suncalc",
+      false,
+      after.revision,
+    );
+    expect(fixture.writes()).toBe(2);
+  });
+
+  it("releases the mutation guard after failed preflight and failed writes", async () => {
+    const fixture = await paletteServer();
+    const before = await fixture.management.paletteState();
+    await expect(
+      fixture.management.changePalette(
+        "node-red-node-other",
+        true,
+        before.revision,
+      ),
+    ).rejects.toThrow("niet toegestaan");
+    await expect(
+      fixture.management.changePalette(
+        "node-red-node-suncalc",
+        true,
+        "0".repeat(64),
+      ),
+    ).rejects.toThrow("gewijzigd");
+    const snapshot = vi
+      .spyOn(fixture.management, "paletteState")
+      .mockRejectedValueOnce(new Error("synthetic preflight failure"));
+    await expect(
+      fixture.management.changePalette(
+        "node-red-node-suncalc",
+        true,
+        before.revision,
+      ),
+    ).rejects.toThrow("synthetic preflight failure");
+    snapshot.mockRestore();
+    fixture.failNextWrite();
+    await expect(
+      fixture.management.changePalette(
+        "node-red-node-suncalc",
+        true,
+        before.revision,
+      ),
+    ).rejects.toThrow("geweigerd");
+    const after = await fixture.management.changePalette(
+      "node-red-node-suncalc",
+      true,
+      before.revision,
+    );
+    expect(after.modules[0]?.installed).toBe(true);
+    // A subsequent remove remains usable after the earlier error paths.
+    await fixture.management.changePalette(
+      "node-red-node-suncalc",
+      false,
+      after.revision,
+    );
+    expect(fixture.writes()).toBe(3);
+  });
+
   it("writes only allowlisted packages with a fresh snapshot and verifies readback", async () => {
     const fixture = await paletteServer();
     const before = await fixture.management.paletteState();
