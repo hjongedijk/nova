@@ -32,6 +32,13 @@ function fixture(
   );
   const findWorkflowEvent = vi.fn((id: string) => accepted.get(id));
   const auditRecord = vi.fn();
+  const allMessages = vi.fn(() => [
+    {
+      role: "user",
+      content: "Ik heb mijn project afgerond.",
+      at: "2026-10-08T12:00:00.000Z",
+    },
+  ]);
   let receivedOptions: unknown;
   const call = vi.fn(async (messages: unknown, options: unknown) => {
     void messages;
@@ -69,15 +76,7 @@ function fixture(
         },
       }),
     } as never,
-    {
-      allMessages: () => [
-        {
-          role: "user",
-          content: "Ik heb mijn project afgerond.",
-          at: "2026-10-08T12:00:00.000Z",
-        },
-      ],
-    } as never,
+    { allMessages } as never,
     {
       read: () => [
         {
@@ -107,6 +106,7 @@ function fixture(
     findWorkflowEvent,
     record,
     auditRecord,
+    allMessages,
     call,
     options: () => receivedOptions,
     service,
@@ -221,5 +221,58 @@ describe("opt-in weekly overview", () => {
     expect(JSON.parse(fs.readFileSync(progress, "utf8"))).toEqual({
       completedWeek: "2026-10-11",
     });
+  });
+
+  it("budgets the newest messages across unsorted sessions and restores actual chronological order", async () => {
+    const instance = fixture(true);
+    const message = (label: string, at: string) => ({
+      role: "user",
+      content: label.padEnd(1000, "."),
+      at,
+    });
+    const older = Array.from({ length: 130 }, (_, index) =>
+      message(
+        `older-${String(index).padStart(3, "0")}:`,
+        new Date(
+          Date.parse("2026-10-07T10:00:00Z") + index * 60_000,
+        ).toISOString(),
+      ),
+    );
+    instance.allMessages.mockReturnValue([
+      message("new-latest-decision:", "2026-10-10T13:00:00+01:00"),
+      ...older.reverse(),
+      message("new-first-decision:", "2026-10-10T14:00:00+03:00"),
+      message("new-middle-decision:", "2026-10-10T10:30:00-01:00"),
+      message("invalid-date:", "not-a-date"),
+      message("outside-window:", "2026-10-12T10:00:00Z"),
+    ]);
+    await instance.service.checkSchedule(new Date("2026-10-11T16:00:00Z"));
+    expect(instance.call).toHaveBeenCalledOnce();
+    const prompt = instance.call.mock.calls[0]?.[0] as Array<{
+      content: string;
+    }>;
+    const conversation = JSON.parse(prompt[1]!.content).conversation as string;
+    const lines = conversation.split("\n");
+    expect(lines).toHaveLength(12);
+    expect(
+      lines.map((line) => line.slice("Gebruiker: ".length).split(":")[0]),
+    ).toEqual([
+      ...Array.from({ length: 9 }, (_, index) => `older-${index + 121}`),
+      "new-first-decision",
+      "new-middle-decision",
+      "new-latest-decision",
+    ]);
+    expect(conversation).not.toContain("older-120:");
+    expect(conversation).not.toContain("invalid-date:");
+    expect(conversation).not.toContain("outside-window:");
+    expect(
+      lines.reduce(
+        (sum, line) => sum + line.slice("Gebruiker: ".length).length,
+        0,
+      ),
+    ).toBe(12_000);
+    expect(
+      lines.every((line) => line.slice("Gebruiker: ".length).length <= 1000),
+    ).toBe(true);
   });
 });

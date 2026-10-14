@@ -85,10 +85,11 @@ function transcript(
 ): string {
   const selected = withoutRefusals(messages)
     .filter((message) => inWindow(message.at, start, end, timezone))
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
     .slice(-120);
   let remaining = MAX_INPUT_CHARS;
   const lines: string[] = [];
-  for (const message of selected) {
+  for (const message of selected.reverse()) {
     const content = sanitize(message.content).slice(
       0,
       Math.min(1000, remaining),
@@ -98,7 +99,7 @@ function transcript(
     remaining -= content.length;
     if (remaining <= 0) break;
   }
-  return lines.join("\n");
+  return lines.reverse().join("\n");
 }
 
 interface Progress {
