@@ -1355,7 +1355,12 @@ export class SettingsController {
       throw new ValidationError(["Deze Node-RED-module is niet toegestaan."]);
     if (
       state.revision !== value.revision ||
-      selected.installed === value.install
+      (value.install
+        ? selected.restartRequired ||
+          (selected.installed &&
+            (!selected.targetVersion ||
+              selected.version === selected.targetVersion))
+        : !selected.installed)
     )
       throw new ValidationError([
         "Node-RED-palette is gewijzigd. Laad opnieuw.",
@@ -1368,6 +1373,7 @@ export class SettingsController {
         module: value.module,
         install: value.install,
         revision: state.revision,
+        targetVersion: value.install ? (selected.targetVersion ?? null) : null,
       },
       "DANGEROUS",
       state.revision,
@@ -1378,13 +1384,19 @@ export class SettingsController {
       tool: "node_red_palette",
       risk: "DANGEROUS",
       confirmation: "pending_admin_ui",
-      arguments: { module: value.module, install: value.install },
+      arguments: {
+        module: value.module,
+        install: value.install,
+        targetVersion: value.install ? (selected.targetVersion ?? null) : null,
+      },
     });
     return {
       ok: true as const,
       action,
       warning: value.install
-        ? "Installeren voert de actuele npm-versie van deze module uit in Node-RED."
+        ? selected.targetVersion
+          ? `Installeren zet ${selected.name}@${selected.targetVersion} klaar in Node-RED.${selected.installed ? ` Vervangt de geïnstalleerde versie ${selected.version ?? "onbekend"}; een herstart kan nodig zijn.` : ""} De pakketcode draait met de rechten van Node-RED.`
+          : "Installeren voert de actuele npm-versie van deze module uit in Node-RED, zonder vaste versie."
         : "Verwijderen kan flows die deze module gebruiken onderbreken.",
     };
   }
@@ -1439,28 +1451,45 @@ export class SettingsController {
       };
     const module = String(action.args.module);
     const install = action.args.install === true;
+    const targetVersion =
+      install && typeof action.args.targetVersion === "string"
+        ? action.args.targetVersion
+        : null;
     try {
       const state = await this.nodeRedManagement.changePalette(
         module,
         install,
         String(action.args.revision),
       );
+      const pendingRestart =
+        install &&
+        state.modules.find((row) => row.name === module)?.restartRequired ===
+          true;
       this.audit.record({
         sessionId: value.sessionId,
         tool: "node_red_palette",
         risk: "DANGEROUS",
         confirmation: "approved_admin_ui",
-        arguments: { module, install },
-        result: { ok: true },
+        arguments: { module, install, targetVersion },
+        result: {
+          ok: true,
+          verified: !pendingRestart,
+          ...(pendingRestart ? { status: "restart_required" } : {}),
+        },
       });
-      return { ok: true as const, state };
+      return {
+        ok: true as const,
+        state,
+        verified: !pendingRestart,
+        pendingRestart,
+      };
     } catch (error) {
       this.audit.record({
         sessionId: value.sessionId,
         tool: "node_red_palette",
         risk: "DANGEROUS",
         confirmation: "approved_admin_ui",
-        arguments: { module, install },
+        arguments: { module, install, targetVersion },
         result: { ok: false },
       });
       throw error;

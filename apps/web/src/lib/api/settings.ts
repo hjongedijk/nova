@@ -581,7 +581,14 @@ export const getNodeRedFlows = () =>
   read<NodeRedFlowInventory>("/node-red/flows");
 export interface NodeRedPaletteState {
   revision: string;
-  modules: { name: string; installed: boolean; version: string | null }[];
+  modules: {
+    name: string;
+    installed: boolean;
+    version: string | null;
+    targetVersion?: string | null;
+    pendingVersion?: string | null;
+    restartRequired?: boolean;
+  }[];
 }
 export const getNodeRedPalette = () =>
   read<NodeRedPaletteState>("/node-red/palette");
@@ -601,7 +608,13 @@ export const confirmNodeRedPalette = (
   approve: boolean,
 ) =>
   write<
-    | { ok: true; cancelled?: true; state?: NodeRedPaletteState }
+    | {
+        ok: true;
+        cancelled?: true;
+        state?: NodeRedPaletteState;
+        verified?: boolean;
+        pendingRestart?: boolean;
+      }
     | { ok: false; error: string }
   >("POST", "/node-red/palette/confirm", {
     sessionId,

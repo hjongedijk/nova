@@ -73,7 +73,11 @@
       if (result.state) palette = result.state;
       message =
         approve && result.state
-          ? `${selected.module} gewijzigd en gecontroleerd.`
+          ? result.pendingRestart
+            ? `${selected.module}: versie klaargezet. Herstart Node-RED via Services om de versie actief te maken.`
+            : result.verified === false
+              ? `${selected.module} aangevraagd; controle ontbreekt.`
+              : `${selected.module} gewijzigd en gecontroleerd.`
           : "Palettewijziging geannuleerd.";
     } catch (error) {
       message =
@@ -89,8 +93,9 @@
 <section aria-label="Node-RED-palette">
   <h4>Palette-nodes</h4>
   <p class="hint">
-    Alleen modules die op de server zijn toegestaan. Installatie voert de
-    actuele npm-versie uit in Node-RED.
+    Alleen modules die op de server zijn toegestaan. Installatie gebruikt de
+    opgegeven vaste versie in Node-RED. Zonder vaste versie wordt de actuele
+    npm-versie gebruikt.
   </p>
   <Button disabled={busy} onclick={load}>Palette laden</Button>
   {#if message}<p role="status">{message}</p>{/if}
@@ -103,8 +108,27 @@
             · {module.installed
               ? `geïnstalleerd${module.version ? ` (${module.version})` : ""}`
               : "niet geïnstalleerd"}
+            · {module.targetVersion
+              ? `vaste versie ${module.targetVersion}`
+              : "geen vaste versie"}
+            {#if module.installed && !module.restartRequired && module.targetVersion && module.version !== module.targetVersion}
+              <Button
+                disabled={busy || pending !== null}
+                onclick={() => prepare(module.name, true)}
+                >Versie {module.targetVersion} installeren</Button
+              >
+            {/if}
+            {#if module.restartRequired}
+              <span
+                >· wacht op herstart{module.pendingVersion
+                  ? ` voor versie ${module.pendingVersion}`
+                  : " (versie onbekend)"}</span
+              >
+            {/if}
             <Button
-              disabled={busy || pending !== null}
+              disabled={busy ||
+                pending !== null ||
+                (!module.installed && module.restartRequired)}
               onclick={() => prepare(module.name, !module.installed)}
             >
               {module.installed ? "Verwijderen" : "Installeren"}
@@ -112,6 +136,10 @@
           </li>
         {/each}
       </ul>
+      {#if palette.modules.some((module) => module.restartRequired)}
+        <a href="/settings?section=services">Node-RED herstarten via Services</a
+        >
+      {/if}
     {:else}
       <p>Geen toegestane palette-modules ingesteld.</p>
     {/if}

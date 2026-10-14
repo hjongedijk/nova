@@ -394,6 +394,32 @@ try {
     let wallpaperHistoryReads = 0;
     let wallpaperHistoryWrites = 0;
     let nodeRedFlowReads = 0;
+    let nodeRedPaletteReads = 0;
+    let nodeRedPalettePrepares = 0;
+    let nodeRedPaletteInstalls = 0;
+    let nodeRedPaletteCancels = 0;
+    let nodeRedPaletteInstalledVersion = null;
+    let nodeRedPalettePendingVersion = null;
+    let nodeRedPalettePending = null;
+    const nodeRedPaletteState = () => ({
+      revision: "a".repeat(64),
+      modules: [
+        {
+          name: "node-red-node-fixture",
+          installed: nodeRedPaletteInstalledVersion !== null,
+          version: nodeRedPaletteInstalledVersion,
+          targetVersion: "1.2.3",
+          pendingVersion: nodeRedPalettePendingVersion,
+          restartRequired: nodeRedPalettePendingVersion !== null,
+        },
+        {
+          name: "node-red-contrib-legacy-fixture",
+          installed: false,
+          version: null,
+          targetVersion: null,
+        },
+      ],
+    });
     let hotkeyHistoryReads = 0;
     let helperDebugReads = 0;
     const backup = {
@@ -2793,6 +2819,62 @@ try {
             },
           ],
         };
+      } else if (endpoint === "/settings/node-red/palette") {
+        assert.equal(request.method(), "GET");
+        nodeRedPaletteReads++;
+        data = nodeRedPaletteState();
+      } else if (endpoint === "/settings/node-red/palette/prepare") {
+        assert.equal(request.method(), "POST");
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        const body = request.postDataJSON();
+        assert.equal(body.module, "node-red-node-fixture");
+        assert.equal(body.install, true);
+        assert.equal(body.revision, "a".repeat(64));
+        nodeRedPalettePrepares++;
+        const createdAt = await page.evaluate(() => Date.now());
+        nodeRedPalettePending = {
+          confirmationId: "14141414-1414-4141-8141-141414141414",
+          sessionId:
+            "settings-node-red-palette:15151515-1515-4151-8151-151515151515",
+          tool: "node_red_palette",
+          risk: "DANGEROUS",
+          allowAlways: false,
+          args: { ...body, version: "1.2.3" },
+          createdAt,
+          expiresAt: createdAt + 60_000,
+        };
+        data = {
+          ok: true,
+          action: nodeRedPalettePending,
+          warning:
+            "Installeren voert vaste versie 1.2.3 van deze module uit in Node-RED.",
+        };
+      } else if (endpoint === "/settings/node-red/palette/confirm") {
+        assert.equal(request.method(), "POST");
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        const body = request.postDataJSON();
+        assert.ok(nodeRedPalettePending);
+        assert.equal(body.sessionId, nodeRedPalettePending.sessionId);
+        assert.equal(body.confirmationId, nodeRedPalettePending.confirmationId);
+        if (body.approve) {
+          nodeRedPaletteInstalls++;
+          if (nodeRedPaletteInstalledVersion === "0.9.0") {
+            nodeRedPalettePendingVersion = "1.2.3";
+            data = {
+              ok: true,
+              verified: false,
+              pendingRestart: true,
+              state: nodeRedPaletteState(),
+            };
+          } else {
+            nodeRedPaletteInstalledVersion = "1.2.3";
+            data = { ok: true, verified: true, state: nodeRedPaletteState() };
+          }
+        } else {
+          nodeRedPaletteCancels++;
+          data = { ok: true, cancelled: true };
+        }
+        nodeRedPalettePending = null;
       } else if (endpoint === "/settings/node-red/flows") {
         nodeRedFlowReads++;
         data = {
@@ -5980,6 +6062,115 @@ try {
       .waitFor();
     await nodeRedCard.getByText("deploy/nodered/flows.json").waitFor();
     assert.equal(nodeRedFlowReads, 1);
+    const palette = nodeRedCard.getByRole("region", {
+      name: "Node-RED-palette",
+    });
+    assert.equal(nodeRedPaletteReads, 0, "palette loads only on request");
+    await palette
+      .getByRole("button", { name: "Palette laden", exact: true })
+      .click();
+    const pinnedModule = palette
+      .locator("li")
+      .filter({ hasText: "node-red-node-fixture" });
+    const legacyModule = palette
+      .locator("li")
+      .filter({ hasText: "node-red-contrib-legacy-fixture" });
+    await pinnedModule
+      .getByText("vaste versie 1.2.3", { exact: false })
+      .waitFor();
+    await legacyModule
+      .getByText("geen vaste versie", { exact: false })
+      .waitFor();
+    assert.equal(nodeRedPaletteReads, 1);
+    await pinnedModule
+      .getByRole("button", { name: "Installeren", exact: true })
+      .click();
+    const paletteConfirmation = palette.getByRole("group", {
+      name: "Palettewijziging bevestigen",
+    });
+    await paletteConfirmation.getByText(/vaste versie 1\.2\.3/).waitFor();
+    assert.equal(nodeRedPaletteInstalls, 0, "prepare never installs a package");
+    await paletteConfirmation
+      .getByRole("button", { name: "Annuleren", exact: true })
+      .click();
+    await palette
+      .getByText("Palettewijziging geannuleerd.", { exact: true })
+      .waitFor();
+    assert.equal(nodeRedPaletteCancels, 1);
+    assert.equal(nodeRedPaletteInstalls, 0);
+    await pinnedModule
+      .getByRole("button", { name: "Installeren", exact: true })
+      .click();
+    await paletteConfirmation.getByText(/vaste versie 1\.2\.3/).waitFor();
+    await paletteConfirmation
+      .getByRole("button", { name: "Ja, doorgaan", exact: true })
+      .click();
+    await pinnedModule
+      .getByRole("button", { name: "Verwijderen", exact: true })
+      .waitFor();
+    assert.equal(nodeRedPaletteInstalls, 1);
+    assert.equal(
+      await pinnedModule
+        .getByRole("button", { name: "Versie 1.2.3 installeren", exact: true })
+        .count(),
+      0,
+    );
+    // A separate mocked inventory models an older installed version.
+    nodeRedPaletteInstalledVersion = "0.9.0";
+    await palette
+      .getByRole("button", { name: "Palette laden", exact: true })
+      .click();
+    await pinnedModule.getByText(/geïnstalleerd \(0\.9\.0\)/).waitFor();
+    await pinnedModule
+      .getByRole("button", { name: "Versie 1.2.3 installeren", exact: true })
+      .click();
+    await paletteConfirmation.getByText(/vaste versie 1\.2\.3/).waitFor();
+    assert.equal(
+      nodeRedPaletteInstalls,
+      1,
+      "upgrade waits for explicit approval",
+    );
+    await paletteConfirmation
+      .getByRole("button", { name: "Ja, doorgaan", exact: true })
+      .click();
+    await palette
+      .getByText(/herstart/i)
+      .first()
+      .waitFor();
+    await pinnedModule.getByText(/geïnstalleerd \(0\.9\.0\)/).waitFor();
+    await pinnedModule
+      .getByText(/1\.2\.3.*herstart|herstart.*1\.2\.3/i)
+      .waitFor();
+    await palette.getByRole("link", { name: /services|diensten/i }).waitFor();
+    assert.equal(
+      await pinnedModule
+        .getByRole("button", { name: "Versie 1.2.3 installeren", exact: true })
+        .count(),
+      0,
+      "a pending target must not offer another upgrade",
+    );
+    assert.equal(
+      nodeRedPaletteInstalledVersion,
+      "0.9.0",
+      "pending upgrade is not presented as active",
+    );
+    assert.equal(nodeRedPalettePendingVersion, "1.2.3");
+    // Simulate a completed restart through the mocked inventory only.
+    nodeRedPaletteInstalledVersion = "1.2.3";
+    nodeRedPalettePendingVersion = null;
+    await palette
+      .getByRole("button", { name: "Palette laden", exact: true })
+      .click();
+    await pinnedModule.getByText(/geïnstalleerd \(1\.2\.3\)/).waitFor();
+    assert.equal(
+      await pinnedModule
+        .getByRole("button", { name: "Versie 1.2.3 installeren", exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(nodeRedPaletteInstalls, 2);
+    assert.equal(nodeRedPalettePrepares, 3);
+    assert.equal(nodeRedPaletteReads, 3);
     const automationPanel = nodeRedCard.locator("#node-red-flows");
     await automationPanel.scrollIntoViewIfNeeded();
     const automationBounds = await automationPanel.boundingBox();
@@ -6381,7 +6572,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP and GitHub secret entry with cleared secret fields and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
+    "Settings browser checks passed: pinned palette install/cancel/upgrade with exact-version confirmation, pending restart and active readback, and legacy warnings, all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP and GitHub secret entry with cleared secret fields and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();
