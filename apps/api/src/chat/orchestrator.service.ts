@@ -501,10 +501,11 @@ export class OrchestratorService {
           liveToolAttempted = true;
         }
         completedSteps++;
+        const risk =
+          this.tools.list().find((tool) => tool.name === name)?.risk ?? null;
         emit("tool_result", {
           name,
-          risk:
-            this.tools.list().find((tool) => tool.name === name)?.risk ?? null,
+          risk,
           pendingConfirmation: result.requiresConfirmation === true,
           ok: result.ok,
           standingApproval: result.standingApproval === true,
@@ -539,6 +540,34 @@ export class OrchestratorService {
           );
           if (stream) emit("token", { text: reply });
           return { reply, ...base, confirmation: result.action };
+        }
+        // Mutation evidence owns the response before another model or batch action can run.
+        // Read-only failures remain recoverable through the existing tool loop.
+        if (risk === "SAFE" || risk === "CONFIRM" || risk === "DANGEROUS") {
+          const english = responseLanguage === "en";
+          const reply =
+            result.executed === false
+              ? english
+                ? "The action was not executed."
+                : "De actie is niet uitgevoerd."
+              : result.verified === false
+                ? english
+                  ? "The check did not confirm that the action succeeded."
+                  : "De controle heeft niet bevestigd dat de actie is gelukt."
+                : (result.ok && result.verified === null) ||
+                    (result.accepted === true && result.verified !== true)
+                  ? english
+                    ? "The action was requested, but I could not verify that it completed."
+                    : "De actie is aangevraagd, maar ik kon niet controleren of die is voltooid."
+                  : result.ok === false
+                    ? english
+                      ? "The action failed. Check the current state before trying again."
+                      : "De actie is niet gelukt. Controleer de huidige toestand voordat je het opnieuw probeert."
+                    : null;
+          if (reply !== null) {
+            if (stream) emit("token", { text: reply });
+            return { reply, ...base };
+          }
         }
         messages.push({
           role: "tool",
