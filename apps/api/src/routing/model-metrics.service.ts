@@ -6,7 +6,7 @@ import { RoutingService } from "./routing.service.js";
 /** Keep only model identifiers and numeric measurements; never forward upstream objects. */
 export function modelIdentifier(value: unknown): string | null {
   return typeof value === "string" &&
-    /^[a-zA-Z0-9][a-zA-Z0-9/:._@+-]{0,255}$/.test(value)
+    /^(?:[a-zA-Z0-9]|@(?=[a-zA-Z0-9]))[a-zA-Z0-9/:._@+-]{0,255}$/.test(value)
     ? value
     : null;
 }

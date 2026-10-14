@@ -77,6 +77,34 @@ describe("private model measurements", () => {
       "/api/usage/model-latency-stats?windowHours=24&minSamples=1&maxRows=10000",
     );
   });
+  it("retains provider-stripped Cloudflare model IDs in completed answers and usage rows", async () => {
+    const model = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    vi.mocked(routing.status).mockReturnValue({
+      freeOnly: true,
+      ready: true,
+      status: "OK",
+      enabledModels: [`cloudflare-ai/${model}`],
+    });
+    vi.spyOn(management, "request").mockResolvedValue({
+      entries: [{ ...sample, provider: "cloudflare-ai", model }],
+    });
+    metrics.observe(model, null, 927);
+    metrics.observe("@\nprivate-value", "cloudflare-ai", 1);
+    const report = await metrics.report();
+    expect(report.lastResponse).toMatchObject({
+      model,
+      provider: null,
+      latencyMs: 927,
+    });
+    expect(report.models).toEqual([
+      expect.objectContaining({
+        provider: "cloudflare-ai",
+        model,
+        enabled: true,
+      }),
+    ]);
+    expect(JSON.stringify(report)).not.toContain("private-");
+  });
   it("rejects malformed rows and limits the public list", async () => {
     vi.spyOn(management, "request").mockResolvedValue({
       entries: [
