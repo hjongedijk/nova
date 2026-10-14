@@ -1,0 +1,306 @@
+{
+  "suite": "supplementary-cloudflare-tools",
+  "candidate": true,
+  "baseVersion": "0.1.32",
+  "model": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "startedAt": "2026-10-14T16:01:36.914Z",
+  "finishedAt": "2026-10-14T16:02:00.830Z",
+  "complete": true,
+  "hashes": {
+    "candidateClientSha256": "0f3a70a286e25afec68f44ee522a1164e55a7f87e2c55acc4dafe49243c5eaab",
+    "promptSha256": "d81275643ac062ad4ad1050bdd7a06f911073dfcc0bf83cd1610786354e35410",
+    "parsedCasesSha256": "28caa4abb1b9b177f333da2237e05a1a58bf4fc626aa990a0e268db830f5d0fb",
+    "fixturesSha256": "27c1311df1dc33f0e6993bc99258aca970539d881b3e02213b2e36f1f52f7000",
+    "evaluatorSha256": "a693c6dbf710b3556d8391af130dda02025512833abffdbd312ad0d0f8b41ce6"
+  },
+  "limits": {
+    "cases": 6,
+    "maxRounds": 3,
+    "maxToolsPerRound": 4,
+    "maxTokens": 1024
+  },
+  "cases": [
+    {
+      "caseId": "P19",
+      "error": null,
+      "replyPresent": true,
+      "toolNames": ["system_time"],
+      "attributions": [
+        {
+          "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualProvider": null,
+          "matched": true
+        },
+        {
+          "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualProvider": null,
+          "matched": true
+        }
+      ],
+      "confirmationIntercepted": false,
+      "fixtureTimeCorrect": true
+    },
+    {
+      "caseId": "P20",
+      "error": "INVALID_MOCK_CALL",
+      "replyPresent": false,
+      "toolNames": [],
+      "attributions": [],
+      "confirmationIntercepted": false
+    },
+    {
+      "caseId": "P21",
+      "error": "TOOL_ROUND_LIMIT",
+      "replyPresent": false,
+      "toolNames": [],
+      "attributions": [],
+      "confirmationIntercepted": false
+    },
+    {
+      "caseId": "P22",
+      "error": null,
+      "replyPresent": true,
+      "toolNames": ["proxmox_guests"],
+      "attributions": [
+        {
+          "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualProvider": null,
+          "matched": true
+        },
+        {
+          "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualProvider": null,
+          "matched": true
+        }
+      ],
+      "confirmationIntercepted": false
+    },
+    {
+      "caseId": "P23",
+      "error": "INVALID_MOCK_CALL",
+      "replyPresent": false,
+      "toolNames": [],
+      "attributions": [],
+      "confirmationIntercepted": false
+    },
+    {
+      "caseId": "P24",
+      "error": null,
+      "replyPresent": true,
+      "toolNames": ["ha_search_entities", "ha_turn_off"],
+      "attributions": [
+        {
+          "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualProvider": null,
+          "matched": true
+        },
+        {
+          "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          "actualProvider": null,
+          "matched": true
+        }
+      ],
+      "confirmationIntercepted": true
+    }
+  ],
+  "rounds": [
+    {
+      "caseId": "P19",
+      "round": 1,
+      "attribution": {
+        "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualProvider": null,
+        "matched": true
+      },
+      "toolCalls": [
+        {
+          "name": "system_time",
+          "argumentsJsonValid": true,
+          "schemaValid": true
+        }
+      ]
+    },
+    {
+      "caseId": "P19",
+      "round": 2,
+      "attribution": {
+        "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualProvider": null,
+        "matched": true
+      },
+      "toolCalls": []
+    },
+    {
+      "caseId": "P20",
+      "round": 1,
+      "attribution": {
+        "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualProvider": null,
+        "matched": true
+      },
+      "toolCalls": [
+        {
+          "name": "weather_forecast",
+          "argumentsJsonValid": true,
+          "schemaValid": false
+        }
+      ]
+    },
+    {
+      "caseId": "P21",
+      "round": 1,
+      "attribution": {
+        "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualProvider": null,
+        "matched": true
+      },
+      "toolCalls": [
+        {
+          "name": "ha_get_state",
+          "argumentsJsonValid": true,
+          "schemaValid": true
+        }
+      ]
+    },
+    {
+      "caseId": "P21",
+      "round": 2,
+      "attribution": {
+        "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualProvider": null,
+        "matched": true
+      },
+      "toolCalls": [
+        {
+          "name": "ha_search_entities",
+          "argumentsJsonValid": true,
+          "schemaValid": true
+        }
+      ]
+    },
+    {
+      "caseId": "P21",
+      "round": 3,
+      "attribution": {
+        "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualProvider": null,
+        "matched": true
+      },
+      "toolCalls": [
+        {
+          "name": "ha_get_state",
+          "argumentsJsonValid": true,
+          "schemaValid": true
+        }
+      ]
+    },
+    {
+      "caseId": "P22",
+      "round": 1,
+      "attribution": {
+        "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualProvider": null,
+        "matched": true
+      },
+      "toolCalls": [
+        {
+          "name": "proxmox_guests",
+          "argumentsJsonValid": true,
+          "schemaValid": true
+        }
+      ]
+    },
+    {
+      "caseId": "P22",
+      "round": 2,
+      "attribution": {
+        "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualProvider": null,
+        "matched": true
+      },
+      "toolCalls": []
+    },
+    {
+      "caseId": "P23",
+      "round": 1,
+      "attribution": {
+        "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualProvider": null,
+        "matched": true
+      },
+      "toolCalls": [
+        {
+          "name": "proxmox_reboot_guest",
+          "argumentsJsonValid": true,
+          "schemaValid": false
+        }
+      ]
+    },
+    {
+      "caseId": "P24",
+      "round": 1,
+      "attribution": {
+        "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualProvider": null,
+        "matched": true
+      },
+      "toolCalls": [
+        {
+          "name": "ha_search_entities",
+          "argumentsJsonValid": true,
+          "schemaValid": true
+        }
+      ]
+    },
+    {
+      "caseId": "P24",
+      "round": 2,
+      "attribution": {
+        "rawActualModel": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualModel": "cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "actualProvider": null,
+        "matched": true
+      },
+      "toolCalls": [
+        {
+          "name": "ha_turn_off",
+          "argumentsJsonValid": true,
+          "schemaValid": true
+        }
+      ]
+    }
+  ],
+  "findings": [
+    "P19 completes mocked time lookup and returns fixture time correctly.",
+    "P22 produces a final reply after mocked VM inventory; reply quality not independently scored here.",
+    "P24 reaches guarded confirmation after mocked entity search and turn-off request; no action executes.",
+    "P20 weather_forecast returns JSON-valid arguments rejected by fixture schema.",
+    "P23 proxmox_reboot_guest returns JSON-valid arguments rejected by fixture schema; no action executes.",
+    "P21 uses three schema-valid tool rounds and exhausts fixed round budget before a final reply.",
+    "All eleven returned rounds match requested model; no MODEL_UNAVAILABLE or RATE_LIMITED outcome.",
+    "Supplement remains separate from frozen original ninety-case comparison; this is not a rescoring."
+  ],
+  "method": {
+    "scope": "Six supplementary tool cases P19\u2013P24 only, candidate client subsequently deployed as v0.1.33. Original frozen ninety-case scores remain unchanged.",
+    "tools": "Synthetic fixtures only; no real state-changing or account operation executed.",
+    "quality": "Final reply quality beyond the time fixture was not independently scored. P21 exhausted the deliberately fixed three-round harness budget; this is not a claim that the production orchestrator cannot finish.",
+    "attribution": "Canonical model matched on all eleven returned rounds. Missing provider metadata is recorded as null, not inferred.",
+    "privacy": "Safe metadata only; raw sanitized responses and argument values remain private."
+  }
+}
