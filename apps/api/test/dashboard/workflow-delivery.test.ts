@@ -52,11 +52,16 @@ afterEach(() => {
 describe("durable workflow alert acceptance", () => {
   it("acknowledges retries across restart without repeating delivery or speech", () => {
     const first = boot();
+    expect(first.feed.findWorkflowEvent(deliveryId)).toBeUndefined();
     const original = first.feed.recordNodeRedAlert(input)!;
+    expect(first.feed.findWorkflowEvent(deliveryId)?.seq).toBe(original.seq);
     expect(original.speakAllowed).toBe(true);
     expect(first.feed.recordNodeRedAlert(input)?.seq).toBe(original.seq);
     expect(notifyHelper).toHaveBeenCalledOnce();
     const restarted = boot();
+    expect(restarted.feed.findWorkflowEvent(deliveryId)?.seq).toBe(
+      original.seq,
+    );
     expect(
       restarted.controller.receive(`Bearer ${token}`, {
         type: "alert",
@@ -135,6 +140,9 @@ describe("durable workflow alert acceptance", () => {
       controller.receive(`Bearer ${token}`, { type: "alert", ...input }),
     ).toThrow("Node-RED alert acceptance unavailable");
     expect(notifyHelper).not.toHaveBeenCalled();
+    expect(() => feed.findWorkflowEvent(deliveryId)).toThrow(
+      "Workflow feed history unavailable",
+    );
     expect(feed.recordNodeRedAlert({ title: "Gewone melding" })).not.toBeNull();
   });
   it.each([
@@ -184,6 +192,37 @@ describe("durable workflow alert acceptance", () => {
     expect(
       restarted.recordNodeRedAlert({ title: "Volgende melding" })?.seq,
     ).toBe(4);
+  });
+  it("retains the latest daily and weekly receipt through workflow history churn", () => {
+    const file = path.join(dir, "history.json");
+    const journal = new WorkflowFeedJournal(file);
+    const notice = (seq: number, key: string) => ({
+      seq,
+      kind: "alert" as const,
+      severity: "info" as const,
+      title: "Overzicht",
+      detail: "",
+      key,
+      at: new Date().toISOString(),
+    });
+    const id = (seq: number) =>
+      `nova-workflow:${seq.toString(16).padStart(64, "0")}`;
+    journal.accept(id(1), notice(1, "daily-highlight-2026-10-13"));
+    journal.accept(id(2), notice(2, "weekly-overview-2026-10-11"));
+    for (let seq = 3; seq <= 203; seq++)
+      journal.accept(id(seq), notice(seq, "briefing"));
+    const restarted = new WorkflowFeedJournal(file);
+    expect(restarted.read()).toHaveLength(200);
+    expect(restarted.find(id(1))).toBeDefined();
+    expect(restarted.find(id(2))).toBeDefined();
+    expect(restarted.find(id(3))).toBeUndefined();
+    restarted.accept(id(204), notice(204, "daily-highlight-2026-10-14"));
+    restarted.accept(id(205), notice(205, "weekly-overview-2026-10-18"));
+    expect(restarted.find(id(1))).toBeUndefined();
+    expect(restarted.find(id(2))).toBeUndefined();
+    expect(restarted.find(id(204))).toBeDefined();
+    expect(restarted.find(id(205))).toBeDefined();
+    expect(restarted.read()).toHaveLength(200);
   });
   it("bounds durable history and rejects malformed stored event rows", () => {
     const journal = new WorkflowFeedJournal(path.join(dir, "history.json"));

@@ -90,9 +90,22 @@ export class WorkflowFeedJournal {
   }
 
   accept(id: string, event: FeedEvent): void {
-    const next = [...this.read(), { id, event: { ...event } }].slice(
-      -MAX_WORKFLOW_NOTICES,
-    );
+    const next = [...this.read(), { id, event: { ...event } }];
+    // Keep one receipt per built-in ritual even when unrelated workflow traffic fills the journal.
+    // Otherwise a failed completion-marker write could replay the same day/week after restart.
+    const rituals = new Map<string, string>();
+    for (const row of next) {
+      const family =
+        /^(daily-highlight|weekly-overview)-\d{4}-\d{2}-\d{2}$/.exec(
+          row.event.key ?? "",
+        )?.[1];
+      if (family) rituals.set(family, row.id);
+    }
+    const retained = new Set(rituals.values());
+    while (next.length > MAX_WORKFLOW_NOTICES) {
+      const oldest = next.findIndex((row) => !retained.has(row.id));
+      next.splice(oldest, 1);
+    }
     const temporary = `${this.file}.${process.pid}.tmp`;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });

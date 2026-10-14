@@ -5,6 +5,8 @@ import {
   type OnModuleInit,
 } from "@nestjs/common";
 import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
@@ -114,7 +116,9 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
     ).rituals?.dailyHighlight;
     if (!preference?.enabled) return;
     const { day, time } = localDayAndTime(now, this.config.timezone);
-    if (time < preference.time || this.completedDay() === day) return;
+    if (time < preference.time) return;
+    const completed = this.completedDay();
+    if (this.paused || completed === day) return;
     const attempts = this.attempts.get(day) ?? 0;
     if (
       attempts >= MAX_ATTEMPTS ||
@@ -126,25 +130,38 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
     this.attempts.set(day, attempts + 1);
     const startedAt = Date.now();
     try {
-      const done = await this.createHighlight(day, now);
-      this.audit.record({
-        tool: "proactive_daily_highlight",
-        risk: "READ_ONLY",
-        phase: done ? "completed" : "skipped",
-        durationMs: Date.now() - startedAt,
-        arguments: { day },
-        result: { ok: done },
-      });
+      const workflowId = `nova-workflow:${crypto.createHash("sha256").update(`nova:daily-highlight:${day}`).digest("hex")}`;
+      if (this.alerts.findWorkflowEvent(workflowId)) {
+        this.saveCompletedDay(day);
+        return;
+      }
+      const done = await this.createHighlight(day, now, workflowId);
       if (done) this.saveCompletedDay(day);
+      try {
+        this.audit.record({
+          tool: "proactive_daily_highlight",
+          risk: "READ_ONLY",
+          phase: done ? "completed" : "skipped",
+          durationMs: Date.now() - startedAt,
+          arguments: { day },
+          result: { ok: done },
+        });
+      } catch {
+        this.logger.warn("Daily highlight audit unavailable");
+      }
     } catch {
-      this.audit.record({
-        tool: "proactive_daily_highlight",
-        risk: "READ_ONLY",
-        phase: "failed",
-        durationMs: Date.now() - startedAt,
-        arguments: { day },
-        result: { ok: false },
-      });
+      try {
+        this.audit.record({
+          tool: "proactive_daily_highlight",
+          risk: "READ_ONLY",
+          phase: "failed",
+          durationMs: Date.now() - startedAt,
+          arguments: { day },
+          result: { ok: false },
+        });
+      } catch {
+        this.logger.warn("Daily highlight audit unavailable");
+      }
       this.logger.warn("Daily highlight unavailable; retry scheduled");
     } finally {
       this.running = false;
@@ -156,7 +173,9 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
       const value = JSON.parse(fs.readFileSync(this.progressFile, "utf8")) as {
         completedDay?: unknown;
       };
-      return typeof value.completedDay === "string" ? value.completedDay : null;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value?.completedDay ?? "")))
+        throw new Error("Invalid daily highlight progress");
+      return value.completedDay as string;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       this.paused = true;
@@ -172,7 +191,19 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
         mode: 0o600,
       });
       fs.chmodSync(temporary, 0o600);
+      const descriptor = fs.openSync(temporary, "r");
+      try {
+        fs.fsyncSync(descriptor);
+      } finally {
+        fs.closeSync(descriptor);
+      }
       fs.renameSync(temporary, this.progressFile);
+      const directory = fs.openSync(path.dirname(this.progressFile), "r");
+      try {
+        fs.fsyncSync(directory);
+      } finally {
+        fs.closeSync(directory);
+      }
       this.attempts.delete(day);
     } catch {
       this.paused = true;
@@ -182,7 +213,7 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private createHighlight(day: string, now: Date): boolean {
+  private createHighlight(day: string, now: Date, workflowId: string): boolean {
     const detail = this.session
       .allMessages()
       .filter(
@@ -198,7 +229,7 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
       .map((message) => safeHighlight(message.content))
       .find((copy) => copy !== null);
     if (!detail) return true;
-    this.alerts.record(
+    const accepted = this.alerts.record(
       {
         topic: "jarvis/alerts",
         payload: {
@@ -210,7 +241,8 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
         },
       },
       now,
+      workflowId,
     );
-    return true;
+    return accepted !== null;
   }
 }

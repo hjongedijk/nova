@@ -1,7 +1,9 @@
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { InfrastructureEvent } from "@nova/contracts";
 import { DailyHighlightService } from "../../src/dashboard/daily-highlight.service.js";
 
 const directories: string[] = [];
@@ -13,10 +15,20 @@ afterEach(() => {
 function fixture(
   enabled: boolean,
   statements: Array<string | { content: string; at: string }>,
+  existing?: { dir: string; accepted: Map<string, object> },
 ) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-highlight-"));
-  directories.push(dir);
-  const record = vi.fn();
+  const dir =
+    existing?.dir ?? fs.mkdtempSync(path.join(os.tmpdir(), "nova-highlight-"));
+  if (!existing) directories.push(dir);
+  const accepted = existing?.accepted ?? new Map<string, object>();
+  const record = vi.fn(
+    (event: InfrastructureEvent, _now?: Date, workflowId?: string) => {
+      const stored = { ...event, seq: accepted.size + 1 };
+      if (workflowId) accepted.set(workflowId, stored);
+      return stored as object | null;
+    },
+  );
+  const findWorkflowEvent = vi.fn((id: string) => accepted.get(id));
   const auditRecord = vi.fn();
   const service = new DailyHighlightService(
     {
@@ -53,10 +65,10 @@ function fixture(
           at: typeof item === "string" ? "2026-10-13T12:00:00.000Z" : item.at,
         })),
     } as never,
-    { record } as never,
+    { record, findWorkflowEvent } as never,
     { record: auditRecord } as never,
   );
-  return { dir, record, auditRecord, service };
+  return { dir, accepted, record, findWorkflowEvent, auditRecord, service };
 }
 
 describe("opt-in daily highlight", () => {
@@ -122,5 +134,60 @@ describe("opt-in daily highlight", () => {
     expect(JSON.stringify(instance.record.mock.calls[0]?.[0])).not.toContain(
       "dossier",
     );
+  });
+
+  it("pauses before the first delivery when saved progress is corrupt", async () => {
+    const instance = fixture(true, ["Ik heb mijn project afgerond."]);
+    const progress = path.join(instance.dir, "daily-highlight-progress.json");
+    fs.writeFileSync(progress, "{broken");
+    await instance.service.checkSchedule(due);
+    await instance.service.checkSchedule(new Date(due.getTime() + 6 * 60_000));
+    expect(instance.record).not.toHaveBeenCalled();
+    expect(instance.auditRecord).not.toHaveBeenCalled();
+    expect(fs.readFileSync(progress, "utf8")).toBe("{broken");
+  });
+
+  it("does not repeat an accepted highlight after audit failure or restart", async () => {
+    const instance = fixture(true, ["Ik heb mijn project afgerond."]);
+    instance.auditRecord.mockImplementationOnce(() => {
+      throw new Error("audit unavailable");
+    });
+    await instance.service.checkSchedule(due);
+    await instance.service.checkSchedule(new Date(due.getTime() + 6 * 60_000));
+    expect(instance.record).toHaveBeenCalledOnce();
+    const expectedId =
+      "nova-workflow:" +
+      createHash("sha256")
+        .update("nova:daily-highlight:2026-10-13")
+        .digest("hex");
+    expect(instance.record.mock.calls[0]?.[2]).toBe(expectedId);
+    expect(instance.accepted.has(expectedId)).toBe(true);
+    // Lose only the completion marker: durable acceptance must remain authoritative.
+    fs.rmSync(path.join(instance.dir, "daily-highlight-progress.json"), {
+      force: true,
+    });
+    const restarted = fixture(
+      true,
+      ["Ik heb mijn project afgerond."],
+      instance,
+    );
+    await restarted.service.checkSchedule(
+      new Date(due.getTime() + 12 * 60_000),
+    );
+    expect(restarted.findWorkflowEvent).toHaveBeenCalledWith(expectedId);
+    expect(restarted.record).not.toHaveBeenCalled();
+  });
+
+  it("retries a rejected feed delivery instead of marking the day completed", async () => {
+    const instance = fixture(true, ["Ik heb mijn project afgerond."]);
+    instance.record.mockReturnValueOnce(null);
+    await instance.service.checkSchedule(due);
+    const progress = path.join(instance.dir, "daily-highlight-progress.json");
+    expect(fs.existsSync(progress)).toBe(false);
+    await instance.service.checkSchedule(new Date(due.getTime() + 6 * 60_000));
+    expect(instance.record).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fs.readFileSync(progress, "utf8"))).toEqual({
+      completedDay: "2026-10-13",
+    });
   });
 });

@@ -198,24 +198,28 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     if (this.deferredTimer) clearInterval(this.deferredTimer);
   }
 
+  /** Checks durable acceptance without generating or dispatching a second notice. */
+  findWorkflowEvent(workflowId: string): FeedEvent | undefined {
+    if (
+      !/^nova-workflow:[a-f0-9]{64}$/.test(workflowId) ||
+      !this.workflowJournal
+    )
+      throw new Error("Workflow feed history unavailable");
+    this.restoreWorkflowHistory();
+    const accepted = this.workflowJournal.find(workflowId);
+    if (accepted && !this.feed.some((event) => event.seq === accepted.seq))
+      this.restoreEvent(accepted);
+    return accepted;
+  }
+
   record(
     event: InfrastructureEvent,
     now = new Date(),
     workflowId?: string,
   ): FeedEvent | null {
     if (workflowId) {
-      if (
-        !/^nova-workflow:[a-f0-9]{64}$/.test(workflowId) ||
-        !this.workflowJournal
-      )
-        throw new Error("Workflow feed history unavailable");
-      this.restoreWorkflowHistory();
-      const accepted = this.workflowJournal.find(workflowId);
-      if (accepted) {
-        if (!this.feed.some((event) => event.seq === accepted.seq))
-          this.restoreEvent(accepted);
-        return accepted;
-      }
+      const accepted = this.findWorkflowEvent(workflowId);
+      if (accepted) return accepted;
     }
     const timerId =
       event.topic === "jarvis/events/timer" &&

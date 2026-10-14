@@ -5,6 +5,8 @@ import {
   type OnModuleInit,
 } from "@nestjs/common";
 import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
@@ -148,7 +150,9 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
     const ritual = preferences.rituals?.weeklyOverview;
     if (!ritual?.enabled) return;
     const window = dueWeeklyWindow(now, this.config.timezone, ritual.time);
-    if (!window || this.completedWeek() === window.key) return;
+    if (!window) return;
+    const completed = this.completedWeek();
+    if (this.paused || completed === window.key) return;
     const attempts = this.attempts.get(window.key) ?? 0;
     if (
       attempts >= MAX_ATTEMPTS ||
@@ -160,25 +164,38 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
     this.attempts.set(window.key, attempts + 1);
     const startedAt = Date.now();
     try {
-      const done = await this.createOverview(window, now);
-      this.audit.record({
-        tool: "proactive_weekly_overview",
-        risk: "READ_ONLY",
-        phase: done ? "completed" : "skipped",
-        durationMs: Date.now() - startedAt,
-        arguments: { week: window.key },
-        result: { ok: done },
-      });
+      const workflowId = `nova-workflow:${crypto.createHash("sha256").update(`nova:weekly-overview:${window.key}`).digest("hex")}`;
+      if (this.alerts.findWorkflowEvent(workflowId)) {
+        this.saveCompletedWeek(window.key);
+        return;
+      }
+      const done = await this.createOverview(window, now, workflowId);
       if (done) this.saveCompletedWeek(window.key);
+      try {
+        this.audit.record({
+          tool: "proactive_weekly_overview",
+          risk: "READ_ONLY",
+          phase: done ? "completed" : "skipped",
+          durationMs: Date.now() - startedAt,
+          arguments: { week: window.key },
+          result: { ok: done },
+        });
+      } catch {
+        this.logger.warn("Weekly overview audit unavailable");
+      }
     } catch {
-      this.audit.record({
-        tool: "proactive_weekly_overview",
-        risk: "READ_ONLY",
-        phase: "failed",
-        durationMs: Date.now() - startedAt,
-        arguments: { week: window.key },
-        result: { ok: false },
-      });
+      try {
+        this.audit.record({
+          tool: "proactive_weekly_overview",
+          risk: "READ_ONLY",
+          phase: "failed",
+          durationMs: Date.now() - startedAt,
+          arguments: { week: window.key },
+          result: { ok: false },
+        });
+      } catch {
+        this.logger.warn("Weekly overview audit unavailable");
+      }
       this.logger.warn("Weekly overview unavailable; retry scheduled");
     } finally {
       this.running = false;
@@ -190,9 +207,9 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
       const value = JSON.parse(
         fs.readFileSync(this.progressFile, "utf8"),
       ) as Progress;
-      return typeof value.completedWeek === "string"
-        ? value.completedWeek
-        : null;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value?.completedWeek ?? "")))
+        throw new Error("Invalid weekly overview progress");
+      return value.completedWeek as string;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       this.paused = true;
@@ -210,7 +227,19 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
         mode: 0o600,
       });
       fs.chmodSync(temporary, 0o600);
+      const descriptor = fs.openSync(temporary, "r");
+      try {
+        fs.fsyncSync(descriptor);
+      } finally {
+        fs.closeSync(descriptor);
+      }
       fs.renameSync(temporary, this.progressFile);
+      const directory = fs.openSync(path.dirname(this.progressFile), "r");
+      try {
+        fs.fsyncSync(directory);
+      } finally {
+        fs.closeSync(directory);
+      }
       this.attempts.delete(week);
     } catch {
       this.paused = true;
@@ -223,6 +252,7 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
   private async createOverview(
     window: { key: string; start: string; end: string },
     now: Date,
+    workflowId: string,
   ): Promise<boolean> {
     const modelId = this.routing.preferredModelForRole("summary");
     if (!modelId) return false;
@@ -316,7 +346,7 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
       .trim()
       .slice(0, 240);
     if (!detail) return false;
-    this.alerts.record(
+    const accepted = this.alerts.record(
       {
         topic: "jarvis/alerts",
         payload: {
@@ -328,7 +358,8 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
         },
       },
       now,
+      workflowId,
     );
-    return true;
+    return accepted !== null;
   }
 }

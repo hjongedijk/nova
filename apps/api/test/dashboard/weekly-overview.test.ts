@@ -1,7 +1,9 @@
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { InfrastructureEvent } from "@nova/contracts";
 import {
   dueWeeklyWindow,
   WeeklyOverviewService,
@@ -13,10 +15,22 @@ afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function fixture(enabled: boolean) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-weekly-"));
-  directories.push(dir);
-  const record = vi.fn();
+function fixture(
+  enabled: boolean,
+  existing?: { dir: string; accepted: Map<string, object> },
+) {
+  const dir =
+    existing?.dir ?? fs.mkdtempSync(path.join(os.tmpdir(), "nova-weekly-"));
+  if (!existing) directories.push(dir);
+  const accepted = existing?.accepted ?? new Map<string, object>();
+  const record = vi.fn(
+    (event: InfrastructureEvent, _now?: Date, workflowId?: string) => {
+      const stored = { ...event, seq: accepted.size + 1 };
+      if (workflowId) accepted.set(workflowId, stored);
+      return stored as object | null;
+    },
+  );
+  const findWorkflowEvent = vi.fn((id: string) => accepted.get(id));
   const auditRecord = vi.fn();
   let receivedOptions: unknown;
   const call = vi.fn(async (messages: unknown, options: unknown) => {
@@ -85,10 +99,12 @@ function fixture(enabled: boolean) {
       assertRoleModel: vi.fn(),
     } as never,
     { call } as never,
-    { record } as never,
+    { record, findWorkflowEvent } as never,
   );
   return {
     dir,
+    accepted,
+    findWorkflowEvent,
     record,
     auditRecord,
     call,
@@ -149,5 +165,61 @@ describe("opt-in weekly overview", () => {
       completedWeek: "2026-10-11",
     });
     expect(fs.statSync(progress).mode & 0o777).toBe(0o600);
+  });
+
+  it("pauses before model generation when saved progress is corrupt", async () => {
+    const instance = fixture(true);
+    const progress = path.join(instance.dir, "weekly-overview-progress.json");
+    fs.writeFileSync(progress, "{broken");
+    const due = new Date("2026-10-11T16:00:00Z");
+    await instance.service.checkSchedule(due);
+    await instance.service.checkSchedule(new Date(due.getTime() + 6 * 60_000));
+    expect(instance.call).not.toHaveBeenCalled();
+    expect(instance.record).not.toHaveBeenCalled();
+    expect(instance.auditRecord).not.toHaveBeenCalled();
+    expect(fs.readFileSync(progress, "utf8")).toBe("{broken");
+  });
+
+  it("does not regenerate an accepted overview after audit failure or restart", async () => {
+    const instance = fixture(true);
+    const due = new Date("2026-10-11T16:00:00Z");
+    instance.auditRecord.mockImplementationOnce(() => {
+      throw new Error("audit unavailable");
+    });
+    await instance.service.checkSchedule(due);
+    await instance.service.checkSchedule(new Date(due.getTime() + 6 * 60_000));
+    expect(instance.call).toHaveBeenCalledOnce();
+    expect(instance.record).toHaveBeenCalledOnce();
+    const expectedId =
+      "nova-workflow:" +
+      createHash("sha256")
+        .update("nova:weekly-overview:2026-10-11")
+        .digest("hex");
+    expect(instance.record.mock.calls[0]?.[2]).toBe(expectedId);
+    expect(instance.accepted.has(expectedId)).toBe(true);
+    fs.rmSync(path.join(instance.dir, "weekly-overview-progress.json"), {
+      force: true,
+    });
+    const restarted = fixture(true, instance);
+    await restarted.service.checkSchedule(
+      new Date(due.getTime() + 12 * 60_000),
+    );
+    expect(restarted.findWorkflowEvent).toHaveBeenCalledWith(expectedId);
+    expect(restarted.call).not.toHaveBeenCalled();
+    expect(restarted.record).not.toHaveBeenCalled();
+  });
+
+  it("retries a rejected feed delivery instead of marking the week completed", async () => {
+    const instance = fixture(true);
+    const due = new Date("2026-10-11T16:00:00Z");
+    instance.record.mockReturnValueOnce(null);
+    await instance.service.checkSchedule(due);
+    const progress = path.join(instance.dir, "weekly-overview-progress.json");
+    expect(fs.existsSync(progress)).toBe(false);
+    await instance.service.checkSchedule(new Date(due.getTime() + 6 * 60_000));
+    expect(instance.record).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fs.readFileSync(progress, "utf8"))).toEqual({
+      completedWeek: "2026-10-11",
+    });
   });
 });
