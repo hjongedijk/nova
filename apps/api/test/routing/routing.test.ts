@@ -262,6 +262,43 @@ describe("RoutingService verified SQLite policy", () => {
     expect(routing.assertFreeModel(model)).toBe(model);
   });
 
+  it("projects embedding models only from the strictly verified explicit scope", () => {
+    const embedding = "fixture-provider/free-embedding";
+    const changed = boundPolicy();
+    changed.enabledModels.push(embedding);
+    changed.nativeModelAllowlist.push(embedding);
+    const embeddingCandidate = {
+      ...candidate,
+      modelId: "free-embedding",
+      nativeQuota: { status: "SAFE" },
+      modelType: "embedding",
+    };
+    changed.catalog.push(embeddingCandidate);
+    writePolicy(changed);
+    db.prepare(
+      "UPDATE key_value SET value=? WHERE namespace='settings' AND key='modelVisibilityAllowlist'",
+    ).run(JSON.stringify([model, embedding]));
+    db.prepare("UPDATE api_keys SET allowed_models=?").run(
+      JSON.stringify(["auto", model, embedding]),
+    );
+    expect(routing.assertFree()).toMatchObject({
+      explicitModels: [model, embedding],
+      embeddingModels: [embedding],
+    });
+    db.prepare("UPDATE api_keys SET allowed_models=?").run(
+      JSON.stringify(["auto", model]),
+    );
+    expect(routing.assertFree().embeddingModels).toEqual([]);
+    db.prepare(
+      "UPDATE key_value SET value='false' WHERE namespace='settings' AND key='hidePaidModels'",
+    ).run();
+    expect(routing.status()).toMatchObject({
+      ready: false,
+      explicitModels: [],
+      embeddingModels: [],
+    });
+  });
+
   it.each([
     ["missing auto", [model]],
     ["duplicate auto", ["auto", "auto"]],
@@ -337,6 +374,40 @@ describe("RoutingService verified SQLite policy", () => {
     expect(() => routing.assertRoleModel("conversation", model)).toThrow(
       FreeRoutingBlockedError,
     );
+  });
+
+  it("rejects stale role assignments across chat and embedding model types", () => {
+    const embedding = "fixture-provider/free-embedding";
+    vi.spyOn(routing, "assertFree").mockReturnValue({
+      freeOnly: true,
+      ready: true,
+      policyVerified: true,
+      status: "OK",
+      explicitModels: [model, embedding],
+      embeddingModels: [embedding],
+    });
+    fs.writeFileSync(
+      path.join(directory, "settings.json"),
+      JSON.stringify({
+        modelRoles: {
+          conversation: { preferred: [embedding], fallback: model },
+          code: { preferred: [embedding], fallback: null },
+          embedding: { preferred: [model], fallback: embedding },
+        },
+      }),
+    );
+    expect(routing.assertRoleModel("conversation", model)).toBe(model);
+    expect(routing.assertRoleModel("embedding", embedding)).toBe(embedding);
+    expect(() => routing.assertRoleModel("conversation", embedding)).toThrow(
+      FreeRoutingBlockedError,
+    );
+    expect(() => routing.assertRoleModel("embedding", model)).toThrow(
+      FreeRoutingBlockedError,
+    );
+    expect(routing.roleModels("conversation")).toEqual([model]);
+    expect(routing.roleModels("code")).toEqual([]);
+    expect(routing.roleModels("embedding")).toEqual([embedding]);
+    vi.restoreAllMocks();
   });
 
   it("verifies a bound account without projecting credential material or fingerprints", () => {

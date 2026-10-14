@@ -7,12 +7,12 @@ import {
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
 import { NativeMemoryRecordsService } from "../../src/settings/native-memory-records.service.js";
 
-function fixture() {
+function fixture(application = "jarvis") {
   let row: Record<string, unknown> | null = {
     id: "owned-record",
     apiKeyId: "nova-owner",
     content: "private memory",
-    metadata: { application: "jarvis" },
+    metadata: { application },
   };
   const request = vi.fn(
     async (endpoint: string, options?: { method?: string; body?: unknown }) => {
@@ -53,6 +53,24 @@ function fixture() {
 afterEach(() => vi.useRealTimers());
 
 describe("NOVA-owned native memory record deletion", () => {
+  it.each(["jarvis", "nova"])(
+    "checks %s owner and requires fresh delete approval",
+    async (application) => {
+      const f = fixture(application);
+      const prepared = await f.service.prepare({ id: "owned-record" });
+      expect(prepared.action?.risk).toBe("DANGEROUS");
+      expect(f.row).not.toBeNull();
+      expect(
+        await f.service.confirm(
+          prepared.action!.sessionId,
+          prepared.action!.confirmationId,
+          true,
+        ),
+      ).toEqual({ ok: true, verified: true });
+      expect(f.row).toBeNull();
+    },
+  );
+
   it("bulk deletes only selected unchanged records after one confirmation", async () => {
     const f = fixture();
     const prepared = await f.service.prepareDeleteMany({

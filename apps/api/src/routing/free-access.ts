@@ -2,6 +2,7 @@
 export interface FreeCandidate {
   provider: string;
   modelId?: string;
+  modelType?: string;
   freeType?: string;
   permanent?: boolean;
   billingVerified?: boolean;

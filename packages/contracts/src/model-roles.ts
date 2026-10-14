@@ -13,6 +13,7 @@ export interface ModelRolesSettings {
   error?: string;
   historyWarning?: string;
   verifiedFreeModels: string[];
+  verifiedEmbeddingModels?: string[];
   roles: ModelRolePreferences;
 }
 

@@ -32,6 +32,7 @@ export interface RoutingStatus {
   route?: string;
   enabledModels?: string[];
   explicitModels?: string[];
+  embeddingModels?: string[];
   verifiedProviders?: string[];
   reason?: string;
   quotaSource?: string;
@@ -299,6 +300,11 @@ export class RoutingService {
           status: strict ? (policy.status ?? "OK") : "POLICY_DRIFT_BLOCKED",
           enabledModels: policy.enabledModels,
           explicitModels: strict ? allowed!.filter((id) => id !== "auto") : [],
+          embeddingModels: strict
+            ? allowed!.filter(
+                (id) => candidateOf(id)?.modelType === "embedding",
+              )
+            : [],
           verifiedProviders: policy.verifiedProviders,
           reason: strict
             ? policy.reason
@@ -345,7 +351,18 @@ export class RoutingService {
 
   /** A role-selected model must remain both globally verified-free and explicitly approved for that role. */
   assertRoleModel(role: ModelRoleId, modelId: string): string {
-    this.assertFreeModel(modelId);
+    const status = this.assertFree();
+    if (!status.explicitModels?.includes(modelId))
+      throw new FreeRoutingBlockedError(
+        "Selected model is outside the verified free key scope",
+      );
+    if (
+      (role === "embedding") !==
+      (status.embeddingModels?.includes(modelId) === true)
+    )
+      throw new FreeRoutingBlockedError(
+        "Selected model does not support this role",
+      );
     try {
       const settings = JSON.parse(
         fs.readFileSync(this.config.dataFile("settings.json"), "utf8"),

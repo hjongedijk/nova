@@ -36,6 +36,7 @@ const labels: Record<ModelRoleId, string> = {
   vision: "Beeld",
   embedding: "Inbedden",
 };
+type EligibleModels = { models: string[]; embeddingModels: string[] };
 
 @Injectable()
 export class ModelRolesService {
@@ -51,21 +52,42 @@ export class ModelRolesService {
     this.historyFile = config.dataFile("model-roles-history.json");
   }
 
-  private eligible(): string[] {
+  private eligible(): EligibleModels {
     const status = this.routing.status();
-    return status.ready && status.freeOnly && status.policyVerified
-      ? [...new Set(status.explicitModels ?? [])].filter(
-          (item) => typeof item === "string" && item.length <= 200,
-        )
-      : [];
+    const models =
+      status.ready && status.freeOnly && status.policyVerified
+        ? [...new Set(status.explicitModels ?? [])].filter(
+            (item) => typeof item === "string" && item.length <= 200,
+          )
+        : [];
+    return {
+      models,
+      embeddingModels: models.filter((model) =>
+        status.embeddingModels?.includes(model),
+      ),
+    };
+  }
+
+  private allowedForRole(
+    role: ModelRoleId,
+    eligible: EligibleModels,
+  ): Set<string> {
+    return new Set(
+      role === "embedding"
+        ? eligible.embeddingModels
+        : eligible.models.filter(
+            (model) => !eligible.embeddingModels.includes(model),
+          ),
+    );
   }
 
   get(): ModelRolesSettings {
-    const models = this.eligible();
+    const eligible = this.eligible();
+    const models = eligible.models;
     const saved = this.settings.get().modelRoles;
-    const allowed = new Set(models);
     const normalized = Object.fromEntries(
       roles.map((role) => {
+        const allowed = this.allowedForRole(role, eligible);
         const preference = saved[role];
         return [
           role,
@@ -90,6 +112,7 @@ export class ModelRolesService {
         ? {}
         : { error: "Er is geen geverifieerde gratis modelkeuze beschikbaar." }),
       verifiedFreeModels: models,
+      verifiedEmbeddingModels: eligible.embeddingModels,
       roles: normalized,
     };
   }
@@ -97,8 +120,8 @@ export class ModelRolesService {
   save(input: unknown): ModelRolesSettings {
     this.lastWarning = undefined;
     const before = this.get().roles;
-    const models = this.eligible();
-    if (!models.length)
+    const eligible = this.eligible();
+    if (!eligible.models.length)
       throw new ValidationError([
         "Modelrollen kunnen niet worden gewijzigd zolang de gratis route niet geverifieerd is.",
       ]);
@@ -110,9 +133,9 @@ export class ModelRolesService {
       roles.some((role) => !Object.hasOwn(body, role))
     )
       throw new ValidationError(["Alle modelrollen zijn vereist."]);
-    const allowed = new Set(models);
     const next = {} as ModelRolePreferences;
     for (const role of roles) {
+      const allowed = this.allowedForRole(role, eligible);
       const value = body[role];
       if (!value || typeof value !== "object" || Array.isArray(value))
         throw new ValidationError([`Ongeldige rol: ${labels[role]}.`]);
@@ -281,7 +304,7 @@ export class ModelRolesService {
     if (!revision)
       throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
     const eligible = this.eligible();
-    if (!eligible.length)
+    if (!eligible.models.length)
       throw new ConflictException(
         "De gratis modelroute is niet geverifieerd; herstel is afgebroken.",
       );
@@ -290,16 +313,17 @@ export class ModelRolesService {
       throw new ConflictException(
         "Modelrollen zijn daarna gewijzigd. Terugdraaien is afgebroken.",
       );
-    const available = new Set(eligible);
     if (
-      roles.some(
-        (role) =>
+      roles.some((role) => {
+        const available = this.allowedForRole(role, eligible);
+        return (
           revision.before[role].preferred.some(
             (model) => !available.has(model),
           ) ||
           (revision.before[role].fallback !== null &&
-            !available.has(revision.before[role].fallback)),
-      )
+            !available.has(revision.before[role].fallback))
+        );
+      })
     )
       throw new ConflictException(
         "Een eerder model is niet meer beschikbaar in de geverifieerde gratis route.",

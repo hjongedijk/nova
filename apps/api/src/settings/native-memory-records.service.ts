@@ -54,7 +54,7 @@ export class NativeMemoryRecordsService {
     if (
       row.id !== id ||
       row.apiKeyId !== this.management.scope ||
-      metadata.application !== "jarvis" ||
+      (metadata.application !== "nova" && metadata.application !== "jarvis") ||
       typeof row.content !== "string"
     )
       throw new Error("Memory ownership check failed");

@@ -236,6 +236,12 @@ The page transition keeps one private, server-local snapshot named `settings.jso
 It is readable only by NOVA, includes existing private skill configuration and is never part of a download.
 See [settings design and preservation](settings-design.md) for rollback and screenshot evidence.
 
+### Embeddings and model roles
+
+Long-term memory may keep using OmniRoute's native keyword backend while the separate document library uses verified cloud embeddings through the same gateway. Set `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` and `EMBEDDING_FREE_VERIFIED=true` only after verifying the account's free hard stop, the exact model grant and a real vector response. The embedding key must match the verified NOVA gateway key. Current Gemini Embedding 2 pricing includes a [free standard API tier](https://ai.google.dev/gemini-api/docs/pricing.md); paid or batch availability is not evidence of a free account.
+
+A model explicitly declared as an embedding in the private free policy is offered only for the Inbedden role. Chat roles reject it even if an old preference still references it. Embedding preferences take effect when the memory backend initializes after restart; the environment model remains the fallback when no role preference exists. Dimensions remain explicit. Existing vectors are not relabelled or silently converted: changing model or dimensions requires rebuilding the affected index. Keep the current source collection, active-index pointer and document namespace together when migrating an installation with existing vectors.
+
 ### Service connections managed in NOVA
 
 The Models, Connections and Devices sections edit OmniRoute, Home Assistant, Proxmox, Qdrant, MQTT,

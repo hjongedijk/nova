@@ -20,7 +20,11 @@ interface Row {
   id: string;
   content: string;
   apiKeyId?: string;
-  metadata?: { application?: string; jarvis?: Record<string, unknown> };
+  metadata?: {
+    application?: string;
+    nova?: Record<string, unknown>;
+    jarvis?: Record<string, unknown>;
+  };
   createdAt?: string;
   updatedAt?: string;
 }
@@ -44,13 +48,16 @@ export class OmniRouteMemory implements SemanticBackend {
   private owned(row: Row | undefined): row is Row {
     return (
       row?.apiKeyId === this.client.scope &&
-      row.metadata?.application === "jarvis"
+      (row.metadata?.application === "nova" ||
+        row.metadata?.application === "jarvis")
     );
   }
 
   private map(row: Row): MemoryRecord {
     return sanitize({
-      ...row.metadata?.jarvis,
+      ...(row.metadata?.application === "nova"
+        ? row.metadata.nova
+        : row.metadata?.jarvis),
       id: row.id,
       text: row.content,
       created_at: row.createdAt,

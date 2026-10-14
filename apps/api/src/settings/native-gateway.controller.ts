@@ -167,7 +167,8 @@ export class NativeGatewayController {
         if (
           !id ||
           row.apiKeyId !== owner ||
-          metadata.application !== "jarvis" ||
+          (metadata.application !== "nova" &&
+            metadata.application !== "jarvis") ||
           typeof row.content !== "string"
         )
           return [];

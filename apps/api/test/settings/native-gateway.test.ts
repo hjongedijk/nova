@@ -9,7 +9,11 @@ import { createApp } from "./helpers.js";
 const ERROR = "OmniRoute-beheer is niet beschikbaar. Controleer de koppeling.";
 const gateway = "http://verified-gateway.invalid/v1";
 
-function fixture({ configured = true, verified = true } = {}) {
+function fixture({
+  configured = true,
+  verified = true,
+  application = "jarvis",
+} = {}) {
   const scope = vi.fn(() => "nova-owner");
   const configuration = vi.fn(() => configured);
   const management = {
@@ -30,7 +34,11 @@ function fixture({ configured = true, verified = true } = {}) {
               apiKeyId: "nova-owner",
               content: "NOVA private fact",
               createdAt: "2026-10-11T10:00:00.000Z",
-              metadata: { application: "jarvis", jarvis: { key: "hidden" } },
+              metadata: {
+                application,
+                jarvis: { key: "hidden" },
+                nova: { key: "hidden" },
+              },
             },
             {
               id: "other-app-memory",
@@ -93,26 +101,29 @@ function expectUnavailable(result: unknown) {
 }
 
 describe("native gateway read-only report", () => {
-  it("lists only NOVA-owned native memory records on explicit request", async () => {
-    const { controller, management } = fixture();
-    const result = await controller.memoryRecords();
-    expect(result).toEqual({
-      memories: [
-        {
-          id: "owned-memory",
-          text: "NOVA private fact",
-          created_at: "2026-10-11T10:00:00.000Z",
-        },
-      ],
-      next: null,
-    });
-    expect(management.request).toHaveBeenCalledWith(
-      "/api/memory?apiKeyId=nova-owner&limit=50&offset=0",
-    );
-    expect(JSON.stringify(result)).not.toContain("hidden");
-    expect(JSON.stringify(result)).not.toContain("other-owner");
-    expect(JSON.stringify(result)).not.toContain("other app data");
-  });
+  it.each(["jarvis", "nova"])(
+    "lists only owned %s memory records on explicit request",
+    async (application) => {
+      const { controller, management } = fixture({ application });
+      const result = await controller.memoryRecords();
+      expect(result).toEqual({
+        memories: [
+          {
+            id: "owned-memory",
+            text: "NOVA private fact",
+            created_at: "2026-10-11T10:00:00.000Z",
+          },
+        ],
+        next: null,
+      });
+      expect(management.request).toHaveBeenCalledWith(
+        "/api/memory?apiKeyId=nova-owner&limit=50&offset=0",
+      );
+      expect(JSON.stringify(result)).not.toContain("hidden");
+      expect(JSON.stringify(result)).not.toContain("other-owner");
+      expect(JSON.stringify(result)).not.toContain("other app data");
+    },
+  );
 
   it("requests only the fixed runtime, catalog and prompt endpoints", async () => {
     const { controller, management, scope } = fixture();

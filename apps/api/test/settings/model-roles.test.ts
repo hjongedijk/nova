@@ -12,6 +12,7 @@ const dirs: string[] = [];
 function fixture(
   available = true,
   explicitModels = ["free/provider-a", "free/provider-b"],
+  embeddingModels: string[] = [],
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-model-roles-"));
   dirs.push(dir);
@@ -24,6 +25,7 @@ function fixture(
       policyVerified: available,
       enabledModels: available ? ["free/provider-a", "free/provider-b"] : [],
       explicitModels: available ? explicitModels : [],
+      embeddingModels,
     }),
   };
   const audit = { record: vi.fn() };
@@ -86,6 +88,86 @@ describe("model role preferences", () => {
       verifiedFreeModels: [],
     });
   });
+
+  it("separates explicit embedding grants from chat roles and filters stale cross-type preferences", () => {
+    const f = fixture(
+      true,
+      ["free/provider-a", "free/embed"],
+      ["free/embed", "free/ungranted-embed"],
+    );
+    expect(f.service.get().verifiedEmbeddingModels).toEqual(["free/embed"]);
+    const next = f.service.get().roles;
+    next.embedding = { preferred: ["free/embed"], fallback: null };
+    next.conversation = { preferred: ["free/provider-a"], fallback: null };
+    expect(f.service.save(next).roles).toEqual(next);
+    for (const role of [
+      "conversation",
+      "code",
+      "planning",
+      "summary",
+      "vision",
+    ] as const) {
+      const invalid = structuredClone(next);
+      invalid[role].preferred = ["free/embed"];
+      expect(() => f.service.save(invalid)).toThrow(
+        "actuele geverifieerde gratis lijst",
+      );
+      invalid[role] = { preferred: [], fallback: "free/embed" };
+      expect(() => f.service.save(invalid)).toThrow(
+        "actuele geverifieerde gratis lijst",
+      );
+    }
+    const invalid = structuredClone(next);
+    invalid.embedding = { preferred: ["free/provider-a"], fallback: null };
+    expect(() => f.service.save(invalid)).toThrow(
+      "actuele geverifieerde gratis lijst",
+    );
+    invalid.embedding = { preferred: [], fallback: "free/provider-a" };
+    expect(() => f.service.save(invalid)).toThrow(
+      "actuele geverifieerde gratis lijst",
+    );
+    f.settings.update((value) => {
+      value.modelRoles.embedding = {
+        preferred: ["free/provider-a", "free/embed"],
+        fallback: "free/ungranted-embed",
+      };
+      value.modelRoles.conversation = {
+        preferred: ["free/embed", "free/provider-a"],
+        fallback: "free/embed",
+      };
+    });
+    expect(f.service.get().roles.embedding).toEqual({
+      preferred: ["free/embed"],
+      fallback: null,
+    });
+    expect(f.service.get().roles.conversation).toEqual({
+      preferred: ["free/provider-a"],
+      fallback: null,
+    });
+  });
+
+  it.each(["embedding", "conversation"] as const)(
+    "rejects rollback restoring a cross-type %s model",
+    (role) => {
+      const f = fixture(
+        true,
+        ["free/provider-a", "free/embed"],
+        ["free/embed"],
+      );
+      const next = f.service.get().roles;
+      next.conversation.preferred = ["free/provider-a"];
+      f.service.save(next);
+      const id = f.service.history().revisions[0]!.id;
+      const file = path.join(dirs.at(-1)!, "model-roles-history.json");
+      const rows = JSON.parse(fs.readFileSync(file, "utf8"));
+      rows[0].before[role].preferred = [
+        role === "embedding" ? "free/provider-a" : "free/embed",
+      ];
+      fs.writeFileSync(file, JSON.stringify(rows), { mode: 0o600 });
+      expect(() => f.service.rollback(id)).toThrow("niet meer beschikbaar");
+      expect(f.service.get().roles).toEqual(next);
+    },
+  );
 
   it("rejects models outside the currently verified free list", () => {
     const f = fixture();

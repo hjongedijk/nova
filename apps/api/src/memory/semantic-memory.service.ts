@@ -92,6 +92,15 @@ export class SemanticMemoryService implements OnModuleInit, OnModuleDestroy {
   get qdrant(): SemanticBackend {
     if (!this.qdrantBackend) {
       try {
+        let roleModel: string | undefined;
+        if (this.routing.status().ready) {
+          try {
+            roleModel = this.routing.preferredModelForRole("embedding");
+          } catch {
+            // A revoked role must not disable an independently verified bootstrap model.
+            this.routing.assertFreeModel(this.config.embeddingModel);
+          }
+        }
         this.qdrantBackend = new QdrantMemory({
           url: this.config.qdrantUrl,
           collection: this.config.qdrantCollection,
@@ -102,7 +111,7 @@ export class SemanticMemoryService implements OnModuleInit, OnModuleDestroy {
           embeddings: new RemoteEmbeddings({
             url: this.config.omniUrl,
             key: this.config.embeddingKey || this.config.omniKey,
-            model: this.config.embeddingModel,
+            model: roleModel ?? this.config.embeddingModel,
             dimensions: this.config.embeddingDimensions,
             freeVerified: this.config.embeddingFreeVerified,
             assertFreeModel: (model) => {

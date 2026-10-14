@@ -86,6 +86,12 @@
     if (roleSettings.roles[role].fallback === model)
       roleSettings.roles[role].fallback = null;
   }
+  function modelsForRole(role: ModelRoleId): string[] {
+    const embeddings = new Set(roleSettings?.verifiedEmbeddingModels ?? []);
+    return (roleSettings?.verifiedFreeModels ?? []).filter((model) =>
+      role === "embedding" ? embeddings.has(model) : !embeddings.has(model),
+    );
+  }
   onMount(() => void load());
 </script>
 
@@ -107,9 +113,15 @@
     {#each ids as id (id)}
       <fieldset>
         <legend>{labels[id]}</legend>
-        {#if roleSettings.verifiedFreeModels.length}
+        {#if id === "embedding"}
+          <p>
+            Een andere voorkeur gaat in na herstart van NOVA. Bestaande
+            geheugenindexen moeten daarna opnieuw worden opgebouwd.
+          </p>
+        {/if}
+        {#if modelsForRole(id).length}
           <p>Voorkeurslijst (maximaal 5, in ingestelde volgorde):</p>
-          {#each roleSettings.verifiedFreeModels as model (model)}
+          {#each modelsForRole(id) as model (model)}
             <label>
               <input
                 type="checkbox"
@@ -130,11 +142,15 @@
               disabled={busy}
             >
               <option value={null}>Geen extra terugval</option>
-              {#each roleSettings.verifiedFreeModels.filter((model) => !roleSettings!.roles[id].preferred.includes(model)) as model (model)}
+              {#each modelsForRole(id).filter((model) => !roleSettings!.roles[id].preferred.includes(model)) as model (model)}
                 <option value={model}>{model}</option>
               {/each}
             </select>
           </label>
+        {:else}
+          <p>
+            Geen geschikt geverifieerd gratis model beschikbaar voor deze rol.
+          </p>
         {/if}
       </fieldset>
     {/each}

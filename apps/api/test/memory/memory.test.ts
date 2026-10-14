@@ -498,7 +498,7 @@ describe("OmniRouteMemory", () => {
           };
         }
         if (endpoint.endsWith("retrieve-preview"))
-          return { memories: [{ id }, { id: foreign }] };
+          return { memories: [...rows.keys()].map((id) => ({ id })) };
         const rowId = endpoint.split("/").at(-1)!;
         if (options.method === "DELETE") {
           rows.delete(rowId);
@@ -522,6 +522,11 @@ describe("OmniRouteMemory", () => {
     ).toBe(true);
     await memory.write("Onthoud mijn voorkeur is zacht volume");
     expect(calls[0]!.options?.body.key).toBe(calls[1]!.options.body.key);
+    expect(calls[0]!.options?.body.key).toMatch(/^jarvis:/);
+    expect(calls[0]!.options?.body.metadata).toMatchObject({
+      application: "jarvis",
+      jarvis: { text: "mijn voorkeur is zacht volume" },
+    });
     expect(calls[0]!.options?.body.apiKeyId).toBe("jarvis-owner");
     expect((await memory.list()).memories).toHaveLength(1);
     expect(await memory.search("volume")).toHaveLength(1);
@@ -540,6 +545,75 @@ describe("OmniRouteMemory", () => {
     expect(rows.has(id)).toBe(false);
     expect((await memory.health()).ready).toBe(true);
     expect(memory.embeddings.configured).toBe(false);
+  });
+
+  it("reads and deletes mixed NOVA and legacy rows only within the exact owner scope", async () => {
+    const { client, calls, rows } = fakeClient();
+    const novaId = "33333333-3333-4333-8333-333333333333";
+    const unrelatedId = "44444444-4444-4444-8444-444444444444";
+    const noNovaMetadataId = "55555555-5555-4555-8555-555555555555";
+    rows.set(id, {
+      id,
+      content: "Legacy preference",
+      apiKeyId: client.scope,
+      metadata: {
+        application: "jarvis",
+        jarvis: { type: "PREFERENCE", source: "legacy" },
+        nova: { source: "wrong-nova-namespace" },
+      },
+    });
+    rows.set(novaId, {
+      id: novaId,
+      content: "NOVA preference Bearer fixture-private-value",
+      apiKeyId: client.scope,
+      metadata: {
+        application: "nova",
+        nova: { type: "PREFERENCE", source: "nova", password: "private" },
+        jarvis: { source: "wrong-legacy-namespace" },
+      },
+    });
+    rows.set(noNovaMetadataId, {
+      id: noNovaMetadataId,
+      content: "NOVA row without matching metadata",
+      apiKeyId: client.scope,
+      metadata: {
+        application: "nova",
+        jarvis: { source: "must-not-fall-back" },
+      },
+    });
+    rows.set(foreign, {
+      id: foreign,
+      content: "Foreign scope",
+      apiKeyId: "someone-else",
+      metadata: { application: "nova", nova: { source: "foreign" } },
+    });
+    rows.set(unrelatedId, {
+      id: unrelatedId,
+      content: "Unrelated application",
+      apiKeyId: client.scope,
+      metadata: { application: "other", nova: { source: "unrelated" } },
+    });
+    const memory = new OmniRouteMemory(client as never);
+    const listed = (await memory.list()).memories;
+    expect(listed.map((row) => row.id)).toEqual([id, novaId, noNovaMetadataId]);
+    expect(listed[0]).toMatchObject({
+      source: "legacy",
+      text: "Legacy preference",
+    });
+    expect(listed[1]).toMatchObject({
+      source: "nova",
+      text: "NOVA preference [redacted]",
+    });
+    expect(listed[1]).not.toHaveProperty("password");
+    expect(listed[2]).not.toHaveProperty("source");
+    expect(await memory.search("preference")).toEqual(listed);
+    expect(await memory.search("unmatched")).toEqual(listed);
+    await expect(memory.remove(foreign)).rejects.toThrow(/not owned/);
+    await expect(memory.remove(unrelatedId)).rejects.toThrow(/not owned/);
+    expect(calls.some((call) => call.options.method === "DELETE")).toBe(false);
+    for (const ownedId of [id, novaId, noNovaMetadataId])
+      await memory.remove(ownedId);
+    expect([...rows.keys()]).toEqual([foreign, unrelatedId]);
   });
 
   it("a management failure cannot report readiness or leak upstream content", async () => {
@@ -572,6 +646,57 @@ describe("SemanticMemoryService and MemorySource", () => {
   const saved = { ...process.env };
   afterEach(() => {
     process.env = { ...saved };
+  });
+
+  it.each([true, false])(
+    "selects an embedding role on initialization only when routing is ready: %s",
+    (ready) => {
+      process.env.EMBEDDING_MODEL = "free/configured-embedding";
+      const config = new NovaConfig();
+      const routing = new RoutingService(config);
+      vi.spyOn(routing, "status").mockReturnValue({
+        ready,
+        freeOnly: true,
+        status: "fixture",
+      });
+      const preferred = vi
+        .spyOn(routing, "preferredModelForRole")
+        .mockReturnValue("free/role-embedding");
+      const memory = new SemanticMemoryService(
+        config,
+        new OmniRouteManagement(config),
+        routing,
+      );
+      expect(memory.documentEmbeddings?.model).toBe(
+        ready ? "free/role-embedding" : "free/configured-embedding",
+      );
+      expect(preferred).toHaveBeenCalledTimes(ready ? 1 : 0);
+      if (ready) expect(preferred).toHaveBeenCalledWith("embedding");
+    },
+  );
+
+  it("keeps a verified environment embedder when a saved role is revoked", () => {
+    process.env.EMBEDDING_MODEL = "free/configured-embedding";
+    const config = new NovaConfig();
+    const routing = new RoutingService(config);
+    vi.spyOn(routing, "status").mockReturnValue({
+      ready: true,
+      freeOnly: true,
+      status: "fixture",
+    });
+    vi.spyOn(routing, "preferredModelForRole").mockImplementation(() => {
+      throw new Error("revoked role");
+    });
+    const verify = vi
+      .spyOn(routing, "assertFreeModel")
+      .mockReturnValue("free/configured-embedding");
+    const memory = new SemanticMemoryService(
+      config,
+      new OmniRouteManagement(config),
+      routing,
+    );
+    expect(memory.documentEmbeddings?.model).toBe("free/configured-embedding");
+    expect(verify).toHaveBeenCalledWith("free/configured-embedding");
   });
 
   it("keeps backend diagnostics out of memory tool results", async () => {
