@@ -17,6 +17,7 @@
 | [Cooking mode](cooking-mode.md)                     | Read recipe steps aloud, voice step controls, and planner timers                              |
 | [Music and media](media-control.md)                 | Home Assistant and Music Assistant playback, volume, and confirmation rules                   |
 | [Web research](research.md)                         | Multi-step source research, citations, and uncertainty                                        |
+| [Node-RED packages](node-red-palette.md)            | Approved packages, exact versions, confirmation and inventory verification                    |
 | [Node-RED routines](node-red-routines.md)           | Personal daily reminder routines and their safety boundaries                                  |
 | [Routes and travel time](routes.md)                 | Optional free route source, setup, attribution and current limits                             |
 | [Local plugins](local-plugins.md)                   | Private JSON webhook manifests, limits and safety rules                                       |
