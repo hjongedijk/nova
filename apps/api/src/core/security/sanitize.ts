@@ -30,7 +30,11 @@ export function sanitize<T>(value: T): T {
     let clean: string = value;
     for (const secret of secrets())
       clean = clean.split(secret).join("[redacted]");
+    // Match only authority userinfo; path/query/fragment and quoted-code boundaries
+    // terminate the scan. Greedy @ consumes malformed multi-@ credentials safely.
+    // No URL parsing/serialization: surrounding punctuation and host bytes stay intact.
     return clean
+      .replace(/(https?:\/\/)[^\s/?#"'<>`\\]+@/gi, "$1[redacted]@")
       .replace(/(?:Bearer\s+|PVEAPIToken=)[^\s"'<>]+/gi, "[redacted]")
       .replace(
         /\b(sk-[a-zA-Z0-9_-]{10,}|eyJ[a-zA-Z0-9_-]{15,}\.[a-zA-Z0-9_.-]+)/g,

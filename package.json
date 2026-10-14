@@ -32,7 +32,8 @@
     "typecheck": "npm run typecheck -w @nova/contracts && npm run typecheck -w @nova/api && npm run check -w @nova/web",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test:mcp-sandbox:context7-runtime": "node scripts/test-context7-sandbox-runtime.mjs"
+    "test:mcp-sandbox:context7-runtime": "node scripts/test-context7-sandbox-runtime.mjs",
+    "test:model-evaluation": "node --test scripts/test-code-evaluation.mjs scripts/test-model-evaluation-runtime.mjs scripts/test-persona-fixtures.mjs scripts/test-persona-models.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

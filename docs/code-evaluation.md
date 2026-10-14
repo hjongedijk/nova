@@ -35,6 +35,7 @@ The 2026-10-14 current-prompt run completed all ten tasks for each model through
 | Baseline | Not run                                                  | —          |                — |           — |          — | No paired baseline prompt captured.                                           |
 | Current  | `gemini/gemini-3.1-flash-lite`                           | 2026-10-14 |             3.50 |        4.10 |       2.20 | C08: bearer tokens remain exposed.                                            |
 | Current  | `cloudflare-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` | 2026-10-14 |             3.20 |        3.80 |       1.90 | C08: bearer tokens remain exposed. C09: rename precedes buffered flush/close. |
+| Current  | `mistral/codestral-latest`                               | 2026-10-14 |             2.90 |        3.80 |       1.40 | C08: missing bearer handling; unbounded redaction proposal.                   |
 
 This was a static acceptance review, with one blinded reviewer per model. Generated code was not executed. Both models returned ten answers without a reported fallback; response completion does not establish correctness. Median request latency was 3,070.5 ms for Gemini and 15,232.5 ms for Cloudflare. Requests used temperature 0 and a 1,800-token limit.
 
@@ -45,3 +46,11 @@ These results compare models under one current prompt. They do not show a before
 The recorded `casesSha256` is the SHA256 of the entire input Markdown document at run time, including its historical run-record section. The published summary also records a hash of the parsed task array; the ten tasks and acceptance checks above are unchanged.
 
 Before any run, build the API and run `node scripts/preflight-code-evaluation.mjs` with `NOVA_DATA_DIR`, `OMNIROUTE_DATABASE`, and `OMNIROUTE_API_KEY` from the NOVA installation. This read-only check reports the policy hash, verified-free candidates, the active NOVA key's model access, and their intersection. It exits unsuccessfully if no explicit candidate is accessible and never sends a model request. A passing preflight is only eligibility evidence; it does not score the cases.
+
+A later [Codestral sample](code-evaluation-runs/2026-10-14-codestral-code-summary.json)
+returned ten replies, median2,783ms. The exact prompt, parsed cases, recorded
+compiled modules and policy match the first Gemini/Cloudflare batch, although
+NOVA deployment versions differ (27/30). This is an additional model comparison,
+not a paired prompt experiment. Its static C08 failure concerns missing bearer
+handling and an unbounded proposal; printing fictional demo values alone is not
+proof of an operational leak. Model-role defaults remain unchanged.

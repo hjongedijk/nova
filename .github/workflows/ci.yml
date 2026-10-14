@@ -19,6 +19,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:model-evaluation
       - run: npm test -w @nova/web
       - run: npm run build
       - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr

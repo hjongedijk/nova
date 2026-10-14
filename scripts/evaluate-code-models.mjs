@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { createEvaluationRuntime } from "./model-evaluation-runtime.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -72,7 +72,7 @@ export function writeCheckpoint(output, report) {
   }
 }
 
-function failure(error) {
+export function failure(error) {
   if (error?.name === "FreeRoutingBlockedError") return "POLICY_BLOCKED";
   if (error?.name === "IncompleteModelResponseError") return "INCOMPLETE";
   if (/OmniRoute request failed \(429\)/.test(error?.message ?? ""))
@@ -222,48 +222,21 @@ async function main(args) {
     return;
   }
   if (fs.existsSync(options.output)) throw new Error("OUTPUT_EXISTS");
-  if (
-    !process.env.NOVA_DATA_DIR ||
-    !process.env.OMNIROUTE_DATABASE ||
-    !process.env.OMNIROUTE_API_KEY
-  )
-    throw new Error("MISSING_CONFIGURATION");
-  const load = (file) =>
-    import(pathToFileURL(path.join(ROOT, "apps/api/dist", file)));
-  const [
-    { NovaConfig },
-    { RoutingService },
-    { OmniRouteClient },
-    { SYSTEM_PROMPT },
-    { codeResponseStyle, responseStyle },
-    { sanitize },
-  ] = await Promise.all([
-    load("core/config/nova-config.js"),
-    load("routing/routing.service.js"),
-    load("chat/omniroute-client.service.js"),
-    load("chat/prompt.js"),
-    load("chat/orchestrator.service.js"),
-    load("core/security/sanitize.js"),
-  ]);
-  const config = new NovaConfig();
-  const live = new RoutingService(config);
-  const liveGate = (model) => {
-    const status = live.assertFree();
-    if (
-      !status.freeOnly ||
-      !status.policyVerified ||
-      !status.explicitModels?.includes(model) ||
-      status.embeddingModels?.includes(model)
-    )
-      throw new Error("POLICY_BLOCKED");
-  };
-  options.models.forEach(liveGate);
+  const {
+    config,
+    policy,
+    liveGate,
+    createRunner,
+    SYSTEM_PROMPT,
+    responseStyle,
+    codeResponseStyle,
+    sanitize,
+  } = await createEvaluationRuntime(options.models);
   const markdown = fs.readFileSync(
     path.join(ROOT, "docs/code-evaluation.md"),
     "utf8",
   );
   const cases = parseCases(markdown);
-  const policy = fs.readFileSync(config.dataFile("free-routing-policy.json"));
   const prompt = [
     SYSTEM_PROMPT,
     responseStyle("text", false),
@@ -287,40 +260,11 @@ async function main(args) {
       ]),
     ),
     evaluatorSha256: hash(fs.readFileSync(new URL(import.meta.url))),
-  };
-  const createRunner = (model) => {
-    const scratch = fs.mkdtempSync(
-      path.join(os.tmpdir(), "nova-code-evaluation-"),
-    );
-    fs.chmodSync(scratch, 0o700);
-    try {
-      fs.writeFileSync(path.join(scratch, "free-routing-policy.json"), policy, {
-        mode: 0o600,
-      });
-      fs.writeFileSync(
-        path.join(scratch, "settings.json"),
-        JSON.stringify({
-          modelRoles: { code: { preferred: [model], fallback: null } },
-        }),
-        { mode: 0o600 },
-      );
-      const isolated = Object.create(config);
-      isolated.dataFile = (name) => path.join(scratch, name);
-      const routing = new RoutingService(isolated);
-      const checkScratch = routing.assertFree.bind(routing);
-      routing.assertFree = () => {
-        liveGate(model);
-        return checkScratch();
-      };
-      const client = new OmniRouteClient(isolated, routing);
-      return {
-        call: client.call.bind(client),
-        close: () => fs.rmSync(scratch, { recursive: true, force: true }),
-      };
-    } catch (error) {
-      fs.rmSync(scratch, { recursive: true, force: true });
-      throw error;
-    }
+    runtimeSha256: hash(
+      fs.readFileSync(
+        new URL("./model-evaluation-runtime.mjs", import.meta.url),
+      ),
+    ),
   };
   const report = await runEvaluation({
     ...options,
