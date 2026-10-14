@@ -13,10 +13,10 @@ import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { normalizeHelperPreferences } from "../settings/settings-validation.js";
 import { SettingsStore } from "../settings/store/settings.store.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
+import { ScheduledAttemptBudget } from "./scheduled-attempt-budget.js";
 
 const CHECK_MS = 30_000;
 const RETRY_MS = 5 * 60_000;
-const MAX_ATTEMPTS = 3;
 /** Fixed, non-identifying copy only; never send a day's private conversation to a model. */
 function safeHighlight(content: string): string | null {
   const text = content.slice(0, 500).trim();
@@ -84,7 +84,7 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
   private running = false;
   private paused = false;
   private lastAttemptAt = 0;
-  private readonly attempts = new Map<string, number>();
+  private readonly attempts: ScheduledAttemptBudget;
 
   constructor(
     private readonly config: NovaConfig,
@@ -94,6 +94,9 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
     private readonly audit: AuditService,
   ) {
     this.progressFile = config.dataFile("daily-highlight-progress.json");
+    this.attempts = new ScheduledAttemptBudget(
+      config.dataFile("daily-highlight-attempts.json"),
+    );
   }
 
   onModuleInit(): void {
@@ -119,15 +122,8 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
     if (time < preference.time) return;
     const completed = this.completedDay();
     if (this.paused || completed === day) return;
-    const attempts = this.attempts.get(day) ?? 0;
-    if (
-      attempts >= MAX_ATTEMPTS ||
-      now.getTime() - this.lastAttemptAt < RETRY_MS
-    )
-      return;
+    if (now.getTime() - this.lastAttemptAt < RETRY_MS) return;
     this.running = true;
-    this.lastAttemptAt = now.getTime();
-    this.attempts.set(day, attempts + 1);
     const startedAt = Date.now();
     try {
       const workflowId = `nova-workflow:${crypto.createHash("sha256").update(`nova:daily-highlight:${day}`).digest("hex")}`;
@@ -135,6 +131,8 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
         this.saveCompletedDay(day);
         return;
       }
+      if (!this.attempts.reserve(day, now.getTime())) return;
+      this.lastAttemptAt = now.getTime();
       const done = await this.createHighlight(day, now, workflowId);
       if (done) this.saveCompletedDay(day);
       try {
@@ -150,6 +148,7 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn("Daily highlight audit unavailable");
       }
     } catch {
+      this.lastAttemptAt = now.getTime();
       try {
         this.audit.record({
           tool: "proactive_daily_highlight",
@@ -204,7 +203,6 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
       } finally {
         fs.closeSync(directory);
       }
-      this.attempts.delete(day);
     } catch {
       this.paused = true;
       this.logger.error(

@@ -19,6 +19,7 @@ import { RoutingService } from "../routing/routing.service.js";
 import { normalizeHelperPreferences } from "../settings/settings-validation.js";
 import { SettingsStore } from "../settings/store/settings.store.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
+import { ScheduledAttemptBudget } from "./scheduled-attempt-budget.js";
 import {
   OmniRouteClient,
   type ModelMessage,
@@ -26,7 +27,6 @@ import {
 
 const CHECK_MS = 30_000;
 const RETRY_MS = 5 * 60_000;
-const MAX_ATTEMPTS = 3;
 const MAX_INPUT_CHARS = 12_000;
 const WEEKLY_AT = "18:00";
 
@@ -115,7 +115,7 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
   private running = false;
   private paused = false;
   private lastAttemptAt = 0;
-  private readonly attempts = new Map<string, number>();
+  private readonly attempts: ScheduledAttemptBudget;
 
   constructor(
     private readonly config: NovaConfig,
@@ -128,6 +128,9 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
     private readonly alerts: AlertsFeed,
   ) {
     this.progressFile = config.dataFile("weekly-overview-progress.json");
+    this.attempts = new ScheduledAttemptBudget(
+      config.dataFile("weekly-overview-attempts.json"),
+    );
   }
 
   onModuleInit(): void {
@@ -154,15 +157,8 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
     if (!window) return;
     const completed = this.completedWeek();
     if (this.paused || completed === window.key) return;
-    const attempts = this.attempts.get(window.key) ?? 0;
-    if (
-      attempts >= MAX_ATTEMPTS ||
-      now.getTime() - this.lastAttemptAt < RETRY_MS
-    )
-      return;
+    if (now.getTime() - this.lastAttemptAt < RETRY_MS) return;
     this.running = true;
-    this.lastAttemptAt = now.getTime();
-    this.attempts.set(window.key, attempts + 1);
     const startedAt = Date.now();
     try {
       const workflowId = `nova-workflow:${crypto.createHash("sha256").update(`nova:weekly-overview:${window.key}`).digest("hex")}`;
@@ -170,6 +166,8 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
         this.saveCompletedWeek(window.key);
         return;
       }
+      if (!this.attempts.reserve(window.key, now.getTime())) return;
+      this.lastAttemptAt = now.getTime();
       const done = await this.createOverview(window, now, workflowId);
       if (done) this.saveCompletedWeek(window.key);
       try {
@@ -185,6 +183,7 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn("Weekly overview audit unavailable");
       }
     } catch {
+      this.lastAttemptAt = now.getTime();
       try {
         this.audit.record({
           tool: "proactive_weekly_overview",
@@ -241,7 +240,6 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
       } finally {
         fs.closeSync(directory);
       }
-      this.attempts.delete(week);
     } catch {
       this.paused = true;
       this.logger.error(

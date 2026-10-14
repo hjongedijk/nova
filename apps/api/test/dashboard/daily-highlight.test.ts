@@ -190,4 +190,129 @@ describe("opt-in daily highlight", () => {
       completedDay: "2026-10-13",
     });
   });
+
+  describe("durable attempt owner integration", () => {
+    const scheduled = new Date("2026-10-13T18:00:00Z");
+    const backoff = 5 * 60_000;
+    const attemptsFile = (dir: string) =>
+      path.join(dir, "daily-highlight-attempts.json");
+
+    it("honors a failed attempt's backoff after recreation", async () => {
+      const first = fixture(true, ["Ik heb mijn project afgerond."]);
+      first.record.mockReturnValueOnce(null);
+      await first.service.checkSchedule(scheduled);
+      expect(first.record).toHaveBeenCalledOnce();
+      const restarted = fixture(true, ["Ik heb mijn project afgerond."], first);
+      await restarted.service.checkSchedule(
+        new Date(scheduled.getTime() + backoff - 1),
+      );
+      expect(restarted.record).not.toHaveBeenCalled();
+      await restarted.service.checkSchedule(
+        new Date(scheduled.getTime() + backoff),
+      );
+      expect(restarted.record).toHaveBeenCalledOnce();
+    });
+
+    it("caps three failed work attempts across separate instances", async () => {
+      const first = fixture(true, ["Ik heb mijn project afgerond."]);
+      for (let index = 0; index < 3; index++) {
+        const instance =
+          index === 0
+            ? first
+            : fixture(true, ["Ik heb mijn project afgerond."], first);
+        instance.record.mockReturnValueOnce(null);
+        await instance.service.checkSchedule(
+          new Date(scheduled.getTime() + index * backoff),
+        );
+        expect(instance.record).toHaveBeenCalledOnce();
+      }
+      const fourth = fixture(true, ["Ik heb mijn project afgerond."], first);
+      await fourth.service.checkSchedule(
+        new Date(scheduled.getTime() + 3 * backoff),
+      );
+      expect(fourth.record).not.toHaveBeenCalled();
+      expect(
+        JSON.parse(fs.readFileSync(attemptsFile(first.dir), "utf8")),
+      ).toMatchObject({ period: "2026-10-13", attempts: 3 });
+    });
+
+    it.each(["exhausted", "corrupt"])(
+      "reconciles an accepted receipt before reading a %s attempt sidecar",
+      async (state) => {
+        const instance = fixture(true, ["Ik heb mijn project afgerond."]);
+        const id =
+          "nova-workflow:" +
+          createHash("sha256")
+            .update("nova:daily-highlight:2026-10-13")
+            .digest("hex");
+        instance.accepted.set(id, { seq: 1 });
+        const content =
+          state === "corrupt"
+            ? "{broken"
+            : JSON.stringify({
+                version: 1,
+                period: "2026-10-13",
+                attempts: 3,
+                lastAttemptAt: scheduled.getTime(),
+              });
+        fs.writeFileSync(attemptsFile(instance.dir), content);
+        await instance.service.checkSchedule(scheduled);
+        expect(instance.findWorkflowEvent).toHaveBeenCalledWith(id);
+        expect(instance.record).not.toHaveBeenCalled();
+        expect(
+          JSON.parse(
+            fs.readFileSync(
+              path.join(instance.dir, "daily-highlight-progress.json"),
+              "utf8",
+            ),
+          ),
+        ).toEqual({ completedDay: "2026-10-13" });
+        expect(fs.readFileSync(attemptsFile(instance.dir), "utf8")).toBe(
+          content,
+        );
+      },
+    );
+
+    it("blocks work on a corrupt attempt sidecar and retries after repair", async () => {
+      const instance = fixture(true, ["Ik heb mijn project afgerond."]);
+      fs.writeFileSync(attemptsFile(instance.dir), "{broken");
+      await instance.service.checkSchedule(scheduled);
+      expect(instance.record).not.toHaveBeenCalled();
+      expect(fs.readFileSync(attemptsFile(instance.dir), "utf8")).toBe(
+        "{broken",
+      );
+      fs.rmSync(attemptsFile(instance.dir));
+      await instance.service.checkSchedule(
+        new Date(scheduled.getTime() + backoff),
+      );
+      expect(instance.record).toHaveBeenCalledOnce();
+    });
+
+    it("blocks work until an attempt reservation can be saved and retries after backoff", async () => {
+      const instance = fixture(true, ["Ik heb mijn project afgerond."]);
+      const rename = fs.renameSync.bind(fs);
+      const failure = vi
+        .spyOn(fs, "renameSync")
+        .mockImplementation((source, destination) => {
+          if (destination === attemptsFile(instance.dir))
+            throw new Error("reservation unavailable");
+          return rename(source, destination);
+        });
+      try {
+        await instance.service.checkSchedule(scheduled);
+        expect(instance.record).not.toHaveBeenCalled();
+      } finally {
+        failure.mockRestore();
+      }
+      expect(fs.existsSync(attemptsFile(instance.dir))).toBe(false);
+      await instance.service.checkSchedule(
+        new Date(scheduled.getTime() + backoff - 1),
+      );
+      expect(instance.record).not.toHaveBeenCalled();
+      await instance.service.checkSchedule(
+        new Date(scheduled.getTime() + backoff),
+      );
+      expect(instance.record).toHaveBeenCalledOnce();
+    });
+  });
 });
