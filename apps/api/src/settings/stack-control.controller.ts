@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   Post,
   UseGuards,
@@ -20,6 +21,7 @@ export class StackControlController {
   ) {}
 
   @Get("node-red/logs")
+  @Header("Cache-Control", "no-store")
   async nodeRedLogs() {
     const logs = await this.stack.nodeRedLogs();
     const mapping = logs.available

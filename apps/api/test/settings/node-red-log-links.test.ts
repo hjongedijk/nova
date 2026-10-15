@@ -158,8 +158,22 @@ it("requires configured settings PIN on the actual log route", async () => {
       .get("/api/settings/stack-control/node-red/logs")
       .set({ ...ADMIN, "x-nova-pin": "fixture-pin" });
     expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.body.entries).toEqual([]);
     expect(logs).toHaveBeenCalledOnce();
+    logs.mockResolvedValueOnce({
+      available: false,
+      entries: [],
+      limited: true,
+      truncated: false,
+      reason: "Node-RED-logboek is niet beschikbaar.",
+    });
+    const unavailable = await app.api
+      .get("/api/settings/stack-control/node-red/logs")
+      .set({ ...ADMIN, "x-nova-pin": "fixture-pin" });
+    expect(unavailable.status).toBe(200);
+    expect(unavailable.body.available).toBe(false);
+    expect(unavailable.headers["cache-control"]).toBe("no-store");
   } finally {
     await app.app.close();
   }
