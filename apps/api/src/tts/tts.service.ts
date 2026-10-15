@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
+import { sanitize } from "../core/security/sanitize.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 
 export const TTS_DEFAULT_VOICE = "nl-NL-FennaNeural";
@@ -78,7 +79,10 @@ export class TtsService {
     requestedVoice?: unknown,
     requestedProsody?: unknown,
   ): Promise<{ audio: Buffer; cached: boolean; contentType: string }> {
-    const text = typeof raw === "string" ? raw.trim() : "";
+    const input = typeof raw === "string" ? raw.trim() : "";
+    if (input.length > TTS_MAX_CHARS)
+      throw new ValidationError(["De tekst is te lang."]);
+    const text = sanitize(input);
     if (!text)
       throw new ValidationError(["Er is tekst nodig om uit te spreken."]);
     if (text.length > TTS_MAX_CHARS)
@@ -184,22 +188,33 @@ export class TtsService {
     prosody: { rate: number; pitch: number },
   ): Promise<Buffer> {
     // One connection per request: the service drops idle connections after a while.
-    const tts = new MsEdgeTTS();
-    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-    const { audioStream } = tts.toStream(text, {
-      rate: `${prosody.rate}%`,
-      pitch: `${prosody.pitch}Hz`,
-      volume: "+0%",
+    const tts = new MsEdgeTTS({
+      connectionTimeoutMs: 5000,
+      synthesisTimeoutMs: 15000,
     });
     const chunks: Buffer[] = [];
     try {
+      await tts.setMetadata(
+        voice,
+        OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3,
+      );
+      // The API accepts plain text; the SDK interpolates this value into SSML.
+      const plain = text
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+      const { audioStream } = tts.toStream(plain, {
+        rate: `${prosody.rate}%`,
+        pitch: `${prosody.pitch}Hz`,
+        volume: "+0%",
+      });
       for await (const chunk of audioStream) chunks.push(Buffer.from(chunk));
+      return Buffer.concat(chunks);
     } catch (error) {
       this.log.warn("Speech synthesis stream failed");
       throw error;
     } finally {
       tts.close();
     }
-    return Buffer.concat(chunks);
   }
 }

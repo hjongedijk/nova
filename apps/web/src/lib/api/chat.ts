@@ -46,21 +46,29 @@ export async function fetchSpeech(
   mood: AssistantMood = "neutral",
   language?: ConversationLanguage,
 ): Promise<Blob> {
-  const response = await fetch("/api/tts", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      text,
-      voice: ttsVoiceForSpeech(language),
-      prosody: ttsProsodyForMood(mood),
-    }),
-    signal,
+  const body = JSON.stringify({
+    text,
+    voice: ttsVoiceForSpeech(language),
+    prosody: ttsProsodyForMood(mood),
   });
-  if (!response.ok) {
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      signal,
+    });
+    if (response.ok) return response.blob();
     await response.body?.cancel().catch(() => undefined);
+    signal?.throwIfAborted();
+    if (
+      attempt === 0 &&
+      [500, 502, 503, 504].includes(response.status) &&
+      !response.headers.has("retry-after")
+    )
+      continue;
     throw new Error(`TTS failed (${response.status})`);
   }
-  return response.blob();
 }
 
 /** POST /api/actions/confirm: the buttons on a confirmation card. */

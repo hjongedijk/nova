@@ -82,6 +82,7 @@ export function createSpeaker(
   let playedChars = 0;
   let cancelled = false;
   let finished = false;
+  let speechFailed = false;
   let playIndex = 0;
   let mood: AssistantMood = "neutral";
   let reportedFirstPlayback = false;
@@ -157,6 +158,11 @@ export function createSpeaker(
   const done = (async () => {
     try {
       while (!cancelled) {
+        if (speechFailed) {
+          if (finished) break;
+          await new Promise<void>((resolve) => (wake = resolve));
+          continue;
+        }
         if (playIndex >= items.length) {
           if (finished) break;
           await new Promise<void>((resolve) => (wake = resolve));
@@ -168,11 +174,22 @@ export function createSpeaker(
         let url: string;
         try {
           url = await load(item);
-        } catch (error) {
+        } catch {
           if (cancelled) break;
-          console.error("TTS error:", error);
-          playedChars += item.text.length;
-          playIndex += 1;
+          speechFailed = true;
+          abort.abort();
+          console.warn("Speech synthesis unavailable");
+          showToast({
+            severity: "warning",
+            title:
+              language === "en"
+                ? "Speech is unavailable right now"
+                : "Spraak is nu niet beschikbaar",
+            detail:
+              language === "en"
+                ? "Read the answer on screen. Try speech again later."
+                : "Lees het antwoord op het scherm. Probeer spraak later opnieuw.",
+          });
           continue;
         }
         if (cancelled) break;
@@ -190,13 +207,14 @@ export function createSpeaker(
       if (stopCurrentSpeech === cancel) stopCurrentSpeech = null;
       if (activeSpeaker === self) activeSpeaker = null;
       setState("ready");
-      if (!cancelled) afterSpeech();
+      if (!cancelled && !speechFailed) afterSpeech();
     }
   })();
   const speaker: Speaker = {
     feed(delta) {
-      buffer += delta;
       fedChars += delta.length;
+      if (cancelled || speechFailed) return;
+      buffer += delta;
       for (;;) {
         const cut = speechChunkBoundary(
           buffer,
@@ -209,8 +227,9 @@ export function createSpeaker(
       }
     },
     finish() {
+      if (cancelled) return;
       finished = true;
-      push(buffer);
+      if (!speechFailed) push(buffer);
       buffer = "";
       nudge();
     },

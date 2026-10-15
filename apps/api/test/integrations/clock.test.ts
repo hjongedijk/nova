@@ -1,11 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
-import { WorldService } from "../../src/integrations/world/world.service.js";
-import type { WorldHttp } from "../../src/integrations/world/world.types.js";
-import {
-  worldDefinitions,
-  WORLD_TOOL_NAMES,
-} from "../../src/integrations/world/world.definitions.js";
+import { worldDefinitions } from "../../src/integrations/world/world.definitions.js";
+import { SystemTimeSource } from "../../src/proxmox/system-time.source.js";
+import type { ToolCall } from "../../src/tools/tool.types.js";
 import {
   selectToolsForRequest,
   type SelectableTool,
@@ -16,34 +13,32 @@ afterEach(() => vi.useRealTimers());
 function setup(instant = "2026-10-15T16:30:45.000Z") {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(instant));
-  const network = { getJson: vi.fn(), getPage: vi.fn() };
   const dataFile = vi.fn();
-  const world = new WorldService(
-    { timezone: "Europe/Amsterdam", dataFile } as unknown as NovaConfig,
-    network as WorldHttp,
-  );
-  const home = { sync: vi.fn(), zoneHome: vi.fn() };
-  world.useHomeSource(home);
-  return { world, network, home, dataFile };
+  const source = new SystemTimeSource({
+    timezone: "Europe/Amsterdam",
+    dataFile,
+  } as unknown as NovaConfig);
+  return { source, dataFile };
 }
 
 describe("live server clock", () => {
   it("returns the configured local date/time and the exact UTC observation without network or storage", async () => {
-    const { world, network, home, dataFile } = setup();
-    expect(await world.execute("clock_time", {})).toEqual({
+    const { source, dataFile } = setup();
+    expect(await source.execute("system_time", {})).toMatchObject({
       ok: true,
       result: {
-        source: "server-clock",
+        iso: "2026-10-15T16:30:45.000Z",
+        timestamp: Date.parse("2026-10-15T16:30:45.000Z"),
+        serverTimezone: "Europe/Amsterdam",
         timezone: "Europe/Amsterdam",
-        observedAt: "2026-10-15T16:30:45.000Z",
-        date: "2026-10-15",
-        time: "18:30:45",
+        local: {
+          isoDate: "2026-10-15",
+          time: "18:30",
+          timeWithSeconds: "18:30:45",
+        },
       },
     });
-    expect(network.getJson).not.toHaveBeenCalled();
-    expect(network.getPage).not.toHaveBeenCalled();
-    expect(home.sync).not.toHaveBeenCalled();
-    expect(home.zoneHome).not.toHaveBeenCalled();
+
     expect(dataFile).not.toHaveBeenCalled();
   });
 
@@ -57,15 +52,18 @@ describe("live server clock", () => {
   ])(
     "observes %s in %s across DST and date boundaries",
     async (instant, timezone, date, time) => {
-      const { world } = setup(instant);
-      expect(await world.execute("clock_time", { timezone })).toEqual({
+      const { source } = setup(instant);
+      expect(await source.execute("system_time", { timezone })).toMatchObject({
         ok: true,
         result: {
-          source: "server-clock",
+          iso: instant,
           timezone,
-          observedAt: instant,
-          date,
-          time,
+          serverTimezone: "Europe/Amsterdam",
+          local: {
+            isoDate: date,
+            time: time.slice(0, 5),
+            timeWithSeconds: time,
+          },
         },
       });
     },
@@ -82,38 +80,59 @@ describe("live server clock", () => {
   ])(
     "rejects invalid zone %j without echoing input or diagnostics",
     async (timezone) => {
-      const { world, network } = setup();
-      expect(await world.execute("clock_time", { timezone })).toEqual({
+      const { source } = setup();
+      expect(await source.execute("system_time", { timezone })).toEqual({
         ok: false,
         error: "Gebruik een geldige IANA-tijdzone, zoals Europe/Amsterdam.",
       });
-      expect(network.getJson).not.toHaveBeenCalled();
     },
   );
 
   it("does not read the clock after cancellation", async () => {
-    const { world } = setup();
+    const { source } = setup();
     const controller = new AbortController();
     controller.abort();
-    expect(await world.execute("clock_time", {}, controller.signal)).toEqual({
+    expect(
+      await source.execute("system_time", {}, {
+        signal: controller.signal,
+      } as ToolCall),
+    ).toEqual({
       ok: false,
       error: "Tijdslimiet bereikt",
     });
   });
 
   it("registers one read-only clock and selects it directly for Dutch and English time/date questions", () => {
-    const clock = worldDefinitions().find((tool) => tool.name === "clock_time");
+    const clock = new SystemTimeSource({
+      timezone: "Europe/Amsterdam",
+    } as NovaConfig)
+      .definitions()
+      .find((tool) => tool.name === "system_time");
     expect(clock).toBeDefined();
     expect(clock!.risk).toBe("READ_ONLY");
-    expect(WORLD_TOOL_NAMES).toContain("clock_time");
-    const tools: SelectableTool[] = worldDefinitions().map((tool) => ({
-      type: "function" as const,
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters,
-      },
-    }));
+
+    const tools: SelectableTool[] = new SystemTimeSource({
+      timezone: "Europe/Amsterdam",
+    } as NovaConfig)
+      .definitions()
+      .map((tool) => ({
+        type: "function" as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      }));
+    tools.push(
+      ...worldDefinitions().map((tool) => ({
+        type: "function" as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      })),
+    );
     tools.push(
       ...Array.from({ length: 30 }, (_, index) => ({
         type: "function" as const,
@@ -142,7 +161,7 @@ describe("live server clock", () => {
       expect(
         selectToolsForRequest(tools, question, "conversation")[0]?.function
           .name,
-      ).toBe("clock_time");
+      ).toBe("system_time");
     }
   });
 });

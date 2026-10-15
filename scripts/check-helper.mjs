@@ -157,9 +157,14 @@ import assert from "node:assert/strict";
       await page.route("**/api/settings/wallpaper", (route) =>
         route.fulfill({ json: { available: false, reason: "no-agent" } }),
       );
-      await page.route("**/api/tts", (route) =>
-        route.fulfill({ status: 503, body: "test voice disabled" }),
+      await page.route("**/api/alerts?*", (route) =>
+        route.fulfill({ json: { latest: 0, events: [] } }),
       );
+      let speechRequests = 0;
+      await page.route("**/api/tts", (route) => {
+        speechRequests++;
+        return route.fulfill({ status: 503, body: "test voice disabled" });
+      });
       await page.route("**/api/memory/*", (route) => {
         assert.equal(route.request().method(), "DELETE");
         return route.fulfill({ json: { ok: true } });
@@ -687,6 +692,16 @@ import assert from "node:assert/strict";
       );
 
       await page.getByRole("button", { name: "Chat", exact: true }).click();
+      while (
+        await page
+          .getByRole("button", { name: "Melding sluiten", exact: true })
+          .count()
+      )
+        await page
+          .getByRole("button", { name: "Melding sluiten", exact: true })
+          .first()
+          .click();
+      const speechBefore = speechRequests;
       await page
         .getByRole("textbox", { name: "Bericht aan NOVA" })
         .fill("Hoe gaat het met de server?");
@@ -701,6 +716,35 @@ import assert from "node:assert/strict";
         (await page.locator("body").innerText()).includes("NOVA_MOOD"),
         false,
       );
+      const speechWarning = page.locator(".inline-toasts").getByRole("alert");
+      await speechWarning
+        .filter({ hasText: "Spraak is nu niet beschikbaar" })
+        .waitFor();
+      assert.equal(await speechWarning.count(), 1);
+      assert(
+        (await page.locator(".hp-messages").innerText())
+          .replace(/\s+/g, " ")
+          .includes("Er draaien vier machines. De server ziet er rustig uit."),
+      );
+      await page.waitForFunction(
+        () => !document.querySelector('[aria-label="Verstuur"]')?.disabled,
+      );
+      assert(
+        speechRequests - speechBefore >= 2 &&
+          speechRequests - speechBefore <= 4,
+        "At most one retry per prefetched speech chunk",
+      );
+      assert.equal(
+        (await page.locator("body").innerText()).includes(
+          "test voice disabled",
+        ),
+        false,
+      );
+      assert.equal(await page.evaluate(() => document.fullscreenElement), null);
+      await speechWarning
+        .getByRole("button", { name: "Melding sluiten", exact: true })
+        .click();
+      assert.equal(await speechWarning.count(), 0);
       await snap("chat", 640, 340);
       await assertFullscreen();
       assert.match(
@@ -898,6 +942,45 @@ import assert from "node:assert/strict";
         1,
         "Native resize requests must stay serialized.",
       );
+      kind = "answer";
+      fail = false;
+      await page.evaluate(() => {
+        localStorage.setItem("novaVolume", "1");
+        localStorage.setItem("novaWake", "off");
+        localStorage.setItem("novaVoiceAlerts", "off");
+      });
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto(new URL("/", page.url()).href);
+      const mainSpeechBefore = speechRequests;
+      await page.locator("#input").fill("Hoe gaat het met de server?");
+      await page.locator("#sendButton").click();
+      const mainSpeechWarning = page.locator("#toasts").getByRole("alert");
+      await mainSpeechWarning
+        .filter({ hasText: "Spraak is nu niet beschikbaar" })
+        .waitFor();
+      assert.equal(await mainSpeechWarning.count(), 1);
+      await page.waitForFunction(
+        () => !document.querySelector("#sendButton")?.disabled,
+      );
+      assert(
+        (await page.locator("#reply").innerText())
+          .replace(/\s+/g, " ")
+          .includes("Er draaien vier machines. De server ziet er rustig uit."),
+      );
+      assert(
+        speechRequests - mainSpeechBefore >= 2 &&
+          speechRequests - mainSpeechBefore <= 4,
+      );
+      assert.equal(
+        (await page.locator("body").innerText()).includes(
+          "test voice disabled",
+        ),
+        false,
+      );
+      await mainSpeechWarning
+        .getByRole("button", { name: "Melding sluiten", exact: true })
+        .click();
+      assert.equal(await mainSpeechWarning.count(), 0);
       assert.deepEqual(errors, []);
       await context.close();
     }
@@ -905,7 +988,7 @@ import assert from "node:assert/strict";
     await browser.close();
   }
   console.log(
-    "Helper browser checks passed at 1x/2x: compact/fullscreen/hide/responsive sizing, views, speech meter, persisted input/output selection, temporary missing microphone/reconnect, chosen track for tap-to-talk and wake, stream cleanup, ticker/model, notices/snooze, attachment retry/cleanup, choices, confirmations and N shortcut.",
+    "Helper browser checks passed at 1x/2x: compact/fullscreen/hide/responsive sizing, views, speech meter, persisted input/output selection, temporary missing microphone/reconnect, chosen track for tap-to-talk and wake, stream cleanup, ticker/model, notices/snooze, attachment retry/cleanup, choices, confirmations, N shortcut, bounded speech retries and one readable failure notice in helper/main while full text remains available.",
   );
 })().catch((error) => {
   console.error(error.stack);

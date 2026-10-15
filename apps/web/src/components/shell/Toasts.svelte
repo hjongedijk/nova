@@ -1,8 +1,15 @@
 <script lang="ts">
+  let { inline = false }: { inline?: boolean } = $props();
   import { dismissToast, toasts } from "#lib/stores/toasts.svelte.ts";
 </script>
 
-<div id="toasts" role="region" aria-label="Meldingen" aria-live="polite">
+<div
+  id={inline ? undefined : "toasts"}
+  class:inline-toasts={inline}
+  role="region"
+  aria-label="Meldingen"
+  aria-live="polite"
+>
   {#each toasts.items as toast (toast.id)}
     <div
       class="toast {toast.severity}"
@@ -18,3 +25,10 @@
     </div>
   {/each}
 </div>
+
+<style>
+  .inline-toasts {
+    display: grid;
+    gap: 8px;
+  }
+</style>

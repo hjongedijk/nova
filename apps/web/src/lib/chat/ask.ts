@@ -31,7 +31,10 @@ import { easterEgg } from "./easter-eggs.ts";
 
 // A few words about what NOVA is doing, so a long task never looks stuck.
 const TOOL_HINTS: [RegExp, { nl: string; en: string }][] = [
-  [/^clock_time$/, { nl: "Tijd controleren…", en: "Checking the time…" }],
+  [
+    /^(?:system_time|clock_time)$/,
+    { nl: "Tijd controleren…", en: "Checking the time…" },
+  ],
   [
     /^(web_search|web_read|wikipedia|news_headlines)/,
     { nl: "Informatie opzoeken…", en: "Looking up information…" },

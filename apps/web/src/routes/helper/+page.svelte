@@ -9,6 +9,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import type { FeedEvent, NotificationModes } from "@nova/contracts";
   import Orb from "#components/helper/Orb.svelte";
+  import Toasts from "#components/shell/Toasts.svelte";
   import ActionReceipts from "#components/shell/ActionReceipts.svelte";
   import HelperUi from "#components/helper/HelperUi.svelte";
   import HelperDevices from "#components/helper/HelperDevices.svelte";
@@ -1251,6 +1252,7 @@
               >
                 Wat kan ik voor je doen?
               </p>{/if}{/each}
+          <Toasts inline />
           <ActionReceipts separateWindow />
         </section>
         {#if chat.choices.length}
