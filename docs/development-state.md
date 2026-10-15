@@ -6,6 +6,8 @@ Do not record credentials, personal messages or actual deployment configuration 
 
 ## Current work
 
+- Candidate40: known required-live READ_ONLY attempts now suppress subsequent token/mood narration until a valid alternate read succeeds. All-failed terminal returns fixed NL/EN copy. Discovery does not count; explicit executed=false/verified=false invalidates success. Independent review no issues;40 regressions,176 focused tests, full2170/144files, typecheck/build/lint/format and24 compiled isolated runtime cases pass. Production still39 pending release. Scope intentionally excludes mixed-success fact grounding and the existing never-attempted policy.
+
 This section supersedes older candidate/pending statements below. Updated after deployed v0.1.39 proof on2026-10-14.
 
 - Active objective: all eleven requirements in the user-provided `goal-objective.md`; tasks-09-10-2026.md is215/248 complete. The broad goal is not complete. Do not revisit the resolved Orb or repeat old audits without new regression evidence.
