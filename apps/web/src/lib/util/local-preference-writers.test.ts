@@ -135,4 +135,15 @@ describe("user preference persistence receipts", () => {
     storage.set("novaAudioOutput", "");
     expect(cards).toHaveLength(0);
   });
+
+  it("keeps live prosody preview persistent and emits one card at the end of the adjustment", () => {
+    saveTtsProsody(1, 0, false);
+    saveTtsProsody(2, 0, false);
+    saveTtsProsody(3, 0, false);
+    expect(values.get("novaTtsRate")).toBe("3");
+    expect(cards).toHaveLength(0);
+    saveTtsProsody(3, 0);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.performed).toContain("opgeslagen");
+  });
 });

@@ -1,4 +1,5 @@
 import type { CommunicationPreference } from "@nova/contracts";
+import { publishLocalPreferenceReceipt } from "../util/local-preference-receipts.ts";
 
 const KEY = "nova-communication-preferences-v1";
 const ALLOWED: CommunicationPreference[] = [
@@ -48,10 +49,16 @@ export function saveCommunicationPreference(
         ),
         preference,
       ].slice(0, ALLOWED.length);
+  const serialized = JSON.stringify(updated);
+  let stored = false;
   try {
-    storage?.setItem(KEY, JSON.stringify(updated));
+    if (storage) {
+      storage.setItem(KEY, serialized);
+      stored = storage.getItem(KEY) === serialized;
+    }
   } catch {
     /* Private browsing or full storage must not break chat. */
   }
+  publishLocalPreferenceReceipt("communication-style", stored);
   return updated;
 }

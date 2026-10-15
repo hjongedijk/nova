@@ -80,6 +80,9 @@ export function settingsActionReceipt(
       ? "Opgeslagen waarde opnieuw gelezen en gecontroleerd"
       : "Opslag bevestigd; nieuwe waarde niet gecontroleerd",
     recoverHref,
+    ...(target.kind === "quick-actions"
+      ? { recovery: "quick-actions" as const }
+      : {}),
   };
 }
 

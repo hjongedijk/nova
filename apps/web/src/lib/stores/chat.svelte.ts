@@ -23,6 +23,8 @@ export interface ActionReceipt {
   verification: string;
   /** Fixed settings history link; rollback there always asks for confirmation. */
   recoverHref?: string;
+  /** Fixed family only; historical recovery always requires explicit selection and confirmation. */
+  recovery?: "quick-actions";
 }
 
 /** The conversation as the screen shows it. The chat layer (lib/chat) is the only writer. */

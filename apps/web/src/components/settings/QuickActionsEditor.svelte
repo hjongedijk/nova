@@ -1,11 +1,7 @@
 <script lang="ts">
-  import {
-    getQuickActionsHistory,
-    resetQuickActions,
-    rollbackQuickActions,
-    saveQuickActions,
-  } from "#lib/api/settings.ts";
+  import { resetQuickActions, saveQuickActions } from "#lib/api/settings.ts";
   import Button from "#components/ui/Button.svelte";
+  import QuickActionsHistory from "./QuickActionsHistory.svelte";
   import { afterChange, fail, settings } from "./state.svelte.ts";
 
   let nextKey = 0;
@@ -16,21 +12,7 @@
       prompt: item.prompt,
     })),
   );
-  let history = $state<Awaited<
-    ReturnType<typeof getQuickActionsHistory>
-  > | null>(null);
-  let busy = $state(false);
-
-  async function loadHistory(): Promise<void> {
-    busy = true;
-    try {
-      history = await getQuickActionsHistory();
-    } catch (error) {
-      fail(error);
-    } finally {
-      busy = false;
-    }
-  }
+  let historyView: QuickActionsHistory | undefined = $state();
 
   function swap(index: number, other: number): void {
     const a = rows[index];
@@ -53,7 +35,7 @@
           operation: "save",
         },
       );
-      history = null;
+      historyView?.clear();
     } catch (error) {
       fail(error);
     }
@@ -71,36 +53,9 @@
           operation: "reset",
         },
       );
-      history = null;
+      historyView?.clear();
     } catch (error) {
       fail(error);
-    }
-  }
-
-  async function rollback(id: string): Promise<void> {
-    if (
-      !window.confirm(
-        "Deze eerdere snelle opdrachten herstellen? Dit voert ze niet uit.",
-      )
-    )
-      return;
-    busy = true;
-    try {
-      const result = await rollbackQuickActions(id);
-      rows = result.quickActions.map((item) => ({ key: nextKey++, ...item }));
-      await afterChange(
-        `Snelle opdrachten hersteld.${result.auditWarning ? ` ${result.auditWarning}` : ""}`,
-        {
-          kind: "quick-actions",
-          items: result.quickActions,
-          operation: "rollback",
-        },
-      );
-      history = await getQuickActionsHistory();
-    } catch (error) {
-      fail(error);
-    } finally {
-      busy = false;
     }
   }
 </script>
@@ -148,36 +103,18 @@
       >Knop toevoegen</Button
     >
     <Button go onclick={save}>Opslaan</Button>
-    <Button disabled={busy} onclick={loadHistory}>Geschiedenis</Button>
+    <Button
+      disabled={historyView?.isBusy() ?? false}
+      onclick={() => historyView?.load()}>Geschiedenis</Button
+    >
     {#if settings.data && !settings.data.quickActionsAreDefault}
       <Button onclick={reset}>Standaard herstellen</Button>
     {/if}
   </div>
-  {#if history}
-    <section aria-label="Geschiedenis snelle opdrachten">
-      <h3>Geschiedenis</h3>
-      {#if history.revisions.length}
-        {#each history.revisions as revision (revision.id)}
-          <details>
-            <summary><time datetime={revision.at}>{revision.at}</time></summary>
-            <p><strong>Voor</strong></p>
-            {#each revision.before.items as action, index (`before-${index}`)}<p
-              >
-                {action.label}: {action.prompt}
-              </p>{/each}
-            <p><strong>Na</strong></p>
-            {#each revision.after.items as action, index (`after-${index}`)}<p>
-                {action.label}: {action.prompt}
-              </p>{/each}
-            <Button disabled={busy} onclick={() => rollback(revision.id)}
-              >Herstel deze versie</Button
-            >
-          </details>
-        {/each}
-      {:else}<p class="hint">Nog geen wijzigingen bewaard.</p>{/if}
-      {#if history.truncated}<p class="hint">
-          Oudere wijzigingen ontbreken.
-        </p>{/if}
-    </section>
-  {/if}
+  <QuickActionsHistory
+    bind:this={historyView}
+    onRestored={(items) => {
+      rows = items.map((item) => ({ key: nextKey++, ...item }));
+    }}
+  />
 </section>

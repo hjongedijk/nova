@@ -76,9 +76,13 @@
     voiceExamples[ttsLocale()] ?? voiceExamples["nl-NL"]!,
   );
 
-  function setVolume(percent: number): void {
+  function setVolume(percent: number, recordChange = false): void {
     volume = percent;
-    storage.set("novaVolume", String(percent / 100), "volume");
+    storage.set(
+      "novaVolume",
+      String(percent / 100),
+      recordChange ? "volume" : undefined,
+    );
     if (playback.current) applyVolume(playback.current);
   }
 
@@ -86,10 +90,15 @@
     selectedVoice = saveTtsVoice(value);
   }
 
-  function adjustProsody(field: "rate" | "pitch", value: number): void {
+  function adjustProsody(
+    field: "rate" | "pitch",
+    value: number,
+    recordChange = false,
+  ): void {
     prosody = saveTtsProsody(
       field === "rate" ? value : prosody.rate,
       field === "pitch" ? value : prosody.pitch,
+      recordChange,
     );
   }
 
@@ -217,6 +226,8 @@
       value={prosody.rate}
       oninput={(event) =>
         adjustProsody("rate", Number(event.currentTarget.value))}
+      onchange={(event) =>
+        adjustProsody("rate", Number(event.currentTarget.value), true)}
     />
   </div>
   <div class="field">
@@ -232,6 +243,8 @@
       value={prosody.pitch}
       oninput={(event) =>
         adjustProsody("pitch", Number(event.currentTarget.value))}
+      onchange={(event) =>
+        adjustProsody("pitch", Number(event.currentTarget.value), true)}
     />
     <p class="help">
       Kleine verschillen tussen zinnen maken de stem minder vlak.
@@ -249,6 +262,7 @@
         aria-label="Volume van NOVA"
         value={volume}
         oninput={(event) => setVolume(Number(event.currentTarget.value))}
+        onchange={(event) => setVolume(Number(event.currentTarget.value), true)}
       />
       <Badge text="{volume}%" />
     </div>

@@ -192,17 +192,16 @@ export function loadHelperPreferences(): void {
     /* Damaged browser preferences retain defaults. */
   }
 }
-export function saveHelperPreferences(): void {
-  storage.set(
-    "nova.helper.personality",
-    JSON.stringify({
-      shape: helper.shape,
-      notifications: helper.notifications,
-      rituals: helper.rituals,
-      cues: helper.cues,
-      wardrobe: helper.wardrobe,
-    }),
-  );
+export function saveHelperPreferences(): boolean {
+  const value = JSON.stringify({
+    shape: helper.shape,
+    notifications: helper.notifications,
+    rituals: helper.rituals,
+    cues: helper.cues,
+    wardrobe: helper.wardrobe,
+  });
+  storage.set("nova.helper.personality", value);
+  return storage.matches("nova.helper.personality", value);
 }
 
 /** Optional date accents use only a birthday explicitly supplied in settings. */

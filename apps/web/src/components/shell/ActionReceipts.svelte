@@ -1,7 +1,9 @@
 <script lang="ts">
   import { chat } from "#lib/stores/chat.svelte.ts";
+  import QuickActionsHistory from "#components/settings/QuickActionsHistory.svelte";
 
   let { separateWindow = false }: { separateWindow?: boolean } = $props();
+  let expanded = $state<string | null>(null);
 </script>
 
 {#each chat.actionReceipts as receipt (receipt.id)}
@@ -21,6 +23,21 @@
         target={separateWindow ? "_blank" : undefined}
         rel={separateWindow ? "noopener" : undefined}>Bekijk herstelopties</a
       >
+    {/if}
+    {#if receipt.recovery === "quick-actions"}
+      <button
+        type="button"
+        class="btn"
+        aria-expanded={expanded === receipt.id}
+        onclick={() => (expanded = expanded === receipt.id ? null : receipt.id)}
+        >{expanded === receipt.id
+          ? "Herstelopties sluiten"
+          : "Herstelopties openen"}</button
+      >
+      {#if expanded === receipt.id}
+        <p>Kies een eerdere versie. Bekijk eerst Voor en Na.</p>
+        <QuickActionsHistory loadOnMount />
+      {/if}
     {/if}
   </section>
 {/each}

@@ -11,6 +11,7 @@ import { friendlyApiError, uiErrorLanguage } from "#lib/api/error-copy.ts";
 import { getSettings, setPin } from "#lib/api/settings.ts";
 import { loadSidebar } from "#lib/stores/sidebar.svelte.ts";
 import { chat } from "#lib/stores/chat.svelte.ts";
+import { shell } from "#lib/stores/shell.svelte.ts";
 import {
   settingsActionReceipt,
   type SettingsReceiptTarget,
@@ -110,6 +111,7 @@ export async function afterChange(
   try {
     overview = await getSettings();
     settings.data = overview;
+    shell.quickActions = overview.quickActions;
   } catch (error) {
     if (receipt) {
       chat.actionReceipts.unshift(settingsActionReceipt(receipt, null));

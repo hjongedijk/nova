@@ -13,6 +13,8 @@ const preferences = {
   "voice-alerts": "Gesproken meldingen",
   panels: "Zijpanelen",
   "light-sync": "Lichtsynchronisatie",
+  "communication-style": "Onthouden gespreksvoorkeuren",
+  "helper-preferences": "Lokale helpervoorkeuren",
 } as const;
 
 export type LocalPreferenceReceiptKind = keyof typeof preferences;

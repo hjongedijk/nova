@@ -491,6 +491,14 @@ import assert from "node:assert/strict";
       });
       await page.getByRole("button", { name: "Chat", exact: true }).click();
       const receiptCards = page.getByRole("region", { name: "Actiekaart" });
+      const helperReceipts = receiptCards.filter({
+        hasText: "Lokale helpervoorkeuren aanpassen",
+      });
+      assert.equal(await helperReceipts.count(), 4);
+      assert.match(
+        await helperReceipts.first().innerText(),
+        /Browseropslag opnieuw gelezen en gecontroleerd/,
+      );
       const inputReceipt = receiptCards.filter({
         hasText: "Microfoonkeuze aanpassen",
       });

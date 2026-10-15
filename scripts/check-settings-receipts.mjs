@@ -41,6 +41,27 @@ try {
       let pendingToolReadback = false;
       let failAbility = false;
       let servicePending = false;
+      let quickWrites = 0;
+      let quickHistoryReads = 0;
+      let quickRollbackAttempts = 0;
+      let quickRollbackEffects = 0;
+      let failQuickHistory = false;
+      let expectedRollbackId = null;
+      let quickHistory = [];
+      const quickSaveId = "11111111-1111-4111-8111-111111111111";
+      const olderQuickId = "33333333-3333-4333-8333-333333333333";
+      const driftQuickId = "44444444-4444-4444-8444-444444444444";
+      const savedQuickItems = [
+        { label: "Nieuwe keuze", prompt: "Noem een natuurfeit." },
+      ];
+      const olderQuickItems = [
+        { label: "Eerdere keuze", prompt: "Vertel een rustig feit." },
+      ];
+      const snapshot = (items) => ({
+        isDefault: false,
+        items: structuredClone(items),
+      });
+
       const overview = {
         persona: "Spreek duidelijk.",
         personaStyle: "friendly",
@@ -160,6 +181,59 @@ try {
             pendingToolReadback = true;
             return json({ ok: true, override });
           }
+          if (pathname === "/api/settings/quick-actions" && method === "PUT") {
+            quickWrites++;
+            assert.deepEqual(request.postDataJSON(), {
+              items: savedQuickItems,
+            });
+            const revision = {
+              id: quickSaveId,
+              at: "2026-10-15T12:00:00.000Z",
+              before: snapshot(overview.quickActions),
+              after: snapshot(savedQuickItems),
+            };
+            quickHistory = [revision, ...quickHistory];
+            overview.quickActions = structuredClone(savedQuickItems);
+            return json({ ok: true, quickActions: overview.quickActions });
+          }
+          const quickRollback =
+            /^\/api\/settings\/quick-actions\/history\/([0-9a-f-]{36})\/rollback$/.exec(
+              pathname,
+            );
+          if (quickRollback && method === "POST") {
+            quickRollbackAttempts++;
+            const id = quickRollback[1];
+            assert.equal(
+              id,
+              expectedRollbackId,
+              "Only the explicitly selected history row may be restored",
+            );
+            assert.deepEqual(request.postDataJSON(), {});
+            const revision = quickHistory.find((row) => row.id === id);
+            assert(
+              revision,
+              "Selected revision must exist in the returned fixture history",
+            );
+            if (
+              JSON.stringify(revision.after) !==
+              JSON.stringify(snapshot(overview.quickActions))
+            ) {
+              return json({ error: "Synthetic private drift diagnostic" }, 409);
+            }
+            quickRollbackEffects++;
+            const before = snapshot(overview.quickActions);
+            overview.quickActions = structuredClone(revision.before.items);
+            quickHistory = [
+              {
+                id: `55555555-5555-4555-8555-${String(quickRollbackEffects).padStart(12, "0")}`,
+                at: `2026-10-15T12:0${quickRollbackEffects}:00.000Z`,
+                before,
+                after: snapshot(overview.quickActions),
+              },
+              ...quickHistory,
+            ];
+            return json({ ok: true, quickActions: overview.quickActions });
+          }
           if (
             pathname === "/api/settings/services/node-red" &&
             method === "PUT"
@@ -230,6 +304,13 @@ try {
             pendingToolReadback = false;
           }
           return json(overview);
+        }
+        if (pathname === "/api/settings/quick-actions/history") {
+          quickHistoryReads++;
+          assert.equal(request.headers()["x-nova-admin"], "1");
+          if (failQuickHistory)
+            return json({ error: "Synthetic private history diagnostic" }, 503);
+          return json({ revisions: quickHistory, truncated: false });
         }
         if (pathname === "/api/tts/health")
           return json({ piperAvailable: false, voice: "nl-NL-FennaNeural" });
@@ -596,6 +677,347 @@ try {
         await cards.first().innerText(),
         /GuyNeural|JennyNeural/,
       );
+      // A real quick-action edit creates a receipt but never reads recovery history eagerly.
+      await settingsSection("general");
+      const quickEditor = page.locator("#quick-actions-history");
+      await quickEditor
+        .getByRole("button", { name: "Knop toevoegen", exact: true })
+        .click();
+      await quickEditor
+        .getByRole("textbox", { name: "Knoptekst", exact: true })
+        .fill(savedQuickItems[0].label);
+      await quickEditor
+        .getByRole("textbox", { name: "Opdracht", exact: true })
+        .fill(savedQuickItems[0].prompt);
+      assert.equal(quickHistoryReads, 0);
+      const quickSaveReadback = overviewRead();
+      await quickEditor
+        .getByRole("button", { name: "Opslaan", exact: true })
+        .click();
+      await quickSaveReadback;
+      await page
+        .getByText("De snelle opdrachten zijn opgeslagen.", { exact: true })
+        .waitFor();
+      assert.equal(quickWrites, 1);
+      assert.equal(
+        quickHistoryReads,
+        0,
+        "Saving must not eagerly fetch recovery history",
+      );
+      cards = await inspectReceipts(9);
+      assert.match(
+        await cards.first().innerText(),
+        /Snelle opdrachten aanpassen/,
+      );
+      assert.match(
+        await cards.first().locator("p").nth(2).innerText(),
+        /opnieuw gelezen en gecontroleerd/,
+      );
+      const drawer = page.locator('#history[aria-hidden="false"]');
+      const historyRegion = () =>
+        drawer.getByRole("region", {
+          name: "Geschiedenis snelle opdrachten",
+          exact: true,
+        });
+      const selectedRow = (at) =>
+        historyRegion()
+          .locator("details")
+          .filter({ has: page.locator(`time[datetime="${at}"]`) });
+      const rollbackCards = async () => {
+        const requested = await cards
+          .locator(":scope > p:first-of-type")
+          .allTextContents();
+        return requested.filter((line) =>
+          line.includes("Eerdere snelle opdrachten herstellen"),
+        ).length;
+      };
+      async function closeQuickRecovery() {
+        await drawer
+          .getByRole("button", { name: "Herstelopties sluiten", exact: true })
+          .click();
+        assert.equal(await historyRegion().count(), 0);
+      }
+      // Register the response wait before clicking; the fixture responds immediately.
+      let historyResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+          "/api/settings/quick-actions/history",
+      );
+      await cards
+        .first()
+        .getByRole("button", { name: "Herstelopties openen", exact: true })
+        .click();
+      await historyResponse;
+      assert.equal(quickHistoryReads, 1);
+      await historyRegion().waitFor();
+      let row = selectedRow("2026-10-15T12:00:00.000Z");
+      await row.locator("summary").click();
+      assert.match(await row.innerText(), /Voor/);
+      assert.match(await row.innerText(), /Na/);
+      assert.match(await row.innerText(), /Nieuwe keuze: Noem een natuurfeit/);
+      assert.equal(quickRollbackAttempts, 0);
+      const cancelledCards = await cards.allTextContents();
+      page.once("dialog", async (dialog) => {
+        assert.match(dialog.message(), /Dit voert ze niet uit/);
+        await dialog.dismiss();
+      });
+      await row
+        .getByRole("button", { name: "Herstel deze versie", exact: true })
+        .click();
+      assert.equal(quickRollbackAttempts, 0);
+      assert.deepEqual(await cards.allTextContents(), cancelledCards);
+      assert.deepEqual(overview.quickActions, savedQuickItems);
+
+      expectedRollbackId = quickSaveId;
+      page.once("dialog", async (dialog) => {
+        assert.match(dialog.message(), /Dit voert ze niet uit/);
+        await dialog.accept();
+      });
+      let readback = overviewRead();
+      historyResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+          "/api/settings/quick-actions/history",
+      );
+      await row
+        .getByRole("button", { name: "Herstel deze versie", exact: true })
+        .click();
+      await readback;
+      await historyResponse;
+      await historyRegion()
+        .getByText("Snelle opdrachten hersteld.", { exact: true })
+        .waitFor();
+      assert.equal(quickRollbackAttempts, 1);
+      assert.equal(quickRollbackEffects, 1);
+      assert.deepEqual(overview.quickActions, []);
+      assert.equal(await cards.count(), 10);
+      assert.equal(await rollbackCards(), 1);
+      assert.match(
+        await cards.first().locator("p").nth(2).innerText(),
+        /opnieuw gelezen en gecontroleerd/,
+      );
+      await closeQuickRecovery();
+
+      // The current value can match an older row: select it explicitly, never pick the first.
+      quickHistory = [
+        {
+          id: driftQuickId,
+          at: "2026-10-15T11:00:00.000Z",
+          before: snapshot([]),
+          after: snapshot(savedQuickItems),
+        },
+        {
+          id: olderQuickId,
+          at: "2026-10-14T09:00:00.000Z",
+          before: snapshot(olderQuickItems),
+          after: snapshot([]),
+        },
+      ];
+      historyResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+          "/api/settings/quick-actions/history",
+      );
+      await cards
+        .first()
+        .getByRole("button", { name: "Herstelopties openen", exact: true })
+        .click();
+      await historyResponse;
+      assert.equal(quickHistoryReads, 3);
+      assert.equal(await historyRegion().locator("details").count(), 2);
+      row = selectedRow("2026-10-14T09:00:00.000Z");
+      await row.locator("summary").click();
+      assert.match(
+        await row.innerText(),
+        /Eerdere keuze: Vertel een rustig feit/,
+      );
+      expectedRollbackId = olderQuickId;
+      page.once("dialog", (dialog) => dialog.accept());
+      readback = overviewRead();
+      historyResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+          "/api/settings/quick-actions/history",
+      );
+      await row
+        .getByRole("button", { name: "Herstel deze versie", exact: true })
+        .click();
+      await readback;
+      await historyResponse;
+      assert.equal(quickRollbackAttempts, 2);
+      assert.equal(quickRollbackEffects, 2);
+      assert.deepEqual(overview.quickActions, olderQuickItems);
+      await page
+        .locator("#chips")
+        .getByRole("button", { name: olderQuickItems[0].label, exact: true })
+        .waitFor({ state: "attached" });
+      assert.deepEqual(
+        await page.locator("#chips button").allTextContents(),
+        olderQuickItems.map((item) => item.label),
+        "Direct restore refreshes the actual home chips without navigating or executing a prompt",
+      );
+      assert.equal(
+        await rollbackCards(),
+        2,
+        "One checked receipt per explicit restore",
+      );
+      assert.match(
+        await cards.first().locator("p").nth(2).innerText(),
+        /opnieuw gelezen en gecontroleerd/,
+      );
+      await closeQuickRecovery();
+
+      // A stale selected row gets a friendly conflict, without an effect or another receipt.
+      quickHistory = [
+        {
+          id: driftQuickId,
+          at: "2026-10-15T11:00:00.000Z",
+          before: snapshot([]),
+          after: snapshot(savedQuickItems),
+        },
+      ];
+      historyResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+          "/api/settings/quick-actions/history",
+      );
+      await cards
+        .first()
+        .getByRole("button", { name: "Herstelopties openen", exact: true })
+        .click();
+      await historyResponse;
+      assert.equal(quickHistoryReads, 5);
+      row = selectedRow("2026-10-15T11:00:00.000Z");
+      await row.locator("summary").click();
+      expectedRollbackId = driftQuickId;
+      const beforeConflict = structuredClone(overview.quickActions);
+      const beforeConflictCards = await cards
+        .locator(":scope > p:first-of-type")
+        .allTextContents();
+      page.once("dialog", (dialog) => dialog.accept());
+      await row
+        .getByRole("button", { name: "Herstel deze versie", exact: true })
+        .click();
+      await historyRegion()
+        .getByRole("status")
+        .filter({
+          hasText:
+            /^(?:De instellingen zijn gewijzigd\. Laad ze opnieuw en probeer het nog eens\.|The settings changed\. Reload before trying again\.)$/,
+        })
+        .waitFor();
+      assert.equal(quickRollbackAttempts, 3);
+      assert.equal(quickRollbackEffects, 2);
+      assert.deepEqual(overview.quickActions, beforeConflict);
+      assert.deepEqual(
+        await cards.locator(":scope > p:first-of-type").allTextContents(),
+        beforeConflictCards,
+      );
+      await closeQuickRecovery();
+
+      // Failed history reads cannot keep stale rows; reopening retries with a fresh snapshot.
+      failQuickHistory = true;
+      historyResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+          "/api/settings/quick-actions/history",
+      );
+      await cards
+        .first()
+        .getByRole("button", { name: "Herstelopties openen", exact: true })
+        .click();
+      await historyResponse;
+      await historyRegion().getByRole("status").waitFor();
+      assert.equal(quickHistoryReads, 6);
+      assert.equal(await historyRegion().locator("details").count(), 0);
+      assert.doesNotMatch(
+        await historyRegion().innerText(),
+        /Synthetic private|Nieuwe keuze|Eerdere keuze/,
+      );
+      await closeQuickRecovery();
+      failQuickHistory = false;
+      quickHistory = [
+        {
+          id: olderQuickId,
+          at: "2026-10-14T10:00:00.000Z",
+          before: snapshot([]),
+          after: snapshot(olderQuickItems),
+        },
+      ];
+      historyResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+          "/api/settings/quick-actions/history",
+      );
+      await cards
+        .first()
+        .getByRole("button", { name: "Herstelopties openen", exact: true })
+        .click();
+      await historyResponse;
+      assert.equal(quickHistoryReads, 7);
+      await historyRegion()
+        .locator('time[datetime="2026-10-14T10:00:00.000Z"]')
+        .waitFor();
+      assert.equal(
+        await historyRegion()
+          .locator('time[datetime="2026-10-15T11:00:00.000Z"]')
+          .count(),
+        0,
+      );
+      assert.equal(await historyRegion().getByRole("status").count(), 0);
+      await closeQuickRecovery();
+
+      // A real pointer drag writes live preferences, but emits just one card on release.
+      await settingsSection("voice");
+      const rate = page.locator("#ttsRate");
+      const rateBox = await rate.boundingBox();
+      assert(rateBox);
+      const allStoredCards = page.locator('#history [aria-label="Actiekaart"]');
+      const prosodyCards = async () =>
+        (
+          await allStoredCards
+            .locator(":scope > p:first-of-type")
+            .allTextContents()
+        ).filter((line) => line.includes("Spreektempo en toonhoogte aanpassen"))
+          .length;
+      assert.equal(await prosodyCards(), 0);
+      await page.mouse.move(
+        rateBox.x + rateBox.width * 0.4,
+        rateBox.y + rateBox.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        rateBox.x + rateBox.width * 0.85,
+        rateBox.y + rateBox.height / 2,
+        { steps: 8 },
+      );
+      assert.equal(
+        await prosodyCards(),
+        0,
+        "Live range input must not flood receipts",
+      );
+      assert.notEqual(
+        await page.evaluate(() => localStorage.getItem("novaTtsRate")),
+        null,
+      );
+      await page.mouse.up();
+      cards = await inspectReceipts(10);
+      assert.equal(
+        await prosodyCards(),
+        1,
+        "Range release produces one receipt",
+      );
+      assert.match(
+        await cards.first().innerText(),
+        /Spreektempo en toonhoogte aanpassen/,
+      );
+      assert.match(
+        await cards.first().locator("p").nth(2).innerText(),
+        /Browseropslag opnieuw gelezen en gecontroleerd/,
+      );
+      assert.equal(quickWrites, 1);
+      assert.equal(quickRollbackAttempts, 3);
+      assert.equal(quickRollbackEffects, 2);
+      assert.equal(quickHistoryReads, 7);
       assert.equal(serviceWrites, 1);
       assert.equal(preparations, 3);
       assert.equal(cancellations, 1);
@@ -603,7 +1025,7 @@ try {
       assert.deepEqual(unexpectedWrites, []);
       assert.deepEqual(errors, []);
       console.log(
-        `${width}px: settings receipts pass; failure/preparation/cancellation excluded, credentials hidden, staged restart honest, tool descriptions read back, toggle single-card, local voice storage success/failure honest; all API calls mocked.`,
+        `${width}px: settings receipts pass; failure/preparation/cancellation excluded, credentials hidden, staged restart honest, tool descriptions read back, toggle single-card, local voice storage success/failure honest; direct quick-action recovery is fresh, explicit, cancellable and conflict-safe; range drag emits one card; all API calls mocked.`,
       );
     } finally {
       await context.close();

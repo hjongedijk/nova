@@ -120,7 +120,11 @@ export function ttsProsodyForMood(mood: AssistantMood): TtsProsody {
   };
 }
 
-export function saveTtsProsody(rate: number, pitch: number): TtsProsody {
+export function saveTtsProsody(
+  rate: number,
+  pitch: number,
+  recordChange = true,
+): TtsProsody {
   const selected = {
     rate: Number.isFinite(rate)
       ? Math.max(-10, Math.min(10, Math.round(rate)))
@@ -131,10 +135,11 @@ export function saveTtsProsody(rate: number, pitch: number): TtsProsody {
   };
   storage.set(RATE_KEY, String(selected.rate));
   storage.set(PITCH_KEY, String(selected.pitch));
-  publishLocalPreferenceReceipt(
-    "tts-prosody",
-    storage.matches(RATE_KEY, String(selected.rate)) &&
-      storage.matches(PITCH_KEY, String(selected.pitch)),
-  );
+  if (recordChange)
+    publishLocalPreferenceReceipt(
+      "tts-prosody",
+      storage.matches(RATE_KEY, String(selected.rate)) &&
+        storage.matches(PITCH_KEY, String(selected.pitch)),
+    );
   return selected;
 }

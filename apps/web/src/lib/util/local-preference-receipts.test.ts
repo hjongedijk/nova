@@ -19,6 +19,8 @@ const kinds: LocalPreferenceReceiptKind[] = [
   "voice-alerts",
   "panels",
   "light-sync",
+  "communication-style",
+  "helper-preferences",
 ];
 const receipts: ActionReceipt[] = [];
 let unsubscribe: () => void;

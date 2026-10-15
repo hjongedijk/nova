@@ -4,7 +4,8 @@
     getHelperHotkeys,
     persistHelperPreferences,
   } from "#lib/api/settings.ts";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
+  import { publishLocalPreferenceReceipt } from "#lib/util/local-preference-receipts.ts";
   import { SvelteSet } from "svelte/reactivity";
   import type { FeedEvent, NotificationModes } from "@nova/contracts";
   import Orb from "#components/helper/Orb.svelte";
@@ -52,6 +53,22 @@
     setLightSync,
     startLightSync,
   } from "#lib/stores/light-sync.svelte.ts";
+  async function recordHelperPreference(event: Event): Promise<void> {
+    if (!(event.target instanceof Element)) return;
+    if (!event.target.closest("[data-helper-live]")) return;
+    await tick();
+    const personalityStored = saveHelperPreferences();
+    const flags = [
+      ["nova.helper.autohide", String(autohide)],
+      ["nova.helper.contrast", String(contrast)],
+    ] as const;
+    for (const [key, value] of flags) storage.set(key, value);
+    publishLocalPreferenceReceipt(
+      "helper-preferences",
+      personalityStored &&
+        flags.every(([key, value]) => storage.matches(key, value)),
+    );
+  }
   const MODEL_ROLE_LABELS: Record<string, string> = {
     conversation: "Gesprek",
     code: "Code",
@@ -537,7 +554,7 @@
       if (action.action === "mute") {
         stopSpeaking();
         volume = 0;
-        storage.set("novaVolume", "0");
+        storage.set("novaVolume", "0", "volume");
       }
       if (action.action === "settings") {
         settings = true;
@@ -829,12 +846,15 @@
         <section
           class="hp-content hp-preferences"
           aria-label="Helperinstellingen"
+          onchange={recordHelperPreference}
         >
           <label
-            ><input type="checkbox" bind:checked={autohide} /> Automatisch verbergen</label
+            ><input type="checkbox" data-helper-live bind:checked={autohide} /> Automatisch
+            verbergen</label
           >
           <label
-            ><input type="checkbox" bind:checked={contrast} /> Hoog contrast</label
+            ><input type="checkbox" data-helper-live bind:checked={contrast} /> Hoog
+            contrast</label
           >
           <label
             >Stemvolume <input
@@ -846,19 +866,25 @@
                 storage.set("novaVolume", String(volume / 100));
                 if (playback.current) applyVolume(playback.current);
               }}
+              onchange={() =>
+                storage.set("novaVolume", String(volume / 100), "volume")}
             /></label
           >
           <label
-            >Orb <select bind:value={helper.shape}
+            >Orb <select data-helper-live bind:value={helper.shape}
               ><option value="orb">Bol</option><option value="ring">Ring</option
               ><option value="mist">Mist</option></select
             ></label
           >
           <label
-            ><input type="checkbox" bind:checked={helper.cues.enabled} /> Geluidjes</label
+            ><input
+              type="checkbox"
+              data-helper-live
+              bind:checked={helper.cues.enabled}
+            /> Geluidjes</label
           >
           <label
-            >Kleur <select bind:value={helper.wardrobe.theme}
+            >Kleur <select data-helper-live bind:value={helper.wardrobe.theme}
               ><option value="nova">NOVA</option><option value="violet"
                 >Violet</option
               ><option value="gold">Goud</option></select
@@ -897,9 +923,13 @@
             </p>
           {/if}
           <label
-            ><input type="checkbox" bind:checked={helper.wardrobe.seasonal} /> Seizoensaccenten</label
+            ><input
+              type="checkbox"
+              data-helper-live
+              bind:checked={helper.wardrobe.seasonal}
+            /> Seizoensaccenten</label
           >
-          <label
+          <label data-helper-live
             >Verjaardag (optioneel, MM-DD)<HelperUi
               variant="input"
               aria-label="Verjaardag (MM-DD)"
@@ -914,30 +944,36 @@
               min="0"
               max="1"
               step="0.05"
+              data-helper-live
               bind:value={helper.cues.volume}
             /></label
           >
           <label
-            >Thema <select bind:value={helper.cues.theme}
+            >Thema <select data-helper-live bind:value={helper.cues.theme}
               ><option value="soft">Zacht</option><option value="playful"
                 >Speels</option
               ><option value="minimal">Minimaal</option></select
             ></label
           >
           <label
-            ><input type="checkbox" bind:checked={helper.cues.quiet!.enabled} /> Stille
-            uren</label
+            ><input
+              type="checkbox"
+              data-helper-live
+              bind:checked={helper.cues.quiet!.enabled}
+            /> Stille uren</label
           >
           <input
             aria-label="Begin stille uren"
             type="time"
+            data-helper-live
             bind:value={helper.cues.quiet!.start}
           /><input
             aria-label="Einde stille uren"
             type="time"
+            data-helper-live
             bind:value={helper.cues.quiet!.end}
           />
-          <fieldset class="hp-notification-preferences">
+          <fieldset class="hp-notification-preferences" data-helper-live>
             <legend>Meldingen</legend>
             {#each notificationKinds as notice (notice.key)}
               <label
@@ -1053,7 +1089,7 @@
               samenvattingsroute.
             </p>
           </fieldset>
-          <details>
+          <details data-helper-live>
             <summary>Geluiden kiezen</summary
             >{#each HELPER_CUE_NAMES as name (name)}<label
                 ><input

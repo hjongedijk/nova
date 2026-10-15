@@ -135,6 +135,7 @@ describe("settings action receipts", () => {
     expect(receipt.recoverHref).toBe(
       "/settings?section=general#quick-actions-history",
     );
+    expect(receipt.recovery).toBe("quick-actions");
     expect(JSON.stringify(receipt)).not.toContain("Private");
     expect(JSON.stringify(receipt)).not.toContain("abc123");
     expect(
