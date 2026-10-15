@@ -57,8 +57,8 @@ export async function fetchSpeech(
     signal,
   });
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`TTS failed (${response.status}): ${detail}`);
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`TTS failed (${response.status})`);
   }
   return response.blob();
 }
