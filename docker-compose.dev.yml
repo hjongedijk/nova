@@ -91,3 +91,35 @@ services:
       timeout: 3s
       retries: 12
       start_period: 20s
+
+  # Telephony: Asterisk PBX that NOVA controls over ARI. Off unless started explicitly:
+  #   docker compose -f docker-compose.dev.yml --profile telephony up -d asterisk
+  # First switch Telefonie on in the NOVA settings: that generates ./dev-data/asterisk/conf with random
+  # passwords. SIP/ARI/RTP are bound to loopback by default; set NOVA_SIP_BIND to a LAN IP (never a
+  # public one) to let phones on the network register. See docs/telephony.md.
+  asterisk:
+    profiles: [telephony]
+    build: ./deploy/asterisk
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1
+    environment:
+      ASTERISK_TERMINAL_OPTS: "-n"
+    volumes:
+      - ./dev-data/asterisk/conf:/nova-conf:ro
+      - ./dev-data/asterisk/recordings:/var/spool/asterisk/recording
+    ports:
+      - "${NOVA_SIP_BIND:-127.0.0.1}:5060:5060/udp"
+      - "${NOVA_SIP_BIND:-127.0.0.1}:5060:5060/tcp"
+      - "127.0.0.1:8088:8088/tcp"
+      - "${NOVA_SIP_BIND:-127.0.0.1}:${NOVA_RTP_START:-10000}-${NOVA_RTP_END:-10100}:${NOVA_RTP_START:-10000}-${NOVA_RTP_END:-10100}/udp"
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show uptime"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

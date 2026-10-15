@@ -26,6 +26,7 @@ import { ProxmoxModule } from "./proxmox/proxmox.module.js";
 import { RoutingModule } from "./routing/routing.module.js";
 import { SettingsModule } from "./settings/settings.module.js";
 import { ToolsModule } from "./tools/tools.module.js";
+import { TelephonyModule } from "./telephony/telephony.module.js";
 import { TtsModule } from "./tts/tts.module.js";
 
 const config = new NovaConfig();
@@ -62,6 +63,7 @@ const config = new NovaConfig();
     BrowserAgentModule,
     DesktopModule,
     BridgesModule,
+    TelephonyModule,
     // In production the built Svelte app is served from here; while developing, Vite serves it.
     ...(fs.existsSync(config.webDir)
       ? [

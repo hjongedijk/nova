@@ -24,6 +24,7 @@
   import SidebarTab from "#components/settings/SidebarTab.svelte";
   import BehaviorTab from "#components/settings/BehaviorTab.svelte";
   import SoundSection from "#components/settings/SoundSection.svelte";
+  import TelephonySection from "#components/settings/TelephonySection.svelte";
   import DevicesSection from "#components/settings/DevicesSection.svelte";
   import BackupSection from "#components/settings/BackupSection.svelte";
   import QuickActionsEditor from "#components/settings/QuickActionsEditor.svelte";
@@ -250,6 +251,7 @@
             <WindowsAgentPanel />
             <DevicesSection />
           {:else if section === "desktop"}<DesktopSection />
+          {:else if section === "telephony"}<TelephonySection />
           {:else if section === "memory"}<AdminDialog
               embedded
               initialView="memories"

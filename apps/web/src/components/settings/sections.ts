@@ -83,6 +83,14 @@ export const SECTIONS = [
       "bureaublad scherm pc overnemen muis toetsenbord screenshot windows besturen",
   },
   {
+    id: "telephony",
+    name: "Telefonie",
+    detail:
+      "Eigen telefooncentrale (Asterisk) met Linphone-toestellen, deurbel en belmeldingen.",
+    keywords:
+      "bellen telefoon asterisk linphone sip deurbel intercom toestel nummer trunk voip",
+  },
+  {
     id: "memory",
     name: "Geheugen en privacy",
     detail: "Bekijk wat NOVA onthoudt en verwijder het met bevestiging.",
