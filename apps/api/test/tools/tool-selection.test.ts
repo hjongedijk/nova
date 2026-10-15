@@ -23,6 +23,22 @@ const tools = [
 ];
 
 describe("request tool selection", () => {
+  it.each(["constructor", "__proto__"])(
+    "treats inherited object key %s as an ordinary search word",
+    (word) => {
+      const discovery = makeTool(
+        TOOL_DISCOVERY_NAME,
+        "Search available capabilities",
+      );
+      expect(() =>
+        selectToolsForRequest([...tools, discovery], word, "conversation"),
+      ).not.toThrow();
+      expect(
+        selectToolsForRequest([...tools, discovery], word, "conversation"),
+      ).toEqual([discovery]);
+    },
+  );
+
   it("narrows a clear Dutch request using tool names and descriptions", () => {
     const selected = selectToolsForRequest(
       tools,

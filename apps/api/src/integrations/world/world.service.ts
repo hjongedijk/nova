@@ -264,6 +264,46 @@ export class WorldService {
   ): Promise<WorldToolResult> {
     const str = (key: string) => args[key] as string;
     switch (name) {
+      case "clock_time": {
+        signal?.throwIfAborted();
+        const timezone =
+          args.timezone === undefined ? this.config.timezone : args.timezone;
+        const invalid = {
+          ok: false as const,
+          error: "Gebruik een geldige IANA-tijdzone, zoals Europe/Amsterdam.",
+        };
+        if (typeof timezone !== "string" || !timezone || timezone.length > 100)
+          return invalid;
+        let formatter: Intl.DateTimeFormat;
+        try {
+          formatter = new Intl.DateTimeFormat("en-CA", {
+            timeZone: timezone,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hourCycle: "h23",
+          });
+        } catch {
+          return invalid;
+        }
+        const now = new Date();
+        const parts = formatter.formatToParts(now);
+        const part = (type: Intl.DateTimeFormatPartTypes) =>
+          parts.find((item) => item.type === type)?.value ?? "";
+        return {
+          ok: true,
+          result: {
+            source: "server-clock",
+            timezone: formatter.resolvedOptions().timeZone,
+            observedAt: now.toISOString(),
+            date: `${part("year")}-${part("month")}-${part("day")}`,
+            time: `${part("hour")}:${part("minute")}:${part("second")}`,
+          },
+        };
+      }
       case "weather_forecast": {
         const location = args.location as string | undefined;
         const place = await this.placeFor(location, signal);

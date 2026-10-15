@@ -8,6 +8,7 @@ const text = (minLength: number, maxLength: number) => ({
 });
 
 export const WORLD_TOOL_NAMES = [
+  "clock_time",
   "weather_forecast",
   "web_search",
   "web_read",
@@ -25,6 +26,13 @@ export const WORLD_TOOL_NAMES = [
 
 export function worldDefinitions(): ToolDefinition[] {
   return [
+    {
+      name: "clock_time",
+      description:
+        "Read the current local time and date from NOVA's server clock. Use for 'hoe laat is het', 'wat is de tijd', 'welke datum is het', 'what time is it' or 'what date is it'. Optional timezone is an IANA name such as Europe/Amsterdam or Asia/Tokyo; omit it for the user's configured timezone. Returns the observed UTC instant and the matching local date/time, including daylight-saving rules. No network lookup is needed.",
+      parameters: schema({ timezone: text(1, 100) }, []),
+      risk: "READ_ONLY",
+    },
     {
       name: "weather_forecast",
       description:

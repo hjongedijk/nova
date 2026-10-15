@@ -12,6 +12,11 @@ const STOP_WORDS = new Set(
 );
 
 const ALIASES: Record<string, string[]> = {
+  tijd: ["clock", "time", "timezone"],
+  laat: ["clock", "time"],
+  datum: ["clock", "date"],
+  dag: ["clock", "date"],
+  day: ["clock", "date"],
   lamp: ["light", "lighting", "lamp"],
   licht: ["light", "lighting", "lamp"],
   lampen: ["light", "lighting", "lamp"],
@@ -68,7 +73,10 @@ export function rankToolsForRequest<T extends SelectableTool>(
   const query = words(message);
   const expanded = new Set(query);
   for (const word of query)
-    for (const alias of ALIASES[word] ?? []) expanded.add(alias);
+    for (const alias of Object.hasOwn(ALIASES, word)
+      ? (ALIASES[word] ?? [])
+      : [])
+      expanded.add(alias);
   return tools
     .map((tool, index) => {
       const nameWords = words(tool.function.name.replace(/_/g, " "));

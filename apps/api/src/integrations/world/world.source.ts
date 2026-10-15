@@ -10,7 +10,7 @@ import { WorldService } from "./world.service.js";
 import { Optional } from "@nestjs/common";
 import { CalDavService } from "../../planning/caldav.service.js";
 
-/** Weather, air, moon, ISS, markets, news, Wikipedia, web search/read, currency, calculator. */
+/** Clock, weather, air, moon, ISS, markets, news, Wikipedia, web search/read, currency, calculator. */
 @ToolSourceProvider()
 export class WorldSource implements ToolSource {
   readonly source = "world";

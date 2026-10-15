@@ -808,7 +808,7 @@ describe("pure helpers", () => {
 });
 
 describe("WorldModule", () => {
-  it("registers one read-only tool source with all eleven tools", async () => {
+  it("registers one read-only tool source with all twelve default tools", async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [CoreModule, WorldModule],
     }).compile();
@@ -819,7 +819,7 @@ describe("WorldModule", () => {
         (name) => !["route_estimate", "calendar_departure"].includes(name),
       ).sort(),
     );
-    expect(defs).toHaveLength(11);
+    expect(defs).toHaveLength(12);
     for (const def of defs) {
       expect(def.risk, def.name).toBe("READ_ONLY");
       expect(def.enabled).not.toBe(false);
