@@ -75,7 +75,38 @@ function localDayAndTime(
   };
 }
 
-/** Opt-in, once-a-day highlight based only on explicit positive user statements. */
+const EVENT_HIGHLIGHTS = {
+  code_run_tests: "De controles van een codeproject zijn vandaag geslaagd.",
+  code_self_test: "De controles van een codeproject zijn vandaag geslaagd.",
+  node_red_flow_create:
+    "Er is vandaag een nieuwe automatisering voor je aangemaakt.",
+} as const;
+
+function auditTime(value: unknown): number | null {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(
+      value,
+    )
+  )
+    return null;
+  const year = Number(value.slice(0, 4)),
+    month = Number(value.slice(5, 7)),
+    day = Number(value.slice(8, 10));
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(year, month - 1, day);
+  if (
+    year < 1 ||
+    calendar.getUTCFullYear() !== year ||
+    calendar.getUTCMonth() !== month - 1 ||
+    calendar.getUTCDate() !== day
+  )
+    return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+/** Opt-in daily highlight from explicit positive statements or verified useful actions. */
 @Injectable()
 export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DailyHighlightService.name);
@@ -211,21 +242,72 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private createHighlight(day: string, now: Date, workflowId: string): boolean {
-    const detail = this.session
-      .allMessages()
-      .filter(
-        (message) =>
-          message.role === "user" &&
-          Number.isFinite(Date.parse(message.at)) &&
-          localDayAndTime(new Date(message.at), this.config.timezone).day ===
-            day,
+  private verifiedEventHighlight(day: string, now: Date): string | null {
+    // Read failures propagate to the existing bounded retry path, never complete an unread day.
+    const entries = this.audit.read(500);
+    if (!Array.isArray(entries)) throw new Error("Daily activity unavailable");
+    let latest = -Infinity;
+    let detail: string | null = null;
+    for (const entry of entries.slice(0, 500)) {
+      if (
+        !entry ||
+        typeof entry !== "object" ||
+        Array.isArray(entry) ||
+        typeof entry.tool !== "string" ||
+        !Object.hasOwn(EVENT_HIGHLIGHTS, entry.tool) ||
+        entry.risk !== "DANGEROUS" ||
+        entry.confirmation !== "confirmed" ||
+        entry.verification !== true ||
+        (entry.phase !== undefined &&
+          entry.phase !== "completed" &&
+          entry.phase !== "verified")
       )
-      .sort((a, b) => a.at.localeCompare(b.at))
-      .slice(-100)
-      .reverse()
-      .map((message) => safeHighlight(message.content))
-      .find((copy) => copy !== null);
+        continue;
+      const result = entry.result;
+      if (!result || typeof result !== "object" || Array.isArray(result))
+        continue;
+      const evidence = result as Record<string, unknown>;
+      if (
+        evidence.ok !== true ||
+        evidence.verified !== true ||
+        evidence.error != null ||
+        evidence.executed === false ||
+        evidence.accepted === true ||
+        evidence.requiresConfirmation === true ||
+        evidence.pendingConfirmation === true ||
+        evidence.status != null
+      )
+        continue;
+      const timestamp = auditTime(entry.timestamp);
+      if (
+        timestamp === null ||
+        timestamp > now.getTime() ||
+        timestamp <= latest ||
+        localDayAndTime(new Date(timestamp), this.config.timezone).day !== day
+      )
+        continue;
+      latest = timestamp;
+      detail = EVENT_HIGHLIGHTS[entry.tool as keyof typeof EVENT_HIGHLIGHTS];
+    }
+    return detail;
+  }
+
+  private createHighlight(day: string, now: Date, workflowId: string): boolean {
+    const detail =
+      this.session
+        .allMessages()
+        .filter(
+          (message) =>
+            message.role === "user" &&
+            Number.isFinite(Date.parse(message.at)) &&
+            localDayAndTime(new Date(message.at), this.config.timezone).day ===
+              day,
+        )
+        .sort((a, b) => a.at.localeCompare(b.at))
+        .slice(-100)
+        .reverse()
+        .map((message) => safeHighlight(message.content))
+        .find((copy) => copy !== null) ?? this.verifiedEventHighlight(day, now);
     if (!detail) return true;
     const accepted = this.alerts.record(
       {

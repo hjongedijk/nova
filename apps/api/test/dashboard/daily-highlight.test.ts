@@ -16,6 +16,7 @@ function fixture(
   enabled: boolean,
   statements: Array<string | { content: string; at: string }>,
   existing?: { dir: string; accepted: Map<string, object> },
+  auditEntries: unknown[] = [],
 ) {
   const dir =
     existing?.dir ?? fs.mkdtempSync(path.join(os.tmpdir(), "nova-highlight-"));
@@ -30,6 +31,7 @@ function fixture(
   );
   const findWorkflowEvent = vi.fn((id: string) => accepted.get(id));
   const auditRecord = vi.fn();
+  const auditRead = vi.fn(() => auditEntries);
   const service = new DailyHighlightService(
     {
       timezone: "Europe/Amsterdam",
@@ -66,9 +68,17 @@ function fixture(
         })),
     } as never,
     { record, findWorkflowEvent } as never,
-    { record: auditRecord } as never,
+    { record: auditRecord, read: auditRead } as never,
   );
-  return { dir, accepted, record, findWorkflowEvent, auditRecord, service };
+  return {
+    dir,
+    accepted,
+    record,
+    findWorkflowEvent,
+    auditRecord,
+    auditRead,
+    service,
+  };
 }
 
 describe("opt-in daily highlight", () => {
@@ -314,5 +324,200 @@ describe("opt-in daily highlight", () => {
       );
       expect(instance.record).toHaveBeenCalledOnce();
     });
+  });
+});
+
+describe("verified useful events as a daily highlight", () => {
+  const due = new Date("2026-10-13T18:00:00.000Z");
+  function event(
+    tool = "code_run_tests",
+    changes: Record<string, unknown> = {},
+  ) {
+    return {
+      id: "private-event-id",
+      timestamp: "2026-10-13T12:00:00.000Z",
+      sessionId: "private-session-id",
+      tool,
+      risk: "DANGEROUS",
+      confirmation: "confirmed",
+      verification: true,
+      arguments: {
+        projectId: "private-project",
+        output: "private-source-content",
+      },
+      result: { ok: true, verified: true },
+      ...changes,
+    };
+  }
+  const testsCopy = "De controles van een codeproject zijn vandaag geslaagd.";
+  const routineCopy =
+    "Er is vandaag een nieuwe automatisering voor je aangemaakt.";
+
+  it.each(["code_run_tests", "code_self_test", "node_red_flow_create"])(
+    "uses actual verified success from%s without a positive chat statement",
+    async (tool) => {
+      const instance = fixture(true, [], undefined, [event(tool)]);
+      await instance.service.checkSchedule(due);
+      expect(instance.auditRead).toHaveBeenCalledExactlyOnceWith(500);
+      expect(instance.record).toHaveBeenCalledOnce();
+      expect(instance.record.mock.calls[0]?.[0].payload.detail).toBe(
+        tool === "node_red_flow_create" ? routineCopy : testsCopy,
+      );
+      expect(JSON.stringify(instance.record.mock.calls)).not.toMatch(
+        /private-|code_run_tests|code_self_test|node_red_flow_create/,
+      );
+      expect(JSON.stringify(instance.auditRecord.mock.calls)).not.toMatch(
+        /private-|code_run_tests|code_self_test|node_red_flow_create/,
+      );
+      const progress = fs.readFileSync(
+        path.join(instance.dir, "daily-highlight-progress.json"),
+        "utf8",
+      );
+      expect(JSON.parse(progress)).toEqual({ completedDay: "2026-10-13" });
+      expect(progress).not.toMatch(/private-|code_/);
+    },
+  );
+
+  it("keeps a personal positive statement ahead of later verified actions", async () => {
+    const instance = fixture(true, ["Ik heb mijn examen gehaald."], undefined, [
+      event(),
+    ]);
+    instance.auditRead.mockImplementation(() => {
+      throw new Error("audit should not be needed");
+    });
+    await instance.service.checkSchedule(due);
+    expect(instance.record.mock.calls[0]?.[0].payload.detail).toBe(
+      "Je haalde vandaag een examen.",
+    );
+    expect(instance.auditRead).not.toHaveBeenCalled();
+  });
+
+  it("selects the newest actual instant despite unsorted timezone offsets", async () => {
+    const instance = fixture(true, [], undefined, [
+      event("code_self_test", { timestamp: "2026-10-13T17:00:00+02:00" }),
+      event("node_red_flow_create", { timestamp: "2026-10-13T16:30:00Z" }),
+      event("code_run_tests", { timestamp: "2026-10-13T18:00:00+03:00" }),
+    ]);
+    await instance.service.checkSchedule(due);
+    expect(instance.record.mock.calls[0]?.[0].payload.detail).toBe(routineCopy);
+  });
+
+  it.each([
+    { result: { ok: false, verified: true } },
+    { result: { ok: true, verified: false } },
+    { result: { ok: true } },
+    { verification: false },
+    { verification: null },
+    { verification: undefined },
+    { result: { ok: true, verified: true, error: "private failure" } },
+    { result: { ok: true, verified: true, executed: false } },
+    { result: { ok: true, verified: true, accepted: true } },
+    { result: { ok: true, verified: true, requiresConfirmation: true } },
+    { result: { ok: true, verified: true, status: "noop" } },
+    { phase: "execution_started" },
+    { phase: "failed" },
+    { phase: "skipped" },
+    { confirmation: "pending" },
+    { confirmation: "denied" },
+    { confirmation: "cancelled" },
+    { confirmation: "expired" },
+    { confirmation: "not_required" },
+    { risk: "READ_ONLY" },
+    { timestamp: "2026-10-13T18:00:00.001Z" },
+    { timestamp: "2026-10-12T22:30:00+02:00" },
+    { timestamp: "2026-10-13T23:00:00Z" },
+    { timestamp: "not-a-date" },
+    { timestamp: "2026-02-30T12:00:00Z" },
+  ])(
+    "rejects failed, unproven, pending or out-of-day evidence case%#",
+    async (changes) => {
+      const instance = fixture(true, [], undefined, [
+        event("code_run_tests", changes),
+      ]);
+      await instance.service.checkSchedule(due);
+      expect(instance.record).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "timer_fired",
+    "list_remove",
+    "calendar_events",
+    "node_red_flow_state",
+    "code_file_write",
+    "proactive_daily_highlight",
+    "__proto__",
+  ])("does not infer achievement from%s", async (tool) => {
+    const instance = fixture(true, [], undefined, [event(tool)]);
+    await instance.service.checkSchedule(due);
+    expect(instance.record).not.toHaveBeenCalled();
+  });
+
+  it("uses the configured local calendar day at a UTC day boundary", async () => {
+    const instance = fixture(true, [], undefined, [
+      event("code_run_tests", { timestamp: "2026-10-12T22:30:00Z" }),
+    ]);
+    await instance.service.checkSchedule(due);
+    expect(instance.record.mock.calls[0]?.[0].payload.detail).toBe(testsCopy);
+  });
+
+  it("rejects an impossible calendar date even when Date.parse normalizes it onto the due day", async () => {
+    const instance = fixture(true, [], undefined, [
+      event("code_run_tests", { timestamp: "2026-02-30T12:00:00Z" }),
+    ]);
+    await instance.service.checkSchedule(new Date("2026-03-02T19:00:00Z"));
+    expect(instance.record).not.toHaveBeenCalled();
+  });
+
+  it("does not inspect private arguments or result output", async () => {
+    const entry = event();
+    Object.defineProperty(entry, "arguments", {
+      get() {
+        throw new Error("private arguments accessed");
+      },
+    });
+    Object.defineProperty(entry.result, "output", {
+      get() {
+        throw new Error("private output accessed");
+      },
+    });
+    const instance = fixture(true, [], undefined, [entry]);
+    await instance.service.checkSchedule(due);
+    expect(instance.record).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed without completing the day on audit read failure, then retries", async () => {
+    const instance = fixture(true, [], undefined, [event()]);
+    instance.auditRead.mockImplementationOnce(() => {
+      throw new Error("private audit failure");
+    });
+    await instance.service.checkSchedule(due);
+    expect(instance.record).not.toHaveBeenCalled();
+    expect(
+      fs.existsSync(path.join(instance.dir, "daily-highlight-progress.json")),
+    ).toBe(false);
+    await instance.service.checkSchedule(new Date(due.getTime() + 5 * 60_000));
+    expect(instance.record).toHaveBeenCalledOnce();
+  });
+
+  it("does not inspect entries beyond the existing500-record audit bound", async () => {
+    const instance = fixture(true, [], undefined, [
+      ...Array.from({ length: 500 }, () => event("list_remove")),
+      event(),
+    ]);
+    await instance.service.checkSchedule(due);
+    expect(instance.record).not.toHaveBeenCalled();
+  });
+
+  it("ignores malformed individual audit records without fabricating a highlight", async () => {
+    const instance = fixture(true, [], undefined, [
+      null,
+      [],
+      {},
+      true,
+      { tool: "code_run_tests", result: null },
+    ]);
+    await instance.service.checkSchedule(due);
+    expect(instance.record).not.toHaveBeenCalled();
   });
 });
