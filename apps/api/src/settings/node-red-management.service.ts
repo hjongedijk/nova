@@ -590,6 +590,69 @@ export class NodeRedManagement {
     }
   }
 
+  /** Resolve log sources against current nodes without projecting configuration or credentials. */
+  async resolveLogSources(
+    sources: ({ type: string; label: string } | null)[],
+  ): Promise<{ available: boolean; flowIds: (string | null)[] }> {
+    const empty = { available: false, flowIds: sources.map(() => null) };
+    if (sources.length > 100 || !sources.some(Boolean)) return empty;
+    try {
+      const base = this.baseUrl();
+      const response = await requestJson<unknown>(`${base.origin}/flows`, {
+        headers: this.flowHeaders(),
+        timeoutMs: 4000,
+        maxResponseBytes: MAX_BACKUP_BYTES,
+        signal: AbortSignal.timeout(5000),
+      });
+      if (response.status !== 200) return empty;
+      const body = response.data;
+      const flows = Array.isArray(body)
+        ? body
+        : body && typeof body === "object"
+          ? (body as { flows?: unknown }).flows
+          : null;
+      if (!Array.isArray(flows) || flows.length > MAX_FLOW_NODES) return empty;
+      const nodes: Record<string, unknown>[] = [];
+      const ids = new Set<string>();
+      for (const value of flows) {
+        if (!value || typeof value !== "object" || Array.isArray(value))
+          return empty;
+        const node = value as Record<string, unknown>;
+        if (
+          typeof node.id !== "string" ||
+          !/^[A-Za-z0-9._:-]{1,128}$/.test(node.id) ||
+          ids.has(node.id) ||
+          sanitize(node.id) !== node.id
+        )
+          return empty;
+        ids.add(node.id);
+        nodes.push(node);
+      }
+      const tabs = new Set(
+        nodes.filter((node) => node.type === "tab").map((node) => node.id),
+      );
+      return {
+        available: true,
+        flowIds: sources.map((source) => {
+          if (!source) return null;
+          const matches = nodes.filter(
+            (node) =>
+              node.type === source.type &&
+              (typeof node.name === "string" && node.name
+                ? node.name
+                : node.id) === source.label &&
+              typeof node.z === "string" &&
+              tabs.has(node.z),
+          );
+          // A duplicate display name must never point the user at an arbitrary flow.
+          return matches.length === 1 ? (matches[0]!.z as string) : null;
+        }),
+      };
+    } catch {
+      return empty;
+    }
+  }
+
   runnableFlowId(tabId: string): string | null {
     if (this.config.nodeRedFlowToken.length < 32) return null;
     return this.allowlistedFlowId(tabId);

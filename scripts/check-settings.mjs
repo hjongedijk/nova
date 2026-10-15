@@ -395,6 +395,7 @@ try {
     let wallpaperHistoryWrites = 0;
     let nodeRedFlowReads = 0;
     let nodeRedPaletteReads = 0;
+    let nodeRedLogReads = 0;
     let nodeRedPalettePrepares = 0;
     let nodeRedPaletteInstalls = 0;
     let nodeRedPaletteCancels = 0;
@@ -2819,6 +2820,37 @@ try {
             },
           ],
         };
+      } else if (endpoint === "/settings/stack-control/node-red/logs") {
+        assert.equal(request.method(), "GET");
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        nodeRedLogReads++;
+        data =
+          nodeRedLogReads === 2
+            ? {
+                available: false,
+                reason: "Node-RED-logboek is niet beschikbaar.",
+                entries: [],
+                limited: true,
+                truncated: false,
+                flowLinksAvailable: false,
+              }
+            : {
+                available: true,
+                limited: true,
+                truncated: false,
+                flowLinksAvailable: true,
+                entries:
+                  nodeRedLogReads === 3
+                    ? []
+                    : Array.from({ length: 40 }, (_, i) => ({
+                        at: "2026-10-15T06:00:00Z",
+                        stream: "stderr",
+                        level: "error",
+                        text: `15 Oct 06:00:00 - [error] [function:fixture] Fixture log ${i} [redacted]`,
+                        source: { type: "function", label: "fixture" },
+                        flowId: i === 0 ? "tab-home" : null,
+                      })),
+              };
       } else if (endpoint === "/settings/node-red/palette") {
         assert.equal(request.method(), "GET");
         nodeRedPaletteReads++;
@@ -6062,6 +6094,51 @@ try {
       .waitFor();
     await nodeRedCard.getByText("deploy/nodered/flows.json").waitFor();
     assert.equal(nodeRedFlowReads, 1);
+    const logbook = nodeRedCard.getByRole("region", {
+      name: "Node-RED-logboek",
+      exact: true,
+    });
+    assert.equal(nodeRedLogReads, 0, "logbook loads only on request");
+    await logbook
+      .getByRole("button", { name: "Logboek laden", exact: true })
+      .click();
+    await logbook.getByText(/Fixture log 0 /).waitFor();
+    assert.equal(
+      await logbook
+        .getByRole("link", { name: "Open flow", exact: true })
+        .getAttribute("href"),
+      "/settings?section=connections&nodeRedFlow=tab-home#node-red-flows",
+    );
+    const logWindow = logbook.getByRole("region", {
+      name: "Recente Node-RED-logregels",
+    });
+    assert.equal(
+      await logWindow.evaluate((el) => el.scrollHeight > el.clientHeight),
+      true,
+      "logbook is independently scrollable",
+    );
+    await logbook.getByRole("button", { name: "Wissen van scherm" }).click();
+    assert.equal(await logbook.locator("ol").count(), 0);
+    await logbook
+      .getByRole("button", { name: "Logboek laden", exact: true })
+      .click();
+    await logbook
+      .getByText("Node-RED-logboek is niet beschikbaar.", { exact: true })
+      .waitFor();
+    assert.equal(
+      await logbook
+        .getByRole("link", { name: "Open flow", exact: true })
+        .count(),
+      0,
+      "failed refresh removes stale entries",
+    );
+    await logbook
+      .getByRole("button", { name: "Logboek laden", exact: true })
+      .click();
+    await logbook
+      .getByText("Geen recente logregels beschikbaar.", { exact: true })
+      .waitFor();
+    assert.equal(nodeRedLogReads, 3);
     const palette = nodeRedCard.getByRole("region", {
       name: "Node-RED-palette",
     });
@@ -6572,7 +6649,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: pinned palette install/cancel/upgrade with exact-version confirmation, pending restart and active readback, and legacy warnings, all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP and GitHub secret entry with cleared secret fields and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
+    "Settings browser checks passed: on-demand Node-RED logs with scrolling, clear, current-flow links, empty state and failed-refresh cleanup, pinned palette install/cancel/upgrade with exact-version confirmation, pending restart and active readback, and legacy warnings, all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP and GitHub secret entry with cleared secret fields and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();

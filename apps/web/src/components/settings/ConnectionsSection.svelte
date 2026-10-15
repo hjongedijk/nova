@@ -47,6 +47,7 @@
   import NodeRedFlowHistory from "./NodeRedFlowHistory.svelte";
   import NodeRedBriefing from "./NodeRedBriefing.svelte";
   import NodeRedPalette from "./NodeRedPalette.svelte";
+  import NodeRedLogs from "./NodeRedLogs.svelte";
   import AdminConfirmation from "#components/admin/AdminConfirmation.svelte";
   import { sessionId } from "#components/admin/session.ts";
   import { executeAction } from "#lib/api/admin.ts";
@@ -1178,6 +1179,7 @@
           {/if}
           <NodeRedFlowHistory />
           <NodeRedPalette />
+          <NodeRedLogs />
         </section>
       {/if}
       {#if service.id === "qdrant"}

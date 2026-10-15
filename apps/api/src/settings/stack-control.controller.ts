@@ -9,11 +9,33 @@ import {
 import { ValidationError } from "../core/errors/validation.error.js";
 import { SettingsGuard } from "./settings.guard.js";
 import { StackControlService } from "./stack-control.service.js";
+import { NodeRedManagement } from "./node-red-management.service.js";
 
 @Controller("settings/stack-control")
 @UseGuards(SettingsGuard)
 export class StackControlController {
-  constructor(private readonly stack: StackControlService) {}
+  constructor(
+    private readonly stack: StackControlService,
+    private readonly nodeRed: NodeRedManagement,
+  ) {}
+
+  @Get("node-red/logs")
+  async nodeRedLogs() {
+    const logs = await this.stack.nodeRedLogs();
+    const mapping = logs.available
+      ? await this.nodeRed.resolveLogSources(
+          logs.entries.map((row) => row.source),
+        )
+      : { available: false, flowIds: [] };
+    return {
+      ...logs,
+      flowLinksAvailable: mapping.available,
+      entries: logs.entries.map((row, index) => ({
+        ...row,
+        flowId: mapping.flowIds[index] ?? null,
+      })),
+    };
+  }
 
   @Get("services")
   status() {

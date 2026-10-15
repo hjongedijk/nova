@@ -4,6 +4,7 @@ import { URL } from "node:url";
 import { createCodeSandbox } from "./code-sandbox.mjs";
 import { createMcpSandbox } from "./mcp-sandbox.mjs";
 import { createMcpUpgradeHandler } from "./mcp-stream.mjs";
+import { readNodeRedLogs } from "./node-red-logs.mjs";
 
 export const STACK_SERVICES = Object.freeze({
   nova: "nova",
@@ -215,6 +216,17 @@ export function createStackControlServer({
       return;
     }
     try {
+      if (
+        request.method === "GET" &&
+        url.pathname === "/services/node-red/logs"
+      ) {
+        if (url.search) {
+          send(response, 400, { error: "invalid_request" });
+          return;
+        }
+        send(response, 200, await readNodeRedLogs(docker));
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/services") {
         const containers = await allContainers();
         const services = await Promise.all(

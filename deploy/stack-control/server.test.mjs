@@ -190,3 +190,27 @@ test("worker inspection failures remain unknown while confirmed disappearance pe
     else assert.ok(body.mcpWorkers.every((row) => row.state === "missing"));
   }
 });
+
+test("Node-RED logs require authentication and reject caller options before Docker", async () => {
+  let calls = 0;
+  const base = await start(async () => {
+    calls++;
+    return Buffer.alloc(0);
+  });
+  assert.equal((await fetch(`${base}/services/node-red/logs`)).status, 401);
+  const headers = { authorization: `Bearer ${token}` };
+  assert.equal(
+    (await fetch(`${base}/services/node-red/logs?tail=999`, { headers }))
+      .status,
+    400,
+  );
+  assert.equal(calls, 0);
+  const response = await fetch(`${base}/services/node-red/logs`, { headers });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    entries: [],
+    limited: true,
+    truncated: false,
+  });
+  assert.equal(calls, 1);
+});

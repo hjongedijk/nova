@@ -1413,3 +1413,22 @@ export const prepareOmniRouteAccountActivationRollback = (
   );
 
 export const getToolUsage = () => read<ToolUsageReport>("/tools/usage");
+
+export interface NodeRedLogs {
+  available: boolean;
+  reason?: string;
+  limited: true;
+  truncated: boolean;
+  flowLinksAvailable: boolean;
+  entries: {
+    at: string;
+    stream: "stdout" | "stderr";
+    text: string;
+    level: "info" | "warn" | "error" | "debug" | "trace" | "fatal" | "unknown";
+    source: { type: string; label: string } | null;
+    truncated?: boolean;
+    flowId: string | null;
+  }[];
+}
+export const getNodeRedLogs = () =>
+  read<NodeRedLogs>("/stack-control/node-red/logs");
