@@ -41,7 +41,11 @@
               name: tool.name,
               enabled: override.enabled === true,
             }
-          : undefined,
+          : {
+              kind: "tool-description",
+              name: tool.name,
+              description: result.override.description ?? null,
+            },
       );
     } catch (error) {
       if (box) {

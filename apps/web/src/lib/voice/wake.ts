@@ -341,9 +341,16 @@ async function startWake(): Promise<void> {
 }
 
 /** Switch "Hey NOVA" on or off (the menu toggle); remembered in this browser. */
-export function setWake(on: boolean): void {
+export function setWake(
+  on: boolean,
+  origin: "user" | "system" = "system",
+): void {
   shell.wakeEnabled = on && !!Ctor;
-  storage.set("novaWake", shell.wakeEnabled ? "on" : "off");
+  storage.set(
+    "novaWake",
+    shell.wakeEnabled ? "on" : "off",
+    origin === "user" ? "wake" : undefined,
+  );
   if (shell.wakeEnabled) startWake();
   else stopWake();
 }

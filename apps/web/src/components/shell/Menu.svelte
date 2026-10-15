@@ -54,12 +54,16 @@
 
   function toggleVoiceAlerts() {
     shell.voiceAlerts = !shell.voiceAlerts;
-    storage.set("novaVoiceAlerts", shell.voiceAlerts ? "on" : "off");
+    storage.set(
+      "novaVoiceAlerts",
+      shell.voiceAlerts ? "on" : "off",
+      "voice-alerts",
+    );
   }
 
   function togglePanels() {
     shell.panels = !shell.panels;
-    storage.set("novaPanels", shell.panels ? "on" : "off");
+    storage.set("novaPanels", shell.panels ? "on" : "off", "panels");
   }
 </script>
 
@@ -173,7 +177,7 @@
     aria-checked={shell.wakeEnabled}
     type="button"
     disabled={!shell.speechSupported}
-    onclick={() => setWake(!shell.wakeEnabled)}
+    onclick={() => setWake(!shell.wakeEnabled, "user")}
   >
     <span>Luisteren naar “Hey NOVA”</span><i></i>
   </button>

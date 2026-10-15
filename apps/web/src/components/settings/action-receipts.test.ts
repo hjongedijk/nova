@@ -13,6 +13,52 @@ const overview = {
 } as SettingsOverview;
 
 describe("settings action receipts", () => {
+  it("checks description edits and default restoration without exposing private content", () => {
+    const saved = {
+      ...overview,
+      tools: [
+        { name: "private-tool", description: "private rule", edited: true },
+      ],
+    } as SettingsOverview;
+    const target = {
+      kind: "tool-description",
+      name: "private-tool",
+      description: "private rule",
+    } as const;
+    const receipt = settingsActionReceipt(target, saved);
+    expect(receipt.verification).toBe(
+      "Opgeslagen waarde opnieuw gelezen en gecontroleerd",
+    );
+    expect(receipt.recoverHref).toBe("/settings?section=abilities");
+    expect(JSON.stringify(receipt)).not.toMatch(/private-tool|private rule/);
+    expect(
+      settingsActionReceipt({ ...target, description: "different" }, saved)
+        .verification,
+    ).toContain("niet gecontroleerd");
+    expect(settingsActionReceipt(target, null).verification).toContain(
+      "niet gecontroleerd",
+    );
+    expect(
+      settingsActionReceipt({ ...target, name: "missing" }, saved).verification,
+    ).toContain("niet gecontroleerd");
+    const reset = { ...target, description: null };
+    expect(settingsActionReceipt(reset, saved).verification).toContain(
+      "niet gecontroleerd",
+    );
+    const restored = {
+      ...saved,
+      tools: [
+        {
+          ...saved.tools[0]!,
+          edited: false,
+          description: "built-in description",
+        },
+      ],
+    };
+    expect(settingsActionReceipt(reset, restored).verification).toBe(
+      "Opgeslagen waarde opnieuw gelezen en gecontroleerd",
+    );
+  });
   it("checks a tool toggle by reading the stored override without exposing its name", () => {
     const receipt = settingsActionReceipt(
       { kind: "tool-switch", name: "secret-tool-name", enabled: false },

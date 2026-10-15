@@ -1,3 +1,6 @@
+import { publishLocalPreferenceReceipt } from "#lib/util/local-preference-receipts.ts";
+import { storage } from "#lib/util/storage.ts";
+
 const DUTCH_CARDINALS = [
   "nul",
   "één",
@@ -121,6 +124,10 @@ export function savePronunciationEntries(entries: PronunciationEntry[]): void {
   } catch {
     // The current session still works; browser storage can be unavailable.
   }
+  publishLocalPreferenceReceipt(
+    "pronunciations",
+    storage.matches(PRONUNCIATIONS_KEY, JSON.stringify(safe)),
+  );
 }
 
 export function applyPronunciations(

@@ -17,7 +17,7 @@ export function selectedInputDevice(): string {
 }
 
 export function setSelectedInputDevice(deviceId: string): void {
-  storage.set(DEVICE_KEY, deviceId);
+  storage.set(DEVICE_KEY, deviceId, "audio-input");
   window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 

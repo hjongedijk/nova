@@ -19,7 +19,11 @@ export function getConversationLanguage(): ConversationLanguage {
 export function setConversationLanguage(
   language: ConversationLanguage,
 ): ConversationLanguage {
-  storage.set(`${LANGUAGE_KEY}:${getSessionId()}`, language);
+  storage.set(
+    `${LANGUAGE_KEY}:${getSessionId()}`,
+    language,
+    "conversation-language",
+  );
   if (typeof window !== "undefined")
     window.dispatchEvent(new Event("nova-conversation-language-changed"));
   return language;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import ActionReceipts from "./ActionReceipts.svelte";
   import { addMessage, showStage } from "#lib/chat/index.ts";
   import { getSessionId } from "#lib/chat/session.ts";
   import { forgetConversation } from "#lib/api/chat.ts";
@@ -202,18 +203,7 @@
         {/if}
       </div>
     {/each}
-    {#each chat.actionReceipts as receipt (receipt.id)}
-      <section class="handoff-card" aria-label="Actiekaart">
-        <h3>Actiekaart</h3>
-        <p><strong>Gevraagd:</strong> {receipt.requested}</p>
-        <p><strong>Uitgevoerd:</strong> {receipt.performed}</p>
-        <p><strong>Gecontroleerd:</strong> {receipt.verification}</p>
-        <a href="/settings?section=system#actielog">Bekijk het actielog</a>
-        {#if receipt.recoverHref}
-          <a href={receipt.recoverHref}>Bekijk herstelopties</a>
-        {/if}
-      </section>
-    {/each}
+    <ActionReceipts />
     {#if handoffOpen}
       <section class="handoff-card" aria-label="Overdracht bewaren">
         <h3>Overdracht bewaren</h3>

@@ -78,7 +78,7 @@
 
   function setVolume(percent: number): void {
     volume = percent;
-    storage.set("novaVolume", String(percent / 100));
+    storage.set("novaVolume", String(percent / 100), "volume");
     if (playback.current) applyVolume(playback.current);
   }
 

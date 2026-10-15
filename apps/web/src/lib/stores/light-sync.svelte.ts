@@ -53,6 +53,7 @@ export function setLightSync(
   storage.set(
     KEY,
     JSON.stringify({ enabled: lightSync.enabled, areaId: lightSync.areaId }),
+    "light-sync",
   );
   void refreshLightSync();
 }

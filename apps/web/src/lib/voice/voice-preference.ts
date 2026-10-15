@@ -1,5 +1,6 @@
 import { storage } from "#lib/util/storage.ts";
 import type { AssistantMood } from "#lib/stores/chat.svelte.ts";
+import { publishLocalPreferenceReceipt } from "#lib/util/local-preference-receipts.ts";
 
 export const TTS_VOICES = [
   { id: "en-US-GuyNeural", label: "Guy · Engels (VS)" },
@@ -61,7 +62,7 @@ export function saveTtsVoice(voice: string): TtsVoiceId {
   const selected = TTS_VOICES.some((item) => item.id === voice)
     ? (voice as TtsVoiceId)
     : DEFAULT_VOICE;
-  storage.set(KEY, selected);
+  storage.set(KEY, selected, "tts-voice");
   return selected;
 }
 
@@ -130,5 +131,10 @@ export function saveTtsProsody(rate: number, pitch: number): TtsProsody {
   };
   storage.set(RATE_KEY, String(selected.rate));
   storage.set(PITCH_KEY, String(selected.pitch));
+  publishLocalPreferenceReceipt(
+    "tts-prosody",
+    storage.matches(RATE_KEY, String(selected.rate)) &&
+      storage.matches(PITCH_KEY, String(selected.pitch)),
+  );
   return selected;
 }

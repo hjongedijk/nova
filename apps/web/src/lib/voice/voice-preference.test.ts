@@ -38,7 +38,11 @@ describe("TTS voice preference", () => {
 
     expect(ttsVoice()).toBe("nl-NL-FennaNeural");
     expect(saveTtsVoice("unreviewed-voice")).toBe("nl-NL-FennaNeural");
-    expect(save).toHaveBeenCalledWith("novaTtsVoice", "nl-NL-FennaNeural");
+    expect(save).toHaveBeenCalledWith(
+      "novaTtsVoice",
+      "nl-NL-FennaNeural",
+      "tts-voice",
+    );
   });
 
   it("offers multiple languages and uses the selected language for recognition", () => {

@@ -160,6 +160,10 @@ import assert from "node:assert/strict";
       await page.route("**/api/tts", (route) =>
         route.fulfill({ status: 503, body: "test voice disabled" }),
       );
+      await page.route("**/api/memory/*", (route) => {
+        assert.equal(route.request().method(), "DELETE");
+        return route.fulfill({ json: { ok: true } });
+      });
       await page.route("**/api/settings/helper/preferences", (route) => {
         if (route.request().method() === "PUT") {
           savedNotificationModes = route.request().postDataJSON().notifications;
@@ -485,6 +489,54 @@ import assert from "node:assert/strict";
       assert.deepEqual(await page.evaluate(() => window.__testMicRequests[0]), {
         audio: true,
       });
+      await page.getByRole("button", { name: "Chat", exact: true }).click();
+      const receiptCards = page.getByRole("region", { name: "Actiekaart" });
+      const inputReceipt = receiptCards.filter({
+        hasText: "Microfoonkeuze aanpassen",
+      });
+      const outputReceipt = receiptCards.filter({
+        hasText: "Geluidsuitvoer aanpassen",
+      });
+      await inputReceipt.waitFor();
+      assert.equal(await inputReceipt.count(), 1);
+      assert.equal(await outputReceipt.count(), 1);
+      assert.match(
+        await inputReceipt.innerText(),
+        /Browseropslag opnieuw gelezen/,
+      );
+      assert.doesNotMatch(
+        await inputReceipt.innerText(),
+        /microphone-one|Test microphone/,
+      );
+      assert.equal(
+        await inputReceipt
+          .getByRole("link", { name: "Bekijk het actielog" })
+          .getAttribute("target"),
+        "_blank",
+      );
+      const beforeRestore = await receiptCards.count();
+      await page
+        .getByRole("button", { name: "Helperinstellingen", exact: true })
+        .click();
+      await page.getByText("Microfoon en stem", { exact: true }).click();
+      await page.waitForFunction(() => window.__testSinkId === "speaker-one");
+      await page.getByRole("button", { name: "Chat", exact: true }).click();
+      assert.equal(
+        await receiptCards.count(),
+        beforeRestore,
+        "Restoring the saved output must not create a user-action receipt",
+      );
+      await page
+        .getByRole("button", { name: "Wis gesprek", exact: true })
+        .click();
+      await page.waitForFunction(
+        () => !document.querySelector('[aria-label="Actiekaart"]'),
+      );
+      assert.equal(await page.evaluate(() => document.fullscreenElement), null);
+      await page
+        .getByRole("button", { name: "Helperinstellingen", exact: true })
+        .click();
+      await page.getByText("Microfoon en stem", { exact: true }).click();
       await page.evaluate(() => {
         window.__testInputAvailable = false;
       });
@@ -549,6 +601,16 @@ import assert from "node:assert/strict";
         await page.getByLabel("Uitvoerapparaat").inputValue(),
         "speaker-one",
       );
+      await page.getByRole("button", { name: "Chat", exact: true }).click();
+      assert.equal(
+        await page.getByRole("region", { name: "Actiekaart" }).count(),
+        0,
+        "Reload and automatic device restoration must not create receipts",
+      );
+      await page
+        .getByRole("button", { name: "Helperinstellingen", exact: true })
+        .click();
+      await page.getByText("Microfoon en stem", { exact: true }).click();
       await page.evaluate(() =>
         localStorage.setItem("novaAudioOutput", "missing-device"),
       );

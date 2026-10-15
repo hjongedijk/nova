@@ -48,7 +48,7 @@
       const saved = storage.get(outputDeviceKey, "");
       if (saved && outputs.some((device) => device.deviceId === saved)) {
         output = saved;
-        await setOutput();
+        await setOutput("restore");
       } else if (saved) {
         output = "";
         storage.set(outputDeviceKey, "");
@@ -59,7 +59,8 @@
       note = "Deze browser geeft geen uitvoerapparaten vrij.";
     }
   }
-  async function setOutput() {
+  async function setOutput(origin: "user" | "restore" = "user") {
+    const selected = output;
     try {
       const context = audioContext() as AudioContext & {
         setSinkId?: (id: string) => Promise<void>;
@@ -67,15 +68,21 @@
       const audio = ttsElement() as HTMLAudioElement & {
         setSinkId?: (id: string) => Promise<void>;
       };
-      if (context.setSinkId) await context.setSinkId(output);
+      if (context.setSinkId) await context.setSinkId(selected);
       else if (audio.setSinkId && !ttsElement()._source)
-        await audio.setSinkId(output);
+        await audio.setSinkId(selected);
       else throw new Error("Kies je uitvoer via Windows-geluidsinstellingen.");
-      storage.set(outputDeviceKey, output);
+      if (output !== selected) return;
+      storage.set(
+        outputDeviceKey,
+        selected,
+        origin === "user" ? "audio-output" : undefined,
+      );
       note = output
         ? "Uitvoerapparaat gekozen en op dit apparaat bewaard."
         : "Standaarduitvoer gekozen.";
     } catch (error) {
+      if (output !== selected) return;
       note = (error as Error).message;
       output = "";
       storage.set(outputDeviceKey, "");

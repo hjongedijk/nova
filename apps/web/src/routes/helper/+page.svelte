@@ -8,6 +8,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import type { FeedEvent, NotificationModes } from "@nova/contracts";
   import Orb from "#components/helper/Orb.svelte";
+  import ActionReceipts from "#components/shell/ActionReceipts.svelte";
   import HelperUi from "#components/helper/HelperUi.svelte";
   import HelperDevices from "#components/helper/HelperDevices.svelte";
   import HelperConfirm from "#components/helper/HelperConfirm.svelte";
@@ -339,6 +340,7 @@
     resetSession();
     responseLanguage = getConversationLanguage();
     chat.history = [];
+    chat.actionReceipts.length = 0;
     chat.reply = "";
     chat.you = "";
     chat.model = "";
@@ -1205,9 +1207,12 @@
             >
               <span>{message.role === "user" ? "Jij" : "NOVA"}</span>
               <p>{message.text || "Even nadenken…"}</p>
-            </article>{:else}<p class="hp-empty">
-              Wat kan ik voor je doen?
-            </p>{/each}
+            </article>{:else}{#if !chat.actionReceipts.length}<p
+                class="hp-empty"
+              >
+                Wat kan ik voor je doen?
+              </p>{/if}{/each}
+          <ActionReceipts separateWindow />
         </section>
         {#if chat.choices.length}
           <div class="hp-files" aria-label="Kies een apparaat">

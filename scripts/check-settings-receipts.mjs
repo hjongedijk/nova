@@ -5,6 +5,10 @@ const base = process.env.NOVA_SETTINGS_TEST_URL ?? "https://localhost:5173";
 const privateAbility = "Private fixture ability";
 const privateToken = "private-receipt-token-example-123456";
 const moduleName = "node-red-contrib-private-fixture";
+const privateTool = "private-fixture-tool";
+const defaultToolDescription = "Private fixture default tool description.";
+const changedToolDescription =
+  "Private fixture description that must never enter cards.";
 const browser = await chromium.launch({
   headless: true,
   args: ["--no-sandbox"],
@@ -32,6 +36,9 @@ try {
       let preparations = 0;
       let cancellations = 0;
       let confirmations = 0;
+      let toolWrites = 0;
+      let toolReadbacks = 0;
+      let pendingToolReadback = false;
       let failAbility = false;
       let servicePending = false;
       const overview = {
@@ -64,7 +71,18 @@ try {
             state: "on",
           },
         ],
-        tools: [],
+        tools: [
+          {
+            name: privateTool,
+            description: defaultToolDescription,
+            defaultDescription: defaultToolDescription,
+            source: "fixture",
+            risk: "READ_ONLY",
+            enabled: true,
+            switchedOff: false,
+            edited: false,
+          },
+        ],
         pinRequired: false,
         standingApprovals: [],
       };
@@ -119,6 +137,28 @@ try {
             overview.abilities[0].state = enabled ? "on" : "off";
             overview.abilities[0].enabledCount = enabled ? 1 : 0;
             return json({ ok: true });
+          }
+          if (
+            pathname === `/api/settings/tools/${privateTool}` &&
+            method === "PUT"
+          ) {
+            toolWrites++;
+            const override = request.postDataJSON();
+            assert(
+              Object.keys(override).every((key) =>
+                ["enabled", "description"].includes(key),
+              ),
+            );
+            const tool = overview.tools[0];
+            tool.description =
+              typeof override.description === "string"
+                ? override.description
+                : defaultToolDescription;
+            tool.edited = typeof override.description === "string";
+            tool.enabled = override.enabled !== false;
+            tool.switchedOff = override.enabled === false;
+            pendingToolReadback = true;
+            return json({ ok: true, override });
           }
           if (
             pathname === "/api/settings/services/node-red" &&
@@ -184,7 +224,15 @@ try {
         }
         if (pathname === "/api/access/status")
           return json({ required: false, unlocked: true });
-        if (pathname === "/api/settings") return json(overview);
+        if (pathname === "/api/settings") {
+          if (pendingToolReadback) {
+            toolReadbacks++;
+            pendingToolReadback = false;
+          }
+          return json(overview);
+        }
+        if (pathname === "/api/tts/health")
+          return json({ piperAvailable: false, voice: "nl-NL-FennaNeural" });
         if (pathname === "/api/settings/services") return json({ services });
         if (pathname === "/api/settings/services/restart") {
           return json({
@@ -401,6 +449,153 @@ try {
         await cards.first().locator("p").nth(2).innerText(),
         /niet|ontbreekt|geen/i,
       );
+      async function openFixtureTool() {
+        await settingsSection("abilities");
+        await page
+          .getByText("Alle gereedschappen en hun risico", { exact: true })
+          .click();
+        return page
+          .locator("li.set-row")
+          .filter({ has: page.getByText(privateTool, { exact: true }) });
+      }
+      const overviewRead = () =>
+        page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === "/api/settings" &&
+            response.request().method() === "GET",
+        );
+      let tool = await openFixtureTool();
+      await tool
+        .getByRole("button", { name: "Beschrijving", exact: true })
+        .click();
+      await tool
+        .getByRole("textbox", {
+          name: `Beschrijving van ${privateTool}`,
+          exact: true,
+        })
+        .fill(changedToolDescription);
+      let refreshed = overviewRead();
+      await tool.getByRole("button", { name: "Opslaan", exact: true }).click();
+      await refreshed;
+      await tool.getByText(changedToolDescription, { exact: true }).waitFor();
+      cards = await inspectReceipts(4);
+      assert.match(
+        await cards.first().innerText(),
+        /Gereedschapsbeschrijving aanpassen/,
+      );
+      assert.match(
+        await cards.first().locator("p").nth(2).innerText(),
+        /opnieuw gelezen en gecontroleerd/,
+      );
+      assert.equal(toolReadbacks, 1);
+
+      tool = await openFixtureTool();
+      await tool
+        .getByRole("button", { name: "Beschrijving", exact: true })
+        .click();
+      refreshed = overviewRead();
+      await tool
+        .getByRole("button", { name: "Standaard herstellen", exact: true })
+        .click();
+      await refreshed;
+      await tool.getByText(defaultToolDescription, { exact: true }).waitFor();
+      assert.equal(
+        await tool.getByText("aangepast", { exact: true }).count(),
+        0,
+      );
+      cards = await inspectReceipts(5);
+      assert.match(
+        await cards.first().innerText(),
+        /Standaardbeschrijving van gereedschap herstellen/,
+      );
+      assert.match(
+        await cards.first().locator("p").nth(2).innerText(),
+        /opnieuw gelezen en gecontroleerd/,
+      );
+      assert.equal(toolReadbacks, 2);
+
+      tool = await openFixtureTool();
+      refreshed = overviewRead();
+      await tool
+        .getByRole("checkbox", {
+          name: `${privateTool} aan of uit`,
+          exact: true,
+        })
+        .uncheck();
+      await refreshed;
+      cards = await inspectReceipts(6);
+      assert.match(await cards.first().innerText(), /Gereedschap uitschakelen/);
+      assert.match(
+        await cards.first().locator("p").nth(2).innerText(),
+        /opnieuw gelezen en gecontroleerd/,
+      );
+      assert.equal(toolWrites, 3);
+      assert.equal(toolReadbacks, 3);
+
+      await settingsSection("voice");
+      await page.locator("#ttsVoice").selectOption("en-US-GuyNeural");
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem("novaTtsVoice")),
+        "en-US-GuyNeural",
+      );
+      cards = await inspectReceipts(7);
+      assert.match(await cards.first().innerText(), /Spreekstem aanpassen/);
+      assert.match(
+        await cards.first().locator("p").nth(1).innerText(),
+        /op dit apparaat opgeslagen/,
+      );
+      assert.match(
+        await cards.first().locator("p").nth(2).innerText(),
+        /Browseropslag opnieuw gelezen en gecontroleerd/,
+      );
+      assert.match(
+        await cards.first().locator("p").nth(2).innerText(),
+        /Hardware, spraak en server niet gecontroleerd/,
+      );
+      assert.doesNotMatch(
+        await cards.first().innerText(),
+        /GuyNeural|JennyNeural/,
+      );
+
+      await settingsSection("voice");
+      await page.evaluate(() => {
+        globalThis.__novaReceiptStorageSetter = Storage.prototype.setItem;
+        Storage.prototype.setItem = function () {
+          throw new DOMException(
+            "Synthetic storage denied",
+            "QuotaExceededError",
+          );
+        };
+      });
+      try {
+        await page.locator("#ttsVoice").selectOption("en-US-JennyNeural");
+        assert.equal(
+          await page.evaluate(() => localStorage.getItem("novaTtsVoice")),
+          "en-US-GuyNeural",
+        );
+      } finally {
+        await page.evaluate(() => {
+          Storage.prototype.setItem = globalThis.__novaReceiptStorageSetter;
+          delete globalThis.__novaReceiptStorageSetter;
+        });
+      }
+      cards = await inspectReceipts(8);
+      assert.match(
+        await cards.first().locator("p").nth(1).innerText(),
+        /opslag niet bevestigd/,
+      );
+      assert.doesNotMatch(
+        await cards.first().locator("p").nth(1).innerText(),
+        /opgeslagen/,
+      );
+      assert.match(
+        await cards.first().locator("p").nth(2).innerText(),
+        /Hardware, spraak en server niet gecontroleerd/,
+      );
+      assert.doesNotMatch(
+        await cards.first().innerText(),
+        /GuyNeural|JennyNeural/,
+      );
       assert.equal(serviceWrites, 1);
       assert.equal(preparations, 3);
       assert.equal(cancellations, 1);
@@ -408,7 +603,7 @@ try {
       assert.deepEqual(unexpectedWrites, []);
       assert.deepEqual(errors, []);
       console.log(
-        `${width}px: settings receipts pass; failure/preparation/cancellation excluded, credentials hidden, staged restart honest; all API calls mocked.`,
+        `${width}px: settings receipts pass; failure/preparation/cancellation excluded, credentials hidden, staged restart honest, tool descriptions read back, toggle single-card, local voice storage success/failure honest; all API calls mocked.`,
       );
     } finally {
       await context.close();

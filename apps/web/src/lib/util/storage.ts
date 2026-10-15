@@ -1,3 +1,8 @@
+import {
+  publishLocalPreferenceReceipt,
+  type LocalPreferenceReceiptKind as LocalPreferenceKind,
+} from "./local-preference-receipts.ts";
+
 const legacyKeys: Readonly<Record<string, string>> = {
   novaSessionId: "jarvisSessionId",
   novaWake: "jarvisWake",
@@ -24,7 +29,7 @@ export const storage = {
       return fallback;
     }
   },
-  set(key: string, value: string): void {
+  set(key: string, value: string, receipt?: LocalPreferenceKind): void {
     try {
       localStorage.setItem(key, value);
     } catch {
@@ -37,6 +42,16 @@ export const storage = {
       } catch {
         /* A failed rollback copy must not invalidate the current value. */
       }
+    }
+    if (receipt)
+      publishLocalPreferenceReceipt(receipt, storage.matches(key, value));
+  },
+  /** Read the primary key again; a default or legacy fallback is not persistence evidence. */
+  matches(key: string, expected: string): boolean {
+    try {
+      return localStorage.getItem(key) === expected;
+    } catch {
+      return false;
     }
   },
 };
