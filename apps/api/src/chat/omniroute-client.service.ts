@@ -446,31 +446,46 @@ export class OmniRouteClient {
         if (!includeMood) emit("token", { text: delta.content });
         else {
           pendingMoodText += delta.content;
-          const markerAt = pendingMoodText.indexOf(moodPrefix);
-          if (markerAt >= 0) {
-            if (markerAt > 0)
+          for (;;) {
+            const markerAt = pendingMoodText.toUpperCase().indexOf(moodPrefix);
+            if (markerAt < 0) {
+              if (!content.trim()) break;
+              let suffixLength = Math.min(
+                pendingMoodText.length,
+                moodPrefix.length - 1,
+              );
+              const upper = pendingMoodText.toUpperCase();
+              while (
+                suffixLength > 0 &&
+                !upper.endsWith(moodPrefix.slice(0, suffixLength))
+              )
+                suffixLength--;
+              const safeLength = pendingMoodText.length - suffixLength;
+              if (safeLength)
+                emit("token", { text: pendingMoodText.slice(0, safeLength) });
+              pendingMoodText = pendingMoodText.slice(safeLength);
+              break;
+            }
+            const initial =
+              content
+                .slice(0, content.length - pendingMoodText.length + markerAt)
+                .trim() === "";
+            if (markerAt > 0 && !initial)
               emit("token", { text: pendingMoodText.slice(0, markerAt) });
             pendingMoodText = pendingMoodText.slice(markerAt);
-            if (pendingMoodText.includes("-->")) {
-              if (content.startsWith(moodPrefix)) {
-                const parsedMood = extractAssistantMood(pendingMoodText);
-                if (parsedMood.matched) {
-                  mood = parsedMood.mood;
-                  moodEmitted = true;
-                  emit("mood", { mood });
-                  pendingMoodText = parsedMood.content;
-                  if (pendingMoodText) emit("token", { text: pendingMoodText });
-                  pendingMoodText = "";
-                } else {
-                  emit("token", { text: parsedMood.content });
-                  pendingMoodText = "";
-                }
-              }
+            const markerEnd = pendingMoodText.indexOf("-->");
+            if (markerEnd < 0) break;
+            const parsedMood = extractAssistantMood(
+              pendingMoodText.slice(0, markerEnd + 3),
+            );
+            if (initial && parsedMood.matched) {
+              mood = parsedMood.mood;
+              moodEmitted = true;
+              emit("mood", { mood });
             }
-          } else if (pendingMoodText.length >= moodPrefix.length) {
-            const safeLength = pendingMoodText.length - moodPrefix.length + 1;
-            emit("token", { text: pendingMoodText.slice(0, safeLength) });
-            pendingMoodText = pendingMoodText.slice(safeLength);
+            pendingMoodText = pendingMoodText.slice(markerEnd + 3);
+            if (initial && parsedMood.matched)
+              pendingMoodText = pendingMoodText.trimStart();
           }
         }
       }
@@ -521,9 +536,7 @@ export class OmniRouteClient {
         const parsed = extractAssistantMood(content);
         mood = parsed.mood;
         if (parsed.matched && !moodEmitted) emit("mood", { mood });
-        const pending = parsed.matched
-          ? ""
-          : stripPrivateMoodMarkers(pendingMoodText);
+        const pending = stripPrivateMoodMarkers(pendingMoodText);
         if (pending) emit("token", { text: pending });
         content = parsed.content;
       }
