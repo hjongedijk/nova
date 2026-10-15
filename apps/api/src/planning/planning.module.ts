@@ -5,6 +5,10 @@ import { PlanningService } from "./planning.service.js";
 import { PlanningSource } from "./planning.source.js";
 import { CalDavService } from "./caldav.service.js";
 import { CookingController } from "./cooking.controller.js";
+import { AutonomyController } from "./autonomy/autonomy.controller.js";
+import { AutonomyService } from "./autonomy/autonomy.service.js";
+import { AutonomySource } from "./autonomy/autonomy.source.js";
+import { AutonomyStore } from "./autonomy/autonomy.store.js";
 import { HomeModule } from "../home/home.module.js";
 
 /**
@@ -13,8 +17,16 @@ import { HomeModule } from "../home/home.module.js";
  */
 @Module({
   imports: [ProxmoxModule, HomeModule],
-  controllers: [CookingController],
-  providers: [JarvisStateStore, PlanningService, PlanningSource, CalDavService],
+  controllers: [CookingController, AutonomyController],
+  providers: [
+    JarvisStateStore,
+    PlanningService,
+    PlanningSource,
+    CalDavService,
+    AutonomyStore,
+    AutonomyService,
+    AutonomySource,
+  ],
   exports: [PlanningService, JarvisStateStore, CalDavService],
 })
 export class PlanningModule {}
