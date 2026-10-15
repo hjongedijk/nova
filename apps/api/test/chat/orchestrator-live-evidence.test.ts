@@ -260,7 +260,7 @@ describe.each(["nl", "en"] as const)(
         expect(text(test.events)).toBe(stream ? conceptual : "");
       });
 
-      it("preserves the existing policy when no actual tool is ever attempted", async () => {
+      it("rejects speculative narration when no actual tool is ever attempted", async () => {
         const test = fixture(
           [
             { text: "Existing no-tool reply." },
@@ -269,7 +269,13 @@ describe.each(["nl", "en"] as const)(
           {},
         );
         const response = await test.run(language, stream);
-        expect(response.reply).toBe("Existing no-tool reply.");
+        expect(response.reply).toBe(
+          language === "en"
+            ? "I could not complete your request right now. Please try again later."
+            : "Ik kon je verzoek nu niet afronden. Probeer het straks nog eens.",
+        );
+        expect(text(test.events)).toBe(stream ? response.reply : "");
+        expect(test.events.some(({ event }) => event === "mood")).toBe(false);
         expect(test.execute).not.toHaveBeenCalled();
       });
     });

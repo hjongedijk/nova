@@ -3,7 +3,7 @@ import { OrchestratorService } from "../../src/chat/orchestrator.service.js";
 import { IncompleteModelResponseError } from "../../src/chat/omniroute-client.service.js";
 
 describe("tool-enforced response recovery", () => {
-  it("discards a failed reminder's tokens and mood before using the complete fallback", async () => {
+  it("discards ignored-tool narration and a failed reminder before returning unavailable", async () => {
     const complete = {
       assistant: { role: "assistant", content: "Complete fallback." },
       model: "fixture",
@@ -57,14 +57,17 @@ describe("tool-enforced response recovery", () => {
       stream: true,
       emit,
     });
-    expect(reply.reply).toBe("Complete fallback.");
+    expect(reply.reply).toBe(
+      "Ik kon je verzoek nu niet afronden. Probeer het straks nog eens.",
+    );
+    expect(reply.unavailable).toBe(true);
     expect(
       emit.mock.calls
         .filter(([event]) => event === "token")
         .map(([, data]) => data.text)
         .join(""),
     ).toBe(reply.reply);
-    expect(emit).toHaveBeenCalledWith("mood", { mood: "happy" });
+    expect(emit).not.toHaveBeenCalledWith("mood", { mood: "happy" });
     expect(emit).not.toHaveBeenCalledWith("mood", { mood: "concerned" });
     expect(execute).not.toHaveBeenCalled();
     expect(call).toHaveBeenCalledTimes(2);

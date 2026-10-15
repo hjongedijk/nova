@@ -41,25 +41,80 @@ import type { AssistantMood } from "./assistant-mood.js";
  * from memory before keeps doing so, so for these the first round must call a tool.
  */
 const LIVE_DATA =
-  /\b(?:weer|temperatuur|regent?|regen|zonnig|wind|buiten|weather|forecast|hoe laat|welke dag|welke datum|datum|nieuws|headlines?|timer|herinner\w*|wekker|lijst\w*|boodschappen|taken|lampen?|licht|verlichting|verwarming|thermostaat|iemand thuis|hoe warm|hoe koud|graden|in huis|woonkamer|slaapkamer|keuken|proxmox|vm|vm['’]?s|virtuele|servers?|status|bereikbaar|storing|meldingen?|watchdog|opslag|cpu|belasting|koers|bitcoin|dollar|euro|valuta|luchtkwaliteit|pollen|maan|iss|ruimtestation|zoek\w*|google|wikipedia|internet|inwoners|bereken\w*|open|sluit|herstart|restart|vergrendel\w*|speel|pauzeer|volume|browser|chrome|website|surf|navigeer|scroll|klik|tabblad|ga naar|youtube|amazon|marktplaats)\b/i;
+  /\b(?:weer|temperatuur|regent?|regen|zonnig|wind|buiten|weather|forecast|temperature|raining|calendar|agenda|what time|what day|what date|latest news|news|shopping lists?|to-do lists?|task lists?|remind(?:ers?)?|alarms?|lights?|(?:turn|switch) (?:on|off)|hoe laat|welke dag|welke datum|datum|nieuws|headlines?|timers?|herinner\w*|wekker|lijst\w*|boodschappen|taken|lamp(?:en)?|licht|verlichting|verwarming|thermostaat|iemand thuis|hoe warm|hoe koud|graden|in huis|woonkamer|slaapkamer|keuken|proxmox|vm|vm['’]?s|virtuele|servers?|status|bereikbaar|storing|meldingen?|watchdog|opslag|cpu|belasting|koers|bitcoin|dollar|euro|valuta|luchtkwaliteit|pollen|maan|iss|ruimtestation|zoek\w*|google|wikipedia|internet|inwoners|bereken\w*|open|sluit|herstart|restart|vergrendel\w*|speel|pauzeer|volume|browser|chrome|website|surf|navigeer|scroll|klik|tabblad|ga naar|youtube|amazon|marktplaats)\b/i;
 
 // Sharing a mood is conversation, even if it mentions the weather or the house.
 const PERSONAL_CHAT =
   /\b(?:ik ben (?:moe|kapot|verdrietig|blij|gestrest|druk|eenzaam|overprikkeld|overweldigd|opgelucht|boos|gefrustreerd|nerveus|gespannen)|ik heb (?:een )?(?:drukke|zware|lastige|rotte|heftige) dag|ik voel me|het valt me zwaar|ik zit erdoorheen|wat een dag|i(?:'m| am) (?:tired|exhausted|sad|happy|stressed|lonely|overwhelmed|anxious|frustrated)|i feel|it's been a (?:long|rough|busy|hard) day|i(?:'ve| have) had a lot on)\b/i;
 const EXPLICIT_REQUEST =
-  /\b(?:kun je|kan je|wil je|hoe|wat is|wat zijn|welke|zoek|check|controleer|zet|doe|open|sluit|speel|help|can you|could you|please|what|when|where|check|turn|play)\b/i;
+  /\b(?:kun je|kan je|wil je|hoe|wat is|wat zijn|welke|zoek|check|controleer|zet|doe|open|sluit|speel|help|can you|could you|what|when|where|check|turn|switch|play|add|voeg|remind|herinner|schakel|voer|run|execute)\b/i;
 const LIVE_WITH_FILES =
-  /\b(?:nu|momenteel|actueel|live|current|currently|today|vandaag|check|controleer|zet|schakel|herstart|restart|reboot|turn|open|sluit|speel|play)\b/i;
+  /\b(?:nu|momenteel|actueel|live|current|currently|today|vandaag|check|controleer|zet|schakel|herstart|restart|reboot|turn|switch|open|sluit|speel|play|fetch|search|zoek|run|execute|voer|add|voeg|remind|herinner)\b/i;
 const MOOD_STYLE =
   "Before any user-facing answer text, emit exactly one private marker: <!--NOVA_MOOD:happy-->, <!--NOVA_MOOD:thoughtful-->, <!--NOVA_MOOD:concerned-->, <!--NOVA_MOOD:enthusiastic--> or <!--NOVA_MOOD:neutral-->. Choose the tone of your answer, not a diagnosis or a claim about the user's feelings. Do not mention the marker. Do not add it to tool calls.";
+const FRESH_REQUEST =
+  /\b(?:nu|momenteel|actueel|live|current|currently|today|vandaag|latest|right now)\b/i;
+const EXPLAIN_ONLY =
+  /^\s*(?:(?:kun je|kan je|wil je|can you|could you)\s+)?(?:leg(?: mij)? uit|uitleggen|verklaar|beschrijf (?:hoe|waarom)|explain|describe (?:how|why)|tell me (?:how|why)|wat betekent|wat is de (?:functie|betekenis|definitie)|what is the (?:purpose|meaning|definition))\b/i;
+const CODE_ONLY =
+  /^\s*(?:(?:kun je|kan je|wil je|can you|could you|please)\s+)?(?:schrijf|maak|genereer|write|create|generate)\b[^.!?]{0,120}\b(?:code|script|functie|function|simulatie|simulation|voorbeeld|example)\b/i;
+const EXECUTE_ALSO =
+  /(?:[,;.]|\b(?:and|en)\b)\s*(?:then\s+|daarna\s+)?(?:run|execute|start|restart|reboot|check|turn|play|open|close|stop|voer|herstart|controleer|zet|schakel|speel|sluit)\b/i;
+const EXECUTION_REQUEST =
+  /(?:^|[,;.]|\b(?:and|en)\b)\s*(?:(?:please|can you|could you|kun je|kan je|wil je)\s+)?(?:then\s+|daarna\s+)?(?:run|execute|fetch|search|look up|zoek|voer)\b/i;
+const OWN_DIAGNOSIS =
+  /\b(?:mijn|my|our|onze)\b.{0,80}\b(?:down|offline|unreachable|niet|storing|failed|error|kapot|defect)\b/i;
+const ATTACHMENT_REFERENCE =
+  /\b(?:in (?:dit|het|this|the) (?:bestand|document|file)|this (?:file|document|article)|attached|bijlage)\b/i;
+const EXTERNAL_CHECK =
+  /\b(?:check|controleer|verify|zoek|search|fetch|run|execute|voer|herstart|restart)\b/i;
+// A check inside an attached report is document analysis, unless an outside lookup/action is requested.
+const OUTSIDE_ATTACHMENT =
+  /\b(?:buiten|outside|online|internet|fetch|search|zoek|run|execute|voer|herstart|restart|reboot|turn|switch|zet|schakel|speel|play|add|voeg|remind|herinner|still accurate|nog actueel)\b/i;
+// The amount is supplied as a product description, rather than requested from an outside source.
+const PROVIDED_PRICE =
+  /^(?:wat kost (?:een|de|het) [^?!;]{1,100}\bvan \d+(?:[.,]\d+)? ?(?:euro|eur|dollars?|usd|pond|gbp)|how much does (?:a|an|the) \d+(?:[.,]\d+)? ?(?:euro|eur|dollar|usd|pound|gbp)[ -][^?!;]{1,100}\bcost)[?.!]?$/i;
+const PRICE_QUESTION =
+  /^(?:wat (?:kost|kosten)\b|how much (?:does|do)\b[^?!;]{0,120}\bcost\b)/i;
+const PRICE_CHECK =
+  /\b(?:check|controleer|verify|zoek)\b.{0,80}\b(?:prijs|prijzen|price|prices)\b/i;
+const EXCHANGE_REQUEST =
+  /\b(?:omreken\w*|convert\w*|exchange|wisselkoers|koers|worth|waard|in dollars?|in euros?|naar dollars?|naar euros?|to usd|to eur)\b/i;
 export const requiresLiveData = (
   message: string,
   hasAttachments = false,
 ): boolean => {
   if (PERSONAL_CHAT.test(message) && !EXPLICIT_REQUEST.test(message))
     return false;
-  if (hasAttachments && !LIVE_WITH_FILES.test(message)) return false;
-  return LIVE_DATA.test(message);
+  if (hasAttachments) {
+    if (!LIVE_WITH_FILES.test(message)) return false;
+    if (ATTACHMENT_REFERENCE.test(message) && !OUTSIDE_ATTACHMENT.test(message))
+      return false;
+  }
+  if (
+    PROVIDED_PRICE.test(message) &&
+    !FRESH_REQUEST.test(message) &&
+    !EXTERNAL_CHECK.test(message) &&
+    !EXECUTE_ALSO.test(message) &&
+    !EXECUTION_REQUEST.test(message) &&
+    !EXCHANGE_REQUEST.test(message)
+  )
+    return false;
+  if (CODE_ONLY.test(message) && !EXECUTE_ALSO.test(message)) return false;
+  if (
+    EXPLAIN_ONLY.test(message) &&
+    !FRESH_REQUEST.test(message) &&
+    !OWN_DIAGNOSIS.test(message) &&
+    !EXECUTE_ALSO.test(message)
+  )
+    return false;
+  return (
+    LIVE_DATA.test(message) ||
+    PRICE_QUESTION.test(message) ||
+    PRICE_CHECK.test(message) ||
+    EXECUTION_REQUEST.test(message) ||
+    (EXTERNAL_CHECK.test(message) && FRESH_REQUEST.test(message))
+  );
 };
 
 export function responseStyle(
@@ -118,6 +173,8 @@ export interface Reply {
   result?: unknown;
   role?: ModelRoleId;
   mood?: AssistantMood;
+  /** Required external evidence was unavailable; autonomous callers may retry. */
+  unavailable?: true;
 }
 
 export function classifyModelRole(
@@ -184,12 +241,8 @@ export class OrchestratorService {
       includeMood?: boolean;
     },
   ): Promise<ModelAnswer> {
-    const held: string[] = [];
-    let heldMood: AssistantMood | undefined;
     const quiet: Emit = (event, data) => {
-      if (event === "token") held.push(String(data.text));
-      else if (event === "mood") heldMood = data.mood as AssistantMood;
-      else options.emit(event, data);
+      if (event !== "token" && event !== "mood") options.emit(event, data);
     };
     const tools = options.tools;
     const attempt = (
@@ -210,27 +263,14 @@ export class OrchestratorService {
       result = await attempt("required");
     } catch (error) {
       if (options.signal?.aborted) throw error;
-      held.length = 0;
-      heldMood = undefined;
       result = await attempt("auto", [REMINDER]);
     }
+    if (options.signal?.aborted) throw new Error("Request cancelled");
     if (!result.assistant.tool_calls?.length) {
-      held.length = 0;
-      heldMood = undefined;
       result = await attempt("required", [REMINDER]).catch((error) => {
         if (options.signal?.aborted) throw error;
-        held.length = 0;
-        heldMood = result.mood;
         return result;
       });
-    }
-    if (!result.assistant.tool_calls?.length && options.stream) {
-      // Nothing worked: the model really has no tool for this, so its text is the answer.
-      if (heldMood) options.emit("mood", { mood: heldMood });
-      const text = held.length
-        ? held.join("")
-        : (result.assistant.content ?? "");
-      if (text) options.emit("token", { text });
     }
     return result;
   }
@@ -390,22 +430,44 @@ export class OrchestratorService {
     );
     if (notes) messages.splice(1, 0, { role: "system", content: notes });
 
-    const mustUseTool =
-      modelTools.length > 0 &&
-      requiresLiveData(message, !!input.attachments?.length);
+    const requiredEvidence = requiresLiveData(
+      message,
+      !!input.attachments?.length,
+    );
+    const mustUseTool = modelTools.length > 0 && requiredEvidence;
     const rounds = this.config.maxToolRounds;
     let emptyRetried = false;
     let completedSteps = 0;
     let liveToolAttempted = false;
     let requiredReadAttempted = false;
-    let requiredReadSucceeded = false;
+    let requiredEvidenceSucceeded = false;
+    const evidenceUnavailable = () => {
+      const reply = requiredReadAttempted
+        ? responseLanguage === "en"
+          ? "I could not verify the current information. Please try again later."
+          : "Ik kon de actuele gegevens niet controleren. Probeer het straks nog eens."
+        : responseLanguage === "en"
+          ? "I could not complete your request right now. Please try again later."
+          : "Ik kon je verzoek nu niet afronden. Probeer het straks nog eens.";
+      if (stream) emit("token", { text: reply });
+      return reply;
+    };
+    if (signal?.aborted) throw new Error("Request cancelled");
+    if (requiredEvidence && !modelTools.length)
+      return {
+        reply: evidenceUnavailable(),
+        model: null,
+        usage: null,
+        role,
+        unavailable: true,
+      };
 
     for (let round = 0; round < rounds; round++) {
       if (signal?.aborted) throw new Error("Request cancelled");
       // Speculative narration after failed live reads cannot reach speech or the interface.
       // A tool-bearing round's preface is discarded; a successful alternate read reopens narration.
       const roundEmit: Emit =
-        requiredReadAttempted && !requiredReadSucceeded
+        requiredEvidence && !requiredEvidenceSucceeded
           ? (event, data) => {
               if (event !== "token" && event !== "mood") emit(event, data);
             }
@@ -455,13 +517,8 @@ export class OrchestratorService {
         role,
       };
 
-      if (!calls.length && requiredReadAttempted && !requiredReadSucceeded) {
-        const reply =
-          responseLanguage === "en"
-            ? "I could not verify the current information. Please try again later."
-            : "Ik kon de actuele gegevens niet controleren. Probeer het straks nog eens.";
-        if (stream) emit("token", { text: reply });
-        return { reply, ...base };
+      if (!calls.length && requiredEvidence && !requiredEvidenceSucceeded) {
+        return { reply: evidenceUnavailable(), ...base, unavailable: true };
       }
       if (!calls.length && !String(assistant.content ?? "").trim()) {
         // Free models now and then return nothing at all. Ask once more, then say so.
@@ -522,18 +579,14 @@ export class OrchestratorService {
         completedSteps++;
         const risk =
           this.tools.list().find((tool) => tool.name === name)?.risk ?? null;
-        if (
-          mustUseTool &&
-          risk === "READ_ONLY" &&
-          name !== TOOL_DISCOVERY_NAME
-        ) {
-          requiredReadAttempted = true;
+        if (requiredEvidence && name !== TOOL_DISCOVERY_NAME && risk !== null) {
+          if (risk === "READ_ONLY") requiredReadAttempted = true;
           if (
             result.ok === true &&
             result.executed !== false &&
             result.verified !== false
           )
-            requiredReadSucceeded = true;
+            requiredEvidenceSucceeded = true;
         }
         emit("tool_result", {
           name,
