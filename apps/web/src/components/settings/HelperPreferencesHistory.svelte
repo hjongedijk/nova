@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import type {
     HelperPreferenceHistory as History,
     HelperPreferenceRevision,
@@ -23,7 +24,7 @@
       history = await getHelperPreferenceHistory();
     } catch (error) {
       message =
-        error instanceof Error
+        error instanceof ApiError
           ? error.message
           : "De wijzigingsgeschiedenis is niet beschikbaar.";
     } finally {
@@ -46,7 +47,7 @@
       history = await getHelperPreferenceHistory();
     } catch (error) {
       message =
-        error instanceof Error ? error.message : "Terugdraaien is mislukt.";
+        error instanceof ApiError ? error.message : "Terugdraaien is mislukt.";
     } finally {
       busy = false;
     }

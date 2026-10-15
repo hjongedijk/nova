@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import type {
     NodeRedBriefingSchedule,
     PendingConfirmation,
@@ -48,7 +49,7 @@
       }
     } catch (error) {
       message =
-        error instanceof Error ? error.message : "Planning niet gewijzigd.";
+        error instanceof ApiError ? error.message : "Planning niet gewijzigd.";
     } finally {
       busy = false;
     }

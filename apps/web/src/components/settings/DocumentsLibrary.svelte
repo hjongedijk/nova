@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import { onMount } from "svelte";
   import { encodeAttachments } from "#lib/chat/attachments.ts";
   import {
@@ -25,7 +26,9 @@
       documents = response.documents;
     } catch (reason) {
       error =
-        reason instanceof Error ? reason.message : "Bibliotheek laden mislukt.";
+        reason instanceof ApiError
+          ? reason.message
+          : "Bibliotheek laden mislukt.";
     }
   }
 
@@ -42,7 +45,8 @@
       notice = `${uploaded.documents.length} document${uploaded.documents.length === 1 ? "" : "en"} veilig geïndexeerd.${uploaded.truncated ? " Van een groot document is alleen het eerste deel gebruikt." : ""}`;
       await reload();
     } catch (reason) {
-      error = reason instanceof Error ? reason.message : "Indexeren mislukt.";
+      error =
+        reason instanceof ApiError ? reason.message : "Indexeren mislukt.";
     } finally {
       busy = false;
     }
@@ -55,7 +59,7 @@
     try {
       results = (await searchDocuments(query.trim())).results;
     } catch (reason) {
-      error = reason instanceof Error ? reason.message : "Zoeken mislukt.";
+      error = reason instanceof ApiError ? reason.message : "Zoeken mislukt.";
     } finally {
       busy = false;
     }

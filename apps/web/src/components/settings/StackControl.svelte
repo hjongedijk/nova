@@ -39,7 +39,7 @@
       status = await getStackControlStatus();
     } catch (cause) {
       error =
-        cause instanceof Error
+        cause instanceof ApiError
           ? cause.message
           : "Stackstatus niet beschikbaar.";
     } finally {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import type {
     AuditLogEntry,
     GatewayReport,
@@ -83,7 +84,8 @@
       loaded = result;
     } catch (error) {
       if (next === view)
-        message = error instanceof Error ? error.message : "Niet beschikbaar";
+        message =
+          error instanceof ApiError ? error.message : "Niet beschikbaar";
     }
   }
 

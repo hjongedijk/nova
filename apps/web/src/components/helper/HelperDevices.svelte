@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import { onMount } from "svelte";
   import {
     getHelperHotkeys,
@@ -37,7 +38,10 @@
         ? result.preferences?.warnings.join(" · ") || "Sneltoetsen opgeslagen."
         : result.error || "Opslaan mislukt.";
     } catch (error) {
-      note = (error as Error).message;
+      note =
+        error instanceof ApiError
+          ? error.message
+          : "Sneltoetsen zijn niet opgeslagen. Controleer de verbinding en probeer opnieuw.";
     }
   }
   async function devices() {
@@ -81,9 +85,10 @@
       note = output
         ? "Uitvoerapparaat gekozen en op dit apparaat bewaard."
         : "Standaarduitvoer gekozen.";
-    } catch (error) {
+    } catch {
       if (output !== selected) return;
-      note = (error as Error).message;
+      note =
+        "Uitvoerapparaat niet ingesteld. Controleer browsertoegang of kies je uitvoer via Windows-geluidsinstellingen.";
       output = "";
       storage.set(outputDeviceKey, "");
     }

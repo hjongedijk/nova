@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import type {
     PersonaPreferencesHistory as History,
     PersonaPreferencesRevision,
@@ -40,7 +41,7 @@
       history = await getPersonaPreferencesHistory();
     } catch (error) {
       message =
-        error instanceof Error
+        error instanceof ApiError
           ? error.message
           : "Profiel herstellen is mislukt.";
     } finally {

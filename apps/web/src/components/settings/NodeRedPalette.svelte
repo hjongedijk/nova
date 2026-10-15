@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import { onDestroy } from "svelte";
   import {
     confirmNodeRedPalette,
@@ -27,7 +28,7 @@
       message = "";
     } catch (error) {
       message =
-        error instanceof Error ? error.message : "Palette niet beschikbaar.";
+        error instanceof ApiError ? error.message : "Palette niet beschikbaar.";
     } finally {
       busy = false;
     }
@@ -51,7 +52,7 @@
       );
     } catch (error) {
       message =
-        error instanceof Error
+        error instanceof ApiError
           ? error.message
           : "Palettewijziging niet beschikbaar.";
     } finally {
@@ -81,7 +82,7 @@
           : "Palettewijziging geannuleerd.";
     } catch (error) {
       message =
-        error instanceof Error ? error.message : "Palettewijziging mislukt.";
+        error instanceof ApiError ? error.message : "Palettewijziging mislukt.";
     } finally {
       pending = null;
       clearTimeout(timer);

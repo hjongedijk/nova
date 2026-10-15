@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import type {
     HouseholdProfileSwitchHistory,
     HouseholdProfileDefinitionHistory,
@@ -57,7 +58,7 @@
       definitionHistory = await getHouseholdProfileDefinitionHistory();
     } catch (error) {
       definitionMessage =
-        error instanceof Error
+        error instanceof ApiError
           ? error.message
           : "Gezinsprofielen herstellen is mislukt.";
     } finally {
@@ -93,7 +94,7 @@
       history = await getHouseholdProfileHistory();
     } catch (error) {
       message =
-        error instanceof Error
+        error instanceof ApiError
           ? error.message
           : "Gezinsprofiel herstellen is mislukt.";
     } finally {

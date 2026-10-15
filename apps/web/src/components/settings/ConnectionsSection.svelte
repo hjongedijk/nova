@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import { onMount } from "svelte";
   import type {
     MqttOverview,
@@ -170,7 +171,7 @@
       error = "";
     } catch (e) {
       error =
-        e instanceof Error
+        e instanceof ApiError
           ? e.message
           : "De koppelingen zijn niet beschikbaar.";
     }
@@ -267,7 +268,7 @@
       mqttError = "";
     } catch (e) {
       mqttError =
-        e instanceof Error ? e.message : "MQTT-overzicht niet beschikbaar.";
+        e instanceof ApiError ? e.message : "MQTT-overzicht niet beschikbaar.";
     } finally {
       busy = null;
     }
@@ -279,7 +280,9 @@
       qdrantError = "";
     } catch (e) {
       qdrantError =
-        e instanceof Error ? e.message : "Qdrant-overzicht niet beschikbaar.";
+        e instanceof ApiError
+          ? e.message
+          : "Qdrant-overzicht niet beschikbaar.";
     } finally {
       busy = null;
     }
@@ -293,7 +296,9 @@
       qdrantMaintenance = result;
     } catch (e) {
       qdrantError =
-        e instanceof Error ? e.message : "Geheugen opschonen is niet gelukt.";
+        e instanceof ApiError
+          ? e.message
+          : "Geheugen opschonen is niet gelukt.";
     } finally {
       busy = null;
     }
@@ -315,7 +320,7 @@
       await loadQdrantOverview();
     } catch (e) {
       qdrantError =
-        e instanceof Error ? e.message : "Herindexeren is niet gelukt.";
+        e instanceof ApiError ? e.message : "Herindexeren is niet gelukt.";
     } finally {
       busy = null;
     }
@@ -327,7 +332,9 @@
       qdrantError = "";
     } catch (e) {
       qdrantError =
-        e instanceof Error ? e.message : "Indexgeschiedenis niet beschikbaar.";
+        e instanceof ApiError
+          ? e.message
+          : "Indexgeschiedenis niet beschikbaar.";
     } finally {
       busy = null;
     }
@@ -349,7 +356,7 @@
       qdrantOverview = await getQdrantOverview();
     } catch (e) {
       qdrantError =
-        e instanceof Error ? e.message : "Indexherstel is niet gelukt.";
+        e instanceof ApiError ? e.message : "Indexherstel is niet gelukt.";
     } finally {
       busy = null;
     }
@@ -365,7 +372,9 @@
       homeInventoryError = "";
     } catch (e) {
       homeInventoryError =
-        e instanceof Error ? e.message : "Apparatenoverzicht niet beschikbaar.";
+        e instanceof ApiError
+          ? e.message
+          : "Apparatenoverzicht niet beschikbaar.";
     } finally {
       busy = null;
     }
@@ -389,7 +398,7 @@
         : "Toegang voor Home Assistant opgeslagen.";
     } catch (e) {
       homeInventoryError =
-        e instanceof Error ? e.message : "Toegang opslaan is niet gelukt.";
+        e instanceof ApiError ? e.message : "Toegang opslaan is niet gelukt.";
     } finally {
       busy = null;
     }
@@ -426,7 +435,9 @@
         : "Home Assistant-toegang teruggezet en gecontroleerd.";
     } catch (e) {
       homeInventoryError =
-        e instanceof Error ? e.message : "Toegang terugzetten is niet gelukt.";
+        e instanceof ApiError
+          ? e.message
+          : "Toegang terugzetten is niet gelukt.";
     } finally {
       busy = null;
     }
@@ -455,7 +466,7 @@
       targetInventoryError = "";
     } catch (e) {
       targetInventoryError =
-        e instanceof Error ? e.message : "Doelenoverzicht niet beschikbaar.";
+        e instanceof ApiError ? e.message : "Doelenoverzicht niet beschikbaar.";
     } finally {
       busy = null;
     }
@@ -502,7 +513,9 @@
         : "Doeltoegang opgeslagen.";
     } catch (e) {
       targetInventoryError =
-        e instanceof Error ? e.message : "Doeltoegang opslaan is niet gelukt.";
+        e instanceof ApiError
+          ? e.message
+          : "Doeltoegang opslaan is niet gelukt.";
     } finally {
       busy = null;
     }
@@ -542,7 +555,7 @@
         : "Doeltoegang teruggezet en gecontroleerd.";
     } catch (e) {
       targetInventoryError =
-        e instanceof Error
+        e instanceof ApiError
           ? e.message
           : "Doeltoegang terugzetten is niet gelukt.";
     } finally {
@@ -556,7 +569,7 @@
       nodeRedFlowsError = "";
     } catch (e) {
       nodeRedFlowsError =
-        e instanceof Error ? e.message : "Flows niet beschikbaar.";
+        e instanceof ApiError ? e.message : "Flows niet beschikbaar.";
     } finally {
       nodeRedFlowsBusy = false;
     }
@@ -585,7 +598,8 @@
         await loadNodeRedFlows();
       }
     } catch (e) {
-      nodeRedRunMessage = e instanceof Error ? e.message : "Flow niet gestart.";
+      nodeRedRunMessage =
+        e instanceof ApiError ? e.message : "Flow niet gestart.";
     } finally {
       nodeRedRunBusy = false;
     }
@@ -619,7 +633,7 @@
       }
     } catch (e) {
       nodeRedRunMessage =
-        e instanceof Error ? e.message : "Flowstatus niet gewijzigd.";
+        e instanceof ApiError ? e.message : "Flowstatus niet gewijzigd.";
     } finally {
       nodeRedRunBusy = false;
     }
@@ -659,7 +673,7 @@
       }
     } catch (e) {
       nodeRedRunMessage =
-        e instanceof Error ? e.message : "Sjabloon niet toegevoegd.";
+        e instanceof ApiError ? e.message : "Sjabloon niet toegevoegd.";
     } finally {
       nodeRedRunBusy = false;
     }

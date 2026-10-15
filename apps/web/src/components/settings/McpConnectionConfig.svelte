@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import type { McpServerConfigStatus } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
   import {
@@ -76,7 +77,7 @@
       values = {};
       await onSaved();
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : "Opslaan is mislukt.";
+      error = cause instanceof ApiError ? cause.message : "Opslaan is mislukt.";
     } finally {
       busy = false;
     }

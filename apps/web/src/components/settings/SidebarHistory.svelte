@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import type {
     SidebarHistory as History,
     SidebarRevision,
@@ -22,7 +23,7 @@
       history = await getSidebarHistory();
     } catch (error) {
       message =
-        error instanceof Error
+        error instanceof ApiError
           ? error.message
           : "De indelingsgeschiedenis is niet beschikbaar.";
     } finally {
@@ -45,7 +46,7 @@
       history = await getSidebarHistory();
     } catch (error) {
       message =
-        error instanceof Error ? error.message : "Terugdraaien is mislukt.";
+        error instanceof ApiError ? error.message : "Terugdraaien is mislukt.";
     } finally {
       busy = false;
     }

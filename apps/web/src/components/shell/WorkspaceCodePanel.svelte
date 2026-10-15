@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import {
     getWorkspaceCodeFile,
     getWorkspaceCodeRun,
@@ -35,7 +36,10 @@
       )
         file = null;
     } catch (cause) {
-      error = (cause as Error).message || "Codeproject niet beschikbaar.";
+      error =
+        cause instanceof ApiError
+          ? cause.message
+          : "Codeproject niet beschikbaar.";
     } finally {
       busy = false;
     }
@@ -47,7 +51,8 @@
     try {
       file = await getWorkspaceCodeFile(path);
     } catch (cause) {
-      error = (cause as Error).message || "Bestand niet beschikbaar.";
+      error =
+        cause instanceof ApiError ? cause.message : "Bestand niet beschikbaar.";
     } finally {
       busy = false;
     }

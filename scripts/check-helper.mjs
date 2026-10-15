@@ -632,6 +632,59 @@ import assert from "node:assert/strict";
         () => localStorage.getItem("novaAudioOutput") === "",
       );
       assert.equal(await page.getByLabel("Uitvoerapparaat").inputValue(), "");
+      const privateDiagnostic =
+        "private-audio.invalid /srv/private token=fixture-secret";
+      await page.evaluate((diagnostic) => {
+        globalThis.AudioContext.prototype.setSinkId = async () => {
+          throw new Error(diagnostic);
+        };
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (input, init) => {
+          const path = new URL(
+            typeof input === "string" ? input : input.url,
+            globalThis.location.href,
+          ).pathname;
+          if (init?.method === "PUT" && path.endsWith("/helper/preferences"))
+            throw diagnostic;
+          if (init?.method === "PUT" && path.endsWith("/helper/hotkeys"))
+            throw new TypeError(diagnostic);
+          return originalFetch(input, init);
+        };
+      }, privateDiagnostic);
+      await page.getByLabel("Uitvoerapparaat").selectOption("speaker-one");
+      await page
+        .getByText(
+          "Uitvoerapparaat niet ingesteld. Controleer browsertoegang of kies je uitvoer via Windows-geluidsinstellingen.",
+          { exact: true },
+        )
+        .waitFor();
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem("novaAudioOutput")),
+        "",
+      );
+      await page
+        .getByRole("button", { name: "Instellingen opslaan", exact: true })
+        .click();
+      await page
+        .getByText(
+          "Helperinstellingen zijn niet opgeslagen. Controleer de verbinding en probeer opnieuw.",
+          { exact: true },
+        )
+        .waitFor();
+      await page.getByText("Sneltoetsen", { exact: true }).click();
+      await page
+        .getByRole("button", { name: "Sneltoetsen opslaan", exact: true })
+        .click();
+      await page
+        .getByText(
+          "Sneltoetsen zijn niet opgeslagen. Controleer de verbinding en probeer opnieuw.",
+          { exact: true },
+        )
+        .waitFor();
+      assert.equal(
+        (await page.locator("body").innerText()).includes(privateDiagnostic),
+        false,
+      );
 
       await page.getByRole("button", { name: "Chat", exact: true }).click();
       await page

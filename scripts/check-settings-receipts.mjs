@@ -1014,6 +1014,102 @@ try {
         await cards.first().locator("p").nth(2).innerText(),
         /Browseropslag opnieuw gelezen en gecontroleerd/,
       );
+      // Rejected fetches and local export failures must never display diagnostics.
+      await settingsSection("connections");
+      await service().locator("summary").click();
+      const privateDiagnostic =
+        "private-host.invalid /srv/private token=fixture-secret";
+      await page.evaluate((diagnostic) => {
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = async (input, init) => {
+          const path = new URL(
+            typeof input === "string" ? input : input.url,
+            globalThis.location.href,
+          ).pathname;
+          if (
+            path === "/api/settings/node-red/palette" ||
+            path.startsWith("/api/settings/node-red/flow-revisions") ||
+            path === "/api/settings/workspace/code/tree"
+          )
+            throw new TypeError(diagnostic);
+          if (path === "/api/settings/node-red/flows/export")
+            return new Response("[]", {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          return originalFetch(input, init);
+        };
+        URL.createObjectURL = () => {
+          throw new Error(diagnostic);
+        };
+      }, privateDiagnostic);
+      await paletteRegion
+        .getByRole("button", { name: "Palette laden", exact: true })
+        .click();
+      await paletteRegion
+        .getByRole("status")
+        .getByText("Palette niet beschikbaar.", { exact: true })
+        .waitFor();
+      const versions = page.getByRole("region", {
+        name: "Node-RED-versiegeschiedenis",
+        exact: true,
+      });
+      for (const [button, message] of [
+        ["Versies laden", "Versies niet beschikbaar."],
+        ["Huidige versie bewaren", "Flowversie opslaan is mislukt."],
+        ["Flows downloaden", "Flowexport mislukt."],
+      ]) {
+        await versions
+          .getByRole("button", { name: button, exact: true })
+          .click();
+        await versions
+          .getByRole("status")
+          .getByText(message, { exact: true })
+          .waitFor();
+      }
+      await page.evaluate((diagnostic) => {
+        const previous = globalThis.fetch;
+        globalThis.fetch = async (input, init) => {
+          const path = new URL(
+            typeof input === "string" ? input : input.url,
+            globalThis.location.href,
+          ).pathname;
+          if (path === "/api/settings/node-red/palette")
+            return new Response(JSON.stringify({ error: diagnostic }), {
+              status: 409,
+              headers: { "content-type": "application/json" },
+            });
+          return previous(input, init);
+        };
+      }, privateDiagnostic);
+      await paletteRegion
+        .getByRole("button", { name: "Palette laden", exact: true })
+        .click();
+      await paletteRegion
+        .getByRole("status")
+        .filter({ hasText: /settings changed|instellingen zijn gewijzigd/ })
+        .waitFor();
+      assert.equal(
+        (await page.locator("body").innerText()).includes(privateDiagnostic),
+        false,
+      );
+      await inspectReceipts(10);
+      await page.locator("#historyClose").click();
+      await page.getByRole("button", { name: "Code", exact: true }).click();
+      await page
+        .locator(".code-panel")
+        .getByRole("status")
+        .filter({ hasText: "Codeproject niet beschikbaar." })
+        .waitFor();
+      assert.equal(
+        (await page.locator(".code-panel").innerText()).includes(
+          privateDiagnostic,
+        ),
+        false,
+      );
+      await page
+        .getByRole("button", { name: "Codeweergave sluiten", exact: true })
+        .click();
       assert.equal(quickWrites, 1);
       assert.equal(quickRollbackAttempts, 3);
       assert.equal(quickRollbackEffects, 2);
@@ -1025,7 +1121,7 @@ try {
       assert.deepEqual(unexpectedWrites, []);
       assert.deepEqual(errors, []);
       console.log(
-        `${width}px: settings receipts pass; failure/preparation/cancellation excluded, credentials hidden, staged restart honest, tool descriptions read back, toggle single-card, local voice storage success/failure honest; direct quick-action recovery is fresh, explicit, cancellable and conflict-safe; range drag emits one card; all API calls mocked.`,
+        `${width}px: settings receipts pass; failure/preparation/cancellation excluded, credentials hidden, staged restart honest, tool descriptions read back, toggle single-card, local voice storage success/failure honest; rejected transport/local export diagnostics hidden and translated conflicts preserved; direct quick-action recovery is fresh, explicit, cancellable and conflict-safe; range drag emits one card; all API calls mocked.`,
       );
     } finally {
       await context.close();

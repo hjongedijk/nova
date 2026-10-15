@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import { onDestroy } from "svelte";
   import {
     captureNodeRedFlowRevision,
@@ -35,7 +36,7 @@
       message = "";
     } catch (error) {
       message =
-        error instanceof Error ? error.message : "Versies niet beschikbaar.";
+        error instanceof ApiError ? error.message : "Versies niet beschikbaar.";
     } finally {
       busy = false;
     }
@@ -52,7 +53,7 @@
       message = "Huidige Node-RED-flowversie privé opgeslagen.";
     } catch (error) {
       message =
-        error instanceof Error
+        error instanceof ApiError
           ? error.message
           : "Flowversie opslaan is mislukt.";
     } finally {
@@ -80,7 +81,8 @@
       message =
         "Flowexport gedownload. Controleer het bestand vóór opslag in een repo.";
     } catch (error) {
-      message = error instanceof Error ? error.message : "Flowexport mislukt.";
+      message =
+        error instanceof ApiError ? error.message : "Flowexport mislukt.";
     } finally {
       busy = false;
     }
@@ -105,7 +107,7 @@
       );
     } catch (error) {
       message =
-        error instanceof Error ? error.message : "Herstel niet beschikbaar.";
+        error instanceof ApiError ? error.message : "Herstel niet beschikbaar.";
     } finally {
       busy = false;
     }
@@ -135,7 +137,7 @@
         "Node-RED-flows hersteld en gecontroleerd.";
     } catch (error) {
       message =
-        error instanceof Error ? error.message : "Flowherstel is mislukt.";
+        error instanceof ApiError ? error.message : "Flowherstel is mislukt.";
       pending = null;
       clearTimeout(timer);
     } finally {

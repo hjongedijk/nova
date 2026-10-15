@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import type {
     ConfirmableResult,
     MemoryListResponse,
@@ -46,7 +47,9 @@
         cards[id] = result.action;
       else say(result.error || "Verwijderd");
     } catch (error) {
-      say(error instanceof Error ? error.message : "Geheugen niet beschikbaar");
+      say(
+        error instanceof ApiError ? error.message : "Geheugen niet beschikbaar",
+      );
     }
   }
 
@@ -71,7 +74,7 @@
       relatedEntity = "";
       say("Opgeslagen");
     } catch (error) {
-      say(error instanceof Error ? error.message : "Niet opgeslagen");
+      say(error instanceof ApiError ? error.message : "Niet opgeslagen");
     } finally {
       saving = false;
     }

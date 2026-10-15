@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import type {
     OmniRouteKeyModelAccessOptions,
     OmniRouteKeyModelAccessHistory,
@@ -39,7 +40,7 @@
       selected = [...report.allowedModels];
     } catch (cause) {
       error =
-        cause instanceof Error
+        cause instanceof ApiError
           ? cause.message
           : "Modelrechten konden niet worden geladen.";
       report = null;
@@ -62,7 +63,7 @@
       pending = result;
     } catch (cause) {
       error =
-        cause instanceof Error
+        cause instanceof ApiError
           ? cause.message
           : "Modelrechten konden niet worden voorbereid.";
     } finally {
@@ -77,7 +78,7 @@
       history = await getOmniRouteKeyModelAccessHistory(id);
     } catch (cause) {
       error =
-        cause instanceof Error
+        cause instanceof ApiError
           ? cause.message
           : "Modelrechtenhistorie kon niet worden geladen.";
     } finally {
@@ -98,7 +99,7 @@
       pending = result;
     } catch (cause) {
       error =
-        cause instanceof Error
+        cause instanceof ApiError
           ? cause.message
           : "Modelrechtenherstel kon niet worden voorbereid.";
     } finally {
@@ -138,7 +139,7 @@
       }
     } catch (cause) {
       error =
-        cause instanceof Error
+        cause instanceof ApiError
           ? cause.message
           : "Modelrechten konden niet worden bevestigd.";
     } finally {

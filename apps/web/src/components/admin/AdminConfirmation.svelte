@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import type { PendingConfirmation } from "@nova/contracts";
   import { confirmAction } from "#lib/api/admin.ts";
   import Button from "#components/ui/Button.svelte";
@@ -77,7 +78,7 @@
       label = data.reply;
       onreply?.(data.reply);
     } catch (error) {
-      label = error instanceof Error ? error.message : "Bevestiging mislukt";
+      label = error instanceof ApiError ? error.message : "Bevestiging mislukt";
     }
   }
 </script>

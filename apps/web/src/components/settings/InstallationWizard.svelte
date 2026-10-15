@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import { onMount } from "svelte";
   import {
     getModelMetrics,
@@ -120,7 +121,7 @@
     } catch (error) {
       finalCheck = null;
       checkError =
-        error instanceof Error
+        error instanceof ApiError
           ? error.message
           : "Eindcontrole niet beschikbaar.";
     } finally {

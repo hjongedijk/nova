@@ -1135,7 +1135,10 @@
                 preferencesNote =
                   result.auditWarning ?? "Helperinstellingen opgeslagen.";
               } catch (error) {
-                preferencesNote = (error as Error).message;
+                preferencesNote =
+                  error instanceof ApiError
+                    ? error.message
+                    : "Helperinstellingen zijn niet opgeslagen. Controleer de verbinding en probeer opnieuw.";
               }
             }}>Instellingen opslaan</HelperUi
           >

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ApiError } from "#lib/api/client.ts";
   import { onMount } from "svelte";
   import type {
     McpServerActivity,
@@ -137,7 +138,7 @@
       );
     } catch (cause) {
       error =
-        cause instanceof Error ? cause.message : "MCP-herstel is mislukt.";
+        cause instanceof ApiError ? cause.message : "MCP-herstel is mislukt.";
       fail(cause);
     } finally {
       activityBusy = null;
@@ -158,7 +159,9 @@
       );
     } catch (cause) {
       error =
-        cause instanceof Error ? cause.message : "MCP-verbindingstest mislukt.";
+        cause instanceof ApiError
+          ? cause.message
+          : "MCP-verbindingstest mislukt.";
       fail(cause);
     } finally {
       activityBusy = null;
@@ -196,7 +199,7 @@
       );
     } catch (cause) {
       error =
-        cause instanceof Error
+        cause instanceof ApiError
           ? cause.message
           : "MCP-stand wijzigen is mislukt.";
       fail(cause);
@@ -239,7 +242,7 @@
       );
     } catch (cause) {
       error =
-        cause instanceof Error
+        cause instanceof ApiError
           ? cause.message
           : "MCP-cataloguswijziging mislukt.";
       fail(cause);
@@ -276,7 +279,7 @@
       );
     } catch (cause) {
       error =
-        cause instanceof Error
+        cause instanceof ApiError
           ? cause.message
           : "Risiconiveau wijzigen is mislukt.";
       fail(cause);
