@@ -170,7 +170,7 @@ export class ChatController {
     this.memory.add(sessionId, "user", message);
     this.memory.add(sessionId, "assistant", result.reply);
     try {
-      this.milestone?.completedTurn();
+      if (!result.unavailable) this.milestone?.completedTurn();
       this.milestoneWarning = false;
     } catch {
       if (!this.milestoneWarning)
@@ -292,6 +292,12 @@ export class ChatController {
         sessionId,
         readOnlyOnly: true,
       });
+      if (result.unavailable)
+        throw new ServiceUnavailableException(
+          request.responseLanguage === "en"
+            ? "Current information is unavailable. Please try again later."
+            : "Actuele gegevens zijn niet beschikbaar. Probeer het straks nog eens.",
+        );
       return sanitize({ ...result, sessionId });
     } finally {
       active.delete(sessionId);

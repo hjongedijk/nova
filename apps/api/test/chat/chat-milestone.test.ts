@@ -34,6 +34,67 @@ function fixture() {
 }
 
 describe("completed chat milestone boundary", () => {
+  it.each([false, true])(
+    "keeps an unavailable answer without counting it, stream=%s",
+    async (stream) => {
+      const f = fixture();
+      f.run.mockResolvedValue({
+        reply: "Ik kon je verzoek nu niet afronden.",
+        model: null,
+        usage: null,
+        unavailable: true,
+      });
+      const request = {
+        sessionId: "milestone-unavailable",
+        message: "Wat is het actuele weer?",
+      };
+      if (stream) {
+        await f.chat.stream(request, f.response as never);
+        const events = f.response.write.mock.calls
+          .map(([text]) => String(text))
+          .join("");
+        expect(events).toContain('"unavailable":true');
+        expect(events).toContain("event: done");
+      } else
+        expect(await f.chat.chat(request)).toMatchObject({
+          unavailable: true,
+          reply: "Ik kon je verzoek nu niet afronden.",
+        });
+      expect(f.completedTurn).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["nl", "en"] as const)(
+    "marks unavailable proactive work retryable, language=%s",
+    async (responseLanguage) => {
+      const f = fixture();
+      f.run.mockResolvedValueOnce({
+        reply: "Synthetic unavailable reply.",
+        model: null,
+        usage: null,
+        unavailable: true,
+      });
+      const token =
+        "Bearer synthetic-proactive-token-for-milestone-tests-123456789";
+      let status: unknown;
+      try {
+        await f.chat.proactiveAsk(token, {
+          message: "Actuele briefing",
+          responseLanguage,
+        });
+      } catch (error) {
+        status = (error as { getStatus(): number }).getStatus();
+      }
+      expect(status).toBe(503);
+      expect(
+        await f.chat.proactiveAsk(token, {
+          message: "Actuele briefing",
+          responseLanguage,
+        }),
+      ).toMatchObject({ reply: "Synthetic reply." });
+      expect(f.completedTurn).not.toHaveBeenCalled();
+    },
+  );
+
   it("counts one completed JSON turn without passing private conversation fields", async () => {
     const f = fixture();
     await f.chat.chat({

@@ -168,3 +168,64 @@ test("close aborts an in-flight request and prevents polling or input from resta
   assert.equal(calls, 1);
   assert.equal(JSON.parse(fs.readFileSync(f.file, "utf8")).jobs.length, 1);
 });
+
+test("unavailable live information survives restart and retries before delivery", async (t) => {
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  t.after(() => {
+    Date.now = realNow;
+  });
+  let asks = 0,
+    deliveries = 0;
+  const f = fixture(t, async (url) => {
+    if (url.endsWith("/api/proactive/ask")) {
+      asks++;
+      return new Response(
+        JSON.stringify(
+          asks === 1
+            ? { error: "Current information is unavailable." }
+            : { reply: "Synthetic recovered briefing." },
+        ),
+        {
+          status: asks === 1 ? 503 : 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    }
+    deliveries++;
+    return new Response(JSON.stringify({ accepted: true }), {
+      headers: { "content-type": "application/json" },
+    });
+  });
+  const seed = new BriefingState({
+    file: f.file,
+    nodeId: "test-node",
+    kind: "morning_briefing",
+    ask: async () => "unused",
+    deliver: async () => {},
+  });
+  seed.event("unavailable-live-data");
+  await seed.close();
+  const node = f.open();
+  await f.poll();
+  assert.equal(asks, 1);
+  assert.equal(deliveries, 0);
+  assert.equal(node.sent.length, 0);
+  let job = JSON.parse(fs.readFileSync(f.file, "utf8")).jobs[0];
+  assert.equal(job.status, "pending");
+  assert.equal(job.attempts, 1);
+  assert.equal(job.reply, undefined);
+  await f.close();
+  now += 30001;
+  const resumed = f.open();
+  await f.poll();
+  assert.equal(asks, 2);
+  assert.equal(deliveries, 1);
+  assert.equal(resumed.sent.length, 1);
+  job = JSON.parse(fs.readFileSync(f.file, "utf8")).jobs[0];
+  assert.equal(job.status, "complete");
+  await f.poll();
+  assert.equal(asks, 2);
+  assert.equal(deliveries, 1);
+});

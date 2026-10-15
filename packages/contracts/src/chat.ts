@@ -16,7 +16,13 @@ export type ChatEvent =
   | { event: "error"; data: { message: string } }
   | {
       event: "done";
-      data: { reply: string; role?: ModelRoleId; model?: string | null };
+      data: {
+        reply: string;
+        role?: ModelRoleId;
+        model?: string | null;
+        /** Required external evidence was unavailable; the request may be retried. */
+        unavailable?: true;
+      };
     };
 
 export interface ChatAttachment {
