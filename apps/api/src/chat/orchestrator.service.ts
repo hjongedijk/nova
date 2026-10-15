@@ -397,14 +397,24 @@ export class OrchestratorService {
     let emptyRetried = false;
     let completedSteps = 0;
     let liveToolAttempted = false;
+    let requiredReadAttempted = false;
+    let requiredReadSucceeded = false;
 
     for (let round = 0; round < rounds; round++) {
       if (signal?.aborted) throw new Error("Request cancelled");
+      // Speculative narration after failed live reads cannot reach speech or the interface.
+      // A tool-bearing round's preface is discarded; a successful alternate read reopens narration.
+      const roundEmit: Emit =
+        requiredReadAttempted && !requiredReadSucceeded
+          ? (event, data) => {
+              if (event !== "token" && event !== "mood") emit(event, data);
+            }
+          : emit;
       const last =
         mustUseTool && !liveToolAttempted
           ? await this.firstRoundWithTool(messages, {
               stream,
-              emit,
+              emit: roundEmit,
               signal,
               sessionId,
               maxTokens:
@@ -419,7 +429,7 @@ export class OrchestratorService {
             })
           : await this.client.call(messages, {
               stream,
-              emit,
+              emit: roundEmit,
               signal,
               sessionId,
               tools: modelTools,
@@ -432,6 +442,7 @@ export class OrchestratorService {
               roleModel,
               includeMood: role === "conversation",
             });
+      if (signal?.aborted) throw new Error("Request cancelled");
       const assistant = last.assistant;
       // A model that asks for more than eight calls at once gets its first eight run.
       const calls = (assistant.tool_calls ?? []).slice(0, 8);
@@ -444,6 +455,14 @@ export class OrchestratorService {
         role,
       };
 
+      if (!calls.length && requiredReadAttempted && !requiredReadSucceeded) {
+        const reply =
+          responseLanguage === "en"
+            ? "I could not verify the current information. Please try again later."
+            : "Ik kon de actuele gegevens niet controleren. Probeer het straks nog eens.";
+        if (stream) emit("token", { text: reply });
+        return { reply, ...base };
+      }
       if (!calls.length && !String(assistant.content ?? "").trim()) {
         // Free models now and then return nothing at all. Ask once more, then say so.
         if (!emptyRetried) {
@@ -503,6 +522,19 @@ export class OrchestratorService {
         completedSteps++;
         const risk =
           this.tools.list().find((tool) => tool.name === name)?.risk ?? null;
+        if (
+          mustUseTool &&
+          risk === "READ_ONLY" &&
+          name !== TOOL_DISCOVERY_NAME
+        ) {
+          requiredReadAttempted = true;
+          if (
+            result.ok === true &&
+            result.executed !== false &&
+            result.verified !== false
+          )
+            requiredReadSucceeded = true;
+        }
         emit("tool_result", {
           name,
           risk,
