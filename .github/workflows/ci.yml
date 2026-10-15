@@ -30,6 +30,7 @@ jobs:
       - run: node scripts/test-nodered-flows.mjs
       - run: node scripts/test-briefing-runtime.mjs
       - run: npm run test:compose-notification
+      - run: node --test deploy/omniroute/repair-stream-content.test.mjs
       - run: npm run test:mcp-sandbox
       # The Windows agent cannot run here, but its syntax and embedded C# can be checked.
       - run: pwsh -NoProfile -File agents/windows/test/check.ps1
@@ -51,3 +52,21 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  omniroute-image:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+        with:
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
+      - uses: docker/build-push-action@v7
+        with:
+          context: deploy/omniroute
+          push: false
+          cache-from: type=gha,scope=omniroute
+          cache-to: type=gha,mode=max,scope=omniroute

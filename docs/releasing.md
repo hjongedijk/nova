@@ -1,6 +1,6 @@
 # Releasing
 
-A release is a git tag. Pushing a tag that starts with `v` runs `.github/workflows/release.yml`, which publishes the Docker image and the Windows agent.
+A release is a git tag. Pushing a tag that starts with `v` runs `.github/workflows/release.yml`, which publishes the NOVA and gateway Docker images and the Windows agent.
 
 ## Version numbers
 
@@ -29,6 +29,8 @@ The version that matters is the tag: the image build receives it as `NOVA_VERSIO
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `image`  | A multi-architecture image (`linux/amd64`, `linux/arm64`) pushed to `ghcr.io/<owner>/nova` with the tags `X.Y.Z`, `X.Y` and `latest`. The build argument `NOVA_VERSION` is the tag name.                           |
 | `agents` | A GitHub release with the reviewed version-specific notes and two attached files: `nova-windows-agent.zip` (the `agents/windows` folder without its tests) and `docker-compose.yml` (the production compose file). |
+
+The `omniroute-image` job also publishes the matching `ghcr.io/<owner>/nova:omniroute-X.Y.Z` tags for both architectures. Its Dockerfile pins the audited upstream image and applies the guarded numeric-stream compatibility patch; it does not migrate gateway data.
 
 The image name uses the owner of the GitHub repository. The first time, set the package visibility in GitHub (Packages) to public if people should be able to pull it without logging in.
 

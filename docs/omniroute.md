@@ -68,3 +68,20 @@ Revisions detect external changes between preparation and confirmation, and cred
 ## Disabling or reverting
 
 Set `NOVA_MEMORY_BACKEND=qdrant` and `NOVA_OMNIROUTE_COMPRESSION=off` and recreate the container. Memories already stored in OmniRoute stay there. Never replace OmniRoute's live database with an older copy; restore single settings through its management API instead.
+
+## Numeric streaming compatibility
+
+NOVA’s `nova-omniroute` image retains the audited upstream 3.8.51 digest and applies one guarded build-time compatibility patch. A Cloudflare issue documents that the Llama OpenAI endpoint sometimes emits JSON numbers in `delta.content`, where text is required ([Cloudflare issue 651](https://github.com/cloudflare/ai/issues/651)). The upstream gateway’s string-only content check drops these fragments; a clock answer can consequently arrive as `::` and contain nothing TTS can pronounce.
+
+The patch converts only finite numeric content values to strings before the gateway’s existing validation. Existing strings (including leading zeroes), arrays, objects, booleans and null remain unchanged. It preserves tool calls, finish reasons and usage. It cannot reconstruct whitespace or precision already lost by the provider.
+
+The build checks the upstream package version and requires exactly one matching compiled expression. An incompatible upstream update stops the build. There are no runtime interception hooks or additional credentials. Releases publish this small derivative as `ghcr.io/<owner>/nova:omniroute-X.Y.Z` alongside the matching NOVA version. Compose uses the same `NOVA_VERSION` for both images; existing gateway data mounts and configuration remain in place.
+
+Local build and regression check:
+
+```sh
+node --test deploy/omniroute/repair-stream-content.test.mjs
+docker build -t nova-omniroute:local deploy/omniroute
+```
+
+Before rolling back to a NOVA release predating 0.1.53, restore that release’s Compose file as well. Its upstream gateway image has the numeric-stream defect. Preserve `omniroute-data` throughout either direction; this patch performs no data migration.

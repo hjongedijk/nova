@@ -47,6 +47,42 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  omniroute-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v4
+        with:
+          image: mirror.gcr.io/tonistiigi/binfmt:latest
+      - uses: docker/setup-buildx-action@v4
+        with:
+          driver-opts: image=mirror.gcr.io/moby/buildkit:buildx-stable-1
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/nova
+          tags: |
+            type=semver,pattern={{version}},prefix=omniroute-
+            type=semver,pattern={{major}}.{{minor}},prefix=omniroute-
+            type=raw,value=omniroute-latest
+      - uses: docker/build-push-action@v7
+        with:
+          context: deploy/omniroute
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=omniroute
+          cache-to: type=gha,mode=max,scope=omniroute
+
   agents:
     runs-on: ubuntu-latest
     steps:
