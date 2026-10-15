@@ -25,6 +25,7 @@
 | [Conversation language](conversation-language.md)   | Switch one conversation between Dutch and English, including voice                            |
 | [Conversation milestone](conversation-milestone.md) | Opt-in completed-turn counter, quiet delivery, restart recovery and privacy                   |
 | [Kleine verrassingen](small-surprises.md)           | Opt-in birthdays from explicit memory, public occasions and delivery guards                   |
+| [Dagelijks hoogtepunt](daily-highlight.md)          | Positive statements, verified daily actions, local scheduling and restart-safe delivery       |
 | [Conversation handoff](conversation-handoff.md)     | Save a small local handoff card and resume a conversation later                               |
 | [Urgent phone notifications](push-notifications.md) | Private ntfy setup and what NOVA sends to the phone                                           |
 
