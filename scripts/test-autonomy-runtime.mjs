@@ -9,7 +9,9 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nova-autonomy-runtime-"));
+const directory = fs.mkdtempSync(
+  path.join(os.tmpdir(), "nova-autonomy-runtime-"),
+);
 const url = (file) => pathToFileURL(path.resolve("apps/api/dist", file)).href;
 const script = `
 import path from 'node:path';
@@ -68,11 +70,19 @@ console.log('PROOF ' + JSON.stringify(out));
 feed.onModuleDestroy(); planning.onModuleDestroy();
 `;
 function run(phase) {
-  const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
-    env: { ...process.env, NOVA_AUTONOMY_TEST_DIR: directory, NOVA_AUTONOMY_TEST_PHASE: phase },
-    encoding: "utf8",
-    timeout: 20_000,
-  });
+  const child = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    {
+      env: {
+        ...process.env,
+        NOVA_AUTONOMY_TEST_DIR: directory,
+        NOVA_AUTONOMY_TEST_PHASE: phase,
+      },
+      encoding: "utf8",
+      timeout: 20_000,
+    },
+  );
   assert.equal(child.status, 0, `phase ${phase} failed: ${child.stderr}`);
   const line = child.stdout.split("\n").find((l) => l.startsWith("PROOF "));
   assert(line, `missing proof: ${phase}`);
@@ -80,7 +90,10 @@ function run(phase) {
 }
 try {
   const created = run("create");
-  assert.deepEqual(created.tasks.map((t) => t.status), ["scheduled", "scheduled"]);
+  assert.deepEqual(
+    created.tasks.map((t) => t.status),
+    ["scheduled", "scheduled"],
+  );
   assert.equal(created.effects, 0);
   await new Promise((r) => setTimeout(r, 2500)); // the first process is gone; the due time passes
   const restarted = run("restart");
@@ -98,10 +111,16 @@ try {
   console.log(JSON.stringify(approved));
   assert.deepEqual(approved.approved, ["s2"]);
   assert.equal(approved.effects, 1, "approved step runs exactly once");
-  assert.equal(Object.fromEntries(approved.tasks.map((t) => [t.title, t]))["Deur-alarm"].runs, 1);
+  assert.equal(
+    Object.fromEntries(approved.tasks.map((t) => [t.title, t]))["Deur-alarm"]
+      .runs,
+    1,
+  );
   const file = path.join(directory, "autonomy-tasks.json");
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-  console.log("Autonomy runtime PASS: scheduled run after restart, event trigger with idempotent id, approval pause and resume across processes.");
+  console.log(
+    "Autonomy runtime PASS: scheduled run after restart, event trigger with idempotent id, approval pause and resume across processes.",
+  );
 } finally {
   fs.rmSync(directory, { recursive: true, force: true });
 }
