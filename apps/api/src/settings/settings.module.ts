@@ -1,3 +1,7 @@
+import { AppAccessModule } from "../access/access.module.js";
+import { NodeRedEditorAccess } from "./node-red-editor-access.service.js";
+import { NodeRedEditorProxy } from "./node-red-editor-proxy.service.js";
+import { NodeRedEditorController } from "./node-red-editor.controller.js";
 import { ToolUsageController } from "./tool-usage.controller.js";
 import { SettingsBackupService } from "./settings-backup.service.js";
 import { FreePolicyWizardController } from "./free-policy-wizard.controller.js";
@@ -110,6 +114,7 @@ import { HouseholdProfileHistory } from "./household-profile-history.service.js"
  */
 @Module({
   imports: [
+    AppAccessModule,
     SettingsStoreModule,
     NodeRedFlowRevisionsModule,
     RoutingModule,
@@ -125,6 +130,7 @@ import { HouseholdProfileHistory } from "./household-profile-history.service.js"
     UpdatesModule,
   ],
   controllers: [
+    NodeRedEditorController,
     SettingsController,
     ToolUsageController,
     WidgetsController,
@@ -157,6 +163,8 @@ import { HouseholdProfileHistory } from "./household-profile-history.service.js"
     WorkspaceCodeController,
   ],
   providers: [
+    NodeRedEditorAccess,
+    NodeRedEditorProxy,
     SettingsGuard,
     SettingsMutationsService,
     SettingsBackupService,

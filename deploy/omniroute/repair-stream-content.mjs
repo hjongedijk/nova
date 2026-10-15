@@ -10,31 +10,42 @@ const STREAM_ORIGINAL =
   'let z=w||x||n||t?.content===""&&t?.reasoning_content||!p&&"string"==typeof t?.reasoning_content&&t.reasoning_content.length>0;';
 const STREAM_REPAIRED =
   'let z="number"==typeof m?.content&&Number.isFinite(m.content)||w||x||n||t?.content===""&&t?.reasoning_content||!p&&"string"==typeof t?.reasoning_content&&t.reasoning_content.length>0;';
+// The pinned multiarchitecture image contains a separately minified arm64 build.
+// Its raw delta is still `m`; only this reserialization flag is named `y`.
+const ARM64_STREAM_ORIGINAL =
+  'let y=w||x||n||t?.content===""&&t?.reasoning_content||!p&&"string"==typeof t?.reasoning_content&&t.reasoning_content.length>0;';
+const ARM64_STREAM_REPAIRED =
+  'let y="number"==typeof m?.content&&Number.isFinite(m.content)||w||x||n||t?.content===""&&t?.reasoning_content||!p&&"string"==typeof t?.reasoning_content&&t.reasoning_content.length>0;';
 const PATCHES = [
-  { original: ORIGINAL, repaired: REPAIRED },
-  { original: STREAM_ORIGINAL, repaired: STREAM_REPAIRED },
+  [{ original: ORIGINAL, repaired: REPAIRED }],
+  [
+    { original: STREAM_ORIGINAL, repaired: STREAM_REPAIRED },
+    { original: ARM64_STREAM_ORIGINAL, repaired: ARM64_STREAM_REPAIRED },
+  ],
 ];
 
 function occurrences(source, literal) {
   return source.split(literal).length - 1;
 }
 
-function patchLiteral(source, original, repaired) {
-  if (occurrences(source, repaired) !== 0) {
+function patchLiteral(source, variants) {
+  if (variants.some(({ repaired }) => occurrences(source, repaired) !== 0)) {
     throw new Error("Streaming content repair already present");
   }
-  if (occurrences(source, original) !== 1) {
+  const counts = variants.map(({ original }) => occurrences(source, original));
+  if (counts.reduce((sum, count) => sum + count, 0) !== 1) {
     throw new Error("Expected exactly one known streaming content expression");
   }
+  const { original, repaired } = variants[counts.findIndex((count) => count === 1)];
   return source.replace(original, repaired);
 }
 
 export function patchSource(source) {
-  return patchLiteral(source, ORIGINAL, REPAIRED);
+  return patchLiteral(source, PATCHES[0]);
 }
 
 export function patchStreamSource(source) {
-  return patchLiteral(source, STREAM_ORIGINAL, STREAM_REPAIRED);
+  return patchLiteral(source, PATCHES[1]);
 }
 
 async function main(root) {
@@ -53,11 +64,14 @@ async function main(root) {
     if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
     const filename = path.join(chunksDir, entry.name);
     const source = await readFile(filename, "utf8");
-    const counts = PATCHES.map(({ original, repaired }, index) => {
-      if (occurrences(source, repaired) !== 0) {
+    const counts = PATCHES.map((variants, index) => {
+      if (variants.some(({ repaired }) => occurrences(source, repaired) !== 0)) {
         throw new Error("Streaming content repair already present");
       }
-      const count = occurrences(source, original);
+      const count = variants.reduce(
+        (sum, { original }) => sum + occurrences(source, original),
+        0,
+      );
       totals[index] += count;
       return count;
     });
@@ -73,9 +87,8 @@ async function main(root) {
   // Validate and prepare both repairs before any file is written.
   const updates = candidates.map(({ filename, source, counts }) => {
     let patched = source;
-    PATCHES.forEach(({ original, repaired }, index) => {
-      if (counts[index] > 0)
-        patched = patchLiteral(patched, original, repaired);
+    PATCHES.forEach((variants, index) => {
+      if (counts[index] > 0) patched = patchLiteral(patched, variants);
     });
     return { filename, patched };
   });

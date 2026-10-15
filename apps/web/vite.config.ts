@@ -39,6 +39,6 @@ export default defineConfig({
     strictPort: true,
     https,
     // While developing, API calls go to the NestJS dev server, which stays on this machine.
-    proxy: { "/api": "http://localhost:3000" },
+    proxy: { "/api": { target: "http://localhost:3000", ws: true } },
   },
 });

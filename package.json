@@ -21,6 +21,7 @@
     "test": "npm run test -w @nova/api",
     "test:dev-readiness": "node scripts/test-dev-readiness.mjs",
     "test:nodered-seed": "node scripts/test-nodered-seed.mjs",
+    "test:node-red-editor:runtime": "node scripts/test-node-red-editor-runtime.mjs",
     "test:compose-notification": "node scripts/test-compose-notification.mjs",
     "test:code-sandbox": "node scripts/test-code-sandbox.mjs",
     "test:code-sandbox:runtime": "node scripts/test-code-sandbox-runtime.mjs",

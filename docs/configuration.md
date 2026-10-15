@@ -118,6 +118,8 @@ Each integration is optional and stays off (its tools are listed but disabled) u
 
 NOVA currently publishes status and event broadcasts over MQTT and does not subscribe to a command topic. A bounded HTTP callback accepts only authenticated Node-RED alerts and runtime-error reports; flow triggering remains unimplemented. See the [current MQTT/HTTP contract](node-red-mqtt.md) before connecting flows.
 
+The [embedded flow editor](node-red-editor.md) uses the existing local Node-RED connection through NOVA. It requires protected NOVA access and keeps the private admin token on the server. No extra unlock screen is needed when an authenticated reverse proxy is declared.
+
 Node-RED is required by the production and development Compose stacks. Production keeps its editor/API on the private Compose network; development binds the editor to `127.0.0.1:1880`. The `deploy/nodered/` files seed an empty `/data` directory once, while `nodered-data/` remains authoritative for flows, credentials, settings, and installed nodes. The startup seed never overwrites files already present there. See [Node-RED seed and persistence](../deploy/nodered/README.md).
 
 Production Compose mounts the NOVA application-data archives from `nova-backups/` at `/backups`. `NOVA_BACKUP_DIR` selects the archive directory (default: a sibling of `NOVA_DATA_DIR` outside Compose). See [scheduled data backups](data-backups.md) for schedule, local-only scope, and retention.

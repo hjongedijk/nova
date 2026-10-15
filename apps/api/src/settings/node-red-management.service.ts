@@ -161,6 +161,10 @@ export class NodeRedManagement {
     return base;
   }
 
+  editorBaseUrl(): URL {
+    return new URL("/", this.baseUrl());
+  }
+
   private flowHeaders(): Record<string, string> {
     return {
       "Node-RED-API-Version": "v2",

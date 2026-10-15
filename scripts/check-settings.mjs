@@ -394,6 +394,13 @@ try {
     let wallpaperHistoryReads = 0;
     let wallpaperHistoryWrites = 0;
     let nodeRedFlowReads = 0;
+    let nodeRedEditorMints = 0;
+    let nodeRedEditorRenews = 0;
+    let nodeRedEditorRevokes = 0;
+    let nodeRedEditorFrameReads = 0;
+    let nodeRedEditorOpenFails = false;
+    let nodeRedEditorOpenGate = null;
+    let nodeRedEditorOpenStarted = () => {};
     let nodeRedPaletteReads = 0;
     let nodeRedLogReads = 0;
     let nodeRedPalettePrepares = 0;
@@ -565,7 +572,49 @@ try {
       )
         helperAgentWrites++;
       let data = {};
-      if (endpoint === "/actions/execute") {
+      if (endpoint === "/node-red-editor/") {
+        assert.equal(request.method(), "GET");
+        assert.equal(url.origin, new URL(base).origin);
+        nodeRedEditorFrameReads++;
+        await route.fulfill({
+          contentType: "text/html",
+          body: "<!doctype html><html><body>Native editor fixture</body></html>",
+        });
+        return;
+      } else if (
+        endpoint === "/node-red-editor/_nova/session" ||
+        endpoint === "/node-red-editor/_nova/renew"
+      ) {
+        assert.equal(request.headers()["x-nova-admin"], "1");
+        assert.deepEqual(request.postDataJSON(), {});
+        if (endpoint.endsWith("/renew")) {
+          assert.equal(request.method(), "POST");
+          nodeRedEditorRenews++;
+        } else if (request.method() === "DELETE") {
+          nodeRedEditorRevokes++;
+          await route.fulfill({ json: { ok: true } });
+          return;
+        } else {
+          assert.equal(request.method(), "POST");
+          nodeRedEditorMints++;
+          nodeRedEditorOpenStarted();
+          if (nodeRedEditorOpenGate) await nodeRedEditorOpenGate;
+          if (nodeRedEditorOpenFails) {
+            await route.fulfill({
+              status: 503,
+              json: {
+                message:
+                  "http://node-red:1880 fixture-private-bearer upstream diagnostic",
+              },
+            });
+            return;
+          }
+        }
+        data = {
+          url: "/api/node-red-editor/",
+          expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        };
+      } else if (endpoint === "/actions/execute") {
         const body = request.postDataJSON();
         assert.ok(
           [
@@ -6094,6 +6143,126 @@ try {
       .waitFor();
     await nodeRedCard.getByText("deploy/nodered/flows.json").waitFor();
     assert.equal(nodeRedFlowReads, 1);
+    const flowEditor = nodeRedCard.getByRole("region", {
+      name: "Node-RED-floweditor",
+      exact: true,
+    });
+    const editorFrame = flowEditor.locator("iframe");
+    assert.equal(
+      await editorFrame.count(),
+      0,
+      "editor iframe is explicit opt-in",
+    );
+    assert.equal(
+      nodeRedEditorMints,
+      0,
+      "no editor grant before explicit opening",
+    );
+    assert.equal(nodeRedEditorFrameReads, 0);
+    const editorResponse = (method, endpoint) =>
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+            `/api/node-red-editor/_nova/${endpoint}` &&
+          response.request().method() === method,
+      );
+    await flowEditor
+      .getByRole("button", { name: "Editor openen", exact: true })
+      .click();
+    await flowEditor
+      .frameLocator("iframe")
+      .getByText("Native editor fixture", { exact: true })
+      .waitFor();
+    assert.equal(nodeRedEditorMints, 1);
+    assert.equal(
+      await editorFrame.getAttribute("src"),
+      "/api/node-red-editor/",
+    );
+    assert.equal(
+      new URL(await editorFrame.getAttribute("src"), page.url()).origin,
+      new URL(base).origin,
+    );
+    await editorFrame.evaluate((frame) =>
+      frame.setAttribute("data-renewal-proof", "retained"),
+    );
+    const renewedEditor = editorResponse("POST", "renew");
+    await page.clock.fastForward(5 * 60 * 1000 + 1);
+    await renewedEditor;
+    assert.equal(nodeRedEditorRenews, 1);
+    assert.equal(
+      nodeRedEditorMints,
+      1,
+      "renewal does not mint a fresh editor grant",
+    );
+    assert.equal(
+      nodeRedEditorFrameReads,
+      1,
+      "renewal does not navigate the iframe",
+    );
+    assert.equal(
+      await editorFrame.getAttribute("data-renewal-proof"),
+      "retained",
+      "renewal does not remount the iframe",
+    );
+    const revokedEditor = editorResponse("DELETE", "session");
+    await flowEditor
+      .getByRole("button", { name: "Sluiten", exact: true })
+      .click();
+    await revokedEditor;
+    assert.equal(await editorFrame.count(), 0);
+    assert.equal(nodeRedEditorRevokes, 1);
+
+    // A failed grant must expose only the local safe message, never diagnostics.
+    nodeRedEditorOpenFails = true;
+    await flowEditor
+      .getByRole("button", { name: "Editor openen", exact: true })
+      .click();
+    await flowEditor
+      .getByText("Node-RED-editor is niet beschikbaar. Probeer het opnieuw.", {
+        exact: true,
+      })
+      .waitFor();
+    assert.equal(await editorFrame.count(), 0);
+    assert.equal(nodeRedEditorMints, 2);
+    assert.doesNotMatch(
+      await flowEditor.innerText(),
+      /node-red:1880|fixture-private-bearer|upstream diagnostic/,
+    );
+    nodeRedEditorOpenFails = false;
+
+    // Closing while minting must revoke the eventual grant without mounting it.
+    let releaseEditorMint;
+    nodeRedEditorOpenGate = new Promise((resolve) => {
+      releaseEditorMint = resolve;
+    });
+    const editorMintStarted = new Promise((resolve) => {
+      nodeRedEditorOpenStarted = resolve;
+    });
+    await flowEditor
+      .getByRole("button", { name: "Editor openen", exact: true })
+      .click();
+    await editorMintStarted;
+    await flowEditor
+      .getByRole("button", { name: "Sluiten", exact: true })
+      .click();
+    assert.equal(await editorFrame.count(), 0);
+    assert.equal(nodeRedEditorRevokes, 1, "revoke waits for the pending mint");
+    const revokedPendingEditor = editorResponse("DELETE", "session");
+    releaseEditorMint();
+    await revokedPendingEditor;
+    assert.equal(nodeRedEditorMints, 3);
+    assert.equal(nodeRedEditorRevokes, 2);
+    assert.equal(
+      nodeRedEditorFrameReads,
+      1,
+      "closed pending grant never opens an iframe",
+    );
+    assert.equal(await editorFrame.count(), 0);
+    nodeRedEditorOpenGate = null;
+    nodeRedEditorOpenStarted = () => {};
+    await flowEditor
+      .getByRole("button", { name: "Editor openen", exact: true })
+      .waitFor();
     const logbook = nodeRedCard.getByRole("region", {
       name: "Node-RED-logboek",
       exact: true,
@@ -6649,7 +6818,7 @@ try {
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: on-demand Node-RED logs with scrolling, clear, current-flow links, empty state and failed-refresh cleanup, pinned palette install/cancel/upgrade with exact-version confirmation, pending restart and active readback, and legacy warnings, all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP and GitHub secret entry with cleared secret fields and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
+    "Settings browser checks passed: explicit same-origin Node-RED editor grant/open/renew without iframe remount/close/revoke, safe grant failure and pending-open cancellation, on-demand Node-RED logs with scrolling, clear, current-flow links, empty state and failed-refresh cleanup, pinned palette install/cancel/upgrade with exact-version confirmation, pending restart and active readback, and legacy warnings, all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP and GitHub secret entry with cleared secret fields and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();

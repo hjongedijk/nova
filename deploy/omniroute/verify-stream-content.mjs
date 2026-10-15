@@ -138,5 +138,5 @@ try {
   fs.rmSync(scratch, { recursive: true, force: true });
 }
 console.log(
-  "Gateway numeric content, metadata and full SSE wire verification passed (17 cases; no provider connections or production data).",
+  `Gateway numeric content, metadata and full SSE wire verification passed (17 cases; ${process.arch}; no provider connections or production data).`,
 );
