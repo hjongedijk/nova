@@ -3,6 +3,7 @@ import type {
   ModelRoleId,
   PendingConfirmation,
 } from "@nova/contracts";
+import { onSettingsReceipt } from "../api/settings-receipt-events.ts";
 
 /** What the entity is doing; the sphere's colour and motion follow it. */
 export type UiState =
@@ -48,6 +49,11 @@ export const chat = $state({
   latency: null as number | null,
   /** Time from sending until the browser starts playing NOVA's first sentence. */
   speechLatency: null as number | null,
+});
+
+onSettingsReceipt((receipt) => {
+  chat.actionReceipts.unshift(receipt);
+  chat.actionReceipts.length = Math.min(chat.actionReceipts.length, 10);
 });
 
 /** Change what the entity is doing. Only "executing" keeps a tool hint on the status line. */

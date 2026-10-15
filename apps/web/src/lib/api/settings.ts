@@ -146,6 +146,8 @@ import type {
 } from "@nova/contracts";
 import { getJson, sendJson } from "./client.ts";
 import { getPin } from "./pin-session.ts";
+import { settingsWriteReceipt } from "./settings-receipts.ts";
+import { publishSettingsReceipt } from "./settings-receipt-events.ts";
 export { getPin, setPin, PIN_KEY } from "./pin-session.ts";
 
 /** Every settings call carries these; writes also need x-nova-admin. */
@@ -156,11 +158,20 @@ function headers(): Record<string, string> {
 
 const read = <T>(path: string) =>
   getJson<T>(`/settings${path}`, { headers: headers() });
-const write = <T>(
+const write = async <T>(
   method: "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
-) => sendJson<T>(method, `/settings${path}`, body, headers());
+) => {
+  const receiptRequest =
+    body !== null && typeof body === "object" && "approve" in body
+      ? { approve: body.approve }
+      : undefined;
+  const result = await sendJson<T>(method, `/settings${path}`, body, headers());
+  const receipt = settingsWriteReceipt(method, path, receiptRequest, result);
+  if (receipt) publishSettingsReceipt(receipt);
+  return result;
+};
 
 const enc = encodeURIComponent;
 
