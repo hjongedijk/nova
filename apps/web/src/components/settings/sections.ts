@@ -76,6 +76,13 @@ export const SECTIONS = [
     keywords: "wallpaper scherm display sneltoets pwa downloaden",
   },
   {
+    id: "desktop",
+    name: "Bureaublad",
+    detail: "NOVA laten meekijken en de pc kort laten bedienen.",
+    keywords:
+      "bureaublad scherm pc overnemen muis toetsenbord screenshot windows besturen",
+  },
+  {
     id: "memory",
     name: "Geheugen en privacy",
     detail: "Bekijk wat NOVA onthoudt en verwijder het met bevestiging.",

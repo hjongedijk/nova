@@ -17,6 +17,7 @@
   import ModelMetrics from "#components/settings/ModelMetrics.svelte";
   import NativeGateway from "#components/settings/NativeGateway.svelte";
   import UpdatesSection from "#components/settings/UpdatesSection.svelte";
+  import DesktopSection from "#components/settings/DesktopSection.svelte";
   import WindowsAgentPanel from "#components/settings/WindowsAgentPanel.svelte";
   import AbilitiesTab from "#components/settings/AbilitiesTab.svelte";
   import SkillsTab from "#components/settings/SkillsTab.svelte";
@@ -248,6 +249,7 @@
             />
             <WindowsAgentPanel />
             <DevicesSection />
+          {:else if section === "desktop"}<DesktopSection />
           {:else if section === "memory"}<AdminDialog
               embedded
               initialView="memories"

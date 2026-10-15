@@ -9,6 +9,7 @@ import { ConfirmationsModule } from "./confirmations/confirmations.module.js";
 import { NovaConfig } from "./core/config/nova-config.js";
 import { CoreModule } from "./core/core.module.js";
 import { DashboardModule } from "./dashboard/dashboard.module.js";
+import { DesktopModule } from "./desktop/desktop.module.js";
 import { DownloadsModule } from "./downloads/downloads.module.js";
 import { HealthModule } from "./health/health.module.js";
 import { HomeModule } from "./home/home.module.js";
@@ -59,6 +60,7 @@ const config = new NovaConfig();
     PangolinModule,
     WindowsModule,
     BrowserAgentModule,
+    DesktopModule,
     BridgesModule,
     // In production the built Svelte app is served from here; while developing, Vite serves it.
     ...(fs.existsSync(config.webDir)

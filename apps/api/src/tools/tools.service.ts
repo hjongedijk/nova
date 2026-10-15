@@ -14,6 +14,11 @@ import { MqttService } from "../core/mqtt/mqtt.service.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { requiresScreenConfirmation } from "../confirmations/screen-confirmation.js";
+import {
+  desktopAuditArgs,
+  desktopAuditResult,
+  isDesktopTool,
+} from "../desktop/desktop.audit.js";
 import { memoryCandidate } from "../memory/semantic/candidate.js";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { SettingsStore } from "../settings/store/settings.store.js";
@@ -127,6 +132,7 @@ function auditArgs(
   name: string,
   args: Record<string, unknown>,
 ): Record<string, unknown> {
+  if (isDesktopTool(name)) return desktopAuditArgs(name, args);
   if (name === "notes_save")
     return {
       titleCharacters:
@@ -451,7 +457,7 @@ export class ToolsService implements OnModuleInit {
       this.audit.record({
         sessionId,
         tool: name,
-        arguments: codeTool(name)
+        arguments: codeTool(name) || isDesktopTool(name)
           ? auditArgs(name, args)
           : (privateMemory?.arguments ??
             privateNote?.arguments ??
@@ -461,8 +467,9 @@ export class ToolsService implements OnModuleInit {
             args),
         risk,
         confirmation,
-        result:
-          codeTool(name) || name === "node_red_flow"
+        result: isDesktopTool(name)
+          ? desktopAuditResult(clean)
+          : codeTool(name) || name === "node_red_flow"
             ? {
                 ok: clean.ok,
                 ...(clean.error ? { error: clean.error } : {}),
@@ -483,6 +490,7 @@ export class ToolsService implements OnModuleInit {
       if (
         !SYSTEM_SESSIONS.has(sessionId) &&
         !codeTool(name) &&
+        !isDesktopTool(name) &&
         name !== "node_red_flow" &&
         name !== "route_estimate" &&
         name !== "calendar_departure"

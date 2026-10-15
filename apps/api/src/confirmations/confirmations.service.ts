@@ -1,6 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import type { PendingConfirmation, Risk } from "@nova/contracts";
 import crypto from "node:crypto";
+import { desktopAuditArgs, isDesktopTool } from "../desktop/desktop.audit.js";
 import { AuditService } from "../core/audit/audit.service.js";
 
 /**
@@ -86,7 +87,9 @@ export class ConfirmationsService {
         sessionId,
         tool: action.tool,
         risk: action.risk,
-        arguments: action.args,
+        arguments: isDesktopTool(action.tool)
+          ? desktopAuditArgs(action.tool, action.args)
+          : action.args,
         confirmation: reason,
       });
     return this.pending.delete(sessionId);
