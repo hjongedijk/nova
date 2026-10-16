@@ -1,6 +1,8 @@
 import { Module } from "@nestjs/common";
 import { ChatModule } from "../chat/chat.module.js";
 import { PlanningModule } from "../planning/planning.module.js";
+import { ToolsModule } from "../tools/tools.module.js";
+import { AutonomyLevelController } from "./autonomy-level.controller.js";
 import { AgentController } from "./agent.controller.js";
 import { AgentService } from "./agent.service.js";
 import { AgentSource } from "./agent.source.js";
@@ -11,8 +13,8 @@ import { AgentStore } from "./agent.store.js";
  * hard turn, time and daily budgets, and reports back. See docs/autonomy.md.
  */
 @Module({
-  imports: [ChatModule, PlanningModule],
-  controllers: [AgentController],
+  imports: [ChatModule, PlanningModule, ToolsModule],
+  controllers: [AgentController, AutonomyLevelController],
   providers: [AgentStore, AgentService, AgentSource],
   exports: [AgentService],
 })

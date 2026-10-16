@@ -24,3 +24,37 @@ export const cancelAutonomyTask = (id: string) =>
     "DELETE",
     `/autonomy/tasks/${encodeURIComponent(id)}`,
   );
+
+export type AutonomyLevel = "careful" | "balanced" | "independent";
+export const getAutonomyLevel = () =>
+  getJson<{ level: AutonomyLevel }>("/settings/autonomy-level");
+export const setAutonomyLevel = (level: AutonomyLevel) =>
+  sendJson<{ level: AutonomyLevel }>("PUT", "/settings/autonomy-level", {
+    level,
+  });
+
+export interface AgentRunView {
+  id: string;
+  goal: string;
+  status: string;
+  turns: string;
+  result?: string;
+  waitingFor?: { kind: "approval" | "question"; text: string };
+  lastStep?: string;
+}
+export const getAgentRuns = () =>
+  getJson<{ runs: AgentRunView[] }>("/agent/runs");
+export const cancelAgentRun = (id: string) =>
+  sendJson<AgentRunView>(
+    "POST",
+    `/agent/runs/${encodeURIComponent(id)}/cancel`,
+  );
+export const respondAgentRun = (
+  id: string,
+  body: { approve?: boolean; answer?: string },
+) =>
+  sendJson<AgentRunView>(
+    "POST",
+    `/agent/runs/${encodeURIComponent(id)}/respond`,
+    body,
+  );

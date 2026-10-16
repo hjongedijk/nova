@@ -129,3 +129,17 @@ test("validation, duplicates and recursion block", async () => {
   service.cancel(a.id);
   expect(a.status).toBe("cancelled");
 });
+
+test("autonomy level endpoint validates and stores the level", async () => {
+  const { AutonomyLevelController } =
+    await import("../../src/agent/autonomy-level.controller.js");
+  let level = "balanced";
+  const controller = new AutonomyLevelController({
+    get: () => level,
+    set: (l: string) => (level = l),
+  } as never);
+  expect(controller.read().level).toBe("balanced");
+  expect(controller.update({ level: "careful" }).level).toBe("careful");
+  expect(() => controller.update({ level: "yolo" })).toThrow();
+  expect(level).toBe("careful");
+});
