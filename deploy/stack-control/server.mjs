@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import http from "node:http";
 import { URL } from "node:url";
 import { createCodeSandbox } from "./code-sandbox.mjs";
-import { createCadSandbox } from "./cad-sandbox.mjs";
 import { createMcpSandbox } from "./mcp-sandbox.mjs";
 import { createMcpUpgradeHandler } from "./mcp-stream.mjs";
 import { readNodeRedLogs } from "./node-red-logs.mjs";
@@ -155,7 +154,6 @@ export function createStackControlServer({
   workspaceRoot = "/workspace-host",
 } = {}) {
   const sandbox = createCodeSandbox({ docker, workspaceRoot });
-  const cad = createCadSandbox({ docker });
   const send = (response, status, body) => {
     response.writeHead(status, {
       "content-type": "application/json; charset=utf-8",
@@ -285,26 +283,6 @@ export function createStackControlServer({
         }
         const result = await sandbox.run(input);
         send(response, 200, result);
-        return;
-      }
-
-      if (request.method === "POST" && url.pathname === "/cad/render") {
-        let body = "";
-        for await (const chunk of request) {
-          body += chunk;
-          if (body.length > 80 * 1024) {
-            send(response, 413, { error: "request too large" });
-            return;
-          }
-        }
-        let input;
-        try {
-          input = JSON.parse(body);
-        } catch {
-          send(response, 400, { error: "invalid request" });
-          return;
-        }
-        send(response, 200, await cad.render(input));
         return;
       }
 

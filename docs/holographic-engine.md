@@ -72,7 +72,7 @@ Props:
 
 Methoden (via `bind:this`): `fit()`, `focus(id, preset?)`, `setCamera(preset)`, `rotateObject(id, axis, degrees)`, `clearMeasurements()`, `screenshot(): Promise<Blob | null>`.
 
-Een model laden (bijvoorbeeld voor de 3D-printbackend):
+Een model laden:
 
 ```ts
 const scene: VizScene = {
@@ -146,7 +146,7 @@ class MijnProvider implements VisualizationProvider, OnModuleInit {
 - Providers zijn alleen-lezen: ze lezen een bestaande dienst en gebruiken dezelfde toegangsregels (bijvoorbeeld `ProxmoxService` filtert al op toegestane nodes en gasten, `HomeAssistantService.visibleEntities()` op toegestane apparaten).
 - Acties: `actions` zijn zinnen ("Start VM 105") die de gebruiker aan NOVA kan sturen. Ze gaan door de gewone tools met hun bevestigingen (Proxmox start/stop is `CONFIRM`; Home Assistant via de bestaande autorisatie). De viewer voert zelf nooit iets uit.
 - Abonnementen: een scène met `refreshMs` (5 s tot 5 min) wordt door de viewer gepolld (`GET /api/visualizations/:id?since=<revisie>`, alleen terwijl het tabblad zichtbaar is). De server bouwt de scène dan opnieuw, deelt één herbouw tussen gelijktijdige polls, behoudt de laatste goede scène bij een fout en verhoogt de revisie alleen bij echte verandering. Tool-wijzigingen (markeren, camera, enz.) komen via het bestaande SSE-event `visualization` in de chatstroom. Een aparte SSE-stroom per scène is er niet; polling is bewust genoeg voor deze snelheden.
-- Een andere module (bijvoorbeeld 3D-printen) importeert `VisualizationModule`, injecteert `VisualizationRegistry` en registreert zijn provider; of maakt scènes via `VisualizationService.createCustom({ kind: "model", models, … })`.
+- Een andere module importeert `VisualizationModule`, injecteert `VisualizationRegistry` en registreert zijn provider; of maakt scènes via `VisualizationService.createCustom({ kind: "model", models, … })`.
 
 Meegeleverde providers (alle alleen-lezen):
 

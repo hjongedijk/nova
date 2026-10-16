@@ -31,14 +31,3 @@ NOVA can look at the screen and, in a short confirmed session, move the mouse an
 ```
 
 `enabled` allows `GET /v1/desktop/status`, `/windows` and `/screenshot`. `control` additionally allows `POST /v1/desktop/control` (arm for 1–900 s) and `POST /v1/desktop/input`. Control is never armed after a start, expires on its own, and stops at once on the kill-switch hotkey, on the tray item **Besturing stoppen**, or on `{ "armed": false }`. While armed, a red bar shows on top of the main display and the tray dot turns red. Windows whose title or process matches `desktop.denyList` (password managers, Windows Security, credential prompts by default) are never captured or driven. Details and limits: [docs/desktop-control.md](../../docs/desktop-control.md).
-
-## 3D modelling and slicing (off by default)
-
-For NOVA's 3D design and printing the agent can run **OpenSCAD** and a **slicer** on this PC (the NOVA server has no GPU). Enable it in `agent.json`:
-
-```json
-"fabrication": { "enabled": true, "openscad": "C:\\Program Files\\OpenSCAD\\openscad.exe",
-  "slicer": { "path": "C:\\Program Files\\Bambu Studio\\bambu-studio.exe", "profile": "Bambu Lab P2S 0.4 nozzle", "args": ["…", "{input}", "{output}"] } }
-```
-
-Endpoints: `GET /v1/fab/status`, `POST /v1/fab/render` (OpenSCAD text in, binary STL out), `POST /v1/fab/slice` (STL in, print file out). Only the executables in `agent.json` are started, in a temp folder, without a shell, with a time limit and the whole process tree killed on timeout; custom OpenSCAD may not `include`, `use`, `import` or `surface`. The slicer profile must contain `P2S`. Details: [docs/fabrication-slicing.md](../../docs/fabrication-slicing.md).

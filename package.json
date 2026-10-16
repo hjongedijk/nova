@@ -26,7 +26,7 @@
     "test:compose-notification": "node scripts/test-compose-notification.mjs",
     "test:code-sandbox": "node scripts/test-code-sandbox.mjs",
     "test:code-sandbox:runtime": "node scripts/test-code-sandbox-runtime.mjs",
-    "test:mcp-sandbox": "node --test deploy/stack-control/cad-sandbox.test.mjs deploy/stack-control/mcp-sandbox.test.mjs deploy/stack-control/mcp-stream.test.mjs deploy/stack-control/mcp-egress.test.mjs deploy/stack-control/mcp-proxy-stdio.test.mjs",
+    "test:mcp-sandbox": "node --test deploy/stack-control/mcp-sandbox.test.mjs deploy/stack-control/mcp-stream.test.mjs deploy/stack-control/mcp-egress.test.mjs deploy/stack-control/mcp-proxy-stdio.test.mjs",
     "test:mcp-sandbox:runtime": "node scripts/test-mcp-sandbox-runtime.mjs",
     "check:code-workspace": "node scripts/check-code-workspace.mjs",
     "check:privacy-screenshots": "node scripts/check-screenshot-privacy.mjs",

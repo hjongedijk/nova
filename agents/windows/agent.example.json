@@ -33,16 +33,6 @@
       "Aanmelden bij Windows"
     ]
   },
-  "fabrication": {
-    "enabled": false,
-    "openscad": "C:\\Program Files\\OpenSCAD\\openscad.exe",
-    "slicer": {
-      "path": "C:\\Program Files\\Bambu Studio\\bambu-studio.exe",
-      "profile": "Bambu Lab P2S 0.4 nozzle",
-      "timeoutSeconds": 120,
-      "args": ["VERIFY-WITH-YOUR-BAMBU-STUDIO-VERSION", "{input}", "{output}"]
-    }
-  },
   "apps": {
     "notepad": {
       "path": "notepad.exe",

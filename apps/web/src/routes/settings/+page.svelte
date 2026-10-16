@@ -20,7 +20,6 @@
   import DesktopSection from "#components/settings/DesktopSection.svelte";
   import ConversationSection from "#components/settings/ConversationSection.svelte";
   import AutonomySection from "#components/settings/AutonomySection.svelte";
-  import FabricationSection from "#components/settings/FabricationSection.svelte";
   import WindowsAgentPanel from "#components/settings/WindowsAgentPanel.svelte";
   import AbilitiesTab from "#components/settings/AbilitiesTab.svelte";
   import SkillsTab from "#components/settings/SkillsTab.svelte";
@@ -256,7 +255,6 @@
           {:else if section === "desktop"}<DesktopSection />
           {:else if section === "conversation"}<ConversationSection />
           {:else if section === "autonomy"}<AutonomySection />
-          {:else if section === "fabrication"}<FabricationSection />
           {:else if section === "telephony"}<TelephonySection />
           {:else if section === "memory"}<AdminDialog
               embedded

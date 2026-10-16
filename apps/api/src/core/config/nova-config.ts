@@ -85,8 +85,6 @@ export class NovaConfig {
     "http://stack-control:8090",
   );
   readonly stackControlToken = text("NOVA_STACK_CONTROL_TOKEN");
-  /** Thingiverse app token for the 3D model search (official API). */
-  readonly thingiverseToken = text("THINGIVERSE_TOKEN");
   /** Speech-to-text through OmniRoute only: a model that is inside the verified free key scope. */
   readonly sttModel = text("NOVA_STT_MODEL");
   /** "transcriptions" (/audio/transcriptions, e.g. a Whisper model) or "chat-audio" (an audio-capable chat model). */
