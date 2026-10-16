@@ -18,6 +18,7 @@
   import NativeGateway from "#components/settings/NativeGateway.svelte";
   import UpdatesSection from "#components/settings/UpdatesSection.svelte";
   import DesktopSection from "#components/settings/DesktopSection.svelte";
+  import ConversationSection from "#components/settings/ConversationSection.svelte";
   import AutonomySection from "#components/settings/AutonomySection.svelte";
   import FabricationSection from "#components/settings/FabricationSection.svelte";
   import WindowsAgentPanel from "#components/settings/WindowsAgentPanel.svelte";
@@ -253,6 +254,7 @@
             <WindowsAgentPanel />
             <DevicesSection />
           {:else if section === "desktop"}<DesktopSection />
+          {:else if section === "conversation"}<ConversationSection />
           {:else if section === "autonomy"}<AutonomySection />
           {:else if section === "fabrication"}<FabricationSection />
           {:else if section === "telephony"}<TelephonySection />

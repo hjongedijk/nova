@@ -17,6 +17,12 @@ export type TelephonyEvent = {
   detail?: string;
 };
 
+export type TelephonyContact = {
+  name: string;
+  sip: string;
+  allowConversation: boolean;
+};
+
 export type TelephonyStatus = {
   enabled: boolean;
   connected: boolean;
@@ -26,6 +32,7 @@ export type TelephonyStatus = {
   extensions: TelephonyExtension[];
   trunk: { configured: true; host: string } | { configured: false };
   ringExtensions: string[];
+  contacts: TelephonyContact[];
   allowInternalCallsWithoutConfirmation: boolean;
   voice: "edge" | "piper";
   activeCalls: number;
@@ -65,6 +72,14 @@ export const saveTelephonyTrunk = (body: {
   number: string;
   allowExtensionsToDialOut: boolean;
 }) => sendJson<TelephonyStatus>("PUT", "/telephony/trunk", body, headers());
+
+export const saveTelephonyContacts = (contacts: TelephonyContact[]) =>
+  sendJson<TelephonyStatus>(
+    "PUT",
+    "/telephony/contacts",
+    { contacts },
+    headers(),
+  );
 
 export const removeTelephonyTrunk = () =>
   sendJson<TelephonyStatus>("DELETE", "/telephony/trunk", undefined, headers());

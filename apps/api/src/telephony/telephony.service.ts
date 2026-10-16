@@ -7,6 +7,7 @@ import {
   type OnModuleInit,
 } from "@nestjs/common";
 import crypto from "node:crypto";
+import { ConversationService } from "../conversation/conversation.service.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { JarvisStateStore } from "../planning/jarvis-state.store.js";
 import { TtsService, TTS_PIPER_VOICE } from "../tts/tts.service.js";
@@ -28,6 +29,8 @@ import {
   validHost,
   validSecret,
   validUser,
+  assertValid,
+  contactUser,
 } from "./asterisk-config.js";
 import { linphoneProvisioning } from "./linphone.js";
 import { TelephonyStore } from "./telephony.store.js";
@@ -41,6 +44,7 @@ import {
   type ExtensionKind,
   TelephonyError,
   type Trunk,
+  type Contact,
 } from "./telephony.types.js";
 
 const MAX_EVENTS = 50;
@@ -87,6 +91,7 @@ export interface TelephonyStatus {
   }>;
   trunk: { host: string; configured: true } | { configured: false };
   ringExtensions: string[];
+  contacts: { name: string; sip: string; allowConversation: boolean }[];
   allowInternalCallsWithoutConfirmation: boolean;
   voice: "edge" | "piper";
   activeCalls: number;
@@ -119,8 +124,13 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
     private readonly state: JarvisStateStore,
     private readonly tts: TtsService,
     @Optional() private readonly decode: AudioDecoder = decodeToPhoneWav,
+    @Optional() private readonly conversation?: ConversationService,
   ) {
     this.files = new AnnouncementFiles(this.store.recordingDir);
+    // Extension 700 follows the conversation switch, so the dialplan is rewritten when it changes.
+    this.conversation?.onChange(() => {
+      if (this.enabled) setTimeout(() => this.renderConfig(), 0).unref();
+    });
   }
 
   allowsInternalWithoutConfirmation(): boolean {
@@ -157,7 +167,13 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
 
   /** Writes the generated Asterisk files; the container's sync loop reloads them. */
   renderConfig(): void {
-    this.store.writeConf(renderAll(this.store.get(), rtpRangeFromEnv()));
+    this.store.writeConf(
+      renderAll(
+        this.store.get(),
+        rtpRangeFromEnv(),
+        this.conversation?.dialplan() ?? null,
+      ),
+    );
   }
 
   private commit(change: (draft: ReturnType<TelephonyStore["get"]>) => void) {
@@ -208,6 +224,7 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
     this.commit((draft) => {
       if (!input) {
         draft.trunk = null;
+        draft.contacts = [];
         return;
       }
       const secret = input.secret ?? draft.trunk?.secret ?? "";
@@ -217,6 +234,10 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
         throw new TelephonyError(
           "Ongeldig trunkwachtwoord (8-128 tekens, geen ; = # [ ] \" ' of \\).",
         );
+      // Contacts live on the trunk's domain; a changed trunk host leaves them unreachable, so they are dropped.
+      draft.contacts = (draft.contacts ?? []).filter(
+        (c) => c.sip.split("@")[1]?.toLowerCase() === input.host.toLowerCase(),
+      );
       draft.trunk = {
         host: input.host,
         username: input.username,
@@ -330,6 +351,7 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
         ? { host: config.trunk.host, configured: true }
         : { configured: false },
       ringExtensions: config.ringExtensions,
+      contacts: (config.contacts ?? []).map((c) => ({ ...c })),
       allowInternalCallsWithoutConfirmation:
         config.allowInternalCallsWithoutConfirmation,
       voice: config.voice,
@@ -393,13 +415,46 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
     }
     if (EXTERNAL_NUMBER.test(to) && !validExtensionId(to))
       return { kind: "external", number: to, endpoint: `PJSIP/${to}@trunk` };
+    // A named contact ("Dylan"), its address ("user@sip.linphone.org") or "sip:user@domain".
+    const wanted =
+      typeof raw === "string"
+        ? raw.trim().replace(/^sip:/i, "").toLowerCase()
+        : "";
+    const contact = (config.contacts ?? []).find(
+      (c) => c.name.toLowerCase() === wanted || c.sip.toLowerCase() === wanted,
+    );
+    if (contact)
+      return {
+        kind: "external",
+        number: contact.name,
+        endpoint: `PJSIP/${contactUser(contact.sip)}@trunk`,
+      };
     return null;
+  }
+
+  /** Replaces the contact list; every contact must live on the trunk's domain. */
+  setContacts(input: unknown): void {
+    if (!Array.isArray(input))
+      throw new TelephonyError("Ongeldige contactenlijst.");
+    const contacts = input.map((c) => ({
+      name: String((c as Contact)?.name ?? "").trim(),
+      sip: String((c as Contact)?.sip ?? "")
+        .trim()
+        .replace(/^sip:/i, ""),
+      allowConversation: (c as Contact)?.allowConversation === true,
+    }));
+    this.commit((draft) => {
+      const next = { ...draft, contacts };
+      assertValid(next);
+      draft.contacts = contacts;
+    });
   }
 
   /** Calls someone and speaks the message when they answer. */
   async call(
     to: unknown,
     message: unknown,
+    options: { conversation?: boolean } = {},
   ): Promise<{ callId: string; to: string; kind: "internal" | "external" }> {
     this.requireEnabled();
     const target = this.classify(to);
@@ -418,6 +473,7 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
     const channels = await this.ari.channels();
     if (channels.length >= MAX_CONCURRENT_CALLS)
       throw new TelephonyError("Er lopen al te veel gesprekken tegelijk.");
+    if (options.conversation) return this.callAndTalk(target, text);
     const prepared = await this.prepareAnnouncement(text);
     const token = crypto.randomBytes(12).toString("hex");
     this.pending.set(token, { text, ...prepared, to: target.number });
@@ -439,6 +495,39 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.pending.delete(token);
       this.files.remove(prepared.file);
+      throw error;
+    }
+  }
+
+  /** Calls someone and, once they answer, has a real spoken conversation that opens with `opening`. */
+  private async callAndTalk(
+    target: { kind: "internal" | "external"; number: string; endpoint: string },
+    opening: string,
+  ): Promise<{ callId: string; to: string; kind: "internal" | "external" }> {
+    if (!this.conversation?.dialplan())
+      throw new TelephonyError(
+        "Gesprekken staan uit. Zet ze aan bij Instellingen, Gesprekken, en bel dan opnieuw.",
+      );
+    const unavailable = this.conversation.sttProblem();
+    if (unavailable) throw new TelephonyError(unavailable);
+    const trunk = this.store.get().trunk;
+    this.conversation.expectOutbound(opening);
+    try {
+      const channel = await this.ari.originate({
+        endpoint: target.endpoint,
+        context: "nova-converse",
+        extension: "s",
+        callerId:
+          target.kind === "external" && trunk?.number
+            ? trunk.number
+            : `NOVA <${NOVA_EXTENSION}>`,
+        timeoutSeconds: RING_TIMEOUT_S,
+      });
+      this.started.push(this.now());
+      this.push({ type: "outbound", channelId: channel.id, to: target.number });
+      return { callId: channel.id, to: target.number, kind: target.kind };
+    } catch (error) {
+      this.conversation.cancelOutbound();
       throw error;
     }
   }

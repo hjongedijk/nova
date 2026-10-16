@@ -21,6 +21,15 @@ export interface Trunk {
   allowExtensionsToDialOut: boolean;
 }
 
+/** A person NOVA can call by name through the SIP trunk, for example a Linphone account at sip.linphone.org. */
+export interface Contact {
+  name: string;
+  /** user@domain; the domain must be the trunk's host. */
+  sip: string;
+  /** This contact may call NOVA (through the trunk) and have a conversation. Off unless chosen. */
+  allowConversation: boolean;
+}
+
 export interface TelephonyConfig {
   version: 1;
   /** Master switch; default OFF. */
@@ -32,6 +41,8 @@ export interface TelephonyConfig {
   trunk: Trunk | null;
   /** Extensions that ring for the doorbell and (when a trunk exists) inbound external calls. */
   ringExtensions: string[];
+  /** Named people reachable through the trunk. */
+  contacts?: Contact[];
   /** Internal extension calls may then run without a confirmation (external numbers never). */
   allowInternalCallsWithoutConfirmation: boolean;
   voice: "edge" | "piper";
@@ -73,8 +84,11 @@ export interface AriPort {
   channels(): Promise<AriChannel[]>;
   originate(input: {
     endpoint: string;
-    app: string;
-    appArgs: string;
+    app?: string;
+    appArgs?: string;
+    /** Run this dialplan extension when answered instead of a Stasis application (spoken conversation). */
+    context?: string;
+    extension?: string;
     callerId?: string;
     timeoutSeconds?: number;
   }): Promise<AriChannel>;

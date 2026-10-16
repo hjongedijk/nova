@@ -99,6 +99,14 @@ export class TelephonyController {
     return this.status();
   }
 
+  @Put("contacts")
+  @UseGuards(SettingsGuard)
+  async contacts(@Body() body: unknown) {
+    const input = obj(body);
+    guard(() => this.telephony.setContacts(input.contacts));
+    return this.status();
+  }
+
   @Delete("trunk")
   @UseGuards(SettingsGuard)
   async removeTrunk() {

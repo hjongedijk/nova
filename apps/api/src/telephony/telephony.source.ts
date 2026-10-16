@@ -31,8 +31,15 @@ export class TelephonySource implements ToolSource {
       {
         name: "phone_call",
         description:
-          'Call an internal extension (3-4 digits, e.g. "101") or an external number (digits, optional +, needs a SIP trunk) and speak "message" to the person when they answer. NOVA only speaks; it cannot hold a conversation over the phone yet. The user is always asked to confirm external numbers.',
-        parameters: schema({ to: text(20), message: text(500) }),
+          'Call an internal extension (3-4 digits, e.g. "101"), an external number (digits, optional +, needs a SIP trunk) or a saved contact by name (see phone_status), and speak "message" when they answer. With conversation=true NOVA instead has a real two-way spoken conversation that opens with "message" (needs Gesprekken switched on; only read-only tools are used on the phone). The user is always asked to confirm external numbers.',
+        parameters: schema(
+          {
+            to: text(60),
+            message: text(500),
+            conversation: { type: "boolean" },
+          },
+          ["to", "message"],
+        ),
         risk: "CONFIRM",
         allowStandingApproval: false,
         timeoutMs: 45_000,
@@ -61,7 +68,11 @@ export class TelephonySource implements ToolSource {
       target.kind === "internal" &&
       this.telephony.allowsInternalWithoutConfirmation();
     return {
-      args: { to: target.number, message: args.message },
+      args: {
+        to: target.number,
+        message: args.message,
+        ...(args.conversation === true ? { conversation: true } : {}),
+      },
       risk: internalOk ? "SAFE" : "CONFIRM",
     };
   }
@@ -92,7 +103,9 @@ export class TelephonySource implements ToolSource {
         };
       }
       if (name === "phone_call") {
-        const result = await this.telephony.call(args.to, args.message);
+        const result = await this.telephony.call(args.to, args.message, {
+          conversation: args.conversation === true,
+        });
         return {
           ok: true,
           verified: null,

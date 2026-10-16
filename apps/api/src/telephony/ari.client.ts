@@ -105,15 +105,25 @@ export class AriHttpClient implements AriPort {
 
   originate(input: {
     endpoint: string;
-    app: string;
-    appArgs: string;
+    /** Either a Stasis application (with appArgs)... */
+    app?: string;
+    appArgs?: string;
+    /** ...or a dialplan context and extension that runs when the call is answered. */
+    context?: string;
+    extension?: string;
     callerId?: string;
     timeoutSeconds?: number;
   }) {
+    const target = input.context
+      ? {
+          context: input.context,
+          extension: input.extension ?? "s",
+          priority: 1,
+        }
+      : { app: input.app, appArgs: input.appArgs };
     return this.call<AriChannel>("POST", "/channels", {
       endpoint: input.endpoint,
-      app: input.app,
-      appArgs: input.appArgs,
+      ...target,
       callerId: input.callerId,
       timeout: input.timeoutSeconds ?? 30,
     });

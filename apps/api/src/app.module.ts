@@ -30,6 +30,7 @@ import { TelephonyModule } from "./telephony/telephony.module.js";
 import { TtsModule } from "./tts/tts.module.js";
 import { VisualizationModule } from "./visualization/visualization.module.js";
 import { FabricationModule } from "./fabrication/fabrication.module.js";
+import { ConversationModule } from "./conversation/conversation.module.js";
 
 const config = new NovaConfig();
 
@@ -64,6 +65,7 @@ const config = new NovaConfig();
     WindowsModule,
     VisualizationModule,
     FabricationModule,
+    ConversationModule,
     BrowserAgentModule,
     DesktopModule,
     BridgesModule,

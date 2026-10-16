@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { ConversationModule } from "../conversation/conversation.module.js";
 import { PlanningModule } from "../planning/planning.module.js";
 import { TtsModule } from "../tts/tts.module.js";
 import { AriHttpClient, validateAriUrl } from "./ari.client.js";
@@ -14,7 +15,7 @@ import { ARI_PORT } from "./telephony.types.js";
  * Asterisk when the user switches it on in the settings.
  */
 @Module({
-  imports: [PlanningModule, TtsModule],
+  imports: [PlanningModule, TtsModule, ConversationModule],
   controllers: [TelephonyController],
   providers: [
     TelephonyStore,

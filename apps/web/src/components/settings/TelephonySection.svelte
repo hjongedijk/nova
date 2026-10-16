@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import Button from "#components/ui/Button.svelte";
   import {
+    saveTelephonyContacts,
     addTelephonyExtension,
     createProvisioningLink,
     downloadLinphoneFile,
@@ -19,6 +20,9 @@
   let message = $state("");
   let host = $state("");
   let newName = $state("");
+  let contactName = $state("");
+  let contactSip = $state("");
+  let contactTalk = $state(false);
   let newKind = $state<"phone" | "doorbell">("phone");
   let link = $state<{ id: string; url: string; expiresAt: string } | null>(
     null,
@@ -368,6 +372,85 @@
           >
         {/if}
       </form>
+    </details>
+
+    <details>
+      <summary
+        >Contacten (bellen op naam){status.contacts.length
+          ? ` · ${status.contacts.length}`
+          : ""}</summary
+      >
+      <p class="hint">
+        Mensen die NOVA via de SIP-trunk kan bellen, bijvoorbeeld je
+        Linphone-account (naam@sip.linphone.org). Het domein moet de trunkhost
+        zijn. NOVA heeft een eigen tweede Linphone-account nodig voor de trunk;
+        daarmee bel jij NOVA ook van buitenaf. “Mag met NOVA praten” laat alleen
+        dit contact haar bellen voor een echt gesprek (uit tenzij je het kiest).
+      </p>
+      <ul>
+        {#each status.contacts as contact (contact.name)}
+          <li>
+            {contact.name} · {contact.sip}{contact.allowConversation
+              ? " · mag met NOVA praten"
+              : ""}
+            <button
+              type="button"
+              disabled={busy}
+              onclick={() =>
+                void run(
+                  () =>
+                    saveTelephonyContacts(
+                      status!.contacts.filter((c) => c.name !== contact.name),
+                    ),
+                  "Contact verwijderd.",
+                )}>Verwijderen</button
+            >
+          </li>
+        {/each}
+      </ul>
+      {#if status.trunk.configured}
+        <form
+          class="set-grid"
+          onsubmit={(event) => {
+            event.preventDefault();
+            void run(
+              () =>
+                saveTelephonyContacts([
+                  ...status!.contacts,
+                  {
+                    name: contactName.trim(),
+                    sip: contactSip.trim(),
+                    allowConversation: contactTalk,
+                  },
+                ]),
+              "Contact opgeslagen.",
+            ).then(() => {
+              contactName = "";
+              contactSip = "";
+              contactTalk = false;
+            });
+          }}
+        >
+          <input
+            bind:value={contactName}
+            placeholder="Naam, bijvoorbeeld Dylan"
+            aria-label="Contactnaam"
+          />
+          <input
+            bind:value={contactSip}
+            placeholder="gebruiker@sip.linphone.org"
+            aria-label="SIP-adres"
+          />
+          <label class="set-row">
+            <input type="checkbox" bind:checked={contactTalk} />
+            Mag met NOVA praten (bellen naar NOVA)
+          </label>
+          <Button
+            disabled={busy || !contactName.trim() || !contactSip.trim()}
+            type="submit">Contact toevoegen</Button
+          >
+        </form>
+      {:else}<p>Stel eerst een SIP-trunk in.</p>{/if}
     </details>
 
     <details>

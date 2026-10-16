@@ -83,6 +83,13 @@ export const SECTIONS = [
       "bureaublad scherm pc overnemen muis toetsenbord screenshot windows besturen",
   },
   {
+    id: "conversation",
+    name: "Gesprekken",
+    detail: "Echte gesprekken met NOVA, ook over de telefoon (nummer 700).",
+    keywords:
+      "gesprek bellen telefoon spraak praten stem luisteren onderbreken",
+  },
+  {
     id: "autonomy",
     name: "Zelfstandige taken",
     detail:

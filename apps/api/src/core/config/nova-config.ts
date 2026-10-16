@@ -87,6 +87,11 @@ export class NovaConfig {
   readonly stackControlToken = text("NOVA_STACK_CONTROL_TOKEN");
   /** Thingiverse app token for the 3D model search (official API). */
   readonly thingiverseToken = text("THINGIVERSE_TOKEN");
+  /** Speech-to-text through OmniRoute only: a model that is inside the verified free key scope. */
+  readonly sttModel = text("NOVA_STT_MODEL");
+  /** "transcriptions" (/audio/transcriptions, e.g. a Whisper model) or "chat-audio" (an audio-capable chat model). */
+  readonly sttMode = text("NOVA_STT_MODE", "transcriptions");
+  readonly sttFreeVerified = flag("NOVA_STT_FREE_VERIFIED", false);
   readonly defaultLanguage = setting(
     "NOVA_DEFAULT_LANGUAGE",
     "JARVIS_DEFAULT_LANGUAGE",
