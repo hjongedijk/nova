@@ -13,6 +13,11 @@ const makeTool = (name: string, description: string): SelectableTool => ({
 const tools = [
   makeTool("ha_light_turn_on", "Turn on a Home Assistant light in a room."),
   makeTool("weather_forecast", "Get current weather and forecast."),
+  makeTool(
+    "phone_call",
+    "Call an internal extension or a saved contact and speak a message.",
+  ),
+  makeTool("phone_hangup", "Hang up an active call by its id."),
   makeTool("proxmox_guests", "List virtual machines on Proxmox."),
   makeTool("code_test", "Run a test in the isolated code workspace."),
   makeTool("documents_search", "Search the user's uploaded private documents."),
@@ -111,6 +116,35 @@ describe("request tool selection", () => {
     );
     expect(selected.map((tool) => tool.function.name)).toContain(
       "documents_search",
+    );
+  });
+
+  it.each([
+    "bel mij en vertel het weer",
+    "kun je Dylan bellen",
+    "opbellen naar mijn telefoon",
+    "telefoneer even met de buurman",
+  ])("offers the phone tool for the Dutch request %j", (message) => {
+    const discovery = makeTool(
+      TOOL_DISCOVERY_NAME,
+      "Search available capabilities",
+    );
+    const names = selectToolsForRequest(
+      [...tools, discovery],
+      message,
+      "conversation",
+    ).map((tool) => tool.function.name);
+    expect(names).toContain("phone_call");
+  });
+
+  it("offers both the weather and the phone tool for a call that reads out the weather", () => {
+    const names = selectToolsForRequest(
+      tools,
+      "bel mij en vertel het weer",
+      "conversation",
+    ).map((tool) => tool.function.name);
+    expect(names).toEqual(
+      expect.arrayContaining(["phone_call", "weather_forecast"]),
     );
   });
 });

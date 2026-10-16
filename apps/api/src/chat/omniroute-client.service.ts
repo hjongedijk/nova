@@ -258,6 +258,13 @@ export class OmniRouteClient {
     this.routing.assertFree();
     let response: Response | undefined;
     let lastFailure: unknown;
+    // When every candidate is cooling down after upstream failures, refusing all chat for minutes helps nobody:
+    // try the one due to recover first. Still only verified free models, and still one probe at a time.
+    const gate = options.roleModel ? this.roleAvailability() : undefined;
+    const lastResort =
+      gate && attempts.every((candidate) => !gate.canAcquire(candidate))
+        ? gate.soonest(attempts)
+        : undefined;
     for (const candidate of attempts) {
       if (options.roleModel)
         body.model = this.routing.assertRoleModel(
@@ -265,10 +272,10 @@ export class OmniRouteClient {
           candidate,
         );
       signal?.throwIfAborted();
-      const availability = options.roleModel
-        ? this.roleAvailability()
-        : undefined;
-      const lease = availability?.acquire(candidate);
+      const availability = gate;
+      const lease =
+        availability?.acquire(candidate) ??
+        (candidate === lastResort ? availability?.force(candidate) : undefined);
       if (availability && !lease) continue;
       response = undefined;
       try {

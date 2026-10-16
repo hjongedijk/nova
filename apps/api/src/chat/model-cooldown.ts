@@ -23,6 +23,40 @@ export class ModelCooldown {
     };
   }
 
+  /** True when a request to this model may go out now (not cooling, nobody probing). Does not take the lease. */
+  canAcquire(model: string): boolean {
+    const state = this.models.get(model);
+    return !state || (!state.probing && Date.now() >= state.retryAt);
+  }
+
+  /** The candidate that is due to recover first; used as a last resort when every candidate is cooling. */
+  soonest(models: string[]): string | undefined {
+    let best: string | undefined;
+    let bestAt = Infinity;
+    for (const model of models) {
+      const state = this.models.get(model);
+      if (!state) return model;
+      if (!state.probing && state.retryAt < bestAt) {
+        best = model;
+        bestAt = state.retryAt;
+      }
+    }
+    return best;
+  }
+
+  /** Takes the lease even though the cooldown has not elapsed; one request at a time. */
+  force(model: string): { release(): void } | undefined {
+    const state = this.models.get(model);
+    if (!state) return { release() {} };
+    if (state.probing) return undefined;
+    state.probing = true;
+    return {
+      release: () => {
+        if (this.models.get(model) === state) state.probing = false;
+      },
+    };
+  }
+
   success(model: string): void {
     this.models.delete(model);
   }

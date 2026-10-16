@@ -68,6 +68,14 @@ const ALIASES: Record<string, string[]> = {
   filament: ["filament", "printer", "materials", "print"],
   slicen: ["slice", "print", "3d"],
   stl: ["stl", "3d", "model"],
+  bel: ["phone", "call", "contact", "extension"],
+  bellen: ["phone", "call", "contact", "extension"],
+  belt: ["phone", "call", "contact"],
+  opbellen: ["phone", "call", "contact", "extension"],
+  telefoon: ["phone", "call", "extension"],
+  telefoneer: ["phone", "call", "contact"],
+  telefoneren: ["phone", "call", "contact"],
+  ophangen: ["phone", "hangup", "call"],
 };
 
 function words(value: string): Set<string> {

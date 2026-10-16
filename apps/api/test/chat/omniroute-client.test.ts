@@ -428,6 +428,41 @@ describe("OmniRoute HTTP failure cleanup and bounded fallback", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("when every free candidate is cooling down it still tries the one due to recover first, once", async () => {
+    const { client } = setup();
+    const ok = () =>
+      new Response(
+        JSON.stringify({
+          model: preferred,
+          choices: [
+            {
+              message: { role: "assistant", content: "NOVA_OK" },
+              finish_reason: "stop",
+            },
+          ],
+        }),
+      );
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(rejected(503, vi.fn()))
+      .mockResolvedValueOnce(rejected(503, vi.fn()))
+      .mockImplementationOnce(async () => ok());
+    vi.stubGlobal("fetch", fetcher);
+    const options = {
+      roleModel: { role: "conversation" as const, modelId: preferred },
+    };
+    await expect(client.call(messages, options)).rejects.toThrow(
+      "OmniRoute request failed (503)",
+    );
+    // both models are now cooling down; the next request must not be refused outright
+    const answer = await client.call(messages, options);
+    expect(answer.assistant.content).toBe("NOVA_OK");
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(String(fetcher.mock.calls[2]![1]?.body)).model).toBe(
+      preferred,
+    );
+  });
+
   it("releases a failed auto response without retrying outside the native router", async () => {
     const cancel = vi.fn();
     const { client } = setup();
