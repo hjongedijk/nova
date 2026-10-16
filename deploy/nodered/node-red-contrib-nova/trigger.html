@@ -1,0 +1,44 @@
+<script type="text/javascript">
+  RED.nodes.registerType("nova-trigger", {
+    category: "NOVA",
+    color: "#7656a8",
+    defaults: {
+      name: { value: "" },
+      event: {
+        value: "",
+        validate: RED.validators.regex(/^$|^[a-z0-9][a-z0-9._:-]{0,63}$/i),
+      },
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: "font-awesome/fa-bolt",
+    label: function () {
+      return this.name || this.event || "NOVA taak starten";
+    },
+    paletteLabel: "NOVA taak starten",
+  });
+</script>
+
+<script type="text/html" data-template-name="nova-trigger">
+  <div class="form-row">
+    <label for="node-input-name"><i class="fa fa-tag"></i> Naam</label>
+    <input type="text" id="node-input-name" placeholder="NOVA taak starten" />
+  </div>
+  <div class="form-row">
+    <label for="node-input-event"><i class="fa fa-bolt"></i> Gebeurtenis</label>
+    <input type="text" id="node-input-event" placeholder="deur-open" />
+  </div>
+</script>
+
+<script type="text/html" data-help-name="nova-trigger">
+  <p>
+    Start de autonome NOVA-taken die op deze gebeurtenis wachten (maak ze met
+    "autonomy_create" en een <code>event</code>). Elke taak houdt zijn eigen
+    limieten, cooldown en goedkeuringen aan.
+  </p>
+  <p>
+    Gebeurtenisnaam: het veld hierboven, of <code>msg.event</code>.
+    <code>msg.eventId</code> (of het bericht-id) maakt dubbele meldingen
+    onschadelijk. Het antwoord van NOVA staat in <code>msg.nova</code>.
+  </p>
+</script>

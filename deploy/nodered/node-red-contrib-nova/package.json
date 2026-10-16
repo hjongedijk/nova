@@ -1,6 +1,6 @@
 {
   "name": "node-red-contrib-nova",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Built-in NOVA chat, TTS and authenticated event nodes for Node-RED",
   "license": "MIT",
   "private": true,
@@ -14,7 +14,8 @@
       "nova-ask": "ask.js",
       "nova-notify": "notify.js",
       "nova-event": "event.js",
-      "nova-briefing": "briefing.js"
+      "nova-briefing": "briefing.js",
+      "nova-trigger": "trigger.js"
     }
   }
 }

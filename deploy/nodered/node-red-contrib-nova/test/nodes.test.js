@@ -295,3 +295,56 @@ describe("node-red-contrib-nova", () => {
     assert.deepEqual(blocked.errors, []);
   });
 });
+
+describe("nova-trigger", () => {
+  it("posts the event name and id with the event token to the trigger route", async () => {
+    process.env.NOVA_API_URL = "http://nova:8080";
+    process.env.NODE_RED_EVENT_TOKEN = "t".repeat(40);
+    installFetch(
+      () =>
+        new Response(JSON.stringify({ started: 1 }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const result = await invoke(
+      "nova-trigger",
+      { eventId: "mqtt-42", event: "ignored" },
+      { event: "deur-open" },
+    );
+    assert.equal(result.doneError, undefined);
+    assert.equal(
+      lastRequest.url,
+      "http://nova:8080/api/integrations/node-red/trigger",
+    );
+    assert.deepEqual(JSON.parse(lastRequest.options.body), {
+      event: "deur-open",
+      eventId: "mqtt-42",
+    });
+    assert.equal(
+      lastRequest.options.headers.authorization,
+      `Bearer ${"t".repeat(40)}`,
+    );
+    assert.deepEqual(result.sent.nova, { started: 1 });
+  });
+
+  it("falls back to msg.event and refuses invalid names and a missing token", async () => {
+    process.env.NOVA_API_URL = "http://nova:8080";
+    process.env.NODE_RED_EVENT_TOKEN = "t".repeat(40);
+    installFetch(
+      () =>
+        new Response("{}", {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const ok = await invoke("nova-trigger", { event: "regen" });
+    assert.equal(JSON.parse(lastRequest.options.body).event, "regen");
+    assert.equal(ok.doneError, undefined);
+    const bad = await invoke("nova-trigger", { event: "../etc" });
+    assert.match(String(bad.doneError), /Invalid NOVA event name/);
+    process.env.NODE_RED_EVENT_TOKEN = "short";
+    const noToken = await invoke("nova-trigger", { event: "regen" });
+    assert.match(String(noToken.doneError), /token is not configured/);
+  });
+});

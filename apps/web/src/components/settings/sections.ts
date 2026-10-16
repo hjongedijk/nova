@@ -83,6 +83,14 @@ export const SECTIONS = [
       "bureaublad scherm pc overnemen muis toetsenbord screenshot windows besturen",
   },
   {
+    id: "autonomy",
+    name: "Zelfstandige taken",
+    detail:
+      "Taken die NOVA zelf uitvoert: gepland, herhalend of bij een gebeurtenis.",
+    keywords:
+      "autonoom taak automatisering gebeurtenis node-red goedkeuren plannen",
+  },
+  {
     id: "fabrication",
     name: "3D-printen",
     detail:
