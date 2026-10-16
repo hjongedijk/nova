@@ -1,5 +1,6 @@
 import { attachmentMessage } from "./attachments.js";
 import { directAnswer } from "./direct-answer.js";
+import { directCallQuery } from "./direct-call.js";
 import {
   directDefinitionQuery,
   directDefinitionReply,
@@ -337,6 +338,50 @@ export class OrchestratorService {
           emit("token", { text: currencyReply });
         }
         return { reply: currencyReply, model: null, usage: null, role };
+      }
+      const call = directCallQuery(message);
+      if (
+        call &&
+        this.tools.list().some((tool) => tool.name === "phone_call")
+      ) {
+        this.confirmations.cancel(sessionId);
+        const role = modelRole ?? "conversation";
+        const result = await this.tools.execute(
+          "phone_call",
+          { to: call.to, message: call.message },
+          sessionId,
+          null,
+          false,
+          { signal, readOnlyOnly: input.readOnlyOnly },
+        );
+        if (result.requiresConfirmation && result.action) {
+          const question = confirmationQuestion(
+            result.action,
+            responseLanguage === "en",
+          );
+          emit(
+            "confirmation",
+            result.action as unknown as Record<string, unknown>,
+          );
+          if (stream) emit("token", { text: question });
+          return {
+            reply: question,
+            model: null,
+            usage: null,
+            role,
+            confirmation: result.action,
+          };
+        }
+        const callReply = result.ok
+          ? call.to === "me"
+            ? "Ik bel je nu."
+            : `Ik bel ${call.to} nu.`
+          : `Bellen lukte niet: ${typeof result.error === "string" ? result.error : "onbekende fout"}`;
+        if (stream) {
+          emit("route", { role });
+          emit("token", { text: callReply });
+        }
+        return { reply: callReply, model: null, usage: null, role };
       }
       const definition = directDefinitionQuery(message, responseLanguage);
       if (definition) {

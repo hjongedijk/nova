@@ -91,6 +91,18 @@ describe("contacts on the Linphone trunk", () => {
     expect(service.classify("Onbekend")).toBeNull();
   });
 
+  it("resolves 'me' to the only saved contact, never when there are several", () => {
+    service.setContacts([
+      { name: "Dylan", sip: "a@sip.linphone.org", allowConversation: false },
+    ]);
+    expect(service.classify("me")?.number).toBe("Dylan");
+    service.setContacts([
+      { name: "Dylan", sip: "a@sip.linphone.org", allowConversation: false },
+      { name: "Anna", sip: "b@sip.linphone.org", allowConversation: false },
+    ]);
+    expect(service.classify("me")).toBeNull();
+  });
+
   it("refuses contacts on another domain, bad names, duplicates and anything without a trunk", () => {
     expect(() =>
       service.setContacts([

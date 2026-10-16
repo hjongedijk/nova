@@ -422,9 +422,17 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
       typeof raw === "string"
         ? raw.trim().replace(/^sip:/i, "").toLowerCase()
         : "";
-    const contact = (config.contacts ?? []).find(
-      (c) => c.name.toLowerCase() === wanted || c.sip.toLowerCase() === wanted,
-    );
+    const contacts = config.contacts ?? [];
+    // "me" / "mij" means the one saved contact, and only when there is exactly one.
+    const contact =
+      wanted === "me"
+        ? contacts.length === 1
+          ? contacts[0]
+          : undefined
+        : contacts.find(
+            (c) =>
+              c.name.toLowerCase() === wanted || c.sip.toLowerCase() === wanted,
+          );
     if (contact)
       return {
         kind: "external",
