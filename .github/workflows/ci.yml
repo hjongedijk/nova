@@ -34,6 +34,7 @@ jobs:
       - run: npm run test:mcp-sandbox
       # The Windows agent cannot run here, but its syntax and embedded C# can be checked.
       - run: pwsh -NoProfile -File agents/windows/test/check.ps1
+      - run: pwsh -NoProfile -File agents/windows/test/desktop.ps1
 
   image:
     runs-on: ubuntu-latest

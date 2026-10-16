@@ -21,7 +21,7 @@ param(
   [string]$ConfigPath = (Join-Path $PSScriptRoot 'agent.json')
 )
 $ErrorActionPreference = 'Stop'
-$agentVersion = '2026-10-13.1'
+$agentVersion = '2026-10-16.1'
 
 # However the agent is started (task, double-click, a terminal), it runs on without a window: this copy starts
 # a hidden one and ends. (conhost --headless also keeps Windows Terminal from opening a window.)
@@ -905,6 +905,7 @@ public class NovaControls {
   static readonly ManualResetEvent bindingsReady = new ManualResetEvent(false);
   static uint threadId;
   static bool paused;
+  static volatile bool armed;
   static object tray;
   public static string Take() { string value; return actions.TryDequeue(out value) ? value : null; }
   public static string[] Warnings() { lock (gate) return (string[])warnings.Clone(); }
@@ -961,14 +962,14 @@ public class NovaControls {
   }
   static void TrayState() {
     if (tray == null) return;
-    tray.GetType().GetProperty("Text").SetValue(tray, paused ? "NOVA — gepauzeerd" : "NOVA — actief", null);
+    tray.GetType().GetProperty("Text").SetValue(tray, armed ? "NOVA — bestuurt de pc" : paused ? "NOVA — gepauzeerd" : "NOVA — actief", null);
     Type bitmapType = DrawingType("Bitmap"), colorType = DrawingType("Color"), iconType = DrawingType("Icon");
     object bitmap = Activator.CreateInstance(bitmapType, new object[] { 16, 16 });
     IntPtr handle = IntPtr.Zero;
     try {
       var rgb = colorType.GetMethod("FromArgb", new Type[] { typeof(int), typeof(int), typeof(int) });
       object navy = rgb.Invoke(null, new object[] { 12, 24, 43 });
-      object accent = rgb.Invoke(null, paused ? new object[] { 245, 180, 73 } : new object[] { 80, 225, 206 });
+      object accent = rgb.Invoke(null, armed ? new object[] { 220, 30, 30 } : paused ? new object[] { 245, 180, 73 } : new object[] { 80, 225, 206 });
       var pixel = bitmapType.GetMethod("SetPixel", new Type[] { typeof(int), typeof(int), colorType });
       // Original geometric artwork: navy tile, accent ring and one status dot.
       for (int y = 0; y < 16; y++) for (int x = 0; x < 16; x++) {
@@ -994,8 +995,8 @@ public class NovaControls {
     tray = Activator.CreateInstance(notifyType);
     object menu = Activator.CreateInstance(menuType);
     object items = menuType.GetProperty("Items").GetValue(menu, null);
-    string[] labels = { "Openen", "Pauzeren / hervatten", "Instellingen", "Afsluiten" };
-    string[] commands = { "open", "pause", "settings", "exit" };
+    string[] labels = { "Openen", "Pauzeren / hervatten", "Besturing stoppen", "Instellingen", "Afsluiten" };
+    string[] commands = { "open", "pause", "desktop-stop", "settings", "exit" };
     for (int i = 0; i < labels.Length; i++) {
       string command = commands[i];
       object item = items.GetType().GetMethod("Add", new Type[] { typeof(string) }).Invoke(items, new object[] { labels[i] });
@@ -1006,6 +1007,7 @@ public class NovaControls {
     TrayState();
     notifyType.GetProperty("Visible").SetValue(tray, true, null);
   }
+  public static void SetArmed(bool value) { armed = value; if (threadId != 0) PostThreadMessage(threadId, 0x8002, UIntPtr.Zero, IntPtr.Zero); }
   public static void SetPaused(bool value) { paused = value; if (threadId != 0) PostThreadMessage(threadId, 0x8002, UIntPtr.Zero, IntPtr.Zero); }
   public static void Stop() { if (threadId != 0) PostThreadMessage(threadId, 0x0012, UIntPtr.Zero, IntPtr.Zero); }
   public static void Start() {
@@ -1044,6 +1046,470 @@ public class NovaControls {
 '@ -IgnoreWarnings
 [NovaDesk]::RealPixels()
 Add-Type -AssemblyName System.Windows.Forms
+
+# ---------- desktop eyes and hands (off unless agent.json -> desktop enables it) ----------
+# Pure rules (coordinates, deny-list, keys, expiry, rate limit) sit apart from the Win32 calls so the rules can be tested
+# without Windows. Control is armed by a short time-boxed request, never persists across a restart, and a kill-switch
+# hotkey or the tray item revokes it at once. A red bar on top of the main display shows while NOVA may drive.
+Add-Type @'
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+public class NovaWindowInfo { public long Id; public string Title; public string Process; public int X, Y, W, H; public bool Foreground; }
+
+public static class NovaDesktopPolicy {
+  // Screenshot pixels to real pixels of one display, clamped inside it.
+  public static int[] ScalePoint(double x, double y, double shotW, double shotH, int dx, int dy, int dw, int dh) {
+    if (dw <= 0 || dh <= 0) throw new ArgumentException("Display has no size");
+    if (Double.IsNaN(x) || Double.IsInfinity(x) || Double.IsNaN(y) || Double.IsInfinity(y)) throw new ArgumentException("Bad coordinate");
+    double sw = shotW > 0 ? shotW : dw, sh = shotH > 0 ? shotH : dh;
+    int rx = dx + (int)Math.Round(x * dw / sw), ry = dy + (int)Math.Round(y * dh / sh);
+    rx = Math.Max(dx, Math.Min(dx + dw - 1, rx));
+    ry = Math.Max(dy, Math.Min(dy + dh - 1, ry));
+    return new int[] { rx, ry };
+  }
+  public static bool IsDenied(string title, string process, string[] deny) {
+    if (deny == null) return false;
+    foreach (string entry in deny) {
+      if (String.IsNullOrWhiteSpace(entry)) continue;
+      string needle = entry.Trim();
+      if ((title != null && title.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0) ||
+          (process != null && process.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)) return true;
+    }
+    return false;
+  }
+  static readonly Dictionary<string, ushort> named = new Dictionary<string, ushort>(StringComparer.OrdinalIgnoreCase) {
+    { "enter", 0x0D }, { "tab", 0x09 }, { "esc", 0x1B }, { "escape", 0x1B }, { "backspace", 0x08 }, { "delete", 0x2E }, { "del", 0x2E },
+    { "space", 0x20 }, { "up", 0x26 }, { "down", 0x28 }, { "left", 0x25 }, { "right", 0x27 }, { "home", 0x24 }, { "end", 0x23 },
+    { "pageup", 0x21 }, { "pagedown", 0x22 }
+  };
+  // Allow-list: optional Ctrl/Alt/Shift, then exactly one named key, F1-F12, letter or digit. Win and Ctrl+Alt+Del are refused.
+  public static ushort[] ParseKey(string combo) {
+    if (String.IsNullOrWhiteSpace(combo) || combo.Length > 40) throw new ArgumentException("Empty key");
+    var mods = new List<ushort>(); ushort key = 0;
+    foreach (string raw in combo.Split('+')) {
+      string t = raw.Trim(); ushort bit = 0;
+      if (t.Equals("ctrl", StringComparison.OrdinalIgnoreCase) || t.Equals("control", StringComparison.OrdinalIgnoreCase)) bit = 0x11;
+      else if (t.Equals("alt", StringComparison.OrdinalIgnoreCase)) bit = 0x12;
+      else if (t.Equals("shift", StringComparison.OrdinalIgnoreCase)) bit = 0x10;
+      if (bit != 0) { if (mods.Contains(bit)) throw new ArgumentException("Duplicate modifier"); mods.Add(bit); continue; }
+      if (key != 0) throw new ArgumentException("One key only");
+      int number;
+      if (named.TryGetValue(t, out key)) { }
+      else if (t.Length == 1 && ((t[0] >= 'A' && t[0] <= 'Z') || (t[0] >= 'a' && t[0] <= 'z'))) key = (ushort)Char.ToUpperInvariant(t[0]);
+      else if (t.Length == 1 && t[0] >= '0' && t[0] <= '9') key = (ushort)t[0];
+      else if (t.Length >= 2 && (t[0] == 'F' || t[0] == 'f') && Int32.TryParse(t.Substring(1), out number) && number >= 1 && number <= 12) key = (ushort)(0x6F + number);
+      else throw new ArgumentException("Key not allowed");
+    }
+    if (key == 0) throw new ArgumentException("No key");
+    if (key == 0x2E && mods.Contains(0x11) && mods.Contains(0x12)) throw new ArgumentException("Key not allowed");
+    var all = new List<ushort>(mods); all.Add(key);
+    return all.ToArray();
+  }
+  public static int ClampTtlSeconds(double seconds) {
+    if (Double.IsNaN(seconds) || seconds < 1) throw new ArgumentException("ttlSeconds must be at least 1");
+    return (int)Math.Min(900, Math.Floor(seconds));
+  }
+  // Kill-switch chord: modifiers plus one letter, digit or F-key.
+  public static uint[] ParseChord(string chord) {
+    uint mods = 0, key = 0;
+    foreach (string raw in (chord ?? "").Split('+')) {
+      string t = raw.Trim().ToUpperInvariant(); uint bit = 0;
+      if (t == "CTRL") bit = 2; else if (t == "ALT") bit = 1; else if (t == "SHIFT") bit = 4;
+      if (bit != 0) { mods |= bit; continue; }
+      int number;
+      if (key != 0) throw new ArgumentException("One key only");
+      if (t.Length == 1 && ((t[0] >= 'A' && t[0] <= 'Z') || (t[0] >= '0' && t[0] <= '9'))) key = t[0];
+      else if (t.StartsWith("F") && Int32.TryParse(t.Substring(1), out number) && number >= 1 && number <= 24) key = (uint)(111 + number);
+      else throw new ArgumentException("Unsupported key");
+    }
+    if (key == 0 || mods == 0) throw new ArgumentException("Chord needs a modifier and a key");
+    return new uint[] { mods, key };
+  }
+}
+
+public class NovaRateLimiter {
+  readonly int max; readonly long windowMs; readonly Queue<long> hits = new Queue<long>();
+  public NovaRateLimiter(int maxHits, long windowMilliseconds) { max = maxHits; windowMs = windowMilliseconds; }
+  public bool Allow(long nowMs) {
+    lock (hits) {
+      while (hits.Count > 0 && nowMs - hits.Peek() >= windowMs) hits.Dequeue();
+      if (hits.Count >= max) return false;
+      hits.Enqueue(nowMs); return true;
+    }
+  }
+}
+
+// Armed state lives only in memory: a restart always starts disarmed.
+public static class NovaDesktopGuard {
+  static readonly object gate = new object();
+  static long expiresAt; static string reason = "";
+  public static long NowMs() { return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); }
+  public static long Arm(double ttlSeconds, long nowMs) {
+    int ttl = NovaDesktopPolicy.ClampTtlSeconds(ttlSeconds);
+    lock (gate) { expiresAt = nowMs + ttl * 1000L; reason = ""; return expiresAt; }
+  }
+  public static void Disarm(string why) { lock (gate) { expiresAt = 0; reason = why ?? ""; } }
+  public static bool IsArmed(long nowMs) { lock (gate) return expiresAt > nowMs; }
+  public static long ExpiresAt() { lock (gate) return expiresAt; }
+  public static string Reason() { lock (gate) return reason; }
+}
+
+public static class NovaDesktopInput {
+  [StructLayout(LayoutKind.Sequential)] struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
+  [StructLayout(LayoutKind.Sequential)] struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
+  [StructLayout(LayoutKind.Explicit)] struct InputUnion { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
+  [StructLayout(LayoutKind.Sequential)] struct INPUT { public uint type; public InputUnion u; }
+  [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint n, INPUT[] inputs, int size);
+  [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr l);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder text, int max);
+  [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] static extern int GetWindowLong(IntPtr h, int index);
+  [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int value, int size);
+  static string ProcessOf(IntPtr h) {
+    try { uint pid; GetWindowThreadProcessId(h, out pid); using (Process p = Process.GetProcessById((int)pid)) return p.ProcessName; } catch (Exception) { return ""; }
+  }
+  static string TitleOf(IntPtr h) {
+    int n = GetWindowTextLength(h); if (n <= 0) return "";
+    var sb = new StringBuilder(Math.Min(n, 512) + 1); GetWindowText(h, sb, sb.Capacity); return sb.ToString();
+  }
+  public static NovaWindowInfo Foreground() {
+    IntPtr h = GetForegroundWindow(); if (h == IntPtr.Zero) return null;
+    RECT r; GetWindowRect(h, out r);
+    return new NovaWindowInfo { Id = h.ToInt64(), Title = TitleOf(h), Process = ProcessOf(h), X = r.Left, Y = r.Top, W = r.Right - r.Left, H = r.Bottom - r.Top, Foreground = true };
+  }
+  public static List<NovaWindowInfo> Windows() {
+    var list = new List<NovaWindowInfo>(); IntPtr front = GetForegroundWindow();
+    EnumWindows(delegate (IntPtr h, IntPtr l) {
+      if (list.Count >= 100 || !IsWindowVisible(h)) return true;
+      if ((GetWindowLong(h, -20) & 0x80) != 0) return true;                     // tool windows
+      int cloaked; if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) return true;
+      string title = TitleOf(h); if (title.Length == 0) return true;
+      RECT r; GetWindowRect(h, out r);
+      list.Add(new NovaWindowInfo { Id = h.ToInt64(), Title = title.Length > 200 ? title.Substring(0, 200) : title, Process = ProcessOf(h),
+        X = r.Left, Y = r.Top, W = r.Right - r.Left, H = r.Bottom - r.Top, Foreground = h == front });
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
+  public static bool Focus(long id) {
+    IntPtr h = new IntPtr(id);
+    if (!IsWindow(h) || !IsWindowVisible(h)) return false;
+    if (IsIconic(h)) ShowWindow(h, 9);
+    return SetForegroundWindow(h);
+  }
+  static void Send(params INPUT[] items) { if (SendInput((uint)items.Length, items, Marshal.SizeOf(typeof(INPUT))) != items.Length) throw new InvalidOperationException("Windows refused the input"); }
+  static INPUT Mouse(uint flags, uint data) { var i = new INPUT(); i.type = 0; i.u.mi.dwFlags = flags; i.u.mi.mouseData = data; return i; }
+  static INPUT Key(ushort vk, ushort scan, uint flags) { var i = new INPUT(); i.type = 1; i.u.ki.wVk = vk; i.u.ki.wScan = scan; i.u.ki.dwFlags = flags; return i; }
+  public static void Move(int x, int y) { if (!SetCursorPos(x, y)) throw new InvalidOperationException("Cannot move the pointer"); }
+  // button: 0 left, 1 right. count 1 or 2.
+  public static void Click(int x, int y, int button, int count) {
+    Move(x, y);
+    uint down = button == 1 ? 0x0008u : 0x0002u, up = button == 1 ? 0x0010u : 0x0004u;
+    for (int i = 0; i < count; i++) { Send(Mouse(down, 0)); Thread.Sleep(30); Send(Mouse(up, 0)); Thread.Sleep(60); }
+  }
+  public static void Drag(int x, int y, int toX, int toY) {
+    Move(x, y); Thread.Sleep(60); Send(Mouse(0x0002, 0));
+    const int steps = 12;
+    for (int i = 1; i <= steps; i++) { Move(x + (toX - x) * i / steps, y + (toY - y) * i / steps); Thread.Sleep(15); }
+    Thread.Sleep(60); Send(Mouse(0x0004, 0));
+  }
+  // dy > 0 scrolls down, dx > 0 right.
+  public static void Scroll(int dx, int dy) {
+    if (dy != 0) Send(Mouse(0x0800, unchecked((uint)(-dy * 120))));
+    if (dx != 0) Send(Mouse(0x1000, unchecked((uint)(dx * 120))));
+  }
+  public static void TypeText(string text) {
+    foreach (char c in text) {
+      if (c == '\r') continue;
+      if (c == '\n') { Send(Key(0x0D, 0, 0), Key(0x0D, 0, 2)); continue; }
+      Send(Key(0, c, 4), Key(0, c, 6)); Thread.Sleep(4);
+    }
+  }
+  public static void Press(ushort[] keys) {
+    var downs = new List<INPUT>(); var ups = new List<INPUT>();
+    foreach (ushort k in keys) downs.Add(Key(k, 0, (k >= 0x21 && k <= 0x28) || k == 0x2E ? 1u : 0u));
+    for (int i = keys.Length - 1; i >= 0; i--) { ushort k = keys[i]; ups.Add(Key(k, 0, ((k >= 0x21 && k <= 0x28) || k == 0x2E ? 1u : 0u) | 2u)); }
+    Send(downs.ToArray()); Thread.Sleep(30); Send(ups.ToArray());
+  }
+}
+
+// A thin red bar across the top of the main display while control is armed. Click-through, never takes focus.
+public static class NovaDesktopIndicator {
+  [StructLayout(LayoutKind.Sequential)] struct MSG { public IntPtr Hwnd; public uint Message; public UIntPtr WParam; public IntPtr LParam; public uint Time; public int X, Y; public uint Private; }
+  delegate IntPtr WndProc(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct WNDCLASS { public uint cbSize, style; public IntPtr lpfnWndProc; public int cbClsExtra, cbWndExtra; public IntPtr hInstance, hIcon, hCursor, hbrBackground; public string lpszMenuName, lpszClassName; public IntPtr hIconSm; }
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern ushort RegisterClassEx(ref WNDCLASS c);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateWindowEx(uint ex, string cls, string name, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr inst, IntPtr param);
+  [DllImport("user32.dll")] static extern IntPtr DefWindowProc(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int cx, uint flags);
+  [DllImport("user32.dll")] static extern int GetMessage(out MSG m, IntPtr h, uint min, uint max);
+  [DllImport("user32.dll")] static extern bool TranslateMessage(ref MSG m);
+  [DllImport("user32.dll")] static extern IntPtr DispatchMessage(ref MSG m);
+  [DllImport("user32.dll")] static extern bool PostThreadMessage(uint id, uint msg, UIntPtr w, IntPtr l);
+  [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateSolidBrush(uint color);
+  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  static Thread thread; static uint threadId; static IntPtr hwnd; static readonly ManualResetEvent ready = new ManualResetEvent(false);
+  static readonly WndProc proc = delegate (IntPtr h, uint m, IntPtr w, IntPtr l) { return DefWindowProc(h, m, w, l); };
+  public static void Start() {
+    if (thread != null) return;
+    thread = new Thread(Run); thread.IsBackground = true; thread.SetApartmentState(ApartmentState.STA); thread.Start();
+    ready.WaitOne(3000);
+  }
+  static void Run() {
+    threadId = GetCurrentThreadId();
+    var c = new WNDCLASS(); c.cbSize = (uint)Marshal.SizeOf(typeof(WNDCLASS)); c.lpfnWndProc = Marshal.GetFunctionPointerForDelegate(proc);
+    c.hbrBackground = CreateSolidBrush(0x001E1EDC); c.lpszClassName = "NovaDesktopIndicator";   // BGR: red
+    RegisterClassEx(ref c);
+    // topmost, tool window, click-through, no activate
+    hwnd = CreateWindowEx(0x08000000 | 0x00000080 | 0x00000020 | 0x00000008, c.lpszClassName, "NOVA stuurt de pc", 0x80000000, 0, 0, GetSystemMetrics(0), 6, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+    ready.Set();
+    MSG msg;
+    while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) {
+      if (msg.Message == 0x8001) { SetWindowPos(hwnd, new IntPtr(-1), 0, 0, GetSystemMetrics(0), 6, 0x0010 | 0x0040); ShowWindow(hwnd, 4); continue; }
+      if (msg.Message == 0x8002) { ShowWindow(hwnd, 0); continue; }
+      if (msg.Message == 0x0012) break;
+      TranslateMessage(ref msg); DispatchMessage(ref msg);
+    }
+  }
+  public static void Show(bool on) { if (threadId != 0) PostThreadMessage(threadId, on ? 0x8001u : 0x8002u, UIntPtr.Zero, IntPtr.Zero); }
+}
+
+// Kill switch: the hotkey disarms right on its own thread, without waiting for the agent's request loop.
+public static class NovaDesktopKill {
+  [StructLayout(LayoutKind.Sequential)] struct MSG { public IntPtr Hwnd; public uint Message; public UIntPtr WParam; public IntPtr LParam; public uint Time; public int X, Y; public uint Private; }
+  [DllImport("user32.dll", SetLastError = true)] static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint key);
+  [DllImport("user32.dll")] static extern int GetMessage(out MSG m, IntPtr h, uint min, uint max);
+  static Thread thread; static string failure = "";
+  public static string Failure() { return failure; }
+  public static bool Start(string chord) {
+    uint[] parsed = NovaDesktopPolicy.ParseChord(chord);
+    var ready = new ManualResetEvent(false); bool ok = false;
+    thread = new Thread(delegate () {
+      ok = RegisterHotKey(IntPtr.Zero, 1, parsed[0] | 0x4000, parsed[1]);
+      if (!ok) failure = "Windows error " + Marshal.GetLastWin32Error();
+      ready.Set();
+      if (!ok) return;
+      MSG msg;
+      while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) { if (msg.Message == 0x0312) NovaDesktopGuard.Disarm("hotkey"); }
+    });
+    thread.IsBackground = true; thread.Start(); ready.WaitOne(2000);
+    return ok;
+  }
+}
+'@ -IgnoreWarnings
+
+$desktopCfg = $config.desktop
+$script:desktopView = ($desktopCfg -and $desktopCfg.enabled -eq $true)
+$script:desktopControl = ($script:desktopView -and $desktopCfg.control -eq $true)
+$script:desktopDeny = @(
+  'KeePass', 'Bitwarden', '1Password', 'LastPass', 'Dashlane', 'Enpass', 'Proton Pass', 'NordPass',
+  'Windows Security', 'Credential', 'User Account Control', 'consent', 'LogonUI', 'Referenties', 'Aanmelden bij Windows'
+)
+if ($desktopCfg -and $desktopCfg.denyList) { $script:desktopDeny = @($desktopCfg.denyList | ForEach-Object { [string]$_ }) }
+$script:desktopKillChord = if ($desktopCfg -and $desktopCfg.killHotkey) { [string]$desktopCfg.killHotkey } else { 'Ctrl+Alt+Shift+K' }
+$script:desktopLimiter = New-Object NovaRateLimiter 10, 1000
+$script:desktopLog = Join-Path $PSScriptRoot 'desktop-actions.log'
+$script:desktopShown = $false
+$script:desktopMaxType = if ($desktopCfg -and $desktopCfg.maxTypeChars) { [Math]::Min(500, [int]$desktopCfg.maxTypeChars) } else { 500 }
+
+function Start-DesktopGuard {
+  if (-not $script:desktopControl) { return }
+  # The kill chord may not clash with the agent's own shortcuts.
+  $own = @('Ctrl+Alt+N', 'Ctrl+Alt+Space', 'Ctrl+Alt+M', 'Ctrl+Alt+D')
+  $mine = [NovaDesktopPolicy]::ParseChord($script:desktopKillChord)
+  foreach ($chord in $own) {
+    $other = [NovaControls]::ParseChord($chord)
+    if ($other[0] -eq $mine[0] -and $other[1] -eq $mine[1]) { throw "Kill-switch hotkey $($script:desktopKillChord) clashes with an agent shortcut" }
+  }
+  [NovaDesktopIndicator]::Start()
+  if (-not [NovaDesktopKill]::Start($script:desktopKillChord)) { Write-Host "Desktop kill hotkey not registered: $([NovaDesktopKill]::Failure())" }
+}
+function Write-DesktopLog([string]$line) {
+  try { Add-Content -Path $script:desktopLog -Value ("{0:o} {1}" -f (Get-Date), $line) -Encoding UTF8 } catch { }
+}
+# Keeps the red bar and tray dot in step with the armed state (also covers expiry and the kill switch).
+function Sync-DesktopState {
+  if (-not $script:desktopControl) { return }
+  $armed = [NovaDesktopGuard]::IsArmed([NovaDesktopGuard]::NowMs())
+  if ($armed -ne $script:desktopShown) {
+    $script:desktopShown = $armed
+    [NovaDesktopIndicator]::Show($armed)
+    [NovaControls]::SetArmed($armed)
+    if (-not $armed) { Write-DesktopLog "disarmed reason=$([NovaDesktopGuard]::Reason())" }
+  }
+}
+function Get-DesktopScreen($display) {
+  $screens = [System.Windows.Forms.Screen]::AllScreens
+  $n = if ($null -ne $display) { [int]$display } else { 0 }
+  if ($n -ge 1 -and $n -le $screens.Count) { return $screens[$n - 1] }
+  return [System.Windows.Forms.Screen]::PrimaryScreen
+}
+function Test-DesktopForegroundDenied {
+  $w = [NovaDesktopInput]::Foreground()
+  if (-not $w) { return $false }
+  return [NovaDesktopPolicy]::IsDenied($w.Title, $w.Process, $script:desktopDeny)
+}
+function Send-DesktopImage($ctx, [byte[]]$bytes, [string]$mime, [int]$width, [int]$height, [int]$display) {
+  $ctx.Response.StatusCode = 200
+  $ctx.Response.ContentType = $mime
+  $ctx.Response.Headers['x-nova-width'] = [string]$width
+  $ctx.Response.Headers['x-nova-height'] = [string]$height
+  $ctx.Response.Headers['x-nova-display'] = [string]$display
+  $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+  $ctx.Response.Close()
+}
+function Get-DesktopShot($screen, [int]$maxWidth, $window) {
+  Add-Type -AssemblyName System.Drawing
+  $b = $screen.Bounds
+  $x = $b.X; $y = $b.Y; $w = $b.Width; $h = $b.Height
+  if ($window) {
+    # A window crop of what is on screen (windows on top of it show too), clamped to its display.
+    $x = [Math]::Max($b.X, $window.X); $y = [Math]::Max($b.Y, $window.Y)
+    $w = [Math]::Min($b.X + $b.Width, $window.X + $window.W) - $x; $h = [Math]::Min($b.Y + $b.Height, $window.Y + $window.H) - $y
+    if ($w -lt 8 -or $h -lt 8) { throw 'Window is not on that display' }
+  }
+  $full = New-Object System.Drawing.Bitmap $w, $h
+  $g = [System.Drawing.Graphics]::FromImage($full)
+  try { $g.CopyFromScreen($x, $y, 0, 0, (New-Object System.Drawing.Size $w, $h)) } finally { $g.Dispose() }
+  $scale = [Math]::Min(1.0, $maxWidth / [double]$w)
+  $tw = [Math]::Max(1, [int][Math]::Round($w * $scale)); $th = [Math]::Max(1, [int][Math]::Round($h * $scale))
+  $out = $full
+  if ($scale -lt 1.0) {
+    $out = New-Object System.Drawing.Bitmap $tw, $th
+    $g2 = [System.Drawing.Graphics]::FromImage($out)
+    try { $g2.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic; $g2.DrawImage($full, 0, 0, $tw, $th) } finally { $g2.Dispose(); $full.Dispose() }
+  }
+  $ms = New-Object IO.MemoryStream
+  try { $out.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png); return @{ bytes = $ms.ToArray(); width = $tw; height = $th } }
+  finally { $out.Dispose(); $ms.Dispose() }
+}
+function Invoke-DesktopRoute($ctx, [string]$route) {
+  $method = $ctx.Request.HttpMethod
+  if (-not $script:desktopView) { Send $ctx 403 @{ ok = $false; error = 'Desktop access is off in agent.json' }; return }
+  $now = [NovaDesktopGuard]::NowMs()
+  $armed = $script:desktopControl -and [NovaDesktopGuard]::IsArmed($now)
+  switch ($route) {
+    'status' {
+      $displays = @(Get-Displays | ForEach-Object { @{ index = $_.index; width = $_.width; height = $_.height; primary = $_.primary } })
+      Send $ctx 200 @{
+        ok = $true; view = $true; control = [bool]$script:desktopControl; armed = [bool]$armed
+        armedUntil = $(if ($armed) { [NovaDesktopGuard]::ExpiresAt() } else { $null })
+        paused = [bool]$script:agentPaused; killHotkey = $script:desktopKillChord; version = $agentVersion; displays = $displays
+      }
+    }
+    'windows' {
+      if ($method -ne 'GET') { Send $ctx 405 @{ ok = $false; error = 'Use GET' }; return }
+      $list = @([NovaDesktopInput]::Windows() | ForEach-Object {
+        @{ id = [string]$_.Id; title = $_.Title; process = $_.Process; foreground = [bool]$_.Foreground; x = $_.X; y = $_.Y; width = $_.W; height = $_.H }
+      })
+      Send $ctx 200 @{ ok = $true; windows = $list }
+    }
+    'screenshot' {
+      if ($method -ne 'GET') { Send $ctx 405 @{ ok = $false; error = 'Use GET' }; return }
+      if ($script:agentPaused) { Send $ctx 409 @{ ok = $false; error = 'Agent is paused' }; return }
+      if (Test-DesktopForegroundDenied) { Send $ctx 403 @{ ok = $false; error = 'The active window is protected' }; return }
+      $q = $ctx.Request.QueryString
+      $display = if ($q['display']) { [int]$q['display'] } else { 0 }
+      $maxWidth = [Math]::Min(2560, [Math]::Max(320, $(if ($q['maxWidth']) { [int]$q['maxWidth'] } else { 1280 })))
+      $window = $null
+      if ($q['window']) {
+        $window = [NovaDesktopInput]::Windows() | Where-Object { [string]$_.Id -eq [string]$q['window'] } | Select-Object -First 1
+        if (-not $window) { Send $ctx 404 @{ ok = $false; error = 'Unknown window' }; return }
+        if ([NovaDesktopPolicy]::IsDenied($window.Title, $window.Process, $script:desktopDeny)) { Send $ctx 403 @{ ok = $false; error = 'That window is protected' }; return }
+      }
+      $screen = Get-DesktopScreen $display
+      $shot = Get-DesktopShot $screen $maxWidth $window
+      Write-DesktopLog "screenshot display=$display size=$($shot.width)x$($shot.height)"
+      Send-DesktopImage $ctx $shot.bytes 'image/png' $shot.width $shot.height $display
+    }
+    'control' {
+      if ($method -ne 'POST') { Send $ctx 405 @{ ok = $false; error = 'Use POST' }; return }
+      $body = Read-Body $ctx
+      if ($body.armed -eq $true) {
+        if (-not $script:desktopControl) { Send $ctx 403 @{ ok = $false; error = 'Desktop control is off in agent.json' }; return }
+        if ($script:agentPaused) { Send $ctx 409 @{ ok = $false; error = 'Agent is paused' }; return }
+        $until = [NovaDesktopGuard]::Arm([double]$body.ttlSeconds, $now)
+        Sync-DesktopState
+        Write-DesktopLog "armed until=$until"
+        Send $ctx 200 @{ ok = $true; armed = $true; armedUntil = $until }
+      } else {
+        [NovaDesktopGuard]::Disarm('api')
+        Sync-DesktopState
+        Send $ctx 200 @{ ok = $true; armed = $false }
+      }
+    }
+    'input' {
+      if ($method -ne 'POST') { Send $ctx 405 @{ ok = $false; error = 'Use POST' }; return }
+      if (-not $script:desktopControl) { Send $ctx 403 @{ ok = $false; error = 'Desktop control is off in agent.json' }; return }
+      if ($script:agentPaused -or -not $armed) { Send $ctx 409 @{ ok = $false; error = 'Control is not armed' }; return }
+      if (-not $script:desktopLimiter.Allow($now)) { Send $ctx 429 @{ ok = $false; error = 'Too many actions per second' }; return }
+      if (Test-DesktopForegroundDenied) { Send $ctx 403 @{ ok = $false; error = 'The active window is protected' }; return }
+      $body = Read-Body $ctx
+      $action = [string]$body.action
+      $screen = Get-DesktopScreen $body.display
+      $b = $screen.Bounds
+      $sw = if ($body.relativeTo) { [double]$body.relativeTo.width } else { 0 }
+      $sh = if ($body.relativeTo) { [double]$body.relativeTo.height } else { 0 }
+      $point = { param($px, $py) [NovaDesktopPolicy]::ScalePoint([double]$px, [double]$py, $sw, $sh, $b.X, $b.Y, $b.Width, $b.Height) }
+      $detail = $action
+      switch ($action) {
+        'move' { $p = & $point $body.x $body.y; [NovaDesktopInput]::Move($p[0], $p[1]); $detail = "move $($p[0]),$($p[1])" }
+        'click' { $p = & $point $body.x $body.y; [NovaDesktopInput]::Click($p[0], $p[1], 0, 1); $detail = "click $($p[0]),$($p[1])" }
+        'doubleclick' { $p = & $point $body.x $body.y; [NovaDesktopInput]::Click($p[0], $p[1], 0, 2); $detail = "doubleclick $($p[0]),$($p[1])" }
+        'rightclick' { $p = & $point $body.x $body.y; [NovaDesktopInput]::Click($p[0], $p[1], 1, 1); $detail = "rightclick $($p[0]),$($p[1])" }
+        'drag' {
+          $p = & $point $body.x $body.y; $q2 = & $point $body.toX $body.toY
+          [NovaDesktopInput]::Drag($p[0], $p[1], $q2[0], $q2[1]); $detail = "drag $($p[0]),$($p[1]) to $($q2[0]),$($q2[1])"
+        }
+        'scroll' {
+          if ($null -ne $body.x -and $null -ne $body.y) { $p = & $point $body.x $body.y; [NovaDesktopInput]::Move($p[0], $p[1]) }
+          $dy = [int][Math]::Max(-50, [Math]::Min(50, [double]$body.dy)); $dx = if ($body.dx) { [int][Math]::Max(-50, [Math]::Min(50, [double]$body.dx)) } else { 0 }
+          [NovaDesktopInput]::Scroll($dx, $dy); $detail = "scroll dx=$dx dy=$dy"
+        }
+        'type' {
+          $text = [string]$body.text
+          if (-not $text -or $text.Length -gt $script:desktopMaxType) { throw "text must be 1-$($script:desktopMaxType) characters" }
+          [NovaDesktopInput]::TypeText($text); $detail = "type chars=$($text.Length)"
+        }
+        'key' {
+          $keys = [NovaDesktopPolicy]::ParseKey([string]$body.key)
+          [NovaDesktopInput]::Press($keys); $detail = "key count=$($keys.Length)"
+        }
+        'focus_window' {
+          $id = [long]$body.windowId
+          $target = [NovaDesktopInput]::Windows() | Where-Object { $_.Id -eq $id } | Select-Object -First 1
+          if (-not $target) { Send $ctx 404 @{ ok = $false; error = 'Unknown window' }; return }
+          if ([NovaDesktopPolicy]::IsDenied($target.Title, $target.Process, $script:desktopDeny)) { Send $ctx 403 @{ ok = $false; error = 'That window is protected' }; return }
+          if (-not [NovaDesktopInput]::Focus($id)) { throw 'Windows would not bring that window forward' }
+          $detail = 'focus_window'
+        }
+        default { throw 'Unknown action' }
+      }
+      $fg = [NovaDesktopInput]::Foreground()
+      Write-DesktopLog "input $detail foreground=$(if ($fg) { $fg.Process } else { '' })"
+      Send $ctx 200 @{ ok = $true; action = $action; detail = $detail }
+    }
+    default { Send $ctx 404 @{ ok = $false; error = 'Not found' } }
+  }
+}
 $wallpaperStore = Join-Path $PSScriptRoot 'wallpaper.json'
 $script:placed = @{}
 $novaPort = if ($config.novaPort) { [int]$config.novaPort } else { 8080 }
@@ -1294,6 +1760,7 @@ function Send-HelperNotification($value) {
 # Actions come only from native controls or authenticated requests. Never evaluate arbitrary user-provided script.
 function Invoke-HelperControl([string]$action) {
   if ($action -eq 'exit') { $listener.Stop(); [NovaControls]::Stop(); return }
+  if ($action -eq 'desktop-stop') { [NovaDesktopGuard]::Disarm('tray'); Sync-DesktopState; return }
   if ($action -eq 'desktop') {
     $shell = New-Object -ComObject Shell.Application
     $shell.ToggleDesktop()
@@ -1858,11 +2325,13 @@ try {
   [NovaControls]::Configure($keys.open, $keys.speak, $keys.mute, $keys.desktop)
   [NovaControls]::Start()
 } catch { Write-Host "Agent controls: $($_.Exception.Message)" }
+try { Start-DesktopGuard } catch { Write-Host "Desktop control: $($_.Exception.Message)" }
 $pendingRequest = $listener.GetContextAsync()
 while ($listener.IsListening) {
   while ($null -ne ($action = [NovaControls]::Take())) {
     try { Invoke-HelperControl $action } catch { Write-Host "Helper control: $($_.Exception.Message)" }
   }
+  try { Sync-DesktopState } catch { }
   if (-not $listener.IsListening) { break }
   if (-not $pendingRequest.IsCompleted) { Start-Sleep -Milliseconds 100; continue }
   $ctx = $pendingRequest.GetAwaiter().GetResult()
@@ -1955,6 +2424,7 @@ while ($listener.IsListening) {
           $result.ok = -not $result.risky
           Send $ctx 200 $result
         }
+        elseif ($path.StartsWith('/v1/desktop/')) { Invoke-DesktopRoute $ctx $path.Substring('/v1/desktop/'.Length) }
         else { Send $ctx 404 @{ ok = $false; error = 'Not found' } }
       }
     }
