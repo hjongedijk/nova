@@ -32,6 +32,6 @@ import { DailyMemorySummaryService } from "./daily-memory-summary.service.js";
     OutcomeService,
     DailyMemorySummaryService,
   ],
-  exports: [OrchestratorService],
+  exports: [OrchestratorService, ConfirmationHandler],
 })
 export class ChatModule {}
