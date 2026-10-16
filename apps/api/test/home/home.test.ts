@@ -19,6 +19,7 @@ import {
   HomeSummaryService,
 } from "../../src/home/index.js";
 import { HomeSource } from "../../src/home/home.source.js";
+import { AutonomyLevelStore } from "../../src/tools/autonomy-level.store.js";
 import { ToolsModule } from "../../src/tools/tools.module.js";
 import { ToolsService } from "../../src/tools/tools.service.js";
 import type { ToolResult } from "../../src/tools/tool.types.js";
@@ -62,6 +63,10 @@ describe("Home Assistant", () => {
     confirmations = moduleRef.get(ConfirmationsService);
     config = moduleRef.get(NovaConfig) as unknown as typeof config;
     moduleRef.get(HomeSource).verifyDelayMs = 0;
+    // These tests cover the confirmation flow itself, so no action may auto-approve.
+    vi.spyOn(moduleRef.get(AutonomyLevelStore), "get").mockReturnValue(
+      "careful",
+    );
     await home.sync(true);
   });
   afterAll(async () => {
