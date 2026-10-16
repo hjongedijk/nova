@@ -931,16 +931,6 @@ const cardCanvasColours = async (page) => {
     return seen.size;
   }, png);
 };
-// The turn-on animation ends by itself: wait until the frame counter stops moving.
-const cardSettled = async (page) => {
-  let last = -1;
-  for (let i = 0; i < 40; i++) {
-    const now = await cardFrames(page);
-    if (now === last && now > 0) return;
-    last = now;
-    await page.waitForTimeout(1200);
-  }
-};
 const cardFrames = (page) =>
   page.evaluate(() =>
     Number(
