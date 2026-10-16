@@ -55,6 +55,8 @@ export interface ToolPlan {
   entity?: { area?: string | null } | null;
   /** Anything else the source needs in `execute`. */
   data?: unknown;
+  /** This exact call is routine and low-impact (for example a call to a saved contact): the autonomy level may skip the question. */
+  routine?: boolean;
 }
 
 export interface ToolPlanError {

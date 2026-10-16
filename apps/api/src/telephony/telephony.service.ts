@@ -434,6 +434,13 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
     return null;
   }
 
+  /** Is this (already normalised) name one of the saved contacts? */
+  isContact(name: string): boolean {
+    return (this.store.get().contacts ?? []).some(
+      (c) => c.name.toLowerCase() === name.toLowerCase(),
+    );
+  }
+
   /** Replaces the contact list; every contact must live on the trunk's domain. */
   setContacts(input: unknown): void {
     if (!Array.isArray(input))

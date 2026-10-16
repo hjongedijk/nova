@@ -23,6 +23,7 @@ import {
 import { parseToolArguments } from "../tools/tool-arguments.js";
 import { ToolsService } from "../tools/tools.service.js";
 import { TOOL_DISCOVERY_NAME } from "../tools/tool-selection.js";
+import { inlineCardFor } from "../visualization/auto-card.js";
 import {
   OmniRouteClient,
   type GatewayMetadata,
@@ -405,6 +406,10 @@ export class OrchestratorService {
       message,
       role,
       input.communicationPreferences,
+      {
+        toolNames: modelTools.map((tool) => tool.function.name),
+        hasAttachments: Boolean(input.attachments?.length),
+      },
     );
     if (responseLanguage)
       messages.splice(1, 0, {
@@ -446,6 +451,8 @@ export class OrchestratorService {
     let emptyRetried = false;
     let completedSteps = 0;
     let liveToolAttempted = false;
+    // At most one inline hologram card per turn, and none once the model opened a view itself.
+    let inlineCardShown = false;
     let requiredReadAttempted = false;
     let requiredEvidenceSucceeded = false;
     const evidenceUnavailable = () => {
@@ -606,8 +613,26 @@ export class OrchestratorService {
           status: (result.status as string | undefined) ?? null,
         });
         // Visualisation tools ask the screen to open or refresh the holographic view.
-        if (result.ok && isVisualizationEvent(result.visualization))
+        if (result.ok && isVisualizationEvent(result.visualization)) {
+          inlineCardShown = true;
           emit("visualization", result.visualization);
+        } else if (!inlineCardShown && result.ok) {
+          // Inline card: decided only from this real tool result, never from model text.
+          const card = inlineCardFor(name, result, {
+            timeZone: this.config.timezone,
+          });
+          if (card) {
+            inlineCardShown = true;
+            emit("visualization", {
+              id: card.id,
+              title: card.title,
+              kind: card.kind,
+              revision: card.revision,
+              action: "inline",
+              scene: card,
+            });
+          }
+        }
         if (result.ambiguous && Array.isArray(result.candidates)) {
           const choices = result.candidates
             .flatMap((candidate) => {

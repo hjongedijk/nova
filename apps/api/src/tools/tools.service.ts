@@ -1,4 +1,15 @@
-import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
+import {
+  Injectable,
+  Logger,
+  Optional,
+  type OnModuleInit,
+} from "@nestjs/common";
+import {
+  allowsAutoApproval,
+  TAINT_WINDOW_MS,
+  UNTRUSTED_SOURCES,
+} from "./autonomy-policy.js";
+import { AutonomyLevelStore } from "./autonomy-level.store.js";
 import { DiscoveryService } from "@nestjs/core";
 import type {
   ModelRoleId,
@@ -273,7 +284,11 @@ export class ToolsService implements OnModuleInit {
     private readonly confirmations: ConfirmationsService,
     private readonly memory: SessionMemoryService,
     private readonly settings: SettingsStore,
+    @Optional() private readonly autonomy?: AutonomyLevelStore,
   ) {}
+
+  /** When untrusted content (web, mail, files, the screen) was last read per session. */
+  private readonly untrustedAt = new Map<string, number>();
 
   onModuleInit(): void {
     this.sources = this.discovery
@@ -622,7 +637,20 @@ export class ToolsService implements OnModuleInit {
               grant.argsHash === argsHash &&
               grant.schemaHash === schemaFingerprint,
           );
-        if (!matches && !standing) {
+        const auto =
+          !matches &&
+          !standing &&
+          risk === "CONFIRM" &&
+          !screenRequired &&
+          !unknownArguments &&
+          allowsAutoApproval(name, {
+            level: this.autonomy?.get() ?? "careful",
+            routine: plan.routine,
+            tainted:
+              Date.now() - (this.untrustedAt.get(sessionId) ?? 0) <
+              TAINT_WINDOW_MS,
+          });
+        if (!matches && !standing && !auto) {
           confirmation = "pending";
           const action = this.confirmations.create(
             sessionId,
@@ -634,7 +662,11 @@ export class ToolsService implements OnModuleInit {
           );
           return finish({ ok: false, requiresConfirmation: true, action });
         }
-        confirmation = standing && !matches ? "standing_approval" : "confirmed";
+        confirmation = auto
+          ? "auto_approved"
+          : standing && !matches
+            ? "standing_approval"
+            : "confirmed";
         standingApproval = confirmation === "standing_approval";
         if (
           always &&
@@ -687,6 +719,11 @@ export class ToolsService implements OnModuleInit {
       const result = await tool.source.execute(name, args, { ...call, plan });
       if (!result || typeof result.ok !== "boolean")
         return finish({ ok: false, error: "Malformed tool response" });
+      if (UNTRUSTED_SOURCES.has(tool.source.source)) {
+        this.untrustedAt.set(sessionId, Date.now());
+        if (this.untrustedAt.size > 500)
+          this.untrustedAt.delete(this.untrustedAt.keys().next().value!);
+      }
       return finish(result);
     } catch {
       this.log.warn(`${name} failed`);

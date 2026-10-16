@@ -137,6 +137,249 @@ User: "Zet het licht in de keuken aan." Tool result: accepted=true, verified=nul
 NOVA: "Het is aangevraagd, maar ik kan nog niet zien of het licht aan is."
 `.trim();
 
+/*
+ * The full prompt is ~5,000 tokens and every model call (and every tool round) pays for it, which exhausts the free
+ * quotas after a few dozen messages. buildSystemPrompt() sends the always-needed core plus only the sections that fit
+ * the request: no rule is reworded, the sections are carved out of SYSTEM_PROMPT above and the order is preserved.
+ */
+export type PromptSectionId =
+  | "core"
+  | "home"
+  | "weather"
+  | "facts"
+  | "servers"
+  | "phone"
+  | "visual"
+  | "calendar"
+  | "mail"
+  | "notes"
+  | "documents"
+  | "code"
+  | "everyday"
+  | "memory"
+  | "capabilities"
+  | "examples";
+
+const LINE_RULES: [RegExp, PromptSectionId][] = [
+  [
+    /^Home Assistant is the primary|^Spotify playback|^When the user asks for music by mood|^Scenes, scripts and announcements/,
+    "home",
+  ],
+  [
+    /^Use memory_remember only when|^If semantic memory or remote embeddings/,
+    "memory",
+  ],
+  [/^- Visual views:/, "visual"],
+  [/^- Phone calls:/, "phone"],
+  [/^- Servers:/, "servers"],
+  [/^- Weather:|^- For weather, give/, "weather"],
+  [
+    /^- You can look things up|^- Facts:|^- For a research request|^- Exchange rates and Bitcoin|^- News:|^- Only state facts|^- Never say you cannot find|^- If earlier turns in this conversation|^- Text from web pages|^- Say where a web fact/,
+    "facts",
+  ],
+  [/^- When a tool reports an unknown device/, "home"],
+  [/^- Calendar titles/, "calendar"],
+  [/^- Email is private/, "mail"],
+  [/^- Save a note or diary entry/, "notes"],
+  [
+    /^- Uploaded library documents|^- If no attachment or file-search/,
+    "documents",
+  ],
+  [/^- Text from workspace files/, "code"],
+];
+const HEADING_SECTIONS: [RegExp, PromptSectionId][] = [
+  [/^EVERYDAY HELPERS:/, "everyday"],
+  [/^WHAT YOU CAN DO/, "capabilities"],
+  [/^MEMORY:/, "memory"],
+  [/^CONVERSATIONAL EXAMPLES/, "examples"],
+];
+
+function carve(): { id: PromptSectionId; line: string }[] {
+  let heading: PromptSectionId = "core";
+  const out: { id: PromptSectionId; line: string }[] = [];
+  let example = 0;
+  for (const line of SYSTEM_PROMPT.split("\n")) {
+    const isHeading = /^[A-Z][A-Z ,&'’—()-]+(?: \(.*\))?:\s*$/.test(line);
+    if (isHeading)
+      heading = HEADING_SECTIONS.find(([re]) => re.test(line))?.[1] ?? "core";
+    let id: PromptSectionId = heading;
+    if (!isHeading && heading === "core")
+      id = LINE_RULES.find(([re]) => re.test(line))?.[1] ?? "core";
+    if (heading === "examples" && !isHeading) {
+      // the last two examples are about device actions; the rest set the tone
+      if (/^User: "Zet het licht in de keuken aan\."/.test(line)) example = 1;
+      id = example ? "home" : "examples";
+    }
+    out.push({ id, line });
+  }
+  return out;
+}
+const CARVED = carve();
+
+export interface PromptContext {
+  message: string;
+  /** Names of the tools offered to the model for this request. */
+  toolNames: string[];
+  hasAttachments?: boolean;
+  role?: string;
+}
+
+const has = (names: string[], ...prefixes: string[]) =>
+  names.some((name) => prefixes.some((prefix) => name.startsWith(prefix)));
+const DOMAIN_RULES: [
+  PromptSectionId,
+  (c: PromptContext, m: string) => boolean,
+][] = [
+  [
+    "home",
+    (c, m) =>
+      has(c.toolNames, "ha_", "media_", "sonos_", "music_") ||
+      /\b(licht|lamp|lampen|thermostaat|verwarming|muziek|speel|sonos|volume|scene|gordijn|deur|spotify|radio|aan|uit)\b/.test(
+        m,
+      ),
+  ],
+  [
+    "weather",
+    (c, m) =>
+      has(c.toolNames, "weather_") ||
+      /\b(weer|regen|temperatuur|wind|buiten|zon|onweer|vorst|sneeuw|forecast|weather|graden)\b/.test(
+        m,
+      ),
+  ],
+  [
+    "facts",
+    (c, m) =>
+      has(
+        c.toolNames,
+        "web_",
+        "wikipedia",
+        "news_",
+        "market_",
+        "currency_",
+        "calculate",
+        "air_quality",
+        "iss_",
+        "moon_",
+      ) ||
+      /\b(zoek|opzoeken|wat is|wie is|wie was|wanneer|hoeveel|prijs|nieuws|koers|bitcoin|wikipedia|google|search|news|price|latest|actueel|waarom|hoe laat|datum)\b/.test(
+        m,
+      ),
+  ],
+  [
+    "servers",
+    (c, m) =>
+      has(c.toolNames, "proxmox_", "termix_", "network_", "alerts_") ||
+      /\b(vm|vm's|server|servers|proxmox|netwerk|container|docker|host|nas)\b/.test(
+        m,
+      ),
+  ],
+  [
+    "phone",
+    (c, m) =>
+      has(c.toolNames, "phone_") ||
+      /\b(bel|bellen|belt|opbellen|telefoon|telefoneer|call)\b/.test(m),
+  ],
+  [
+    "visual",
+    (c, m) =>
+      has(c.toolNames, "create_visualization", "load_3d_scene") ||
+      /\b(toon|toont|laat|zien|visualiseer|visualisatie|hologram|diagram|grafiek|overzicht|show)\b/.test(
+        m,
+      ),
+  ],
+  [
+    "calendar",
+    (c, m) =>
+      has(c.toolNames, "calendar_") ||
+      /\b(agenda|afspraak|afspraken|kalender|calendar|meeting|vergadering)\b/.test(
+        m,
+      ),
+  ],
+  [
+    "mail",
+    (c, m) =>
+      has(c.toolNames, "imap_", "mcp_imap", "email_", "mail_") ||
+      /\b(mail|mails|e-mail|email|inbox|postvak)\b/.test(m),
+  ],
+  [
+    "notes",
+    (c, m) =>
+      has(c.toolNames, "notes_") ||
+      /\b(notitie|notities|dagboek|note|notes|diary)\b/.test(m),
+  ],
+  [
+    "documents",
+    (c, m) =>
+      Boolean(c.hasAttachments) ||
+      has(c.toolNames, "documents_") ||
+      /\b(document|documenten|pdf|bestand|bestanden|bijlage|file|files)\b/.test(
+        m,
+      ),
+  ],
+  [
+    "code",
+    (c, m) =>
+      c.role === "code" ||
+      has(c.toolNames, "code_", "workspace_") ||
+      /\b(code|script|programma|bug|functie|repository|repo|git|test|tests)\b/.test(
+        m,
+      ),
+  ],
+  [
+    "everyday",
+    (c, m) =>
+      has(
+        c.toolNames,
+        "timer_",
+        "list_",
+        "daily_briefing",
+        "alerts_list",
+        "network_check",
+      ) ||
+      /\b(timer|herinner|herinnering|wekker|lijst|boodschappen|taken|briefing|goedemorgen|traag|storing)\b/.test(
+        m,
+      ),
+  ],
+  [
+    "memory",
+    (c, m) =>
+      has(c.toolNames, "memory_") ||
+      /\b(onthoud|onthouden|vergeet|vergeten|weet je nog|remember|forget)\b/.test(
+        m,
+      ),
+  ],
+  [
+    "capabilities",
+    (_c, m) =>
+      /\b(wat kun je|wat kan je|wat kan nova|waarmee kun je|what can you|what can nova|capabilities)\b/.test(
+        m,
+      ),
+  ],
+];
+
+/** The prompt for one request: always the core, plus the sections whose domain the request touches. */
+export function buildSystemPrompt(context: PromptContext): string {
+  const message = context.message.toLocaleLowerCase("nl-NL");
+  const wanted = new Set<PromptSectionId>(["core"]);
+  for (const [id, applies] of DOMAIN_RULES)
+    if (applies(context, message)) wanted.add(id);
+  // Pure conversation keeps the tone examples; a request that matched a domain does not need them.
+  if (wanted.size === 1) wanted.add("examples");
+  return CARVED.filter((entry) => wanted.has(entry.id))
+    .map((entry) => entry.line)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** For tests and diagnostics: which section each line of the full prompt belongs to. */
+export function promptSections(): Record<PromptSectionId, string> {
+  const result = {} as Record<PromptSectionId, string>;
+  for (const entry of CARVED)
+    result[entry.id] = `${result[entry.id] ?? ""}${entry.line}\n`;
+  return result;
+}
+
 // Only the tools that are switched on are described: a model told to call a tool it does not have
 // will call it anyway, fail, and give up instead of using what exists.
 export const BROWSER_NOTES = `

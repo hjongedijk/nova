@@ -67,7 +67,11 @@ export class TelephonySource implements ToolSource {
     const internalOk =
       target.kind === "internal" &&
       this.telephony.allowsInternalWithoutConfirmation();
+    // A call to your own phone or a saved contact is routine; a raw external number is not.
+    const routine =
+      target.kind === "internal" || this.telephony.isContact(target.number);
     return {
+      routine,
       args: {
         to: target.number,
         message: args.message,

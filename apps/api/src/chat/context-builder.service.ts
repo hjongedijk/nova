@@ -8,7 +8,7 @@ import { SemanticMemoryService } from "../memory/semantic-memory.service.js";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { PlaybooksService } from "../settings/playbooks.service.js";
 import type { ModelMessage } from "./omniroute-client.service.js";
-import { SYSTEM_PROMPT } from "./prompt.js";
+import { buildSystemPrompt, type PromptContext } from "./prompt.js";
 import type { CommunicationPreference, ModelRoleId } from "@nova/contracts";
 import { socialTimeContext } from "./social-time.js";
 import { sanitize } from "../core/security/sanitize.js";
@@ -107,10 +107,19 @@ export class ContextBuilder {
     message: string,
     role: ModelRoleId = "conversation",
     communicationPreferences: CommunicationPreference[] = [],
+    promptContext?: Omit<PromptContext, "message">,
   ): Promise<ModelMessage[]> {
     message = sanitize(message);
     const messages: ModelMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "system",
+        content: buildSystemPrompt({
+          toolNames: [],
+          role,
+          ...promptContext,
+          message,
+        }),
+      },
     ];
     if (role === "conversation")
       messages.push({
