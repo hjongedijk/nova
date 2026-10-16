@@ -21,7 +21,7 @@ param(
   [string]$ConfigPath = (Join-Path $PSScriptRoot 'agent.json')
 )
 $ErrorActionPreference = 'Stop'
-$agentVersion = '2026-10-16.3'
+$agentVersion = '2026-10-16.4'
 
 # However the agent is started (task, double-click, a terminal), it runs on without a window: this copy starts
 # a hidden one and ends. (conhost --headless also keeps Windows Terminal from opening a window.)
@@ -995,8 +995,8 @@ public class NovaControls {
     tray = Activator.CreateInstance(notifyType);
     object menu = Activator.CreateInstance(menuType);
     object items = menuType.GetProperty("Items").GetValue(menu, null);
-    string[] labels = { "Openen", "Pauzeren / hervatten", "Besturing stoppen", "Instellingen", "Afsluiten" };
-    string[] commands = { "open", "pause", "desktop-stop", "settings", "exit" };
+    string[] labels = { "Openen", "Pauzeren / hervatten", "Bureaublad: meekijken aan/uit", "Bureaublad: bedienen aan/uit", "Besturing stoppen", "Instellingen", "Afsluiten" };
+    string[] commands = { "open", "pause", "desktop-view", "desktop-control", "desktop-stop", "settings", "exit" };
     for (int i = 0; i < labels.Length; i++) {
       string command = commands[i];
       object item = items.GetType().GetMethod("Add", new Type[] { typeof(string) }).Invoke(items, new object[] { labels[i] });
@@ -1330,8 +1330,10 @@ $script:desktopLog = Join-Path $PSScriptRoot 'desktop-actions.log'
 $script:desktopShown = $false
 $script:desktopMaxType = if ($desktopCfg -and $desktopCfg.maxTypeChars) { [Math]::Min(500, [int]$desktopCfg.maxTypeChars) } else { 500 }
 
+$script:desktopGuardStarted = $false
 function Start-DesktopGuard {
-  if (-not $script:desktopControl) { return }
+  if (-not $script:desktopControl -or $script:desktopGuardStarted) { return }
+  $script:desktopGuardStarted = $true
   # The kill chord may not clash with the agent's own shortcuts.
   $own = @('Ctrl+Alt+N', 'Ctrl+Alt+Space', 'Ctrl+Alt+M', 'Ctrl+Alt+D')
   $mine = [NovaDesktopPolicy]::ParseChord($script:desktopKillChord)
@@ -1757,9 +1759,33 @@ function Send-HelperNotification($value) {
     } catch { if ($attempt -eq 4) { throw }; Start-Sleep -Milliseconds 100 }
   }
 }
+# Tray toggles for the desktop switches. The choice is kept in agent.json; control needs view, and view off turns control off.
+function Switch-Desktop([string]$action) {
+  if ($action -eq 'desktop-view') {
+    $script:desktopView = -not $script:desktopView
+    if (-not $script:desktopView) { $script:desktopControl = $false; [NovaDesktopGuard]::Disarm('tray'); Sync-DesktopState }
+  } else {
+    $script:desktopView = $true
+    $script:desktopControl = -not $script:desktopControl
+    if ($script:desktopControl) { try { Start-DesktopGuard } catch { $script:desktopControl = $false; Write-Host "Desktop control: $($_.Exception.Message)" } }
+    else { [NovaDesktopGuard]::Disarm('tray'); Sync-DesktopState }
+  }
+  try {
+    $saved = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+    if (-not $saved.desktop) { $saved | Add-Member -NotePropertyName desktop -NotePropertyValue ([pscustomobject]@{}) }
+    $saved.desktop | Add-Member -NotePropertyName enabled -NotePropertyValue ([bool]$script:desktopView) -Force
+    $saved.desktop | Add-Member -NotePropertyName control -NotePropertyValue ([bool]$script:desktopControl) -Force
+    $saved | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+  } catch { Write-Host "Could not save the desktop switches: $($_.Exception.Message)" }
+  Write-DesktopLog "switch view=$($script:desktopView) control=$($script:desktopControl)"
+}
 # Actions come only from native controls or authenticated requests. Never evaluate arbitrary user-provided script.
 function Invoke-HelperControl([string]$action) {
   if ($action -eq 'exit') { $listener.Stop(); [NovaControls]::Stop(); return }
+  if ($action -eq 'desktop-view' -or $action -eq 'desktop-control') {
+    Switch-Desktop $action
+    return
+  }
   if ($action -eq 'desktop-stop') { [NovaDesktopGuard]::Disarm('tray'); Sync-DesktopState; return }
   if ($action -eq 'desktop') {
     $shell = New-Object -ComObject Shell.Application

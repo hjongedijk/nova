@@ -13,6 +13,8 @@ confirmations, limits) is described in [desktop-control-api.md](desktop-control-
 | `maxTypeChars` | `500`               | Longest text per `type` call (hard cap 500).                                     |
 | `denyList`     | see `agent.example` | Case-insensitive substrings matched against the foreground window title/process. |
 
+You do not have to edit the file: the tray menu has **Bureaublad: meekijken aan/uit** and **Bureaublad: bedienen aan/uit** (agent 2026-10-16.4 and later). They flip these switches at runtime and save them to `agent.json`. Turning view off also turns control off.
+
 ## Endpoints (bearer token, same as the rest of the agent)
 
 - `GET /v1/desktop/status` → `{ ok, view, control, armed, armedUntil (epoch ms | null), paused, killHotkey, version, displays[] }`
