@@ -55,6 +55,19 @@ const ALIASES: Record<string, string[]> = {
   holografisch: ["visualization", "holographic"],
   topologie: ["visualization", "topology", "proxmox"],
   graaf: ["visualization", "graph"],
+  print: ["print", "printer", "3d", "slice", "model"],
+  printen: ["print", "printer", "3d", "slice", "model"],
+  printer: ["printer", "print", "3d", "filament"],
+  "3d": ["3d", "model", "print", "printer", "design"],
+  ontwerp: ["design", "3d", "model", "generate", "parametric"],
+  ontwerpen: ["design", "3d", "model", "generate", "parametric"],
+  maak: ["design", "generate", "3d", "model"],
+  beugel: ["bracket", "design", "3d", "model"],
+  houder: ["design", "3d", "model", "holder"],
+  standaard: ["design", "3d", "model", "stand"],
+  filament: ["filament", "printer", "materials", "print"],
+  slicen: ["slice", "print", "3d"],
+  stl: ["stl", "3d", "model"],
 };
 
 function words(value: string): Set<string> {

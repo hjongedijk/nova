@@ -85,6 +85,8 @@ export class NovaConfig {
     "http://stack-control:8090",
   );
   readonly stackControlToken = text("NOVA_STACK_CONTROL_TOKEN");
+  /** Thingiverse app token for the 3D model search (official API). */
+  readonly thingiverseToken = text("THINGIVERSE_TOKEN");
   readonly defaultLanguage = setting(
     "NOVA_DEFAULT_LANGUAGE",
     "JARVIS_DEFAULT_LANGUAGE",

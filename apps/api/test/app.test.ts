@@ -85,7 +85,7 @@ describe("NOVA as a whole", () => {
       .expect(200);
     expect(agent.headers["content-disposition"]).toContain("jarvis-agent.ps1");
     expect(agent.body.toString("utf8")).toContain(
-      "$agentVersion = '2026-10-13.1'",
+      "$agentVersion = '2026-10-16.1'",
     );
     const novaAgent = await request(app.getHttpServer())
       .get("/windows-agent/nova-agent.ps1")

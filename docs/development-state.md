@@ -729,3 +729,5 @@ I4 werkblok: `/api/pomodoro/start` gebruikt dezelfde focusstatus voor 25 minuten
 ## Telefonie (Asterisk/Linphone), 2026-10-16
 
 Gebouwd en tegen een echte Asterisk 22.11.0-container geprobeerd (registratie, gesproken uitgaande boodschap, inkomende melding, deurbel-brug); standaard uit, niet in productie, geen tweerichtings-spraak, Linphone-app en SIP-trunk niet op echte toestellen/providers getest. Zie `docs/telephony.md`.
+
+- 2026-10-16 fabrication (P1-P6): OpenSCAD CAD worker in a hardened one-shot container behind stack-control `/cad/render`, four parametric templates, revisions/undo, validation and bounded repair, approval-gated print state machine proven against a simulated printer, 19 tools, Thingiverse provider (untried with a real token). 47 API tests plus 12 opt-in real-OpenSCAD renders (all four templates match their promised size and are watertight) and 5 CAD-sandbox tests; full API suite 2918 passing. Not done: real slicer, real P2S, Printables/MakerWorld (no documented API), 3MF import, workspace page, production image build. Nothing was sent to a printer. Local commits only, not deployed.
