@@ -3,7 +3,6 @@
   import Button from "#components/ui/Button.svelte";
   import type { ModelMetricsReport } from "@nova/contracts";
   import { getModelMetrics } from "#lib/api/settings.ts";
-  import ModelRoles from "./ModelRoles.svelte";
   let report = $state<ModelMetricsReport | null>(null);
   let busy = $state(false);
   let error = $state("");
@@ -91,7 +90,6 @@
     </p>
   {/if}
 </section>
-<ModelRoles />
 
 <style>
   .model-metrics {

@@ -2,6 +2,7 @@ import { chromium } from "playwright-core";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { OPEN_ALL_DISCLOSURES, clickSection } from "./check-settings-nav.mjs";
 /* global document, getComputedStyle, window */
 const base = process.env.NOVA_SETTINGS_TEST_URL ?? "https://localhost:5173";
 const screenshots = path.resolve("docs/img");
@@ -262,6 +263,7 @@ try {
       deviceScaleFactor: scale,
     });
     const page = await context.newPage();
+    await page.addInitScript(OPEN_ALL_DISCLOSURES);
     page.on("dialog", (dialog) => dialog.accept());
     await page.clock.install();
     const errors = [];
@@ -3846,7 +3848,10 @@ try {
       .first()
       .click();
     await page.getByText("Notitiegeschiedenis", { exact: true }).click();
-    await page.getByRole("button", { name: "Geschiedenis laden" }).click();
+    await page
+      .getByRole("button", { name: "Geschiedenis laden" })
+      .first()
+      .click();
     await page
       .getByText("Alleen de 50 recentste wijzigingen zijn bewaard.")
       .waitFor();
@@ -3888,7 +3893,10 @@ try {
       .first()
       .click();
     await page.getByText("Geschiedenis weergave", { exact: true }).click();
-    await page.getByRole("button", { name: "Geschiedenis laden" }).click();
+    await page
+      .getByRole("button", { name: "Geschiedenis laden" })
+      .first()
+      .click();
     await page.getByText("Aantal bezoekers (personen)").waitFor();
     await page.getByText("Bezoekers (mensen)").waitFor();
     assert.equal(widgetDisplayHistoryReads, 1);
@@ -3907,7 +3915,7 @@ try {
     assert.equal(widgetDisplayHistoryReads, 2);
     assert.equal(widgetDisplayHistoryWrites, 1);
     await page.locator("#settingsSearch").fill("model");
-    assert.equal(await page.locator(".settings-sidebar nav a").count(), 1);
+    assert((await page.locator(".settings-results a").count()) >= 1);
     await page.locator("#settingsSearch").press("Enter");
     await page.waitForURL("**/settings?section=models");
     assert.equal(
@@ -5252,9 +5260,7 @@ try {
     await page.locator("#settingsSearch").fill("");
     let documentScrollTested = false;
     for (const section of sections) {
-      await page
-        .locator(`.settings-sidebar a[href="/settings?section=${section}"]`)
-        .click();
+      await clickSection(page, section);
       await page.waitForURL(`**/settings?section=${section}`);
       assert(await page.locator(".settings-content h1").isVisible());
       const scroll = await page.evaluate(() => ({
@@ -5271,12 +5277,13 @@ try {
       );
       assert(scroll.widthFits, `Horizontal overflow in ${section} at ${width}`);
       if (scroll.maxScroll > 0) {
-        await page.evaluate(() =>
-          window.scrollTo(0, document.documentElement.scrollHeight),
-        );
-        assert(
-          (await page.evaluate(() => window.scrollY)) > 0,
-          `Long settings content cannot scroll in ${section} at ${width}`,
+        await page.waitForFunction(
+          () => {
+            window.scrollTo(0, document.documentElement.scrollHeight);
+            return window.scrollY > 0;
+          },
+          undefined,
+          { timeout: 5000 },
         );
         documentScrollTested = true;
         await page.evaluate(() => window.scrollTo(0, 0));
@@ -5321,9 +5328,7 @@ try {
       .waitFor();
     assert.equal(workspaceActiveId, "demo-project");
     assert.equal(workspaceProjectWrites, 3);
-    await page
-      .locator('.settings-sidebar a[href="/settings?section=connections"]')
-      .click();
+    await clickSection(page, "services");
     const stack = page.getByRole("region", { name: "Containerstatus" });
     await stack.getByText("Qdrant — actief", { exact: false }).waitFor();
     await stack.getByText("Lokale stem — actief", { exact: false }).waitFor();
@@ -5568,9 +5573,7 @@ try {
       await mcp.innerText(),
       /private-input|secret-arg|command/,
     );
-    await page
-      .locator('.settings-sidebar a[href="/settings?section=voice"]')
-      .click();
+    await clickSection(page, "voice");
     await page
       .getByText(/Ik ben er\. Wat wil je als eerste aanpakken\?/)
       .waitFor();
@@ -5613,9 +5616,7 @@ try {
       0,
       "Opening abilities must not fetch tool audit history",
     );
-    await page
-      .locator('.settings-sidebar a[href="/settings?section=skills"]')
-      .click();
+    await clickSection(page, "skills");
     const skillRow = page.locator(".set-row").filter({ hasText: "Ochtend" });
     assert.equal(skillVersionReads, 0, "Skill versions load only on request");
     await skillRow
@@ -5640,9 +5641,7 @@ try {
         `settings-skill-versions-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
-    await page
-      .locator('.settings-sidebar a[href="/settings?section=abilities"]')
-      .click();
+    await clickSection(page, "abilities");
     const usage = page.getByRole("region", {
       name: "Gebruik van gereedschappen",
       exact: true,
@@ -5651,6 +5650,7 @@ try {
       .getByRole("heading", { name: "Gebruik van gereedschappen", exact: true })
       .waitFor();
     assert.equal(usageReads, 0);
+    await clickSection(page, "safety");
     await page
       .getByRole("heading", {
         name: "Altijd goedgekeurde handelingen",
@@ -5664,6 +5664,7 @@ try {
       await page.locator(".settings-content").innerText(),
       /Risicovolle handelingen blijven bevestiging vragen/,
     );
+    await clickSection(page, "abilities");
     await usage
       .getByRole("button", { name: "Gebruiksstatistieken laden", exact: true })
       .click();
@@ -5770,9 +5771,7 @@ try {
         `settings-tool-usage-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
-    await page
-      .locator('.settings-sidebar a[href="/settings?section=system"]')
-      .click();
+    await clickSection(page, "system");
     await page
       .getByRole("button", { name: "Controleer op nieuwe release" })
       .click();
@@ -6709,9 +6708,7 @@ try {
         `settings-personality-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
-    await page
-      .locator('.settings-sidebar a[href="/settings?section=system"]')
-      .click();
+    await clickSection(page, "devices");
     const helperHistory = page.getByRole("region", {
       name: "Helper wijzigingsgeschiedenis",
     });
@@ -6738,6 +6735,7 @@ try {
       .waitFor();
     assert.equal(helperPreferenceHistoryReads, 2);
     assert.equal(helperPreferenceHistoryWrites, 1);
+    await clickSection(page, "abilities");
     const toolHistory = page.getByRole("region", {
       name: "Gereedschap wijzigingsgeschiedenis",
     });
@@ -6764,6 +6762,7 @@ try {
       .waitFor();
     assert.equal(toolSwitchHistoryReads, 2);
     assert.equal(toolSwitchHistoryWrites, 1);
+    await clickSection(page, "general");
     const sidebarHistory = page.getByRole("region", {
       name: "Zijbalk wijzigingsgeschiedenis",
     });
@@ -6817,8 +6816,40 @@ try {
     assert.deepEqual(errors, []);
     await context.close();
   }
+  {
+    // The real default: nothing expert is open, history is one closed disclosure, and
+    // seven groups (not 21 sections) are in the navigation.
+    const context = await browser.newContext({
+      ignoreHTTPSErrors: true,
+      viewport: { width: 1280, height: 900 },
+    });
+    const page = await context.newPage();
+    await page.route(/^https?:\/\/[^/]+\/api\//, (route) =>
+      route.fulfill({
+        json:
+          new URL(route.request().url()).pathname === "/api/settings"
+            ? overview
+            : {},
+      }),
+    );
+    await page.goto(`${base}/settings?section=abilities`);
+    await page.locator(".settings-content h1").waitFor();
+    assert.equal(await page.locator(".settings-groups a").count(), 7);
+    const open = await page.locator("details.ds-disclosure[open]").count();
+    assert.equal(open, 0, "Geavanceerd and history start closed");
+    assert(
+      await page
+        .getByText("Wijzigingsgeschiedenis", { exact: true })
+        .isVisible(),
+    );
+    await page.goto(`${base}/settings?section=system#actielog`);
+    await page.waitForFunction(
+      () => document.querySelector("#actielog")?.open === true,
+    );
+    await context.close();
+  }
   console.log(
-    "Settings browser checks passed: explicit same-origin Node-RED editor grant/open/renew without iframe remount/close/revoke, safe grant failure and pending-open cancellation, on-demand Node-RED logs with scrolling, clear, current-flow links, empty state and failed-refresh cleanup, pinned palette install/cancel/upgrade with exact-version confirmation, pending restart and active readback, and legacy warnings, all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP and GitHub secret entry with cleared secret fields and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
+    "Settings browser checks passed: seven-group navigation with closed Geavanceerd/history by default and deep links that open them, explicit same-origin Node-RED editor grant/open/renew without iframe remount/close/revoke, safe grant failure and pending-open cancellation, on-demand Node-RED logs with scrolling, clear, current-flow links, empty state and failed-refresh cleanup, pinned palette install/cancel/upgrade with exact-version confirmation, pending restart and active readback, and legacy warnings, all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP and GitHub secret entry with cleared secret fields and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();

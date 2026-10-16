@@ -44,7 +44,7 @@
   } from "#lib/api/settings.ts";
   import { fail, say } from "./state.svelte.ts";
   import Button from "#components/ui/Button.svelte";
-  import StackControl from "./StackControl.svelte";
+  import Disclosure from "./ui/Disclosure.svelte";
   import NodeRedFlowHistory from "./NodeRedFlowHistory.svelte";
   import NodeRedBriefing from "./NodeRedBriefing.svelte";
   import NodeRedPalette from "./NodeRedPalette.svelte";
@@ -682,12 +682,13 @@
 </script>
 
 <section class="connections-section">
-  {#if ids?.includes("qdrant")}<StackControl />{/if}
-  <p class="hint">
-    Opgeslagen waarden zijn leidend. Een gewijzigd adres of geheim wordt
-    toegepast bij de volgende start van NOVA. Testen gebruikt de ingevulde
-    waarden en slaat niets op.
-  </p>
+  <Disclosure title="Meer uitleg" kind="more">
+    <p class="hint">
+      Opgeslagen waarden zijn leidend. Een gewijzigd adres of geheim wordt
+      toegepast bij de volgende start van NOVA. Testen gebruikt de ingevulde
+      waarden en slaat niets op.
+    </p>
+  </Disclosure>
   {#if error}<p role="status">{error}</p>
     <button type="button" onclick={load}>Opnieuw proberen</button>{/if}
   {#if ids?.some( (id) => ["proxmox", "termix", "pangolin"].includes(id) ) || shown.some( (service) => ["proxmox", "termix", "pangolin"].includes(service.id) )}
@@ -1470,8 +1471,11 @@
 
 <style>
   .connection-editor {
-    border-top: 1px solid var(--line);
-    padding: 16px 0;
+    margin: 12px 0;
+    padding: 0 16px 8px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
   }
   .connection-editor summary {
     display: flex;
@@ -1479,11 +1483,13 @@
     justify-content: space-between;
     gap: 14px;
     cursor: pointer;
+    min-height: 56px;
+    font-size: 17px;
   }
   .connection-editor summary span,
   .connection-field small {
     color: var(--dim);
-    font-size: 12px;
+    font-size: 15px;
   }
   .connection-editor fieldset {
     margin: 20px 0 0;
@@ -1504,14 +1510,17 @@
     max-width: 650px;
   }
   .connection-field label {
-    font-size: 13px;
+    font-size: 16px;
+    font-weight: 600;
   }
   .connection-field input:not([type="checkbox"]) {
     width: 100%;
     border: 1px solid var(--line);
-    background: #112338;
+    background: var(--bg);
     color: var(--mist);
-    padding: 10px 12px;
+    padding: 12px;
+    border-radius: 8px;
+    min-height: 48px;
     font: inherit;
   }
   .connection-check {
@@ -1534,8 +1543,8 @@
   }
   .connection-status {
     border: 1px solid var(--line);
-    padding: 3px 9px;
-    border-radius: 4px;
+    padding: 4px 12px;
+    border-radius: 999px;
     white-space: nowrap;
   }
   .connection-editor summary .healthy {

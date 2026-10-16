@@ -1,5 +1,7 @@
 # Settings workspace
 
+**Structure (2026-10-16).** Seven groups: Algemeen (Beginscherm, Persoonlijkheid, Geheugen, Documenten), Stem en gesprekken (Stem en geluid, Gesprekken), Slimme huis en apparaten (Koppelingen, Apparaten, Pc bedienen), Telefoon, Modellen en AI (Modellen, Wat NOVA mag doen, Eigen vaardigheden, Codeprojecten), Automatisering (Zelfstandige taken, Node-RED-flows), Geavanceerd en beheer (Installatie, Toestemmingen, Services en MCP, Back-up en updates). Part ids are the old section ids, so every deep link still works. Each page: purpose line, status pill, the common settings, then closed "Geavanceerd" and "Wijzigingsgeschiedenis" disclosures.
+
 The settings workspace keeps NOVA's navy palette and Sora type. Everyday preferences and service administration have separate navigation groups. Stable section URLs and search continue to reach every editor; mobile adds a native grouped section selector and bounds navigation height so the editor stays reachable.
 
 Palette: background `#081421`, control surface `#112338`, text `#e8f0f8`, secondary text `#a3b7cc`, border `#2c4258`, action accent `#91d7f7`. Status colors distinguish success (`#85d7bb`), pending restart (`#f3cf88`) and failed checks (`#ffa083`). Status labels describe verified checks rather than assuming that stored configuration means a working connection.

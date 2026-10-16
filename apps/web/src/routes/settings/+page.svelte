@@ -14,6 +14,7 @@
   import HelperPreferencesHistory from "#components/settings/HelperPreferencesHistory.svelte";
   import ToolSwitchHistory from "#components/settings/ToolSwitchHistory.svelte";
   import SidebarHistory from "#components/settings/SidebarHistory.svelte";
+  import ModelRoles from "#components/settings/ModelRoles.svelte";
   import ModelMetrics from "#components/settings/ModelMetrics.svelte";
   import NativeGateway from "#components/settings/NativeGateway.svelte";
   import UpdatesSection from "#components/settings/UpdatesSection.svelte";
@@ -43,12 +44,17 @@
     unlock,
   } from "#components/settings/state.svelte.ts";
   import {
-    SECTIONS,
+    GROUPS,
+    GROUP_OF,
+    groupInfo,
+    sectionInfo,
     settingsSection,
     searchSettings,
-    SETTINGS_GROUPS,
-    FREQUENT_SECTIONS,
   } from "#components/settings/sections.ts";
+  import { partStatus, type PartStatus } from "#components/settings/status.ts";
+  import Disclosure from "#components/settings/ui/Disclosure.svelte";
+  import HistoryGroup from "#components/settings/ui/HistoryGroup.svelte";
+  import StatusPill from "#components/settings/ui/StatusPill.svelte";
   import { getPin, setPin } from "#lib/api/settings.ts";
   import "#lib/chat/ask.ts";
   import "#components/settings/settings.css";
@@ -59,7 +65,9 @@
   const section = $derived(
     settingsSection(page.url.searchParams.get("section")),
   );
-  const current = $derived(SECTIONS.find((item) => item.id === section)!);
+  const current = $derived(sectionInfo(section));
+  const group = $derived(groupInfo(GROUP_OF[section]));
+  let status = $state<PartStatus | null>(null);
   const matches = $derived(searchSettings(query));
 
   $effect(() => {
@@ -70,6 +78,52 @@
       stopMicTest();
       say("");
     });
+  });
+
+  $effect(() => {
+    const id = section;
+    const data = settings.data;
+    if (!data) return;
+    status = null;
+    let current = true;
+    void partStatus(
+      id,
+      untrack(() => data),
+    ).then((next) => {
+      if (current) status = next;
+    });
+    return () => {
+      current = false;
+    };
+  });
+
+  /** Old deep links to histories that now live next to the setting they belong to. */
+  const HISTORY_HOME: Record<string, string> = {
+    "sidebar-history": "general",
+    "tool-switch-history": "abilities",
+  };
+
+  /** A link to something inside a closed area (Geavanceerd, history) opens that area. */
+  function revealHash(): void {
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (!id) return;
+    const home = HISTORY_HOME[id];
+    if (home && section === "system") {
+      void goto(`/settings?section=${home}#${id}`, { replaceState: true });
+      return;
+    }
+    const target = document.getElementById(id);
+    if (!target) return;
+    for (let node: HTMLElement | null = target; node; node = node.parentElement)
+      if (node instanceof HTMLDetailsElement) node.open = true;
+    target.scrollIntoView({ block: "start" });
+  }
+
+  $effect(() => {
+    void section;
+    if (!settings.data) return;
+    const timers = [50, 400, 1200].map((ms) => setTimeout(revealHash, ms));
+    return () => timers.forEach(clearTimeout);
   });
 
   onMount(() => {
@@ -98,66 +152,70 @@
   </header>
   <div class="settings-layout">
     <aside class="settings-sidebar">
-      <form
-        class="settings-search"
-        role="search"
-        onsubmit={(event) => {
-          event.preventDefault();
-          if (matches[0]) {
-            void goto(`/settings?section=${matches[0].id}`);
-            query = "";
-          }
-        }}
-      >
-        <label for="settingsSearch">Zoek een instelling</label>
-        <input
-          id="settingsSearch"
-          type="search"
-          placeholder="Stem, model, back-up…"
-          bind:value={query}
-        />
-      </form>
-      <label class="settings-mobile-label" for="settingsSection">Ga naar</label>
-      <select
-        class="settings-mobile-select"
-        id="settingsSection"
-        value={section}
-        onchange={(event) =>
-          void goto(`/settings?section=${event.currentTarget.value}`)}
-      >
-        {#each SETTINGS_GROUPS as group (group.name)}
-          <optgroup label={group.name}>
-            {#each SECTIONS.filter((item) => FREQUENT_SECTIONS.has(item.id) === group.frequent) as item (item.id)}
-              <option value={item.id}>{item.name}</option>
+      <div class="settings-sidebar-inner">
+        <form
+          class="settings-search"
+          role="search"
+          onsubmit={(event) => {
+            event.preventDefault();
+            if (query.trim() && matches[0]) {
+              void goto(`/settings?section=${matches[0].id}`);
+              query = "";
+            }
+          }}
+        >
+          <label for="settingsSearch">Zoek een instelling</label>
+          <input
+            id="settingsSearch"
+            type="search"
+            placeholder="Bijvoorbeeld stem, model of back-up"
+            autocomplete="off"
+            bind:value={query}
+          />
+        </form>
+        {#if query.trim()}
+          <nav class="settings-results" aria-label="Zoekresultaten">
+            {#each matches as item (item.id)}
+              <a href="/settings?section={item.id}" onclick={() => (query = "")}
+                ><span>{item.name}</span><small
+                  >{groupInfo(GROUP_OF[item.id]).name}</small
+                ></a
+              >
             {/each}
-          </optgroup>
-        {/each}
-      </select>
-      <nav aria-label="Instellingen">
-        {#each SETTINGS_GROUPS as group (group.name)}
-          {@const items = matches.filter(
-            (item) => FREQUENT_SECTIONS.has(item.id) === group.frequent,
-          )}
-          {#if items.length}
-            <div class="settings-nav-group">
-              <h2>{query.trim() ? "Zoekresultaten" : group.name}</h2>
-              {#each items as item (item.id)}
-                <a
-                  href="/settings?section={item.id}"
-                  aria-current={section === item.id ? "page" : undefined}
-                  >{item.name}</a
-                >
-              {/each}
-            </div>
-          {/if}
-        {/each}
-        {#if !matches.length}<p role="status">
-            Geen instelling gevonden. Probeer een ander woord.
-          </p>{/if}
-      </nav>
+            {#if !matches.length}<p role="status">
+                Geen instelling gevonden. Probeer een ander woord.
+              </p>{/if}
+          </nav>
+        {:else}
+          <nav class="settings-groups" aria-label="Instellingen">
+            {#each GROUPS as item (item.id)}
+              <a
+                href="/settings?section={item.parts[0]}"
+                data-group={item.id}
+                aria-current={group.id === item.id ? "page" : undefined}
+                >{item.name}</a
+              >
+            {/each}
+          </nav>
+        {/if}
+      </div>
     </aside>
     <main class="settings-content" id="settingsBody">
-      <h1>{current.name}</h1>
+      {#if group.parts.length > 1}
+        <nav class="settings-parts" aria-label="Onderdelen van {group.name}">
+          {#each group.parts as part (part)}
+            <a
+              href="/settings?section={part}"
+              aria-current={part === section ? "page" : undefined}
+              >{sectionInfo(part).name}</a
+            >
+          {/each}
+        </nav>
+      {/if}
+      <div class="settings-title">
+        <h1>{current.name}</h1>
+        {#if status}<StatusPill tone={status.tone} label={status.label} />{/if}
+      </div>
       <p class="settings-intro">{current.detail}</p>
       <div
         id="settingsMessage"
@@ -204,8 +262,15 @@
           {:else if section === "general"}
             <h2>Snelle opdrachten</h2>
             <QuickActionsEditor />
-            <h2>Zijbalk en informatiepanelen</h2>
-            <SidebarTab />
+            <Disclosure
+              kind="advanced"
+              title="Zijbalk en informatiepanelen"
+              hint="Kies welke panelen je ziet en waar"
+              id="zijbalk"
+            >
+              <SidebarTab />
+            </Disclosure>
+            <HistoryGroup><SidebarHistory /></HistoryGroup>
           {:else if section === "voice"}<SoundSection />
           {:else if section === "personality"}<BehaviorTab part="persona" />
           {:else if section === "abilities"}
@@ -214,22 +279,39 @@
                 void goto("/");
               }}
             />
-            <ToolUsage />
-            <BehaviorTab part="approvals" />
-            <details>
-              <summary>Alle gereedschappen en hun risico</summary><ToolsList />
-            </details>
+            <Disclosure
+              kind="advanced"
+              title="Geavanceerd"
+              hint="Alle gereedschappen, hun risico en gebruik"
+            >
+              <ToolUsage />
+              <ToolsList />
+            </Disclosure>
+            <HistoryGroup><ToolSwitchHistory /></HistoryGroup>
           {:else if section === "skills"}<SkillsTab />
           {:else if section === "code"}<WorkspaceProjects />
           {:else if section === "models"}
             <ConnectionsSection ids={["omniroute"]} />
-            <ModelMetrics />
-            <OmniRouteAccounts />
-            <FreePolicyWizard />
-            <NativeGateway />
-            <AdminDialog embedded initialView="providers" />
-            <h2>OmniRoute</h2>
-            <AdminDialog embedded initialView="gateway" />
+            <Disclosure
+              title="Model per taak kiezen"
+              hint="Bijvoorbeeld een ander model voor code of samenvatten"
+              id="modelrollen"
+            >
+              <ModelRoles />
+            </Disclosure>
+            <Disclosure
+              kind="advanced"
+              title="Geavanceerd"
+              hint="Metingen, accounts, gratis-beleid, native gateway en aanbieders"
+            >
+              <ModelMetrics />
+              <OmniRouteAccounts />
+              <FreePolicyWizard />
+              <NativeGateway />
+              <AdminDialog embedded initialView="providers" />
+              <h2>OmniRoute</h2>
+              <AdminDialog embedded initialView="gateway" />
+            </Disclosure>
           {:else if section === "services"}
             <StackControl />
             <McpStatus />
@@ -245,33 +327,39 @@
                 "pangolin",
               ]}
             />
-            <McpStatus />
-            <AdminDialog embedded initialView="integrations" />
-          {:else if section === "devices"}<ConnectionsSection
-              ids={["windows"]}
-            />
+            <Disclosure
+              kind="advanced"
+              title="Geavanceerd"
+              hint="MCP-servers en overige integraties"
+            >
+              <McpStatus />
+              <AdminDialog embedded initialView="integrations" />
+            </Disclosure>
+            <HistoryGroup><ConnectionHistory /></HistoryGroup>
+          {:else if section === "devices"}
+            <ConnectionsSection ids={["windows"]} />
             <WindowsAgentPanel />
             <DevicesSection />
+            <HistoryGroup><HelperPreferencesHistory /></HistoryGroup>
           {:else if section === "desktop"}<DesktopSection />
           {:else if section === "conversation"}<ConversationSection />
           {:else if section === "autonomy"}<AutonomySection />
           {:else if section === "telephony"}<TelephonySection />
-          {:else if section === "memory"}<AdminDialog
-              embedded
-              initialView="memories"
-            />
-            <DocumentsLibrary />
+          {:else if section === "memory"}
+            <AdminDialog embedded initialView="memories" />
           {:else if section === "documents"}<DocumentsLibrary />
           {:else if section === "safety"}<BehaviorTab part="approvals" />
           {:else if section === "system"}
             <UpdatesSection />
-            <ConnectionHistory />
-            <HelperPreferencesHistory />
-            <ToolSwitchHistory />
-            <SidebarHistory />
             <BackupSection />
-            <h2 id="actielog">Actielog</h2>
-            <AdminDialog embedded initialView="audit" />
+            <Disclosure
+              kind="advanced"
+              title="Actielog"
+              hint="Alles wat NOVA heeft gedaan, voor controle"
+              id="actielog"
+            >
+              <AdminDialog embedded initialView="audit" />
+            </Disclosure>
           {:else if section === "automation"}
             <ConnectionsSection ids={["node-red"]} />
           {/if}

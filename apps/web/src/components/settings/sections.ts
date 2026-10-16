@@ -1,152 +1,208 @@
-/** Navigation and search share one catalogue. IDs are stable deep links. */
+/**
+ * Navigation and search share one catalogue.
+ *
+ * Seven groups in plain Dutch; each group holds one or more pages ("parts").
+ * Part ids are the stable deep links (`/settings?section=<id>`), so every
+ * older link keeps working. Rarely used items sit under "Geavanceerd" on the
+ * page itself, but stay searchable through the keywords here.
+ */
+export const GROUPS = [
+  {
+    id: "algemeen",
+    name: "Algemeen",
+    purpose: "Hoe NOVA eruitziet, klinkt en wat ze onthoudt.",
+    parts: ["general", "personality", "memory", "documents"],
+  },
+  {
+    id: "stem",
+    name: "Stem en gesprekken",
+    purpose: "Hoe je met NOVA praat en hoe ze terugpraat.",
+    parts: ["voice", "conversation"],
+  },
+  {
+    id: "huis",
+    name: "Slimme huis en apparaten",
+    purpose: "Koppel je huis, je pc en je telefoon aan NOVA.",
+    parts: ["connections", "devices", "desktop"],
+  },
+  {
+    id: "telefoon",
+    name: "Telefoon",
+    purpose: "Bellen en gebeld worden via NOVA, ook de deurbel.",
+    parts: ["telephony"],
+  },
+  {
+    id: "ai",
+    name: "Modellen en AI",
+    purpose: "Welke AI NOVA gebruikt en wat ze zelf mag doen.",
+    parts: ["models", "abilities", "skills", "code"],
+  },
+  {
+    id: "automatisering",
+    name: "Automatisering",
+    purpose: "Taken en routines die NOVA zelf uitvoert.",
+    parts: ["autonomy", "automation"],
+  },
+  {
+    id: "beheer",
+    name: "Geavanceerd en beheer",
+    purpose: "Installatie, veiligheid, back-ups en techniek.",
+    parts: ["setup", "safety", "services", "system"],
+  },
+] as const;
+
+export type SettingsGroup = (typeof GROUPS)[number]["id"];
+
 export const SECTIONS = [
   {
     id: "setup",
     name: "Installatie",
-    detail: "Controleer NOVA stap voor stap na een nieuwe installatie.",
+    detail: "Loop na een nieuwe installatie de stappen langs.",
     keywords:
       "installatie starten instellen onboarding sleutel account stem verbinding",
   },
   {
     id: "general",
-    name: "Algemeen",
-    detail: "Beginscherm, snelle opdrachten en zijbalk.",
-    keywords: "widget panelen sidebar knoppen zoeken",
+    name: "Beginscherm",
+    detail: "Kies wat je op het beginscherm en in de zijbalk ziet.",
+    keywords:
+      "algemeen widget panelen sidebar zijbalk snelle opdrachten knoppen zoeken",
   },
   {
     id: "voice",
     name: "Stem en geluid",
-    detail: "Volume en microfoon op dit apparaat.",
-    keywords: "spraak audio luidspreker luisteren",
+    detail: "Kies de stem, het volume en test je microfoon.",
+    keywords: "spraak audio luidspreker luisteren microfoon volume",
   },
   {
     id: "personality",
     name: "Persoonlijkheid",
-    detail: "Eigen regels voor hoe NOVA met je praat.",
-    keywords: "gedrag persona toon butler naam",
+    detail: "Bepaal hoe NOVA tegen je praat.",
+    keywords: "gedrag persona toon butler naam karakter gezin profiel stijl",
   },
   {
     id: "models",
     name: "Modellen",
-    detail: "Gratis AI en de geverifieerde OmniRoute-verbinding.",
-    keywords: "provider account route combo model gateway limieten",
+    detail: "Kies welke AI NOVA gebruikt. Gratis modellen staan standaard aan.",
+    keywords:
+      "ai provider account route combo model gateway limieten omniroute sleutel",
   },
   {
     id: "code",
     name: "Codeprojecten",
-    detail: "Maak een lokaal project aan en kies welk project actief is.",
+    detail: "Maak een project aan en kies welk project actief is.",
     keywords: "code werkruimte workspace projecten aanmaken openen",
   },
   {
     id: "abilities",
-    name: "Gereedschappen",
-    detail: "Wat NOVA mag doen en de beschikbare tools.",
-    keywords: "vaardigheden tools risico rechten",
+    name: "Wat NOVA mag doen",
+    detail: "Zet vaardigheden en gereedschappen aan of uit.",
+    keywords: "gereedschappen vaardigheden tools risico rechten toestemming",
   },
   {
     id: "skills",
     name: "Eigen vaardigheden",
-    detail: "Instructies en koppelingen die je zelf maakt.",
+    detail: "Leer NOVA zelf bedachte instructies en koppelingen.",
     keywords: "skill webhook testen geschiedenis",
   },
   {
     id: "automation",
-    name: "Automatisering",
-    detail:
-      "Bekijk je Node-RED-flows, beheer routines en herstel eerdere versies.",
-    keywords: "flows nodes node-red planning routines",
+    name: "Node-RED-flows",
+    detail: "Bekijk en beheer de flows achter je automatiseringen.",
+    keywords: "flows nodes node-red planning routines editor palet logs",
   },
   {
     id: "services",
-    name: "MCP en services",
-    detail:
-      "Status van achtergrondservices, MCP-servers en hun gereedschappen.",
-    keywords: "workers containers broker verbinding services mcp server status",
+    name: "Services en MCP",
+    detail: "Zie of de achtergrondservices en MCP-servers draaien.",
+    keywords:
+      "workers containers broker verbinding services mcp server status herstarten",
   },
   {
     id: "connections",
     name: "Koppelingen",
-    detail: "Bekijk welke diensten bereikbaar zijn.",
-    keywords: "home assistant proxmox termix pangolin mqtt qdrant integraties",
+    detail: "Verbind NOVA met Home Assistant en andere diensten.",
+    keywords:
+      "home assistant proxmox termix pangolin mqtt qdrant integraties huis domotica",
   },
   {
     id: "devices",
     name: "Apparaten",
-    detail: "Windows-agent, helper, achtergrond en telefoon.",
-    keywords: "wallpaper scherm display sneltoets pwa downloaden",
+    detail: "Beheer de Windows-helper, achtergrond en je telefoon.",
+    keywords:
+      "windows agent helper wallpaper achtergrond scherm display sneltoets pwa downloaden telefoon",
   },
   {
     id: "desktop",
-    name: "Bureaublad",
-    detail: "NOVA laten meekijken en de pc kort laten bedienen.",
+    name: "Pc bedienen",
+    detail: "Laat NOVA meekijken op je scherm en de pc kort bedienen.",
     keywords:
       "bureaublad scherm pc overnemen muis toetsenbord screenshot windows besturen",
   },
   {
     id: "conversation",
     name: "Gesprekken",
-    detail: "Echte gesprekken met NOVA, ook over de telefoon (nummer 700).",
+    detail: "Praat echt met NOVA, ook via de telefoon (nummer 700).",
     keywords:
       "gesprek bellen telefoon spraak praten stem luisteren onderbreken",
   },
   {
     id: "autonomy",
     name: "Zelfstandige taken",
-    detail:
-      "Taken die NOVA zelf uitvoert: gepland, herhalend of bij een gebeurtenis.",
+    detail: "Taken die NOVA zelf doet: op een tijdstip of bij een gebeurtenis.",
     keywords:
-      "autonoom taak automatisering gebeurtenis node-red goedkeuren plannen",
+      "autonoom taak automatisering gebeurtenis node-red goedkeuren plannen herhalend",
   },
   {
     id: "telephony",
-    name: "Telefonie",
-    detail:
-      "Eigen telefooncentrale (Asterisk) met Linphone-toestellen, deurbel en belmeldingen.",
+    name: "Telefoon",
+    detail: "Eigen telefooncentrale met Linphone-toestellen en deurbel.",
     keywords:
-      "bellen telefoon asterisk linphone sip deurbel intercom toestel nummer trunk voip",
+      "telefonie bellen telefoon asterisk linphone sip deurbel intercom toestel nummer trunk voip sms berichten",
   },
   {
     id: "memory",
     name: "Geheugen en privacy",
-    detail: "Bekijk wat NOVA onthoudt en verwijder het met bevestiging.",
-    keywords: "onthouden vergeten persoonsgegevens",
+    detail: "Bekijk wat NOVA onthoudt en verwijder het als je wilt.",
+    keywords: "onthouden vergeten persoonsgegevens privacy herinneringen",
   },
   {
     id: "documents",
-    name: "Documentbibliotheek",
-    detail: "Upload privé documenten en doorzoek ze later in de chat.",
-    keywords: "documenten pdf docx upload bibliotheek qdrant bestanden",
+    name: "Documenten",
+    detail: "Upload privédocumenten en zoek er later in via de chat.",
+    keywords:
+      "documentbibliotheek pdf docx upload bibliotheek qdrant bestanden",
   },
   {
     id: "safety",
-    name: "Veiligheid",
+    name: "Toestemmingen",
     detail: "Bekijk en trek blijvende toestemmingen in.",
-    keywords: "altijd goedkeuring confirm pin bevestiging beveiliging",
+    keywords:
+      "veiligheid altijd goedkeuring confirm pin bevestiging beveiliging",
   },
   {
     id: "system",
-    name: "Systeem",
-    detail: "Back-up, importeren en het actielog.",
-    keywords: "export import backup back-up audit logs status updates versie",
+    name: "Back-up en updates",
+    detail: "Maak een back-up, zet er een terug en bekijk het actielog.",
+    keywords:
+      "systeem export import backup back-up audit logs status updates versie actielog",
   },
 ] as const;
 
 export type SettingsSection = (typeof SECTIONS)[number]["id"];
 
-/** Everyday preferences stay separate from service and administration settings. */
-export const FREQUENT_SECTIONS: ReadonlySet<SettingsSection> = new Set([
-  "general",
-  "voice",
-  "personality",
-  "devices",
-  "memory",
-  "documents",
-  "automation",
-]);
-export const SETTINGS_GROUPS = [
-  { name: "Dagelijks gebruik", frequent: true },
-  { name: "Geavanceerd en beheer", frequent: false },
-] as const;
+export const GROUP_OF: Record<SettingsSection, SettingsGroup> =
+  Object.fromEntries(
+    GROUPS.flatMap((group) => group.parts.map((part) => [part, group.id])),
+  ) as Record<SettingsSection, SettingsGroup>;
+
+export function sectionInfo(id: SettingsSection) {
+  return SECTIONS.find((section) => section.id === id)!;
+}
+
+export function groupInfo(id: SettingsGroup) {
+  return GROUPS.find((group) => group.id === id)!;
+}
 
 export function settingsSection(value: string | null): SettingsSection {
   const legacy: Record<string, SettingsSection> = {
@@ -155,6 +211,8 @@ export function settingsSection(value: string | null): SettingsSection {
     more: "system",
   };
   const id = value ? (legacy[value] ?? value) : "general";
+  const group = GROUPS.find((item) => item.id === id);
+  if (group) return group.parts[0];
   return SECTIONS.find((section) => section.id === id)?.id ?? "general";
 }
 
@@ -164,11 +222,14 @@ export function searchSettings(query: string) {
     .toLocaleLowerCase("nl-NL")
     .split(/\s+/)
     .filter(Boolean);
+  const lower = (text: string) => text.toLocaleLowerCase("nl-NL");
+  const rank = (section: (typeof SECTIONS)[number]) =>
+    words.every((word) => lower(section.name).includes(word)) ? 0 : 1;
   return SECTIONS.filter((section) => {
-    const text =
-      `${section.name} ${section.detail} ${section.keywords}`.toLocaleLowerCase(
-        "nl-NL",
-      );
+    const group = groupInfo(GROUP_OF[section.id]);
+    const text = lower(
+      `${section.name} ${section.detail} ${section.keywords} ${group.name}`,
+    );
     return words.every((word) => text.includes(word));
-  });
+  }).sort((a, b) => rank(a) - rank(b));
 }

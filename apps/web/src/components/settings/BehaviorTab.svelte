@@ -17,6 +17,8 @@
   import PersonaHistory from "./PersonaHistory.svelte";
   import PersonaPreferencesHistory from "./PersonaPreferencesHistory.svelte";
   import HouseholdProfileHistory from "./HouseholdProfileHistory.svelte";
+  import Disclosure from "./ui/Disclosure.svelte";
+  import HistoryGroup from "./ui/HistoryGroup.svelte";
   import SoundSection from "./SoundSection.svelte";
   import { afterChange, fail, settings } from "./state.svelte.ts";
 
@@ -172,101 +174,7 @@
   <SoundSection />
 {/if}
 {#if part !== "approvals"}
-  <h3>Hoe NOVA zich gedraagt</h3>
   <section>
-    <p class="hint">
-      Kies wie NOVA nu aanspreekt. Profielen wisselen toon en
-      communicatievoorkeuren; chatgeschiedenis en geheugen blijven gedeeld.
-    </p>
-    <div class="persona-profile">
-      <Field id="householdProfile" label="Actief gezinslid">
-        <div class="set-toolbar">
-          <select
-            id="householdProfile"
-            value={activeProfileId}
-            onchange={(event) => void switchProfile(event.currentTarget.value)}
-          >
-            {#each householdProfiles as householdProfile (householdProfile.id)}
-              <option value={householdProfile.id}
-                >{householdProfile.label}</option
-              >
-            {/each}
-          </select>
-          <Button
-            onclick={() => void addProfile()}
-            disabled={householdProfiles.length >= 8}>Persoon toevoegen</Button
-          >
-          <Button
-            onclick={() => void removeProfile()}
-            disabled={householdProfiles.length <= 1}>Verwijderen</Button
-          >
-        </div>
-      </Field>
-      <Field
-        id="householdLabel"
-        label="Profielnaam"
-        help="Bijvoorbeeld Harm of Sam."
-      >
-        <input
-          id="householdLabel"
-          maxlength="40"
-          value={householdProfiles.find((item) => item.id === activeProfileId)
-            ?.label ?? ""}
-          oninput={(event) => {
-            const label = event.currentTarget.value;
-            householdProfiles = householdProfiles.map((item) =>
-              item.id === activeProfileId ? { ...item, label } : item,
-            );
-          }}
-        />
-      </Field>
-      <Field
-        id="personaName"
-        label="Naam"
-        help="De naam die NOVA gebruikt als dat ter sprake komt."
-      >
-        <input id="personaName" bind:value={profile.name} maxlength="40" />
-      </Field>
-      <Field
-        id="personaCharacter"
-        label="Karakter"
-        help="Bijvoorbeeld: warm, nieuwsgierig en met droge humor."
-      >
-        <input
-          id="personaCharacter"
-          bind:value={profile.character}
-          maxlength="300"
-        />
-      </Field>
-      <Field
-        id="personaAddress"
-        label="Aanspreekvorm"
-        help="Bijvoorbeeld: je/jij of u."
-      >
-        <input
-          id="personaAddress"
-          bind:value={profile.address}
-          maxlength="40"
-        />
-      </Field>
-      <Field
-        id="personaAvoid"
-        label="Wat NOVA vermijdt"
-        help="Bijvoorbeeld: overdreven enthousiasme of doen alsof ze menselijke ervaringen heeft."
-      >
-        <input id="personaAvoid" bind:value={profile.avoid} maxlength="300" />
-      </Field>
-      <fieldset>
-        <legend>Communicatievoorkeuren</legend>
-        {#each preferenceChoices as [value, label] (value)}
-          <label
-            ><input type="checkbox" {value} bind:group={profilePreferences} />
-            {label}</label
-          >
-        {/each}
-      </fieldset>
-      <Button go onclick={saveProfile}>Profiel opslaan</Button>
-    </div>
     <p class="hint">
       Eigen regels voor hoe NOVA zich gedraagt. Ze gaan voor zijn standaardstijl
       en gelden bij elke vraag. Schrijf ze als gewone zinnen.
@@ -301,12 +209,114 @@
       <Button go onclick={save}>Opslaan</Button>
       <Badge text="{persona.length} / 2000" />
     </div>
+    <Disclosure
+      kind="advanced"
+      title="Geavanceerd: gezinsleden en aanspreekvorm"
+      hint="Meerdere personen, naam, karakter en voorkeuren"
+    >
+      <p class="hint">
+        Kies wie NOVA nu aanspreekt. Profielen wisselen toon en
+        communicatievoorkeuren; chatgeschiedenis en geheugen blijven gedeeld.
+      </p>
+      <div class="persona-profile">
+        <Field id="householdProfile" label="Actief gezinslid">
+          <div class="set-toolbar">
+            <select
+              id="householdProfile"
+              value={activeProfileId}
+              onchange={(event) =>
+                void switchProfile(event.currentTarget.value)}
+            >
+              {#each householdProfiles as householdProfile (householdProfile.id)}
+                <option value={householdProfile.id}
+                  >{householdProfile.label}</option
+                >
+              {/each}
+            </select>
+            <Button
+              onclick={() => void addProfile()}
+              disabled={householdProfiles.length >= 8}>Persoon toevoegen</Button
+            >
+            <Button
+              onclick={() => void removeProfile()}
+              disabled={householdProfiles.length <= 1}>Verwijderen</Button
+            >
+          </div>
+        </Field>
+        <Field
+          id="householdLabel"
+          label="Profielnaam"
+          help="Bijvoorbeeld Harm of Sam."
+        >
+          <input
+            id="householdLabel"
+            maxlength="40"
+            value={householdProfiles.find((item) => item.id === activeProfileId)
+              ?.label ?? ""}
+            oninput={(event) => {
+              const label = event.currentTarget.value;
+              householdProfiles = householdProfiles.map((item) =>
+                item.id === activeProfileId ? { ...item, label } : item,
+              );
+            }}
+          />
+        </Field>
+        <Field
+          id="personaName"
+          label="Naam"
+          help="De naam die NOVA gebruikt als dat ter sprake komt."
+        >
+          <input id="personaName" bind:value={profile.name} maxlength="40" />
+        </Field>
+        <Field
+          id="personaCharacter"
+          label="Karakter"
+          help="Bijvoorbeeld: warm, nieuwsgierig en met droge humor."
+        >
+          <input
+            id="personaCharacter"
+            bind:value={profile.character}
+            maxlength="300"
+          />
+        </Field>
+        <Field
+          id="personaAddress"
+          label="Aanspreekvorm"
+          help="Bijvoorbeeld: je/jij of u."
+        >
+          <input
+            id="personaAddress"
+            bind:value={profile.address}
+            maxlength="40"
+          />
+        </Field>
+        <Field
+          id="personaAvoid"
+          label="Wat NOVA vermijdt"
+          help="Bijvoorbeeld: overdreven enthousiasme of doen alsof ze menselijke ervaringen heeft."
+        >
+          <input id="personaAvoid" bind:value={profile.avoid} maxlength="300" />
+        </Field>
+        <fieldset>
+          <legend>Communicatievoorkeuren</legend>
+          {#each preferenceChoices as [value, label] (value)}
+            <label
+              ><input type="checkbox" {value} bind:group={profilePreferences} />
+              {label}</label
+            >
+          {/each}
+        </fieldset>
+        <Button go onclick={saveProfile}>Profiel opslaan</Button>
+      </div>
+    </Disclosure>
   </section>
-  <PersonaHistory />
-  <PersonaPreferencesHistory />
-  <HouseholdProfileHistory
-    onRestored={() => afterChange("Gezinsprofiel hersteld.")}
-  />
+  <HistoryGroup>
+    <PersonaHistory />
+    <PersonaPreferencesHistory />
+    <HouseholdProfileHistory
+      onRestored={() => afterChange("Gezinsprofiel hersteld.")}
+    />
+  </HistoryGroup>
 {/if}
 {#if part === "all"}
   <h3>Snelle opdrachten op het beginscherm</h3>

@@ -26,7 +26,7 @@
 
   async function load() {
     try {
-      tasks = (await getAutonomyTasks()).tasks;
+      tasks = (await getAutonomyTasks()).tasks ?? [];
       loaded = true;
     } catch (cause) {
       fail(cause);

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
+import { OPEN_ALL_DISCLOSURES, clickSection } from "./check-settings-nav.mjs";
 
 const base = process.env.NOVA_SETTINGS_TEST_URL ?? "https://localhost:5173";
 const privateAbility = "Private fixture ability";
@@ -28,6 +29,7 @@ try {
         localStorage.setItem("novaPanels", "off");
       });
       const page = await context.newPage();
+      await page.addInitScript(OPEN_ALL_DISCLOSURES);
       page.setDefaultTimeout(15_000);
       const errors = [];
       const unexpectedWrites = [];
@@ -417,9 +419,7 @@ try {
         await page.locator("#historyClose").click();
         await page.locator("#menuButton").click();
         await page.locator("#settingsOpen").click();
-        await page
-          .locator(`.settings-sidebar a[href="/settings?section=${section}"]`)
-          .click();
+        await clickSection(page, section);
         await page.locator(".settings-content").waitFor();
       }
 
@@ -532,9 +532,6 @@ try {
       );
       async function openFixtureTool() {
         await settingsSection("abilities");
-        await page
-          .getByText("Alle gereedschappen en hun risico", { exact: true })
-          .click();
         return page
           .locator("li.set-row")
           .filter({ has: page.getByText(privateTool, { exact: true }) });
@@ -824,6 +821,10 @@ try {
         .click();
       await historyResponse;
       assert.equal(quickHistoryReads, 3);
+      await historyRegion()
+        .locator("details")
+        .first()
+        .waitFor({ state: "attached" });
       assert.equal(await historyRegion().locator("details").count(), 2);
       row = selectedRow("2026-10-14T09:00:00.000Z");
       await row.locator("summary").click();
@@ -969,6 +970,7 @@ try {
       // A real pointer drag writes live preferences, but emits just one card on release.
       await settingsSection("voice");
       const rate = page.locator("#ttsRate");
+      await rate.scrollIntoViewIfNeeded();
       const rateBox = await rate.boundingBox();
       assert(rateBox);
       const allStoredCards = page.locator('#history [aria-label="Actiekaart"]');
