@@ -7,7 +7,7 @@
   id="chips"
   class="chips"
   aria-label="Snelle opdrachten"
-  hidden={Boolean(chat.reply || chat.streaming)}
+  hidden={Boolean(chat.reply || chat.streaming || shell.draft.trim())}
 >
   {#each shell.quickActions as item (item.label)}
     <button

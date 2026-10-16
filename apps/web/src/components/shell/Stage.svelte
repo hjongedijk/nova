@@ -108,6 +108,9 @@
     class:long={chat.reply.length > 200 && chat.reply.length <= 560}
     class:xl={chat.reply.length > 560}
     class:speaking={talking}
+    title={chat.model
+      ? `Beantwoord door ${roleLabels[chat.modelRole] ?? "model"} (${chat.model})`
+      : undefined}
   >
     {#each blocks as block, b (b)}
       {#if block.type === "ul"}
@@ -133,11 +136,6 @@
     {/each}{#if chat.streaming && blocks.length === 0}<span class="caret"
       ></span>{/if}
   </div>
-  {#if chat.model}
-    <p class="route-meta" aria-label="Gebruikte modelrol en model">
-      {roleLabels[chat.modelRole] ?? "Model"} · {chat.model}
-    </p>
-  {/if}
   {#if chat.reply && chat.mood !== "neutral"}
     <p class="mood-label" aria-label="Toon van het antwoord">
       {MOOD_LABELS[chat.mood]}
@@ -145,18 +143,14 @@
   {/if}
   <Dock />
   <p class="status-line" role="status">
-    <span id="mode">{MODE_LABELS[chat.uiState] ?? chat.uiState}</span>
+    {#if chat.uiState !== "ready"}<span id="mode"
+        >{MODE_LABELS[chat.uiState] ?? chat.uiState}</span
+      >{/if}
     <span id="voiceHint">{chat.hint || idleHint}</span>
   </p>
 </main>
 
 <style>
-  .route-meta {
-    margin: -0.5rem 1rem 0;
-    color: var(--mist);
-    font-size: 0.75rem;
-    overflow-wrap: anywhere;
-  }
   .mood-label {
     margin: -0.45rem 1rem 0;
     color: var(--mist);

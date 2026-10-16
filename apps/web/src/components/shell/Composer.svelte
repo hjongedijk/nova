@@ -35,6 +35,7 @@
   let reading = $state(false);
   let modelRole = $state<Exclude<ModelRoleId, "embedding"> | "">("");
   let responseLanguage = $state(getConversationLanguage());
+  let menuOpen = $state(false);
   let clipboardText = $state("");
   let clipboardOpen = $state(false);
   let clipboardReading = $state(false);
@@ -201,6 +202,16 @@
   });
 </script>
 
+<svelte:window
+  onclick={(event) => {
+    if (menuOpen && !(event.target as Element | null)?.closest(".plus"))
+      menuOpen = false;
+  }}
+  onkeydown={(event) => {
+    if (event.key === "Escape") menuOpen = false;
+  }}
+/>
+
 <form id="form" class="composer" onsubmit={submit}>
   <input
     type="file"
@@ -210,68 +221,94 @@
     onchange={selectFiles}
     accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.gif,text/*,.txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.js,.ts,.py,.sh,.ps1,.html,.css"
   />
-  <select
-    class="role-select language-select"
-    aria-label="Gesprekstaal"
-    value={responseLanguage}
-    onchange={(event) =>
-      changeLanguage(event.currentTarget.value === "en" ? "en" : "nl")}
-    disabled={chat.busy || reading}
-  >
-    <option value="nl">Nederlands</option>
-    <option value="en">English</option>
-  </select>
-  <select
-    class="role-select"
-    aria-label="Rol voor dit bericht"
-    bind:value={modelRole}
-    disabled={chat.busy || reading}
-  >
-    <option value="">Automatisch</option>
-    <option value="conversation">Gesprek</option>
-    <option value="code">Code</option>
-    <option value="planning">Denken en plannen</option>
-    <option value="summary">Samenvatten</option>
-    <option value="vision">Beeld</option>
-  </select>
-  <button
-    class="icon"
-    type="button"
-    aria-label="Bestanden bijvoegen"
-    title="PDF, Word, afbeeldingen en tekst (max. 5 bestanden, 10 MiB per bestand)"
-    disabled={chat.busy || reading}
-    onclick={() => picker.click()}
-  >
-    <svg viewBox="0 0 24 24" aria-hidden="true"
-      ><path d="m8 13 7-7a3 3 0 0 1 4 4l-9 9a5 5 0 0 1-7-7l9-9M6 15l9-9" /></svg
+  <div class="plus">
+    <button
+      class="icon"
+      class:marked={responseLanguage !== "nl" || modelRole !== ""}
+      type="button"
+      aria-label="Meer opties"
+      aria-haspopup="menu"
+      aria-expanded={menuOpen}
+      title="Bijlage, klembord, scherm en taal"
+      disabled={chat.busy || reading}
+      onclick={() => (menuOpen = !menuOpen)}
     >
-  </button>
-  <button
-    class="icon"
-    type="button"
-    aria-label="Klembordhulp openen"
-    title="Lees gekopieerde tekst voor samenvatten of vertalen"
-    disabled={chat.busy || reading || clipboardReading}
-    onclick={readClipboard}
-  >
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="5" y="5" width="14" height="16" rx="2" />
-      <path d="M9 5V3h6v2M8 10h8M8 14h8" />
-    </svg>
-  </button>
-  <button
-    class="icon"
-    type="button"
-    aria-label="Een schermopname maken"
-    title="Kies een scherm of venster; NOVA maakt één momentopname"
-    disabled={chat.busy || reading || screenBusy}
-    onclick={takeScreen}
-  >
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="3" y="4" width="18" height="13" rx="2" />
-      <path d="M8 21h8M12 17v4M8 8h8" />
-    </svg>
-  </button>
+      <svg viewBox="0 0 24 24" aria-hidden="true"
+        ><path d="M12 5v14M5 12h14" /></svg
+      >
+    </button>
+    {#if menuOpen}
+      <div class="plus-menu" role="menu" aria-label="Meer opties">
+        <button
+          type="button"
+          role="menuitem"
+          title="PDF, Word, afbeeldingen en tekst (max. 5 bestanden, 10 MiB per bestand)"
+          onclick={() => {
+            menuOpen = false;
+            picker.click();
+          }}>Bestand bijvoegen</button
+        >
+        <button
+          type="button"
+          role="menuitem"
+          disabled={clipboardReading}
+          title="Lees gekopieerde tekst voor samenvatten of vertalen"
+          onclick={() => {
+            menuOpen = false;
+            void readClipboard();
+          }}>Klembord lezen</button
+        >
+        <button
+          type="button"
+          role="menuitem"
+          disabled={screenBusy}
+          title="Kies een scherm of venster; NOVA maakt één momentopname"
+          onclick={() => {
+            menuOpen = false;
+            void takeScreen();
+          }}>Scherm delen</button
+        >
+        <div class="plus-fields">
+          <label
+            >Taal
+            <select
+              aria-label="Gesprekstaal"
+              value={responseLanguage}
+              onchange={(event) =>
+                changeLanguage(
+                  event.currentTarget.value === "en" ? "en" : "nl",
+                )}
+            >
+              <option value="nl">Nederlands</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+          <label
+            >Soort antwoord
+            <select aria-label="Soort antwoord" bind:value={modelRole}>
+              <option value="">Automatisch (aanbevolen)</option>
+              <option value="conversation">Gesprek</option>
+              <option value="code">Code</option>
+              <option value="planning">Plannen</option>
+              <option value="summary">Samenvatten</option>
+              <option value="vision">Beeld</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    {/if}
+  </div>
+  <input
+    id="input"
+    autocomplete="off"
+    aria-label="Bericht aan NOVA"
+    placeholder="Zeg of typ iets…"
+    bind:this={input}
+    bind:value={shell.draft}
+    disabled={chat.busy || reading}
+    onfocus={() => showChrome()}
+    onblur={() => setTimeout(maybeHide, 3500)}
+  />
   <button
     id="micButton"
     class="icon"
@@ -286,17 +323,6 @@
       <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
     </svg>
   </button>
-  <input
-    id="input"
-    autocomplete="off"
-    aria-label="Bericht aan NOVA"
-    placeholder="Zeg of typ iets…"
-    bind:this={input}
-    bind:value={shell.draft}
-    disabled={chat.busy || reading}
-    onfocus={() => showChrome()}
-    onblur={() => setTimeout(maybeHide, 3500)}
-  />
   <button
     id="sendButton"
     class="icon"
@@ -427,110 +453,69 @@
   .composer:has(.clipboard-help, .screen-help) {
     border-radius: 18px;
   }
-  .role-select {
+  .plus {
+    position: relative;
+    flex: none;
+  }
+  .icon.marked::after {
+    content: "";
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--glow);
+  }
+  .plus-menu {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 0;
+    z-index: 20;
+    min-width: 230px;
+    display: grid;
+    gap: 2px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--panel, #0d1020);
+    box-shadow: 0 14px 40px -12px rgba(0, 0, 0, 0.7);
+  }
+  .plus-menu > button {
     min-height: 44px;
-    max-width: 190px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text, var(--mist));
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .plus-menu > button:hover,
+  .plus-menu > button:focus-visible {
+    background: rgba(233, 230, 245, 0.08);
+  }
+  .plus-fields {
+    display: grid;
+    gap: 8px;
+    margin-top: 6px;
+    padding: 10px 12px 4px;
+    border-top: 1px solid var(--line);
+    color: var(--dim);
+    font-size: 0.85rem;
+  }
+  .plus-fields label {
+    display: grid;
+    gap: 4px;
+  }
+  .plus-fields select {
+    min-height: 44px;
     border: 1px solid var(--line);
     border-radius: 12px;
     padding: 0 8px;
-    background: var(--panel);
-    color: var(--text);
-  }
-  .language-select {
-    max-width: 140px;
-  }
-  .stop {
-    color: #ff897f;
-  }
-  .attachments {
-    flex-basis: 100%;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 0 12px 8px;
-    font-size: 12px;
-    color: var(--mist);
-  }
-  .attachments button {
-    max-width: 100%;
-    overflow-wrap: anywhere;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 4px 8px;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-  }
-  .clipboard-help {
-    flex-basis: 100%;
-    padding: 8px 12px 10px;
-    color: var(--mist);
-    font-size: 13px;
-  }
-  .clipboard-help p {
-    margin: 4px 0 8px;
-  }
-  .clipboard-help pre {
-    max-height: 100px;
-    overflow: auto;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 8px;
+    background: var(--panel, #0d1020);
+    color: var(--text, var(--mist));
     font: inherit;
-  }
-  .clipboard-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-  .clipboard-actions button {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 6px 10px;
-    background: var(--panel);
-    color: var(--text);
-    cursor: pointer;
-  }
-  .screen-help {
-    flex-basis: 100%;
-    padding: 8px 12px 10px;
-    color: var(--mist);
-    font-size: 13px;
-  }
-  .screen-help p {
-    margin: 4px 0 8px;
-  }
-  .screen-help img {
-    display: block;
-    max-width: 100%;
-    max-height: 240px;
-    object-fit: contain;
-    margin-bottom: 8px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-  }
-  .screen-help input {
-    width: 100%;
-    box-sizing: border-box;
-    margin-bottom: 8px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 8px;
-    background: var(--panel);
-    color: var(--text);
-  }
-  .screen-actions {
-    display: flex;
-    gap: 6px;
-  }
-  .screen-actions button {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 6px 10px;
-    background: var(--panel);
-    color: var(--text);
-    cursor: pointer;
   }
 </style>
