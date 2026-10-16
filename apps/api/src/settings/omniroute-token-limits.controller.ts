@@ -10,15 +10,10 @@ import {
 import { ValidationError } from "../core/errors/validation.error.js";
 import { SettingsGuard } from "./settings.guard.js";
 import { OmniRouteTokenLimits } from "./omniroute-token-limits.service.js";
+import { strictBody } from "./request-input.js";
 
-const input = (body: unknown, keys: string[]) => {
-  if (!body || typeof body !== "object" || Array.isArray(body))
-    throw new ValidationError(["Ongeldige tokenlimietaanvraag."]);
-  const value = body as Record<string, unknown>;
-  if (Object.keys(value).some((key) => !keys.includes(key)))
-    throw new ValidationError(["Ongeldige tokenlimietaanvraag."]);
-  return value;
-};
+const input = (body: unknown, keys: string[]) =>
+  strictBody(body, keys, "Ongeldige tokenlimietaanvraag.");
 
 @Controller("settings/omniroute/accounts/keys/:id/token-limits")
 @UseGuards(SettingsGuard)

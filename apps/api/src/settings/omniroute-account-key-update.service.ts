@@ -13,6 +13,7 @@ import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
 import { RoutingService } from "../routing/routing.service.js";
+import { object, sameSecret } from "./request-input.js";
 
 type Account = {
   id: string;
@@ -36,19 +37,8 @@ type StoredAccount = {
   api_key: string | null;
 };
 
-const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 const validId = (value: unknown): value is string =>
   typeof value === "string" && /^[a-zA-Z0-9_.-]{1,100}$/.test(value);
-const fingerprint = (value: string) =>
-  crypto.createHash("sha256").update(value).digest("hex");
-const equalFingerprint = (left: string, right: string) =>
-  crypto.timingSafeEqual(
-    Buffer.from(fingerprint(left)),
-    Buffer.from(fingerprint(right)),
-  );
 const unavailable =
   "API-sleutel vervangen is niet beschikbaar. Controleer of dit een API-sleutelaccount is en probeer opnieuw.";
 
@@ -138,7 +128,7 @@ export class OmniRouteAccountKeyUpdate {
     try {
       this.assertGateway();
       const account = await this.readAccount(id);
-      if (equalFingerprint(account.key, replacement))
+      if (sameSecret(account.key, replacement))
         throw new Error("De nieuwe sleutel is gelijk aan de huidige sleutel.");
       const requestId = crypto.randomUUID();
       const action = this.confirmations.create(
@@ -247,7 +237,7 @@ export class OmniRouteAccountKeyUpdate {
           if (
             before.provider !== secret.provider ||
             before.name !== secret.name ||
-            !equalFingerprint(before.key, secret.key)
+            !sameSecret(before.key, secret.key)
           )
             throw new Error(unavailable);
           this.audit.record({
@@ -277,7 +267,7 @@ export class OmniRouteAccountKeyUpdate {
           if (
             after.provider !== secret.provider ||
             after.name !== secret.name ||
-            !equalFingerprint(after.key, secret.replacement)
+            !sameSecret(after.key, secret.replacement)
           )
             throw new Error("Credential persistence not verified");
           let routeReady = false;

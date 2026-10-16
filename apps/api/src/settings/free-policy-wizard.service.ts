@@ -25,11 +25,8 @@ import {
   type PlanModel,
 } from "./free-policy-plan.js";
 import { ValidationError } from "../core/errors/validation.error.js";
+import { object } from "./request-input.js";
 
-const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 const digest = (value: unknown) =>
   crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const identifier = (value: unknown) =>

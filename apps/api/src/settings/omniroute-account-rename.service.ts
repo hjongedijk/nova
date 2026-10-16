@@ -14,6 +14,7 @@ import { NovaConfig } from "../core/config/nova-config.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
+import { object } from "./request-input.js";
 
 type AccountRow = {
   id: string;
@@ -28,10 +29,6 @@ const validName = (value: unknown): value is string =>
   typeof value === "string" &&
   value.trim().length > 0 &&
   value.trim().length <= 200;
-const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 const unavailable =
   "Account hernoemen is niet beschikbaar. Controleer de OmniRoute-koppeling.";
 const renameInputError =

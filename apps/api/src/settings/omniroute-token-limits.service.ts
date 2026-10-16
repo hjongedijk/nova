@@ -14,13 +14,10 @@ import { NovaConfig } from "../core/config/nova-config.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
+import { object } from "./request-input.js";
 
 const ERROR =
   "Tokenlimieten zijn niet beschikbaar. Controleer de OmniRoute-koppeling.";
-const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 const safeId = (value: string) => /^[a-zA-Z0-9_.-]{1,100}$/.test(value);
 const isInterval = (value: unknown): value is OmniRouteTokenResetInterval =>
   value === "daily" || value === "weekly" || value === "monthly";

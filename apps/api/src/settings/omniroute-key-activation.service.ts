@@ -13,12 +13,9 @@ import { OmniRouteManagement } from "../routing/omniroute-management.service.js"
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { OmniRouteActivationHistory } from "./omniroute-activation-history.service.js";
+import { object } from "./request-input.js";
 
 const safeId = (id: string) => /^[a-zA-Z0-9_.-]{1,100}$/.test(id);
-const obj = (v: unknown): Record<string, unknown> =>
-  v && typeof v === "object" && !Array.isArray(v)
-    ? (v as Record<string, unknown>)
-    : {};
 const fail =
   "Sleutelbeheer niet beschikbaar. Controleer de OmniRoute-koppeling.";
 type KeyRow = {
@@ -86,9 +83,9 @@ export class OmniRouteKeyActivation {
       id === this.novaKeyId()
     )
       throw new Error(fail);
-    const result = obj(await this.management.request("/api/keys"));
+    const result = object(await this.management.request("/api/keys"));
     if (!Array.isArray(result.keys)) throw new Error(fail);
-    const raw = result.keys.map(obj).find((key) => key.id === id);
+    const raw = result.keys.map(object).find((key) => key.id === id);
     if (
       !raw ||
       typeof raw.isActive !== "boolean" ||

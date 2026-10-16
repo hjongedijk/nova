@@ -14,14 +14,11 @@ import { OmniRouteManagement } from "../routing/omniroute-management.service.js"
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { OmniRouteActivationHistory } from "./omniroute-activation-history.service.js";
+import { object } from "./request-input.js";
 
 type ComboRow = { id: string; name: string; data: string; sort_order: number };
 type ComboView = { id: string; name: string; isActive: boolean };
 const validId = (id: string) => /^[a-zA-Z0-9_.-]{1,100}$/.test(id);
-const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 const hash = (row: ComboRow) =>
   crypto.createHash("sha256").update(JSON.stringify(row)).digest("hex");
 const configRevision = (row: ComboRow) => {

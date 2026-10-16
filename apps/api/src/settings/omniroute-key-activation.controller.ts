@@ -11,17 +11,10 @@ import { ValidationError } from "../core/errors/validation.error.js";
 import { SettingsGuard } from "./settings.guard.js";
 import { OmniRouteKeyActivation } from "./omniroute-key-activation.service.js";
 import { OmniRouteActivationHistory } from "./omniroute-activation-history.service.js";
+import { assertConfirmation, strictBody } from "./request-input.js";
 
-const input = (body: unknown, keys: string[]) => {
-  if (
-    !body ||
-    typeof body !== "object" ||
-    Array.isArray(body) ||
-    Object.keys(body).some((key) => !keys.includes(key))
-  )
-    throw new ValidationError(["Ongeldige sleutelwijziging."]);
-  return body as Record<string, unknown>;
-};
+const input = (body: unknown, keys: string[]) =>
+  strictBody(body, keys, "Ongeldige sleutelwijziging.");
 
 @Controller("settings/omniroute/accounts/keys/:id/activation")
 @UseGuards(SettingsGuard)
@@ -63,12 +56,7 @@ export class OmniRouteKeyActivationController {
     @Body() body: unknown,
   ) {
     const value = input(body, ["sessionId", "confirmationId", "approve"]);
-    if (
-      typeof value.sessionId !== "string" ||
-      typeof value.confirmationId !== "string" ||
-      typeof value.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
+    assertConfirmation(value);
     return this.activation.confirm(
       id,
       value.sessionId,

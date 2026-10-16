@@ -13,13 +13,10 @@ import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
 import { RoutingService } from "../routing/routing.service.js";
+import { object } from "./request-input.js";
 
 type Row = { id: string; name: string; data: string; sort_order: number };
 const validId = (id: string) => /^[a-zA-Z0-9_.-]{1,100}$/.test(id);
-const obj = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 const hash = (row: Row) =>
   crypto.createHash("sha256").update(JSON.stringify(row)).digest("hex");
 const unavailable =
@@ -54,8 +51,8 @@ export class OmniRouteComboRemoval {
   private async current(id: string) {
     const row = this.row(id);
     if (!row || row.name.startsWith("qtSd/")) throw new Error(unavailable);
-    const api = obj(await this.management.request(`/api/combos/${id}`));
-    const data = obj(JSON.parse(row.data));
+    const api = object(await this.management.request(`/api/combos/${id}`));
+    const data = object(JSON.parse(row.data));
     if (
       api.id !== id ||
       api.name !== row.name ||

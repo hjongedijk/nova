@@ -13,6 +13,7 @@ import { SettingsMutationsService } from "./settings-mutations.service.js";
 import type { StoredSkill } from "./skills/skills.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
+import { object } from "./request-input.js";
 
 const modelIdentifier = (value: unknown, model = false): string =>
   typeof value === "string" &&
@@ -22,10 +23,6 @@ const modelIdentifier = (value: unknown, model = false): string =>
     : /^[a-zA-Z0-9_.-]{1,80}$/.test(value))
     ? value
     : "";
-const record = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 
 /** Explicit personal changes only. Credentials, services, access and executable skill bindings have no chat setter. */
 @ToolSourceProvider()
@@ -179,17 +176,17 @@ export class SettingsSource implements ToolSource {
   ): Promise<{ hidden: boolean }> {
     if (!this.modelManagementAvailable)
       throw new Error("OmniRoute modelbeheer is niet beschikbaar.");
-    const report = record(
+    const report = object(
       await this.management.request(
         `/api/provider-models?provider=${encodeURIComponent(provider)}`,
       ),
     );
     const models = Array.isArray(report.models) ? report.models : [];
     const customModelExists = models.some((item) => {
-      const row = record(item);
+      const row = object(item);
       return row.id === modelId || row.modelId === modelId;
     });
-    const hiddenByProvider = record(report.hiddenModelsByProvider);
+    const hiddenByProvider = object(report.hiddenModelsByProvider);
     const hiddenModels = Array.isArray(hiddenByProvider[provider])
       ? (hiddenByProvider[provider] as unknown[])
       : [];
@@ -202,15 +199,15 @@ export class SettingsSource implements ToolSource {
       !customModelExists &&
       !hiddenModels.includes(modelId)
     ) {
-      const catalog = record(
+      const catalog = object(
         await this.management.request("/api/models/catalog"),
       );
-      const providerCatalog = record(record(catalog.catalog)[provider]);
+      const providerCatalog = object(object(catalog.catalog)[provider]);
       const catalogModels = Array.isArray(providerCatalog.models)
         ? providerCatalog.models
         : [];
       catalogModelExists = catalogModels.some((item) => {
-        const row = record(item);
+        const row = object(item);
         return row.id === modelId || row.modelId === modelId;
       });
     }

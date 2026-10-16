@@ -10,17 +10,10 @@ import {
 import { ValidationError } from "../core/errors/validation.error.js";
 import { SettingsGuard } from "./settings.guard.js";
 import { OmniRouteAccountRename } from "./omniroute-account-rename.service.js";
+import { strictBody } from "./request-input.js";
 
-const input = (body: unknown, keys: string[]) => {
-  if (
-    !body ||
-    typeof body !== "object" ||
-    Array.isArray(body) ||
-    Object.keys(body).some((key) => !keys.includes(key))
-  )
-    throw new ValidationError(["Ongeldige accountnaamwijziging."]);
-  return body as Record<string, unknown>;
-};
+const input = (body: unknown, keys: string[]) =>
+  strictBody(body, keys, "Ongeldige accountnaamwijziging.");
 
 @Controller("settings/omniroute/accounts/rename")
 @UseGuards(SettingsGuard)

@@ -10,11 +10,8 @@ import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { SettingsGuard } from "./settings.guard.js";
+import { object } from "./request-input.js";
 
-const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 const identifier = (value: unknown, model = false): string =>
   typeof value === "string" &&
   (model

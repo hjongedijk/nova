@@ -13,6 +13,7 @@ import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
 import { RoutingService } from "../routing/routing.service.js";
+import { object, sameSecret } from "./request-input.js";
 
 type PendingSecret = {
   requestId: string;
@@ -29,10 +30,6 @@ type StoredAccount = {
   is_active: number;
   api_key: string | null;
 };
-const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 const validProvider = (value: unknown): value is string =>
   typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,99}$/i.test(value);
 const validName = (value: unknown): value is string =>
@@ -52,11 +49,6 @@ function storedCredentialMatches(stored: string, key: string): boolean {
   if (!stored) return false;
   return stored.length > key.length || sameSecret(stored, key);
 }
-const sameSecret = (left: string, right: string) =>
-  crypto.timingSafeEqual(
-    crypto.createHash("sha256").update(left).digest(),
-    crypto.createHash("sha256").update(right).digest(),
-  );
 
 /** Keeps a provider credential in process memory only until its one-use confirmation expires. */
 @Injectable()

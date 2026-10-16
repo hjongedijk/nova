@@ -14,12 +14,9 @@ import { OmniRouteManagement } from "../routing/omniroute-management.service.js"
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { OmniRouteComboUpdateHistory } from "./omniroute-combo-update-history.service.js";
+import { object } from "./request-input.js";
 
 type Row = { id: string; name: string; data: string; sort_order: number };
-const obj = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 const validId = (value: unknown): value is string =>
   typeof value === "string" && /^[a-zA-Z0-9_.-]{1,100}$/.test(value);
 const validModelId = (value: unknown): value is string =>
@@ -40,7 +37,7 @@ const modelsValue = (value: unknown): string[] =>
   Array.isArray(value)
     ? value.flatMap((item) => {
         if (typeof item === "string" && item.length <= 300) return [item];
-        const row = obj(item);
+        const row = object(item);
         return validId(row.provider) && validModelId(row.modelId)
           ? [`${row.provider}/${row.modelId}`]
           : [];
@@ -81,8 +78,8 @@ export class OmniRouteComboUpdate {
   private async current(id: string) {
     const row = this.row(id);
     if (!row || row.name.startsWith("qtSd/")) throw new Error(unavailable);
-    const api = obj(await this.management.request(`/api/combos/${id}`));
-    const data = obj(JSON.parse(row.data));
+    const api = object(await this.management.request(`/api/combos/${id}`));
+    const data = object(JSON.parse(row.data));
     const storedModels = modelsValue(data.models);
     if (
       api.id !== id ||
@@ -100,20 +97,20 @@ export class OmniRouteComboUpdate {
       this.management.request("/api/providers?limit=200&offset=0"),
       this.management.request("/api/free-models"),
     ]);
-    const providers = obj(providersRaw);
-    const catalog = obj(catalogRaw);
+    const providers = object(providersRaw);
+    const catalog = object(catalogRaw);
     if (!Array.isArray(providers.connections) || !Array.isArray(catalog.models))
       throw new Error(unavailable);
     const active = new Set(
       providers.connections
-        .map(obj)
+        .map(object)
         .filter((row) => row.isActive === true && validId(row.provider))
         .map((row) => row.provider as string),
     );
     return [
       ...new Set(
         catalog.models.flatMap((value: unknown) => {
-          const model = obj(value);
+          const model = object(value);
           return validId(model.provider) &&
             validModelId(model.modelId) &&
             active.has(model.provider) &&
@@ -126,13 +123,13 @@ export class OmniRouteComboUpdate {
   }
 
   private async assertUniqueName(name: string, id: string): Promise<void> {
-    const result = obj(
+    const result = object(
       await this.management.request("/api/combos?limit=200&offset=0"),
     );
     if (!Array.isArray(result.combos)) throw new Error(unavailable);
     if (
       result.combos.some((value: unknown) => {
-        const combo = obj(value);
+        const combo = object(value);
         return (
           combo.id !== id &&
           typeof combo.name === "string" &&

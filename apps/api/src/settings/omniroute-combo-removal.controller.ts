@@ -6,20 +6,12 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
-import { ValidationError } from "../core/errors/validation.error.js";
 import { SettingsGuard } from "./settings.guard.js";
 import { OmniRouteComboRemoval } from "./omniroute-combo-removal.service.js";
+import { assertConfirmation, strictBody } from "./request-input.js";
 
-const input = (body: unknown, keys: string[]) => {
-  if (
-    !body ||
-    typeof body !== "object" ||
-    Array.isArray(body) ||
-    Object.keys(body).some((key) => !keys.includes(key))
-  )
-    throw new ValidationError(["Ongeldige combo-aanvraag."]);
-  return body as Record<string, unknown>;
-};
+const input = (body: unknown, keys: string[]) =>
+  strictBody(body, keys, "Ongeldige combo-aanvraag.");
 @Controller("settings/omniroute/combos/:id/removal")
 @UseGuards(SettingsGuard)
 export class OmniRouteComboRemovalController {
@@ -36,12 +28,7 @@ export class OmniRouteComboRemovalController {
     @Body() body: unknown,
   ) {
     const value = input(body, ["sessionId", "confirmationId", "approve"]);
-    if (
-      typeof value.sessionId !== "string" ||
-      typeof value.confirmationId !== "string" ||
-      typeof value.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
+    assertConfirmation(value);
     return this.removal.confirm(
       id,
       value.sessionId,

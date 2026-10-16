@@ -9,15 +9,12 @@ import { AuditService } from "../core/audit/audit.service.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { ToolsService } from "../tools/tools.service.js";
 import { SettingsGuard } from "./settings.guard.js";
+import { object } from "./request-input.js";
 
 const ENTRY_LIMIT = 500;
 const ACTIVITY_LIMIT = 50;
 const LOG_BYTE_LIMIT = 2_000_000;
 const RISKS: Risk[] = ["READ_ONLY", "SAFE", "CONFIRM", "DANGEROUS"];
-const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 function timestamp(value: unknown): string | null {
   if (
     typeof value !== "string" ||

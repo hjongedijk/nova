@@ -20,11 +20,8 @@ import { SettingsGuard } from "./settings.guard.js";
 import { NativeMemorySettingsService } from "./native-memory-settings.service.js";
 import { NativeMemoryRecordsService } from "./native-memory-records.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
+import { object } from "./request-input.js";
 
-const object = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 const text = (value: unknown, limit = 200): string =>
   typeof value === "string" ? String(sanitize(value)).slice(0, limit) : "";
 const identifier = (value: unknown): string =>
