@@ -24,8 +24,6 @@ export function strictBody(
   return body as Record<string, unknown>;
 }
 
-export const confirmationKeys = ["sessionId", "confirmationId", "approve"];
-
 export interface ConfirmationInput {
   sessionId: string;
   confirmationId: string;

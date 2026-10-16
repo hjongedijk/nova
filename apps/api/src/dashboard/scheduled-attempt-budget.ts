@@ -1,6 +1,4 @@
-import { randomUUID } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
+import { readStrictState, writeStrictState } from "./strict-state-file.js";
 
 const RETRY_MS = 5 * 60_000;
 const MAX_ATTEMPTS = 3;
@@ -30,15 +28,6 @@ function validTime(value: unknown): value is number {
     value >= 0 &&
     value <= 8_640_000_000_000_000
   );
-}
-
-function syncDirectory(file: string): void {
-  const descriptor = fs.openSync(path.dirname(file), "r");
-  try {
-    fs.fsyncSync(descriptor);
-  } finally {
-    fs.closeSync(descriptor);
-  }
 }
 
 /** Reserve before work: failures spend at most three attempts per period, including across restarts. */
@@ -75,81 +64,23 @@ export class ScheduledAttemptBudget {
   }
 
   private read(): AttemptState | undefined {
-    let stats: fs.Stats;
-    try {
-      stats = fs.lstatSync(this.file);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    }
-    if (!stats.isFile() || stats.size > MAX_BYTES) throw new Error(UNAVAILABLE);
-    const descriptor = fs.openSync(
+    return readStrictState<AttemptState>(
       this.file,
-      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+      MAX_BYTES,
+      UNAVAILABLE,
+      (state) =>
+        Object.keys(state).sort().join(",") ===
+          "attempts,lastAttemptAt,period,version" &&
+        state.version === 1 &&
+        validPeriod(state.period) &&
+        Number.isSafeInteger(state.attempts) &&
+        (state.attempts as number) >= 1 &&
+        (state.attempts as number) <= MAX_ATTEMPTS &&
+        validTime(state.lastAttemptAt),
     );
-    try {
-      const opened = fs.fstatSync(descriptor);
-      if (!opened.isFile() || opened.size > MAX_BYTES)
-        throw new Error(UNAVAILABLE);
-      const bytes = Buffer.alloc(MAX_BYTES + 1);
-      let length = 0;
-      while (length < bytes.length) {
-        const count = fs.readSync(
-          descriptor,
-          bytes,
-          length,
-          bytes.length - length,
-          null,
-        );
-        if (!count) break;
-        length += count;
-      }
-      if (length > MAX_BYTES) throw new Error(UNAVAILABLE);
-      const parsed: unknown = JSON.parse(
-        bytes.subarray(0, length).toString("utf8"),
-      );
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-        throw new Error(UNAVAILABLE);
-      const state = parsed as Record<string, unknown>;
-      if (
-        Object.keys(state).sort().join(",") !==
-          "attempts,lastAttemptAt,period,version" ||
-        state.version !== 1 ||
-        !validPeriod(state.period) ||
-        !Number.isSafeInteger(state.attempts) ||
-        (state.attempts as number) < 1 ||
-        (state.attempts as number) > MAX_ATTEMPTS ||
-        !validTime(state.lastAttemptAt)
-      )
-        throw new Error(UNAVAILABLE);
-      fs.fsyncSync(descriptor);
-      syncDirectory(this.file);
-      return state as unknown as AttemptState;
-    } finally {
-      fs.closeSync(descriptor);
-    }
   }
 
   private write(state: AttemptState): void {
-    const temporary = `${this.file}.${process.pid}.${randomUUID()}.tmp`;
-    try {
-      fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-      const descriptor = fs.openSync(temporary, "wx", 0o600);
-      try {
-        fs.fchmodSync(descriptor, 0o600);
-        fs.writeFileSync(descriptor, JSON.stringify(state));
-        fs.fsyncSync(descriptor);
-      } finally {
-        fs.closeSync(descriptor);
-      }
-      fs.renameSync(temporary, this.file);
-      syncDirectory(this.file);
-    } finally {
-      try {
-        fs.rmSync(temporary, { force: true });
-      } catch {
-        // Preserve the reservation failure; never authorize work after an uncertain save.
-      }
-    }
+    writeStrictState(this.file, state);
   }
 }

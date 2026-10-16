@@ -15,7 +15,7 @@ function fsyncPath(target: string): void {
 }
 
 /** Atomically replaces `file` with `value` as JSON, readable by the owner only. */
-export function writePrivateJson(
+function writePrivateJson(
   file: string,
   value: unknown,
   durability: Durability = "none",
@@ -38,7 +38,7 @@ export function writePrivateJson(
 }
 
 /** A JSON array file, or an empty list when it is missing, unreadable or not an array. */
-export function readJsonArray(file: string): unknown[] {
+function readJsonArray(file: string): unknown[] {
   try {
     const value: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
     return Array.isArray(value) ? value : [];
