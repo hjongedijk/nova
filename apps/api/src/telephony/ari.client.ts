@@ -95,8 +95,15 @@ export class AriHttpClient implements AriPort {
     return { version: String(data.system?.version ?? "onbekend") };
   }
 
-  endpoints() {
-    return this.call<AriEndpoint[]>("GET", "/endpoints/PJSIP");
+  /** Asterisk answers 404 for the PJSIP technology while no endpoint is configured yet: that means none, not "down". */
+  async endpoints() {
+    try {
+      return await this.call<AriEndpoint[]>("GET", "/endpoints/PJSIP");
+    } catch (error) {
+      if (error instanceof TelephonyError && error.message.includes("(404)"))
+        return [];
+      throw error;
+    }
   }
 
   channels() {

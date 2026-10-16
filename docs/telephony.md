@@ -1,6 +1,6 @@
 # Telefonie: Asterisk en Linphone
 
-Status: ontwikkelversie, nog niet in productie gedeployed. Standaard UIT.
+Status: in productie beschikbaar (v0.1.56) maar standaard UIT. De Asterisk-container staat in de Compose met profiel `telephony`.
 
 ## Wat het is
 
@@ -27,26 +27,17 @@ Status: ontwikkelversie, nog niet in productie gedeployed. Standaard UIT.
 
 Omgevingsvariabele: `NOVA_ASTERISK_ARI_URL` (standaard `http://127.0.0.1:8088`; alleen localhost, 127.0.0.1 of `asterisk`).
 
-## Optioneel productiefragment (NIET toegepast; `/opt/nova` is niet aangepast)
+## Productie (Compose)
 
-```yaml
-asterisk:
-  build: ./asterisk # kopieer deploy/asterisk
-  restart: unless-stopped
-  cap_drop: [ALL]
-  cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
-  security_opt: [no-new-privileges:true]
-  volumes:
-    - ${NOVA_DATA_DIR}/asterisk/conf:/nova-conf:ro
-    - ${NOVA_DATA_DIR}/asterisk/recordings:/var/spool/asterisk/recording
-  ports: # alleen LAN-IP, nooit 0.0.0.0
-    - "192.168.1.10:5060:5060/udp"
-    - "192.168.1.10:10000-10100:10000-10100/udp"
-  # ARI: geen host-poort; NOVA bereikt hem via het compose-netwerk
-  # NOVA_ASTERISK_ARI_URL=http://asterisk:8088
-```
+Asterisk staat in `deploy/docker-compose.yml` als service `asterisk` met profiel `telephony`, op het private `nova`-netwerk en zonder gepubliceerde poorten.
+NOVA bereikt ARI en AudioSocket intern (`NOVA_ASTERISK_ARI_URL=http://asterisk:8088` staat vast in de compose). De image wordt lokaal gebouwd uit `./asterisk`
+(zoals Piper): kopieer `deploy/asterisk` naast `docker-compose.yml`, zet `COMPOSE_PROFILES=...,telephony` in `.env`, zet Telefonie eenmalig aan in NOVA (dat maakt de configuratie
+in `nova-data/asterisk/conf`) en start `docker compose up -d asterisk`. Releases leveren `asterisk/` mee in `nova-compose.tar.gz`.
 
-NAT/andere netwerken vragen om `external_media_address`/`local_net` in een aangepaste transport-sectie.
+De trunk naar `sip.linphone.org` is een uitgaande registratie: er hoeft niets van buitenaf naar binnen. Wil je ook telefoons op je eigen LAN laten registreren, publiceer dan zelf
+SIP/RTP op een LAN-IP (nooit `0.0.0.0`) in een eigen override. NAT of andere netwerken vragen om `external_media_address`/`local_net` in een aangepaste transport-sectie.
+
+Zolang er nog geen toestel of trunk is, meldt Asterisk geen PJSIP-endpoints; NOVA ziet dat als "nog geen toestellen" en niet als "onbereikbaar".
 
 ## Getest
 

@@ -23,6 +23,8 @@ services:
       # This service has restart: unless-stopped, so NOVA may safely request a graceful restart.
       NOVA_RESTART_ENABLED: "true"
       NOVA_STACK_CONTROL_URL: http://stack-control:8090
+      # Asterisk (profile telephony) shares the private network; NOVA only talks to it when Telefonie is on.
+      NOVA_ASTERISK_ARI_URL: http://asterisk:8088
       NOVA_STACK_CONTROL_TOKEN: ${NOVA_STACK_CONTROL_TOKEN:-}
       OMNIROUTE_URL: http://omniroute:20128/v1
       OMNIROUTE_DATABASE: /omniroute/storage.sqlite
@@ -103,6 +105,34 @@ services:
       retries: 5
       start_period: 30s
     networks: [nova]
+
+  # Optional telephony: Asterisk PBX that NOVA controls over ARI (Settings > Telefonie). Enable with
+  # COMPOSE_PROFILES=...,telephony after switching Telefonie on once (that generates the configuration). No host
+  # ports: it registers outward to a SIP trunk (for example sip.linphone.org) and only NOVA reaches ARI and
+  # AudioSocket on the private network. Publish SIP/RTP yourself only for phones on your own LAN. See docs/telephony.md.
+  asterisk:
+    <<: *restart
+    profiles: [telephony]
+    build: ./asterisk
+    image: nova-asterisk:local
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1
+    environment:
+      ASTERISK_TERMINAL_OPTS: "-n"
+    volumes:
+      - ./nova-data/asterisk/conf:/nova-conf:ro
+      - ./nova-data/asterisk/recordings:/var/spool/asterisk/recording
+    networks: [nova]
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show uptime"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # The only component with Docker socket access. It exposes fixed, token-protected
   # status/restart and project-sandbox routes on a private network shared only with NOVA.
