@@ -1,5 +1,6 @@
+import { handleVizEvent } from "#lib/holo/store.svelte.ts";
 import { showToast } from "#lib/stores/toasts.svelte.ts";
-import type { ChatAttachment } from "@nova/contracts";
+import type { ChatAttachment, VizEventInfo } from "@nova/contracts";
 import { openChatStream } from "#lib/api/chat.ts";
 import { chat, provideAsk, setState } from "#lib/stores/chat.svelte.ts";
 import { playback } from "#lib/voice/audio.ts";
@@ -65,6 +66,10 @@ const TOOL_HINTS: [RegExp, { nl: string; en: string }][] = [
     { nl: "Je huis klaarmaken…", en: "Preparing your home…" },
   ],
   [/^(network|alerts|daily)_/, { nl: "Controleren…", en: "Checking…" }],
+  [
+    /_visualization$|^(load_3d_scene|highlight_object|rotate_object|focus_camera|show_object_details|annotate_object)$/,
+    { nl: "Het beeld opbouwen…", en: "Building the view…" },
+  ],
 ];
 const toolHint = (name: unknown, language: "nl" | "en"): string => {
   const hint = TOOL_HINTS.find(([re]) => re.test(String(name || "")))?.[1];
@@ -211,6 +216,8 @@ export async function ask(
               typeof item.label === "string",
           )
           .slice(0, 10);
+      if (event === "visualization" && typeof data?.id === "string")
+        void handleVizEvent(data as unknown as VizEventInfo);
       if (event === "confirmation")
         addCard(data as unknown as Parameters<typeof addCard>[0]);
       if (event === "tool_start") {

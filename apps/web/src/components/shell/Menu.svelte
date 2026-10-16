@@ -12,6 +12,7 @@
   } from "#lib/api/shell.ts";
   import { showToast } from "#lib/stores/toasts.svelte.ts";
   import { cooking } from "#lib/cooking/session.svelte.ts";
+  import { toggleHoloMenu } from "#lib/holo/store.svelte.ts";
   import { startQuickNoteCapture } from "#lib/voice/recognition.ts";
 
   let { element = $bindable() }: { element?: HTMLElement } = $props();
@@ -118,6 +119,13 @@
     role="menuitem"
     type="button"
     onclick={() => (cooking.open = true)}>Kookmodus</button
+  >
+  <button
+    class="menu-item"
+    id="holoOpen"
+    role="menuitem"
+    type="button"
+    onclick={toggleHoloMenu}>Visualisaties</button
   >
   <button
     class="menu-item"

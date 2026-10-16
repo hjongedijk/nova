@@ -21,6 +21,7 @@
 | [Node-RED logboek](node-red-logs.md)                | On-demand bounded log snapshots, secret redaction and current-flow links                      |
 | [Node-RED routines](node-red-routines.md)           | Personal daily reminder routines and their safety boundaries                                  |
 | [Routes and travel time](routes.md)                 | Optional free route source, setup, attribution and current limits                             |
+| [Holografische visualisatie](holographic-engine.md) | Herbruikbare 3D/2D-viewer, providers, tools en componentAPI                                   |
 | [Local plugins](local-plugins.md)                   | Private JSON webhook manifests, limits and safety rules                                       |
 | [Conversation language](conversation-language.md)   | Switch one conversation between Dutch and English, including voice                            |
 | [Conversation milestone](conversation-milestone.md) | Opt-in completed-turn counter, quiet delivery, restart recovery and privacy                   |

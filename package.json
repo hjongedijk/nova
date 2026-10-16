@@ -30,6 +30,7 @@
     "test:mcp-sandbox:runtime": "node scripts/test-mcp-sandbox-runtime.mjs",
     "check:code-workspace": "node scripts/check-code-workspace.mjs",
     "check:privacy-screenshots": "node scripts/check-screenshot-privacy.mjs",
+    "check:holo": "node scripts/check-holo.mjs",
     "lint": "eslint .",
     "typecheck": "npm run typecheck -w @nova/contracts && npm run typecheck -w @nova/api && npm run check -w @nova/web",
     "format": "prettier --write .",

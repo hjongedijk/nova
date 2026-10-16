@@ -4,6 +4,7 @@
   import Column from "#components/hud/Column.svelte";
   import Composer from "#components/shell/Composer.svelte";
   import CookingMode from "#components/shell/CookingMode.svelte";
+  import HoloPanel from "#components/holo/HoloPanel.svelte";
   import WorkspaceCodePanel from "#components/shell/WorkspaceCodePanel.svelte";
   import Entity from "#components/shell/Entity.svelte";
   import Header from "#components/shell/Header.svelte";
@@ -121,4 +122,5 @@
   <AdminDialog />
   <WorkspaceCodePanel />
   <CookingMode />
+  <HoloPanel />
 {/if}
