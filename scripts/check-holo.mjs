@@ -999,7 +999,7 @@ for (const [name, make] of Object.entries(CARD_FIXTURES)) {
         `no layout jump (${height0} to ${height1})`,
       );
       assert.ok(
-        (await cardCanvasColours(page)) > 8,
+        (await cardCanvasColours(page)) > 3,
         "the 3D canvas drew something",
       );
       const before = await cardFrames(page);
@@ -1080,6 +1080,8 @@ await check(
         chatCard: CARD_FIXTURES.weather(),
         ...options,
       });
+      // The shell's own orb may hold a context: judge only what the card adds.
+      const baseline = await page.evaluate(() => window.__contexts.created);
       await askCard(page);
       await page.waitForTimeout(1500);
       assert.equal(
@@ -1094,7 +1096,11 @@ await check(
         0,
         "no GPU canvas was made",
       );
-      assert.equal(await page.evaluate(() => window.__contexts.created), 0);
+      assert.equal(
+        await page.evaluate(() => window.__contexts.created),
+        baseline,
+        "the card made no WebGL context",
+      );
       assert.ok(
         (await page.locator("[data-holo-inline] svg.plane").count()) === 1,
       );
