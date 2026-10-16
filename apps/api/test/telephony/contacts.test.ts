@@ -275,6 +275,27 @@ describe("dialplan for the trunk and contacts", () => {
     expect(() => assertValid({ ...base(), trunk: null })).toThrow();
   });
 
+  it("encrypts trunk audio with SDES-SRTP, as Linphone requires, and leaves LAN phones unchanged", () => {
+    const config = {
+      ...base(),
+      extensions: [
+        {
+          id: "101",
+          name: "Laptop",
+          kind: "phone" as const,
+          secret: "geheim-wachtwoord",
+        },
+      ],
+    };
+    const pjsip = renderPjsip(config);
+    const trunkBlock = pjsip.slice(
+      pjsip.indexOf("[trunk]\ntype=endpoint"),
+      pjsip.indexOf("[trunk]", pjsip.indexOf("[trunk]\ntype=endpoint") + 10),
+    );
+    expect(trunkBlock).toContain("media_encryption=sdes");
+    expect(pjsip.match(/media_encryption=sdes/g)).toHaveLength(1);
+  });
+
   it("registers the trunk with the Linphone account", () => {
     const pjsip = renderPjsip(base());
     expect(pjsip).toContain("server_uri=sip:sip.linphone.org");

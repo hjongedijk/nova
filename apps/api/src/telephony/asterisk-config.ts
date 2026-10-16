@@ -179,6 +179,9 @@ export function renderPjsip(config: TelephonyConfig): string {
       "context=nova-trunk-in",
       "disallow=all",
       "allow=alaw,ulaw",
+      // Linphone and sip.linphone.org insist on encrypted audio (RTP/SAVP with SDES keys); without this the call is
+      // refused with 488 "Not Acceptable Here" in both directions.
+      "media_encryption=sdes",
       "outbound_auth=trunk-auth",
       "aors=trunk",
       `from_user=${trunk.username}`,
