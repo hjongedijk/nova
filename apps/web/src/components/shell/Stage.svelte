@@ -8,6 +8,8 @@
   import { playback } from "#lib/voice/audio.ts";
   import { speechProgress } from "#lib/voice/speaker.ts";
   import Chips from "./Chips.svelte";
+  import InlineHolo from "#components/holo/InlineHolo.svelte";
+  import { holo } from "#lib/holo/store.svelte.ts";
   import Dock from "./Dock.svelte";
 
   let stage: HTMLElement;
@@ -108,6 +110,7 @@
     class:long={chat.reply.length > 200 && chat.reply.length <= 560}
     class:xl={chat.reply.length > 560}
     class:speaking={talking}
+    class:with-card={!!holo.inline}
     title={chat.model
       ? `Beantwoord door ${roleLabels[chat.modelRole] ?? "model"} (${chat.model})`
       : undefined}
@@ -136,6 +139,7 @@
     {/each}{#if chat.streaming && blocks.length === 0}<span class="caret"
       ></span>{/if}
   </div>
+  <InlineHolo />
   {#if chat.reply && chat.mood !== "neutral"}
     <p class="mood-label" aria-label="Toon van het antwoord">
       {MOOD_LABELS[chat.mood]}

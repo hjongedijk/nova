@@ -1,4 +1,4 @@
-import { handleVizEvent } from "#lib/holo/store.svelte.ts";
+import { clearInline, handleVizEvent } from "#lib/holo/store.svelte.ts";
 import { showToast } from "#lib/stores/toasts.svelte.ts";
 import type { ChatAttachment, VizEventInfo } from "@nova/contracts";
 import { openChatStream } from "#lib/api/chat.ts";
@@ -120,6 +120,7 @@ export async function ask(
   }
 
   stopSpeaking();
+  clearInline();
   chat.model = "";
   chat.modelRole = "";
   chat.mood = "neutral";
@@ -217,7 +218,10 @@ export async function ask(
           )
           .slice(0, 10);
       if (event === "visualization" && typeof data?.id === "string")
-        void handleVizEvent(data as unknown as VizEventInfo);
+        void handleVizEvent(
+          data as unknown as VizEventInfo,
+          chat.history[assistant],
+        );
       if (event === "confirmation")
         addCard(data as unknown as Parameters<typeof addCard>[0]);
       if (event === "tool_start") {

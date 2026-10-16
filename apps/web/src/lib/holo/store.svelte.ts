@@ -1,3 +1,4 @@
+import { parseInlineScene } from "./card/guard.ts";
 import { closeScene, listProviders, openProvider, readScene } from "./api.ts";
 import type { VizEventInfo, VizProviderInfo, VizScene } from "./types.ts";
 
@@ -10,6 +11,8 @@ export const holo = $state({
   error: "",
   /** When the scene was last fetched (ms), for the "bijgewerkt" label. */
   fetchedAt: 0,
+  /** The card under the current answer in the conversation (from tool results of this turn). */
+  inline: null as VizScene | null,
 });
 
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -82,8 +85,32 @@ export async function loadProviders(): Promise<void> {
   }
 }
 
-/** NOVA's chat stream announced a visualisation (create/update/clear tool result). */
-export async function handleVizEvent(event: VizEventInfo): Promise<void> {
+/** A new question starts: the card of the previous answer goes. */
+export function clearInline(): void {
+  holo.inline = null;
+}
+
+/** The "Uitvergroten" action of an inline card: the same scene in the big panel. */
+export function expandInline(scene: VizScene | null = holo.inline): void {
+  if (scene) setScene(scene);
+}
+
+/**
+ * NOVA's chat stream announced a visualisation. "inline" carries a small scene built from this
+ * turn's tool results: it becomes a card under the answer (and in the history line) and never
+ * opens the panel by itself. The other actions come from the visualisation tools.
+ */
+export async function handleVizEvent(
+  event: VizEventInfo,
+  line?: { scene?: VizScene },
+): Promise<void> {
+  if (event.action === "inline") {
+    const scene = parseInlineScene(event.scene);
+    if (!scene) return;
+    holo.inline = scene;
+    if (line) line.scene = scene;
+    return;
+  }
   if (event.action === "clear") {
     if (holo.scene?.id === event.id) closeHolo(false);
     return;

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import ActionReceipts from "./ActionReceipts.svelte";
+  import HoloCard from "#components/holo/HoloCard.svelte";
+  import { expandInline } from "#lib/holo/store.svelte.ts";
   import { addMessage, showStage } from "#lib/chat/index.ts";
   import { getSessionId } from "#lib/chat/session.ts";
   import { forgetConversation } from "#lib/api/chat.ts";
@@ -164,6 +166,12 @@
         <div class:assistant-content={message.role === "assistant"}>
           {message.text}
         </div>
+        {#if message.scene}
+          {@const scene = message.scene}
+          <div class="history-card">
+            <HoloCard {scene} flat onexpand={() => expandInline(scene)} />
+          </div>
+        {/if}
         {#if message.role === "assistant" && message.text.trim()}
           <div class="answer-feedback" aria-label="Was dit antwoord prettig?">
             <button

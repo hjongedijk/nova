@@ -8,6 +8,8 @@ export type {
   VizDetailValue,
   VizEdge,
   VizEventInfo,
+  VizGauge,
+  VizGlyph,
   VizHotspot,
   VizLayer,
   VizMode,
@@ -18,7 +20,12 @@ export type {
   VizSceneKind,
   VizSceneResponse,
   VizStatus,
+  VizTile,
+  VizTileGroup,
+  VizTimeline,
+  VizTimelineItem,
   VizView,
+  VizWeather,
 } from "@nova/contracts";
 
 export type HoloTheme = "dark" | "light" | "auto";

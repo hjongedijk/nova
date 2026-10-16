@@ -2,6 +2,7 @@ import type {
   ChatAttachment,
   ModelRoleId,
   PendingConfirmation,
+  VizScene,
 } from "@nova/contracts";
 import { onSettingsReceipt } from "../api/settings-receipt-events.ts";
 
@@ -14,6 +15,8 @@ export type AssistantMood =
 export interface HistoryMessage {
   role: "user" | "assistant";
   text: string;
+  /** Inline hologram card that belonged to this answer (from the tool results of that turn). */
+  scene?: VizScene;
 }
 
 export interface ActionReceipt {

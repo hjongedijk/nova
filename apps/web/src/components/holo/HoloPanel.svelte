@@ -9,7 +9,7 @@
     refresh,
     showProvider,
   } from "#lib/holo/store.svelte.ts";
-  import HoloViewer from "./HoloViewer.svelte";
+  import HoloScene from "./HoloScene.svelte";
 
   let dialog: HTMLElement | undefined = $state();
   let opener: Element | null = null;
@@ -89,13 +89,17 @@
               ? `Live · bijgewerkt ${updated}`
               : `Gemaakt ${updated}`}
           </span>
-          <button type="button" class="btn" onclick={() => void refresh()}
-            >Ververs</button
-          >
-          <a class="btn" href={exportUrl(holo.scene.id, "json")} download
-            >JSON</a
-          >
-          <a class="btn" href={exportUrl(holo.scene.id, "csv")} download>CSV</a>
+          {#if holo.scene.providerId !== "inline"}
+            <button type="button" class="btn" onclick={() => void refresh()}
+              >Ververs</button
+            >
+            <a class="btn" href={exportUrl(holo.scene.id, "json")} download
+              >JSON</a
+            >
+            <a class="btn" href={exportUrl(holo.scene.id, "csv")} download
+              >CSV</a
+            >
+          {/if}
           <button type="button" class="btn" onclick={() => (holo.scene = null)}
             >Andere</button
           >
@@ -110,7 +114,7 @@
       {#if holo.error}<p class="err" role="alert">{holo.error}</p>{/if}
       {#if holo.scene}
         <div class="view">
-          <HoloViewer scene={holo.scene} />
+          <HoloScene scene={holo.scene} />
         </div>
         {#if holo.scene.notes.length || holo.scene.actions.length}
           <footer>

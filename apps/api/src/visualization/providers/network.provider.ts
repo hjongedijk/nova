@@ -10,6 +10,7 @@ import type {
 import { ChecksService } from "../../checks/checks.service.js";
 import { HostMetricsService } from "../../dashboard/host-metrics.service.js";
 import { HomeAssistantService } from "../../home/home-assistant.service.js";
+import { clean, tilesScene } from "../card-builders.js";
 import { VisualizationRegistry } from "../visualization.registry.js";
 import type {
   ProviderScene,
@@ -178,6 +179,58 @@ export function networkLatency(snapshot: NetworkSnapshot): ProviderScene {
   };
 }
 
+/** Status tiles: every service with its state in words and its response time. */
+export function networkStatus(snapshot: NetworkSnapshot): ProviderScene {
+  const tiles: import("@nova/contracts").VizTile[] = snapshot.checks.map(
+    (check, index) => ({
+      id: `check:${index}`,
+      label: clean(check.name, 40),
+      state: check.ok ? "Bereikbaar" : "Niet bereikbaar",
+      status: check.ok
+        ? check.ms >= HEAT_FULL_MS
+          ? "warning"
+          : "ok"
+        : "critical",
+      group: "services",
+      ...(check.ok ? { detail: `${Math.round(check.ms)} ms` } : {}),
+    }),
+  );
+  const groups = [{ id: "services", label: "Diensten" }];
+  tiles.push({
+    id: "throughput",
+    label: "Doorvoer server",
+    state: snapshot.throughput
+      ? `in ${rate(snapshot.throughput.rxPerSec)}`
+      : "Onbekend",
+    status: snapshot.throughput ? "active" : "unknown",
+    group: "traffic",
+    detail: snapshot.throughput
+      ? `uit ${rate(snapshot.throughput.txPerSec)}`
+      : "geen node-exporter bereikbaar",
+  });
+  groups.push({ id: "traffic", label: "Verkeer" });
+  if (snapshot.trackers?.length) {
+    groups.push({ id: "devices", label: "Apparaten" });
+    for (const entity of snapshot.trackers.slice(0, 30))
+      tiles.push({
+        id: entity.entity_id,
+        label: clean(entity.friendly_name || entity.entity_id, 40),
+        state:
+          entity.state === "home"
+            ? "Thuis"
+            : entity.state === "not_home"
+              ? "Weg"
+              : "Onbekend",
+        status: trackerStatus(entity.state),
+        group: "devices",
+      });
+  }
+  return tilesScene("Netwerk: status", tiles, groups, {
+    notes: ["Alleen echte metingen; wat NOVA niet meet staat er als onbekend."],
+    refreshMs: 15_000,
+  });
+}
+
 const TYPES: VizTypeDefinition[] = [
   {
     id: "overview",
@@ -204,6 +257,14 @@ const TYPES: VizTypeDefinition[] = [
     kind: "chart",
     description: "Staafgrafiek van de reactietijd per gecontroleerde dienst.",
     keywords: ["reactietijd", "latency", "ping", "traag"],
+  },
+  {
+    id: "status",
+    title: "Netwerk: status",
+    kind: "tiles",
+    description:
+      "Tegels met de toestand van elke gecontroleerde dienst, het verkeer en de apparaten, in woorden.",
+    keywords: ["status", "tegels"],
   },
 ];
 
@@ -250,6 +311,8 @@ export class NetworkVisualizationProvider
     const snapshot = { checks, throughput: this.host.network, trackers };
     return typeId === "latency"
       ? networkLatency(snapshot)
-      : networkGraph(snapshot);
+      : typeId === "status"
+        ? networkStatus(snapshot)
+        : networkGraph(snapshot);
   }
 }

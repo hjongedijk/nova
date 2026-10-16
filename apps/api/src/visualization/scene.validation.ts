@@ -6,6 +6,8 @@ import type {
   VizStatus,
 } from "@nova/contracts";
 
+import { isCardKind, validateCardData } from "./card.validation.js";
+
 export const MAX_NODES = 1500;
 export const MAX_EDGES = 4000;
 export const MAX_MODELS = 12;
@@ -56,6 +58,7 @@ export function modesFor(scene: {
   nodes?: { value?: number | null }[];
   heatLabel?: string;
 }): VizMode[] {
+  if (isCardKind(scene.kind)) return ["holographic"];
   if (scene.kind === "chart") return ["realistic"];
   const heat = (scene.nodes ?? []).some(
     (node) => typeof node.value === "number",
@@ -126,8 +129,11 @@ export function validateScene(scene: VizScene): {
     scene.title.length > 120
   )
     push("titel ontbreekt of is te lang");
-  if (!["graph", "model", "chart"].includes(scene.kind))
-    push("kind moet graph, model of chart zijn");
+  if (
+    !["graph", "model", "chart"].includes(scene.kind) &&
+    !isCardKind(scene.kind)
+  )
+    push("onbekende kind");
   if (!Array.isArray(scene.modes) || !scene.modes.length)
     push("modes ontbreekt");
   else {
@@ -293,6 +299,8 @@ export function validateScene(scene: VizScene): {
         push("chart.max moet positief zijn");
     }
   }
+
+  validateCardData(scene, push);
 
   const v = scene.view;
   if (!v || typeof v !== "object") push("view ontbreekt");

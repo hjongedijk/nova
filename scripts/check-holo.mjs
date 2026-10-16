@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
+import { ALL as CARD_FIXTURES } from "./holo-card-fixtures.mjs";
 /* global document, window, HTMLCanvasElement, WebGLRenderingContext, WebGL2RenderingContext, Image */
 const base = process.env.NOVA_HOLO_TEST_URL ?? "https://localhost:5173";
 const shots = process.env.NOVA_HOLO_SHOTS ?? "";
@@ -352,6 +353,11 @@ async function openPage({
   scheme = "dark",
   noWebgl = false,
   scene: fixed = null,
+  /** Scene the mocked chat answers with as an inline card (SSE "visualization" event). */
+  chatCard = null,
+  /** navigator.hardwareConcurrency the page sees (low-power check). */
+  cores = 8,
+  answer = "Dit is wat ik gevonden heb.",
 } = {}) {
   const context = await browser.newContext({
     ignoreHTTPSErrors: true,
@@ -375,6 +381,11 @@ async function openPage({
         console.log("  [console]", m.type(), m.text().slice(0, 300));
     });
   const state = { scenes: new Map(), polls: 0, posts: [], closed: [] };
+  await page.addInitScript((hardware) => {
+    Object.defineProperty(navigator, "hardwareConcurrency", {
+      get: () => hardware,
+    });
+  }, cores);
   await page.addInitScript((disable) => {
     window.__raf = 0;
     const raf = window.requestAnimationFrame.bind(window);
@@ -442,6 +453,32 @@ async function openPage({
           contentType: "application/json",
           body: JSON.stringify(body),
         });
+      if (p === "/api/chat-stream" && chatCard) {
+        const sse = (event, data) =>
+          `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+        return route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          body:
+            sse("route", { role: "conversation" }) +
+            sse("tool_start", { name: "mock_tool", step: 1 }) +
+            sse("tool_result", {
+              name: "mock_tool",
+              risk: "READ_ONLY",
+              ok: true,
+            }) +
+            sse("visualization", {
+              id: chatCard.id,
+              title: chatCard.title,
+              kind: chatCard.kind,
+              revision: 1,
+              action: "inline",
+              scene: chatCard,
+            }) +
+            sse("token", { text: answer }) +
+            sse("done", { model: "mock", role: "conversation" }),
+        });
+      }
       if (assets[p])
         return route.fulfill({
           status: 200,
@@ -857,6 +894,324 @@ await check("mobile layout: toolbar wraps, no horizontal scroll", async () => {
   await shot(page, "holo-mobile");
   await context.close();
 })();
+
+// ---------- inline holographic cards in the conversation ----------
+const askCard = async (page, question = "Wat is het weer?") => {
+  await page.fill("#input", question);
+  await page.press("#input", "Enter");
+  await page.waitForSelector("[data-holo-inline] [data-holo-card]");
+  // Reading the card keeps the answer on the stage (software WebGL is slow; a real user hovers too).
+  await page.hover("[data-holo-inline] figcaption h3");
+};
+const cardLive = (page) =>
+  page.waitForSelector(
+    '[data-holo-inline] [data-holo-card][data-render="3d"]',
+    {
+      timeout: 60_000,
+    },
+  );
+const cardCanvasColours = async (page) => {
+  const canvas = page.locator("[data-holo-inline] canvas");
+  if (!(await canvas.count())) return 0;
+  const png = (await canvas.screenshot()).toString("base64");
+  return page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const g = document.createElement("canvas");
+    g.width = 96;
+    g.height = 96;
+    const ctx = g.getContext("2d");
+    ctx.drawImage(img, 0, 0, 96, 96);
+    const d = ctx.getImageData(0, 0, 96, 96).data;
+    const seen = new Set();
+    for (let i = 0; i < d.length; i += 4)
+      if (d[i + 3] > 20)
+        seen.add(`${d[i] >> 4},${d[i + 1] >> 4},${d[i + 2] >> 4}`);
+    return seen.size;
+  }, png);
+};
+// The turn-on animation ends by itself: wait until the frame counter stops moving.
+const cardSettled = async (page) => {
+  let last = -1;
+  for (let i = 0; i < 40; i++) {
+    const now = await cardFrames(page);
+    if (now === last && now > 0) return;
+    last = now;
+    await page.waitForTimeout(1200);
+  }
+};
+const cardFrames = (page) =>
+  page.evaluate(() =>
+    Number(
+      document.querySelector("[data-holo-inline] canvas")?.dataset.frames ?? 0,
+    ),
+  );
+
+for (const [name, make] of Object.entries(CARD_FIXTURES)) {
+  await check(
+    `card ${name}: sits under the answer, draws in 3D, is idle, has a text alternative`,
+    async () => {
+      const card = make();
+      const { page, context, errors, state } = await openPage({
+        chatCard: card,
+      });
+      await askCard(page);
+      // The card appears with the answer, inside the conversation, and never opens the panel.
+      const placed = await page.evaluate(() => {
+        const reply = document.querySelector("#reply")?.getBoundingClientRect();
+        const box = document
+          .querySelector("[data-holo-inline]")
+          ?.getBoundingClientRect();
+        return {
+          reply: reply?.bottom ?? 0,
+          top: box?.top ?? 0,
+          panel: !!document.querySelector(".backdrop"),
+        };
+      });
+      assert.ok(
+        placed.top >= placed.reply - 1,
+        "card is under the answer text",
+      );
+      assert.equal(placed.panel, false, "no separate panel opened");
+      assert.equal(
+        state.polls,
+        0,
+        "no scene was fetched: the card came with the answer",
+      );
+      const height0 = await page.evaluate(
+        () =>
+          document
+            .querySelector("[data-holo-inline] .visual")
+            .getBoundingClientRect().height,
+      );
+      await shot(page, `card-${name}-flat`);
+      await cardLive(page);
+      await page.waitForTimeout(1800);
+      const height1 = await page.evaluate(
+        () =>
+          document
+            .querySelector("[data-holo-inline] .visual")
+            .getBoundingClientRect().height,
+      );
+      assert.ok(
+        Math.abs(height1 - height0) <= 1,
+        `no layout jump (${height0} to ${height1})`,
+      );
+      assert.ok(
+        (await cardCanvasColours(page)) > 8,
+        "the 3D canvas drew something",
+      );
+      const before = await cardFrames(page);
+      await page.waitForTimeout(1500);
+      assert.equal(
+        (await cardFrames(page)) - before,
+        0,
+        "no frames while idle",
+      );
+      const label = await page.getAttribute(
+        "[data-holo-inline] .visual",
+        "aria-label",
+      );
+      assert.ok(label && label.length > 10, "accessible text alternative");
+      if (shots) {
+        await page
+          .locator("[data-holo-inline]")
+          .screenshot({ path: path.join(shots, `card-${name}-3d.png`) });
+        await shot(page, `card-${name}-page`);
+      }
+      // Tooltip on hover (3D raycast).
+      const box = await page
+        .locator("[data-holo-inline] .visual")
+        .boundingBox();
+      let tipSeen = false;
+      for (const fx of [0.2, 0.35, 0.5, 0.65, 0.8]) {
+        for (const fy of [0.4, 0.55, 0.7]) {
+          await page.mouse.move(
+            box.x + box.width * fx,
+            box.y + box.height * fy,
+          );
+          await page.waitForTimeout(80);
+          if (await page.locator("[data-holo-inline] .tip").count()) {
+            tipSeen = true;
+            break;
+          }
+        }
+        if (tipSeen) break;
+      }
+      assert.ok(tipSeen, "hovering a shape shows its tooltip");
+      // The table is the full text version.
+      await page.click('[data-holo-inline] button:has-text("Tabel")');
+      assert.ok(
+        (await page
+          .locator("[data-holo-inline] [data-holo-table] tbody tr")
+          .count()) > 0,
+      );
+      await page.click('[data-holo-inline] button:has-text("Tabel")');
+      // Flat toggle releases the 3D context.
+      await page.click('[data-holo-inline] button:has-text("Vlak")');
+      await page.waitForFunction(() => window.__contexts.lost >= 1);
+      assert.equal(await page.locator("[data-holo-inline] canvas").count(), 0);
+      await page.waitForTimeout(500);
+      await shot(page, `card-${name}-flat-after`);
+      // Enlarge opens the same card in the panel; Escape closes it.
+      await page.click('[data-holo-inline] button:has-text("Uitvergroten")');
+      await page.waitForSelector(".backdrop [data-holo-card]");
+      assert.equal(
+        await page.locator(".backdrop a:has-text('JSON')").count(),
+        0,
+        "inline scenes have no server export",
+      );
+      await page.waitForTimeout(600);
+      await shot(page, `card-${name}-large`);
+      await page.keyboard.press("Escape");
+      await page.waitForSelector(".backdrop", { state: "detached" });
+      assert.deepEqual(errors, []);
+      await context.close();
+    },
+  )();
+}
+
+await check(
+  "card: reduced motion and low power stay flat, 3D is one click away",
+  async () => {
+    for (const options of [{ reducedMotion: "reduce" }, { cores: 2 }]) {
+      const { page, context, errors } = await openPage({
+        chatCard: CARD_FIXTURES.weather(),
+        ...options,
+      });
+      await askCard(page);
+      await page.waitForTimeout(1500);
+      assert.equal(
+        await page.getAttribute(
+          "[data-holo-inline] [data-holo-card]",
+          "data-render",
+        ),
+        "flat",
+      );
+      assert.equal(
+        await page.locator("[data-holo-inline] canvas").count(),
+        0,
+        "no GPU canvas was made",
+      );
+      assert.equal(await page.evaluate(() => window.__contexts.created), 0);
+      assert.ok(
+        (await page.locator("[data-holo-inline] svg.plane").count()) === 1,
+      );
+      await shot(page, `card-flat-${options.cores ? "lowpower" : "reduced"}`);
+      await page.click('[data-holo-inline] button:has-text("3D")');
+      await cardLive(page);
+      assert.deepEqual(errors, []);
+      await context.close();
+    }
+  },
+)();
+
+await check(
+  "card: no WebGL gives the flat card without a 3D button",
+  async () => {
+    const { page, context, errors } = await openPage({
+      chatCard: CARD_FIXTURES.gauges(),
+      noWebgl: true,
+    });
+    await askCard(page);
+    await page.waitForTimeout(800);
+    assert.equal(
+      await page.getAttribute(
+        "[data-holo-inline] [data-holo-card]",
+        "data-render",
+      ),
+      "flat",
+    );
+    assert.equal(
+      await page.locator('[data-holo-inline] button:has-text("3D")').count(),
+      0,
+    );
+    assert.ok(
+      (await page
+        .locator(
+          "[data-holo-inline] svg.plane rect, [data-holo-inline] svg.plane path",
+        )
+        .count()) > 3,
+    );
+    assert.deepEqual(errors, []);
+    await context.close();
+  },
+)();
+
+await check(
+  "card: a new question removes the card and releases the GPU",
+  async () => {
+    const { page, context } = await openPage({
+      chatCard: CARD_FIXTURES.series(),
+    });
+    await askCard(page, "Hoeveel stroom gebruik ik?");
+    await cardLive(page);
+    await page.fill("#input", "Wat een dag.");
+    // The next answer carries a different card; the old one must have been disposed.
+    await page.evaluate(() => (window.__contexts.lost = 0));
+    await page.press("#input", "Enter");
+    await page.waitForFunction(() => window.__contexts.lost >= 1, null, {
+      timeout: 30_000,
+    });
+    await context.close();
+  },
+)();
+
+for (const [name, make] of [
+  ["weather", CARD_FIXTURES.weather],
+  ["gauges", CARD_FIXTURES.gauges],
+  ["timeline", CARD_FIXTURES.timeline],
+  ["tiles", CARD_FIXTURES.rack],
+  ["series", CARD_FIXTURES.series],
+]) {
+  await check(
+    `card ${name}: phone width fits, text stays legible`,
+    async () => {
+      const { page, context, errors } = await openPage({
+        width: 390,
+        height: 844,
+        chatCard: make(),
+      });
+      await askCard(page);
+      await cardLive(page);
+      await page.waitForTimeout(1800);
+      const fit = await page.evaluate(() => {
+        const card = document
+          .querySelector("[data-holo-inline] [data-holo-card]")
+          .getBoundingClientRect();
+        const small = [
+          ...document.querySelectorAll("[data-holo-inline] text.lab"),
+        ].filter((t) => parseFloat(t.getAttribute("font-size")) < 11).length;
+        const spill = [
+          ...document.querySelectorAll("[data-holo-inline] text.lab"),
+        ].filter((t) => {
+          const r = t.getBoundingClientRect();
+          return r.right > card.right + 1 || r.left < card.left - 1;
+        }).length;
+        return {
+          scroll: document.documentElement.scrollWidth <= window.innerWidth,
+          inside: card.left >= 0 && card.right <= window.innerWidth,
+          small,
+          spill,
+          height: card.height,
+        };
+      });
+      assert.equal(fit.scroll, true, "no horizontal scroll");
+      assert.equal(fit.inside, true, "card inside the screen");
+      assert.equal(fit.small, 0, "no text below 11px");
+      assert.equal(fit.spill, 0, "no label outside the card");
+      await page
+        .locator("[data-holo-inline]")
+        .screenshot({
+          path: path.join(shots || "/tmp", `card-${name}-phone.png`),
+        })
+        .catch(() => {});
+      assert.deepEqual(errors, []);
+      await context.close();
+    },
+  )();
+}
 
 await browser.close();
 if (failures.length) {

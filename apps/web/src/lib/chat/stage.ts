@@ -1,3 +1,4 @@
+import { holo } from "#lib/holo/store.svelte.ts";
 import { chat } from "#lib/stores/chat.svelte.ts";
 import { playback } from "#lib/voice/audio.ts";
 import { shell } from "#lib/stores/shell.svelte.ts";
@@ -26,7 +27,8 @@ export function showStage(
 // A finished answer fades from the screen after a reading time; it stays in the conversation drawer.
 function scheduleStageClear(
   length: number,
-  wait = Math.min(45000, 9000 + length * 45),
+  // A hologram card under the answer gets more time to be looked at.
+  wait = Math.min(45000, 9000 + length * 45) + (holo.inline ? 25000 : 0),
 ): void {
   stageTimer = setTimeout(() => {
     // Never while NOVA is still talking, thinking, listening or the pointer rests on the answer.
@@ -34,7 +36,7 @@ function scheduleStageClear(
       playback.current ||
       chat.busy ||
       shell.awaiting ||
-      stageElement?.matches(":hover")
+      stageElement?.matches(":hover, :focus-within")
     )
       return scheduleStageClear(length, 3000);
     showStage("", "", false);

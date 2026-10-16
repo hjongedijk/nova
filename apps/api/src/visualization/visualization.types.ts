@@ -7,6 +7,7 @@ import type {
   VizMode,
   VizModelSource,
   VizNode,
+  VizScene,
   VizSceneKind,
 } from "@nova/contracts";
 
@@ -29,6 +30,12 @@ export interface ProviderScene {
   models?: VizModelSource[];
   hotspots?: VizHotspot[];
   chart?: VizChart;
+  weather?: VizScene["weather"];
+  gauges?: VizScene["gauges"];
+  timeline?: VizScene["timeline"];
+  tiles?: VizScene["tiles"];
+  tileGroups?: VizScene["tileGroups"];
+  summary?: string;
   layers?: VizLayer[];
   /** Modes override; default: derived from the content. */
   modes?: VizMode[];

@@ -25,7 +25,7 @@ export const MODE_HINTS: Record<VizMode, string> = {
  * technical/x-ray need solid models, a chart has only its own rendering).
  */
 export function availableModes(scene: VizScene): VizMode[] {
-  if (scene.kind === "chart") return [];
+  if (scene.kind !== "graph" && scene.kind !== "model") return [];
   const hasValues = (scene.nodes ?? []).some(
     (node) => typeof node.value === "number",
   );

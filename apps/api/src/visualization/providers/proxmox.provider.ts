@@ -5,6 +5,7 @@ import {
   type GuestView,
   type PveResource,
 } from "../../proxmox/proxmox.service.js";
+import { clean, nl, tilesScene } from "../card-builders.js";
 import { VisualizationRegistry } from "../visualization.registry.js";
 import type {
   ProviderScene,
@@ -245,6 +246,76 @@ export function proxmoxLoad(snapshot: ProxmoxSnapshot): ProviderScene {
   };
 }
 
+/** Rack view: one group per node (with its load in words), one tile per guest, then storage. */
+export function proxmoxRack(snapshot: ProxmoxSnapshot): ProviderScene {
+  const groups: { id: string; label: string; summary?: string }[] = [];
+  const tiles: import("@nova/contracts").VizTile[] = [];
+  for (const n of snapshot.nodes) {
+    const id = `node:${clean(n.node, 30)}`;
+    const mine = snapshot.guests.filter((g) => g.node === n.node);
+    const running = mine.filter((g) => g.status === "running").length;
+    const memory = ratio(n.memUsed, n.memTotal);
+    groups.push({
+      id,
+      label: clean(n.node, 30),
+      summary:
+        n.status === "online"
+          ? `${running} van ${mine.length} draaien · CPU ${n.cpu === null ? "onbekend" : pct(n.cpu)} · RAM ${pct(memory)}`
+          : "Node is niet online",
+    });
+    for (const g of mine.slice(0, 40)) {
+      const up = g.status === "running";
+      const [state] = up
+        ? ["Draait"]
+        : g.status === "stopped"
+          ? ["Gestopt"]
+          : g.status === "paused" || g.status === "suspended"
+            ? ["Gepauzeerd"]
+            : ["Onbekend"];
+      tiles.push({
+        id: `guest:${g.vmid}`,
+        label: clean(
+          g.name || `${g.type === "lxc" ? "CT" : "VM"} ${g.vmid}`,
+          40,
+        ),
+        state: state!,
+        status: guestStatus(g.status),
+        group: id,
+        ...(up
+          ? {
+              detail: `CPU ${nl(g.cpuUsagePercent)}% · RAM ${pct(ratio(g.memoryUsed, g.memoryTotal))}`,
+            }
+          : {}),
+      });
+    }
+  }
+  const storage = snapshot.storage.filter((s) => s.storage).slice(0, 12);
+  if (storage.length) {
+    groups.push({ id: "storage", label: "Opslag" });
+    for (const s of storage) {
+      const usage = ratio(s.disk ?? 0, s.maxdisk ?? 0);
+      tiles.push({
+        id: `storage:${s.node ?? "shared"}/${s.storage}`,
+        label: clean(s.storage, 40),
+        state: usage === null ? "Onbekend" : `${pct(usage)} vol`,
+        status: storageStatus(s.status, usage),
+        group: "storage",
+        detail: s.maxdisk
+          ? `${nl(round1((s.disk ?? 0) / GB))} van ${nl(round1(s.maxdisk / GB))} GB`
+          : undefined,
+      });
+    }
+  }
+  return {
+    ...tilesScene("Proxmox-rek", tiles, groups, {
+      notes: [
+        "Bron: de Proxmox-API; alleen wat NOVA mag zien. Gestopt of onbekend staat er in woorden bij.",
+      ],
+      refreshMs: 15_000,
+    }),
+  };
+}
+
 const TYPES: VizTypeDefinition[] = [
   {
     id: "topology",
@@ -278,6 +349,14 @@ const TYPES: VizTypeDefinition[] = [
     description:
       "Staafgrafiek van CPU en geheugen van nodes en draaiende gasten (live).",
     keywords: ["belasting", "load", "druk", "cpu", "geheugen", "memory", "ram"],
+  },
+  {
+    id: "rack",
+    title: "Proxmox-rek",
+    kind: "tiles",
+    description:
+      "Nodes als rekken met hun VM's, containers en opslag als tegels met toestand in woorden (live).",
+    keywords: ["rek", "rack", "tegels", "overzicht"],
   },
 ];
 
@@ -335,6 +414,8 @@ export class ProxmoxVisualizationProvider
       throw new Error("Proxmox gaf geen nodes of gasten terug.");
     return typeId === "load"
       ? proxmoxLoad(snapshot)
-      : proxmoxTopology(snapshot);
+      : typeId === "rack"
+        ? proxmoxRack(snapshot)
+        : proxmoxTopology(snapshot);
   }
 }

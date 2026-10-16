@@ -176,6 +176,39 @@ Bron `visualization` (`visualization.source.ts`). Alle tien zijn `READ_ONLY`: ze
 
 Chat en spraak: het systeemprompt vraagt `create_visualization` alleen bij een verzoek om iets te _zien_ ("toon mijn Proxmox", "laat het netwerk zien", "visualiseer mijn huis") en een tekstantwoord bij gewone vragen ("hoeveel VM's draaien er", "hoe is de status"). `isDisplayRequest()` (`intent.ts`) legt dit onderscheid vast in tests; `resolveTopic()` zet de omschrijving om naar een provider. Het chat-SSE-event `visualization` (`{id, title, kind, revision, action}`) laat het scherm de weergave openen; zonder open scherm gebeurt er niets (een geplande taak opent dus nooit iets). Handmatig: menu, "Visualisaties".
 
+## Kaarten in het gesprek (inline hologrammen)
+
+Als NOVA een vraag beantwoordt met echte toolgegevens waar een plaatje bij helpt, komt er een compacte holografische kaart direct onder het antwoord op het scherm (geen apart paneel), met "Uitvergroten" (opent dezelfde kaart in het paneel), "Tabel" (tekstversie van alle gegevens) en "3D"/"Vlak".
+
+**Beslissing in de backend, deterministisch** (`apps/api/src/visualization/auto-card.ts`, haakje in `orchestrator.service.ts`): alleen op basis van de toolnaam en het RESULTAAT dat echt binnenkwam; nooit uit modeltekst en nooit verzonnen. Geen kaart bij een mislukte of bevestigingsplichtige tool, bij een leeg resultaat, bij een ongeldige scène of boven 24 KB; één kaart per turn (de eerste); geen kaart als het model zelf `create_visualization` gebruikte. De scène reist mee in het bestaande SSE-event `visualization` met `action: "inline"` en `scene`; ze wordt niet op de server bewaard en het paneel opent niet vanzelf. Geheimen: alleen weergavenamen, toestandswoorden en getallen; geen attributen, tokens, locaties, personen/trackers (alleen bij `home_status` als "Wie is thuis"), hostnamen of foutdetails.
+
+| Tool                              | Kaart                                                                                                                                                             |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `weather_forecast`                | `weather`: nu-blok, temperatuurcurve per uur, regenkans-staven, glyph per uur (nachtvarianten via zonsopkomst/-ondergang), dagenstrook met min/max en regen in mm |
+| `proxmox_status`, `proxmox_nodes` | `gauges`: CPU en geheugen per node (75% let op, 90% probleem); offline node is "onbekend"                                                                         |
+| `proxmox_storage`                 | `gauges`: gebruikte ruimte (80% / 90%)                                                                                                                            |
+| `proxmox_guest_status`            | `gauges`: CPU en geheugen van één draaiende gast                                                                                                                  |
+| `proxmox_guests`                  | `tiles`: rek per node, toestand in woorden (Draait/Gestopt/Gepauzeerd/Onbekend), min. 2 gasten                                                                    |
+| `network_check`                   | `tiles`: dienst bereikbaar / niet bereikbaar met reactietijd                                                                                                      |
+| `home_status`                     | `tiles`: wie thuis, lampen, schakelaars, klimaat, temperaturen, muziek                                                                                            |
+| `ha_search_entities`              | `tiles` per ruimte (zonder person, device_tracker, camera, alarm); batterij- en vermogenssensoren krijgen status                                                  |
+| `ha_get_state`                    | `gauges`, alleen voor een %-sensor                                                                                                                                |
+| `calendar_events`                 | `timeline`: vandaag (of de eerstvolgende dag met afspraken) met "nu"-markering                                                                                    |
+| `timer_list`                      | `timeline`: aftelbalken tot het afgaan                                                                                                                            |
+| `list_show`                       | `tiles`: één tegel per lijst, min. 2 lijsten                                                                                                                      |
+
+Er bestaat (nog) geen energie- of host-metrics-tool; stroomverbruik verschijnt als tegel/meter wanneer Home Assistant-sensoren (`device_class` power/energy/battery) via `ha_search_entities` komen. Het scènetype `series` (3D staaf-/vlakgrafiek met assen, eenheid en tooltips) is klaar voor tijdreeksen (energie, temperatuurgeschiedenis) zodra een bron die levert; hij wordt nu nog niet automatisch gevuld.
+
+### Nieuwe scènetypen (`VizSceneKind`)
+
+`weather`, `gauges`, `timeline`, `tiles`, `series` (naast `graph`, `model`, `chart`). Velden: `weather`, `gauges`, `timeline`, `tiles` + `tileGroups`, `chart` (met `type: "area"` voor `series`) en `summary` (één zin: de tekstvervanger). Validatie in `card.validation.ts` (limieten: 48 uren, 10 dagen, 16 meters, 40 tijdlijnitems, 120 tegels, 200 reekspunten; een onbekende meterwaarde mag nooit "in orde" zijn). Providers: `proxmox:rack` (tegels per node met opslag) en `network:status` (tegels) geven structuur in plaats van zwevende bollen; `topology`/`overview` blijven voor de graaf.
+
+### Weergave
+
+`lib/holo/card/*` rekent één keer een lay-out uit in pixels (vormen, lijnen, labels, glyphs; `layoutCard(scene, breedte)`, puur en getest); `HoloCard.svelte` tekent die altijd als vlakke SVG (volledig leesbaar, tekst scherp) en, wanneer de kaart zichtbaar is, via het lazy `card3d.ts` (three.js, eigen chunk) als ondiep hologram: doorzichtige vlakken met gloeiende randen, een korte inschakelanimatie, slepen kantelt, dubbelklik reset. Labels blijven HTML/SVG en worden op het beeld geprojecteerd. Geen rustlus: alleen frames bij wijziging en tijdens de intro, en alleen zichtbaar (IntersectionObserver). Opruimen: geometrieën, materialen, renderer en WebGL-context worden vrijgegeven; maximaal 2 gelijktijdige 3D-kaarten, de rest (en de geschiedenislijst) blijft vlak. Terugval naar vlak bij `prefers-reduced-motion`, spaarstand (`saveData`, ≤2 GB geheugen, ≤2 kernen, batterij <20% zonder lader) of geen WebGL; de gebruiker kan 3D met één klik aanzetten. De hoogte staat vast vóór het laden (geen verspringen). `HoloScene.svelte` kiest in het paneel tussen kaart en `HoloViewer`.
+
+Browsercheck: `NOVA_HOLO_ONLY=card node scripts/check-holo.mjs` (fixtures in `scripts/holo-card-fixtures.mjs`; screenshots met `NOVA_HOLO_SHOTS`).
+
 ## Beveiliging en privacy
 
 - Alle routes (`/api/visualizations/…`) staan achter de gewone app-toegang.

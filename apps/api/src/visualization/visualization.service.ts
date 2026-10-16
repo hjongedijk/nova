@@ -9,6 +9,8 @@ import type {
   VizSceneKind,
   VizView,
 } from "@nova/contracts";
+import { isCardKind } from "./card.validation.js";
+import { cardRows } from "./card.rows.js";
 import { VisualizationRegistry } from "./visualization.registry.js";
 import type { ProviderScene } from "./visualization.types.js";
 import {
@@ -79,6 +81,11 @@ const hashOf = (scene: ProviderScene | VizScene): string =>
         scene.models,
         scene.hotspots,
         scene.chart,
+        scene.weather,
+        scene.gauges,
+        scene.timeline,
+        scene.tiles,
+        scene.tileGroups,
         scene.layers,
         scene.notes,
       ]),
@@ -160,6 +167,12 @@ export class VisualizationService {
       ...(built.models ? { models: built.models } : {}),
       ...(built.hotspots ? { hotspots: built.hotspots } : {}),
       ...(built.chart ? { chart: built.chart } : {}),
+      ...(built.weather ? { weather: built.weather } : {}),
+      ...(built.gauges ? { gauges: built.gauges } : {}),
+      ...(built.timeline ? { timeline: built.timeline } : {}),
+      ...(built.tiles ? { tiles: built.tiles } : {}),
+      ...(built.tileGroups ? { tileGroups: built.tileGroups } : {}),
+      ...(built.summary ? { summary: built.summary } : {}),
       layers: built.layers ?? [],
       modes,
       defaultMode,
@@ -467,7 +480,7 @@ export class VisualizationService {
   }
 
   private requireObject(scene: VizScene, objectId: string): void {
-    if (scene.kind === "chart")
+    if (scene.kind === "chart" || isCardKind(scene.kind))
       throw new VisualizationError(
         "Een grafiek heeft geen losse objecten om te selecteren.",
       );
@@ -502,7 +515,7 @@ export class VisualizationService {
     degrees: number,
   ): VizScene {
     const stored = this.touch(id);
-    if (stored.scene.kind === "chart")
+    if (stored.scene.kind === "chart" || isCardKind(stored.scene.kind))
       throw new VisualizationError("Een grafiek kun je niet draaien.");
     if (stored.scene.kind === "model" && objectId !== "*")
       this.requireObject(stored.scene, objectId);
@@ -526,7 +539,7 @@ export class VisualizationService {
     target: { objectId?: string; preset?: VizCameraPreset },
   ): VizScene {
     const stored = this.touch(id);
-    if (stored.scene.kind === "chart")
+    if (stored.scene.kind === "chart" || isCardKind(stored.scene.kind))
       throw new VisualizationError("Een grafiek heeft geen camera.");
     if (target.objectId) this.requireObject(stored.scene, target.objectId);
     if (target.preset && !CAMERA_PRESETS.includes(target.preset))
@@ -693,6 +706,8 @@ export class VisualizationService {
             scene.chart?.unit,
             point.status,
           ]);
+    } else if (isCardKind(scene.kind)) {
+      rows.push(...cardRows(scene));
     } else {
       rows.push(["id", "label", "formaat", "laag"]);
       for (const model of scene.models ?? [])
