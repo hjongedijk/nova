@@ -1,5 +1,6 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 import crypto from "node:crypto";
+import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { OrchestratorService } from "../chat/orchestrator.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
@@ -85,6 +86,7 @@ export class TelephonyMessaging {
     private readonly orchestrator: OrchestratorService,
     private readonly audit: AuditService,
     private readonly config: NovaConfig,
+    @Optional() private readonly memory?: SessionMemoryService,
   ) {}
 
   /** `to|reply` for Asterisk, or an empty string when nothing should be sent. */
@@ -141,6 +143,11 @@ export class TelephonyMessaging {
         readOnlyOnly: true,
         signal: AbortSignal.timeout(40_000),
       });
+      const sessionId = `sipchat_${key.replace(/[^a-z0-9]+/g, "_").slice(0, 40)}`;
+      if (!result.unavailable) {
+        this.memory?.add(sessionId, "user", text.slice(0, MAX_IN));
+        this.memory?.add(sessionId, "assistant", result.reply);
+      }
       this.record("answered", {
         contact: contact.name,
         inChars: text.length,

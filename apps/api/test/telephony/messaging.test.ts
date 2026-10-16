@@ -26,6 +26,7 @@ delete process.env.COREPACK_ENABLE_AUTO_PIN;
 let dir: string;
 const audits: Record<string, unknown>[] = [];
 const runs: Record<string, unknown>[] = [];
+const remembered: [string, string, string][] = [];
 let reply: () => Promise<Record<string, unknown>>;
 
 function boot(contacts?: TelephonyConfig["contacts"]) {
@@ -61,6 +62,9 @@ function boot(contacts?: TelephonyConfig["contacts"]) {
     orchestrator as never,
     { record: (r: Record<string, unknown>) => audits.push(r) } as never,
     cfg,
+    {
+      add: (s: string, r: string, c: string) => remembered.push([s, r, c]),
+    } as never,
   );
   return { service, store, orchestrator };
 }
@@ -70,6 +74,7 @@ beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-msg-"));
   audits.length = 0;
   runs.length = 0;
+  remembered.length = 0;
   reply = ok("Het is 14 graden en bewolkt.");
 });
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -188,6 +193,19 @@ describe("answering text messages", () => {
     reply = ok("ja");
     for (let i = 0; i < 12; i++) await msg(b);
     expect(await msg(b)).toContain("erg snel");
+  });
+
+  it("remembers the exchange so the next message has context, but not a failed turn", async () => {
+    const b = boot();
+    await msg(b, { body: "Wat is het weer?" });
+    expect(remembered).toEqual([
+      ["sipchat_harm", "user", "Wat is het weer?"],
+      ["sipchat_harm", "assistant", "Het is 14 graden en bewolkt."],
+    ]);
+    remembered.length = 0;
+    reply = async () => ({ reply: "x", unavailable: true });
+    await msg(b, { body: "nog een vraag" });
+    expect(remembered).toEqual([]);
   });
 
   it("audits metadata only, never the text", async () => {

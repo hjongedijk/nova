@@ -1,12 +1,14 @@
 import {
   Inject,
   Injectable,
+  Optional,
   Logger,
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
 import crypto from "node:crypto";
 import type net from "node:net";
+import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { OrchestratorService } from "../chat/orchestrator.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
@@ -64,6 +66,7 @@ export class ConversationService implements OnModuleInit, OnModuleDestroy {
     private readonly events: JarvisStateStore,
     private readonly audit: AuditService,
     private readonly config: NovaConfig,
+    @Optional() private readonly memory?: SessionMemoryService,
   ) {
     this.server = new AudioSocketServer(() => this.settings.get().secretUuid, {
       onCall: (transport, socket) => this.onCall(transport, socket),
@@ -203,6 +206,11 @@ export class ConversationService implements OnModuleInit, OnModuleDestroy {
       signal: input.signal,
       readOnlyOnly: true,
     });
+    // The next turn of this call must remember this one, exactly like typed chat does.
+    if (!result.unavailable) {
+      this.memory?.add(input.sessionId, "user", input.message);
+      this.memory?.add(input.sessionId, "assistant", result.reply);
+    }
     return {
       reply: result.reply,
       confirmation: result.confirmation,

@@ -252,6 +252,7 @@ describe("conversation service on the phone link", () => {
       settings as unknown as { cached: { secretUuid: string } }
     ).cached.secretUuid = SECRET;
     const runs: Record<string, unknown>[] = [];
+    const remembered: [string, string, string][] = [];
     const events: { topic: string; payload: Record<string, unknown> }[] = [];
     const audits: Record<string, unknown>[] = [];
     const service = new ConversationService(
@@ -285,14 +286,17 @@ describe("conversation service on the phone link", () => {
       } as never,
       { record: (r: Record<string, unknown>) => audits.push(r) } as never,
       cfg,
+      {
+        add: (s: string, r: string, c: string) => remembered.push([s, r, c]),
+      } as never,
     );
     // synthesize a short tone instead of calling a TTS engine
     service.speak = async () => tone(16000, 120);
-    return { service, settings, runs, events, audits };
+    return { service, settings, runs, events, audits, remembered };
   }
 
   it("answers a phone conversation through the chat pipeline with read-only tools", async () => {
-    const { service, runs, events, audits } = boot();
+    const { service, runs, events, audits, remembered } = boot();
     const server = (service as unknown as { server: AudioSocketServer }).server;
     servers.push(server);
     const port = await listenPort(server);
@@ -313,6 +317,9 @@ describe("conversation service on the phone link", () => {
       responseLanguage: "nl",
     });
     expect(String(runs[0]!.sessionId)).toMatch(/^phone_[0-9a-f]{10}$/);
+    // the next turn of the call can refer back to this one
+    expect(remembered.map((r) => r[1])).toEqual(["user", "assistant"]);
+    expect(remembered[0]![2]).toBe("Wat is de temperatuur buiten?");
     expect(events.some((e) => e.payload.key === "conversation")).toBe(true);
     expect(service.status().active).toMatchObject({ turns: 1 });
     c.socket.write(frame(KIND.hangup));
