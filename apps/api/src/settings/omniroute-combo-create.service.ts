@@ -8,6 +8,7 @@ import type {
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { claimConfirmation } from "./confirmation-step.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
@@ -226,27 +227,20 @@ export class OmniRouteComboCreate {
       !/^[0-9a-f-]{36}$/i.test(confirmationId)
     )
       throw new ValidationError(["Ongeldige bevestiging."]);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !pending ||
-      pending.tool !== "omniroute_combo_create" ||
-      pending.confirmationId !== confirmationId
-    )
-      return {
-        ok: false,
-        error:
+    const claimed = claimConfirmation(
+      this.confirmations,
+      sessionId,
+      confirmationId,
+      approve,
+      {
+        tool: "omniroute_combo_create",
+        stale:
           "Deze bevestiging staat niet meer open. Vul de combo opnieuw in.",
-      };
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Vul de combo opnieuw in.",
-      };
+        expired: "Bevestiging verlopen. Vul de combo opnieuw in.",
+      },
+    );
+    if ("reply" in claimed) return claimed.reply;
+    const action = claimed.action;
     const key = String(action.args.name);
     if (this.inFlight.has(key))
       return { ok: false, error: "Deze combo wordt al aangemaakt." };

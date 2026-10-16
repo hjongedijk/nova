@@ -8,6 +8,7 @@ import type {
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { claimConfirmation } from "./confirmation-step.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
@@ -166,28 +167,21 @@ export class OmniRouteKeyActivation {
       !/^[0-9a-f-]{36}$/i.test(confirmationId)
     )
       throw new Error("Ongeldige bevestiging.");
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !pending ||
-      pending.tool !== "omniroute_key_activation" ||
-      pending.args.id !== id ||
-      pending.confirmationId !== confirmationId
-    )
-      return {
-        ok: false,
-        error:
+    const claimed = claimConfirmation(
+      this.confirmations,
+      sessionId,
+      confirmationId,
+      approve,
+      {
+        tool: "omniroute_key_activation",
+        arg: { name: "id", value: id },
+        stale:
           "Deze bevestiging staat niet meer open. Kies de sleutel opnieuw.",
-      };
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Kies de sleutel opnieuw.",
-      };
+        expired: "Bevestiging verlopen. Kies de sleutel opnieuw.",
+      },
+    );
+    if ("reply" in claimed) return claimed.reply;
+    const action = claimed.action;
     if (this.inFlight.has(id))
       return { ok: false, error: "Deze sleutel wordt al gewijzigd." };
     this.inFlight.add(id);

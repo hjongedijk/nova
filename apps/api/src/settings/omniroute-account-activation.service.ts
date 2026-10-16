@@ -8,6 +8,7 @@ import type {
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { claimConfirmation } from "./confirmation-step.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
@@ -166,28 +167,21 @@ export class OmniRouteAccountActivation {
       !/^[0-9a-f-]{36}$/i.test(confirmationId)
     )
       throw new ValidationError(["Ongeldige bevestiging."]);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !pending ||
-      pending.tool !== "omniroute_account_activation" ||
-      pending.args.id !== id ||
-      pending.confirmationId !== confirmationId
-    )
-      return {
-        ok: false,
-        error:
+    const claimed = claimConfirmation(
+      this.confirmations,
+      sessionId,
+      confirmationId,
+      approve,
+      {
+        tool: "omniroute_account_activation",
+        arg: { name: "id", value: id },
+        stale:
           "Deze bevestiging staat niet meer open. Kies het account opnieuw.",
-      };
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Kies het account opnieuw.",
-      };
+        expired: "Bevestiging verlopen. Kies het account opnieuw.",
+      },
+    );
+    if ("reply" in claimed) return claimed.reply;
+    const action = claimed.action;
     if (this.inFlight.has(id))
       return { ok: false, error: "Dit account wordt al gewijzigd." };
     this.inFlight.add(id);

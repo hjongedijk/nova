@@ -8,6 +8,7 @@ import type {
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { claimConfirmation } from "./confirmation-step.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
@@ -121,24 +122,20 @@ export class NativeSkillRemoval {
       !/^[0-9a-f-]{36}$/i.test(confirmationId)
     )
       throw new ValidationError(["Ongeldige bevestiging."]);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !pending ||
-      pending.tool !== "native_skill_remove" ||
-      pending.args.id !== id ||
-      pending.confirmationId !== confirmationId
-    )
-      return {
-        ok: false,
-        error: "Deze bevestiging staat niet meer open. Kies opnieuw.",
-      };
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return { ok: false, error: "Bevestiging verlopen. Kies opnieuw." };
+    const claimed = claimConfirmation(
+      this.confirmations,
+      sessionId,
+      confirmationId,
+      approve,
+      {
+        tool: "native_skill_remove",
+        arg: { name: "id", value: id },
+        stale: "Deze bevestiging staat niet meer open. Kies opnieuw.",
+        expired: "Bevestiging verlopen. Kies opnieuw.",
+      },
+    );
+    if ("reply" in claimed) return claimed.reply;
+    const action = claimed.action;
     if (this.inFlight.has(id))
       return {
         ok: false,

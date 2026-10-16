@@ -9,6 +9,7 @@ import type {
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { claimConfirmation } from "./confirmation-step.js";
 import { HistoryFile, revertedFromField } from "./history-file.js";
 import { REVISION_ID } from "./request-input.js";
 import { sanitize } from "../core/security/sanitize.js";
@@ -467,28 +468,22 @@ export class OmniRouteKeyModelAccess {
       !/^[0-9a-f-]{36}$/i.test(confirmationId)
     )
       return { ok: false, error: "Ongeldige bevestiging." };
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !pending ||
-      pending.tool !== "omniroute_key_model_access" ||
-      pending.args.id !== id ||
-      pending.confirmationId !== confirmationId
-    )
-      return {
-        ok: false,
-        error:
+    const claimed = claimConfirmation(
+      this.confirmations,
+      sessionId,
+      confirmationId,
+      approve,
+      {
+        tool: "omniroute_key_model_access",
+        arg: { name: "id", value: id },
+        stale:
           "Deze bevestiging staat niet meer open. Laad de sleutelrechten opnieuw.",
-      };
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true, cancelled: true };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Laad de sleutelrechten opnieuw.",
-      };
+        expired: "Bevestiging verlopen. Laad de sleutelrechten opnieuw.",
+        cancelled: { ok: true, cancelled: true },
+      },
+    );
+    if ("reply" in claimed) return claimed.reply;
+    const action = claimed.action;
     if (this.inFlight.has(id))
       return { ok: false, error: "Deze sleutel wordt al gewijzigd." };
     this.inFlight.add(id);
