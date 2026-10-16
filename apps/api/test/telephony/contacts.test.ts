@@ -284,6 +284,7 @@ describe("dialplan for the trunk and contacts", () => {
           name: "Laptop",
           kind: "phone" as const,
           secret: "geheim-wachtwoord",
+          createdAt: "2026-10-16T00:00:00.000Z",
         },
       ],
     };
