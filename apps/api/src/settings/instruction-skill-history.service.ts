@@ -1,8 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { isDeepStrictEqual } from "node:util";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import type {
   InstructionSkill,
   InstructionSkillContentHistory,
@@ -10,6 +8,7 @@ import type {
 } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile } from "./history-file.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { SettingsStore } from "./store/settings.store.js";
 import {
@@ -65,67 +64,28 @@ const cleanSnapshot = (
 /** Private, bounded history for instruction text; webhook configuration is never stored here. */
 @Injectable()
 export class InstructionSkillHistory {
-  private readonly file: string;
+  private readonly history: HistoryFile<InstructionSkillContentRevision>;
 
   constructor(
     config: NovaConfig,
     private readonly settings: SettingsStore,
     private readonly audit: AuditService,
   ) {
-    this.file = config.dataFile("instruction-skill-history.json");
-  }
-
-  private read(): InstructionSkillContentRevision[] {
-    try {
-      const value: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(value)) return [];
-      return value
-        .flatMap((item: unknown) => {
-          if (!item || typeof item !== "object" || Array.isArray(item))
-            return [];
-          const row = item as Record<string, unknown>;
-          const before = row.before === null ? null : cleanSnapshot(row.before);
-          const after = cleanSnapshot(row.after);
-          if (
-            typeof row.id !== "string" ||
-            !/^[0-9a-f-]{36}$/i.test(row.id) ||
-            typeof row.at !== "string" ||
-            !Number.isFinite(Date.parse(row.at)) ||
-            typeof row.skillId !== "string" ||
-            (row.before !== null && !before) ||
-            !after
-          )
-            return [];
-          return [
-            {
-              id: row.id,
-              skillId: row.skillId,
-              at: new Date(row.at).toISOString(),
-              before,
-              after,
-            },
-          ];
-        })
-        .slice(-MAX_REVISIONS);
-    } catch {
-      return [];
-    }
-  }
-
-  private write(rows: InstructionSkillContentRevision[]): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const temp = `${this.file}.${process.pid}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(rows.slice(-MAX_REVISIONS)), {
-      mode: 0o600,
-    });
-    fs.chmodSync(temp, 0o600);
-    const fd = fs.openSync(temp, "r");
-    try {
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.renameSync(temp, this.file);
+    this.history = new HistoryFile<InstructionSkillContentRevision>(
+      config.dataFile("instruction-skill-history.json"),
+      (row) => {
+        const before = row.before === null ? null : cleanSnapshot(row.before);
+        const after = cleanSnapshot(row.after);
+        if (
+          typeof row.skillId !== "string" ||
+          (row.before !== null && !before) ||
+          !after
+        )
+          return undefined;
+        return { skillId: row.skillId, before, after };
+      },
+      { max: MAX_REVISIONS, durability: "file" },
+    );
   }
 
   record(before: StoredSkill, after: StoredSkill): void {
@@ -146,8 +106,8 @@ export class InstructionSkillHistory {
     if (!safeBefore || !safeAfter || isDeepStrictEqual(safeBefore, safeAfter))
       return;
     try {
-      this.write([
-        ...this.read(),
+      this.history.write([
+        ...this.history.all(),
         {
           id: crypto.randomUUID(),
           skillId: before.id,
@@ -173,8 +133,8 @@ export class InstructionSkillHistory {
     });
     if (!after) return;
     try {
-      this.write([
-        ...this.read(),
+      this.history.write([
+        ...this.history.all(),
         {
           id: crypto.randomUUID(),
           skillId: skill.id,
@@ -189,9 +149,9 @@ export class InstructionSkillHistory {
   }
 
   forget(id: string): void {
-    const rows = this.read();
+    const rows = this.history.all();
     const remaining = rows.filter((row) => row.skillId !== id);
-    if (remaining.length !== rows.length) this.write(remaining);
+    if (remaining.length !== rows.length) this.history.write(remaining);
   }
 
   list(id: string): InstructionSkillContentHistory {
@@ -200,7 +160,7 @@ export class InstructionSkillHistory {
     ).find((s) => s.id === id);
     if (!current || current.type !== "instruction")
       throw new NotFoundException("De instructievaardigheid bestaat niet.");
-    const all = this.read().filter((r) => r.skillId === id);
+    const all = this.history.all().filter((r) => r.skillId === id);
     return {
       currentVersion: current.version,
       revisions: all.slice(-20).reverse(),
@@ -217,9 +177,9 @@ export class InstructionSkillHistory {
     removed?: true;
     historyWarning?: string;
   } {
-    const revision = this.read().find(
-      (r) => r.id === revisionId && r.skillId === id,
-    );
+    const revision = this.history
+      .all()
+      .find((r) => r.id === revisionId && r.skillId === id);
     if (!revision)
       throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
     const current = (

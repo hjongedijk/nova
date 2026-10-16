@@ -4,8 +4,6 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type {
   ModelRoleId,
@@ -16,6 +14,7 @@ import type {
 } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, listRecent, revertedFromField } from "./history-file.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { SettingsStore } from "./store/settings.store.js";
@@ -41,7 +40,7 @@ type EligibleModels = { models: string[]; embeddingModels: string[] };
 @Injectable()
 export class ModelRolesService {
   lastWarning: string | undefined;
-  private readonly historyFile: string;
+  private readonly revisions: HistoryFile<ModelRoleRevision>;
 
   constructor(
     private readonly settings: SettingsStore,
@@ -49,7 +48,17 @@ export class ModelRolesService {
     private readonly audit: AuditService,
     config: NovaConfig,
   ) {
-    this.historyFile = config.dataFile("model-roles-history.json");
+    this.revisions = new HistoryFile<ModelRoleRevision>(
+      config.dataFile("model-roles-history.json"),
+      (row) => {
+        const before = this.snapshot(row.before);
+        const after = this.snapshot(row.after);
+        return before && after
+          ? { before, after, ...revertedFromField(row, false) }
+          : undefined;
+      },
+      {},
+    );
   }
 
   private eligible(): EligibleModels {
@@ -217,58 +226,6 @@ export class ModelRolesService {
     return result;
   }
 
-  private readHistory(): ModelRoleRevision[] {
-    try {
-      const value: unknown = JSON.parse(
-        fs.readFileSync(this.historyFile, "utf8"),
-      );
-      if (!Array.isArray(value)) return [];
-      return value.flatMap((entry: unknown) => {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry))
-          return [];
-        const row = entry as Record<string, unknown>;
-        const before = this.snapshot(row.before);
-        const after = this.snapshot(row.after);
-        if (
-          typeof row.id !== "string" ||
-          !/^[0-9a-f-]{36}$/i.test(row.id) ||
-          typeof row.at !== "string" ||
-          !Number.isFinite(Date.parse(row.at)) ||
-          !before ||
-          !after
-        )
-          return [];
-        return [
-          {
-            id: row.id,
-            at: new Date(row.at).toISOString(),
-            before,
-            after,
-            ...(typeof row.revertedFrom === "string"
-              ? { revertedFrom: row.revertedFrom }
-              : {}),
-          },
-        ];
-      });
-    } catch {
-      return [];
-    }
-  }
-
-  private writeHistory(entries: ModelRoleRevision[]): void {
-    fs.mkdirSync(path.dirname(this.historyFile), { recursive: true });
-    const temporary = `${this.historyFile}.${process.pid}.tmp`;
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(entries.slice(-100)), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      fs.renameSync(temporary, this.historyFile);
-    } finally {
-      fs.rmSync(temporary, { force: true });
-    }
-  }
-
   private record(
     before: ModelRolePreferences,
     after: ModelRolePreferences,
@@ -283,7 +240,7 @@ export class ModelRolesService {
       ...(revertedFrom ? { revertedFrom } : {}),
     };
     try {
-      this.writeHistory([...this.readHistory(), revision]);
+      this.revisions.append(revision);
     } catch {
       this.lastWarning =
         "Modelrollen zijn opgeslagen, maar de wijzigingsgeschiedenis kon niet worden bijgewerkt.";
@@ -291,16 +248,13 @@ export class ModelRolesService {
   }
 
   history(): ModelRoleHistory {
-    const revisions = this.readHistory();
-    return {
-      revisions: revisions.slice(-50).reverse(),
-      truncated: revisions.length > 50,
-    };
+    const revisions = this.revisions.all();
+    return listRecent(revisions);
   }
 
   rollback(id: string): ModelRolesSettings {
     this.lastWarning = undefined;
-    const revision = this.readHistory().find((item) => item.id === id);
+    const revision = this.revisions.all().find((item) => item.id === id);
     if (!revision)
       throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
     const eligible = this.eligible();

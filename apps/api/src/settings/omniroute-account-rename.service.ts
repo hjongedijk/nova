@@ -1,7 +1,5 @@
 import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   OmniRouteAccountRenameHistoryEntry,
@@ -11,10 +9,11 @@ import type {
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, revertedFromField } from "./history-file.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
-import { object } from "./request-input.js";
+import { object, REVISION_ID } from "./request-input.js";
 
 type AccountRow = {
   id: string;
@@ -40,7 +39,7 @@ type RenameRevision = OmniRouteAccountRenameHistoryEntry;
 @Injectable()
 export class OmniRouteAccountRename {
   private readonly inFlight = new Set<string>();
-  private readonly historyFile: string;
+  private readonly history: HistoryFile<RenameRevision>;
 
   constructor(
     private readonly config: NovaConfig,
@@ -48,91 +47,43 @@ export class OmniRouteAccountRename {
     private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
   ) {
-    this.historyFile = config.dataFile("omniroute-account-rename-history.json");
-  }
-
-  private readHistory(): RenameRevision[] {
-    try {
-      const value: unknown = JSON.parse(
-        fs.readFileSync(this.historyFile, "utf8"),
-      );
-      if (!Array.isArray(value)) return [];
-      return value
-        .flatMap((item): RenameRevision[] => {
-          if (!item || typeof item !== "object" || Array.isArray(item))
-            return [];
-          const row = item as Record<string, unknown>;
-          if (
-            typeof row.id !== "string" ||
-            !/^[0-9a-f-]{36}$/i.test(row.id) ||
-            !validId(row.accountId) ||
-            typeof row.provider !== "string" ||
-            row.provider.length > 100 ||
-            sanitize(row.provider) !== row.provider ||
-            !validName(row.beforeName) ||
-            row.beforeName !== row.beforeName.trim() ||
-            sanitize(row.beforeName) !== row.beforeName ||
-            !validName(row.afterName) ||
-            row.afterName !== row.afterName.trim() ||
-            sanitize(row.afterName) !== row.afterName ||
-            row.beforeName === row.afterName ||
-            typeof row.at !== "string" ||
-            !Number.isFinite(Date.parse(row.at)) ||
-            (row.revertedFrom !== undefined &&
-              (typeof row.revertedFrom !== "string" ||
-                !/^[0-9a-f-]{36}$/i.test(row.revertedFrom)))
-          )
-            return [];
-          return [
-            {
-              id: row.id,
-              at: new Date(row.at).toISOString(),
-              accountId: row.accountId,
-              provider: row.provider,
-              beforeName: row.beforeName,
-              afterName: row.afterName,
-              ...(typeof row.revertedFrom === "string"
-                ? { revertedFrom: row.revertedFrom }
-                : {}),
-            },
-          ];
-        })
-        .slice(-MAX_HISTORY);
-    } catch {
-      return [];
-    }
-  }
-
-  private writeHistory(rows: RenameRevision[]): void {
-    fs.mkdirSync(path.dirname(this.historyFile), { recursive: true });
-    const temp = `${this.historyFile}.${process.pid}.tmp`;
-    let fd: number | undefined;
-    try {
-      fs.writeFileSync(temp, JSON.stringify(rows.slice(-MAX_HISTORY)), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temp, 0o600);
-      fd = fs.openSync(temp, "r");
-      fs.fsyncSync(fd);
-      fs.closeSync(fd);
-      fd = undefined;
-      fs.renameSync(temp, this.historyFile);
-      const directory = fs.openSync(path.dirname(this.historyFile), "r");
-      try {
-        fs.fsyncSync(directory);
-      } finally {
-        fs.closeSync(directory);
-      }
-    } finally {
-      if (fd !== undefined) fs.closeSync(fd);
-      fs.rmSync(temp, { force: true });
-    }
+    this.history = new HistoryFile<RenameRevision>(
+      config.dataFile("omniroute-account-rename-history.json"),
+      (row) => {
+        if (
+          !validId(row.accountId) ||
+          typeof row.provider !== "string" ||
+          row.provider.length > 100 ||
+          sanitize(row.provider) !== row.provider ||
+          !validName(row.beforeName) ||
+          row.beforeName !== row.beforeName.trim() ||
+          sanitize(row.beforeName) !== row.beforeName ||
+          !validName(row.afterName) ||
+          row.afterName !== row.afterName.trim() ||
+          sanitize(row.afterName) !== row.afterName ||
+          row.beforeName === row.afterName ||
+          (row.revertedFrom !== undefined &&
+            (typeof row.revertedFrom !== "string" ||
+              !REVISION_ID.test(row.revertedFrom)))
+        )
+          return undefined;
+        return {
+          accountId: row.accountId,
+          provider: row.provider,
+          beforeName: row.beforeName,
+          afterName: row.afterName,
+          ...revertedFromField(row),
+        };
+      },
+      { max: MAX_HISTORY, durability: "dir" },
+    );
   }
 
   listHistory(accountId: string): { revisions: RenameRevision[] } {
     if (!validId(accountId)) throw new ValidationError(["Ongeldig account."]);
     return {
-      revisions: this.readHistory()
+      revisions: this.history
+        .all()
         .filter((row) => row.accountId === accountId)
         .slice(-20)
         .reverse(),
@@ -143,9 +94,9 @@ export class OmniRouteAccountRename {
     accountId: string,
     revisionId: string,
   ): RenameRevision {
-    const rows = this.readHistory().filter(
-      (row) => row.accountId === accountId,
-    );
+    const rows = this.history
+      .all()
+      .filter((row) => row.accountId === accountId);
     const selected = rows.find((row) => row.id === revisionId);
     if (!selected) throw new Error("Deze accountwijziging bestaat niet meer.");
     if (rows.at(-1)?.id !== selected.id)
@@ -204,8 +155,8 @@ export class OmniRouteAccountRename {
     )
       return "Naamswijziging gecontroleerd, maar accountnamen die op geheimen lijken zijn overgeslagen in de geschiedenis.";
     try {
-      this.writeHistory([
-        ...this.readHistory(),
+      this.history.write([
+        ...this.history.all(),
         { ...entry, id: crypto.randomUUID(), at: new Date().toISOString() },
       ]);
       return;

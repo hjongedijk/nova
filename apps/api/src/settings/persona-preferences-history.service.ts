@@ -1,8 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { isDeepStrictEqual } from "node:util";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import type {
   PersonaPreferencesHistory,
   PersonaPreferencesSnapshot,
@@ -10,6 +8,7 @@ import type {
 } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, revertedFromField } from "./history-file.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { SettingsStore } from "./store/settings.store.js";
 import { normalizePersonaProfile } from "./settings-validation.js";
@@ -48,14 +47,28 @@ const safeSnapshot = (value: unknown): PersonaPreferencesSnapshot | null => {
 /** Private rollback history for non-secret persona style and profile preferences. */
 @Injectable()
 export class PersonaPreferencesHistoryService {
-  private readonly file: string;
+  private readonly history: HistoryFile<
+    PersonaPreferencesHistory["revisions"][number]
+  >;
 
   constructor(
     config: NovaConfig,
     private readonly settings: SettingsStore,
     private readonly audit: AuditService,
   ) {
-    this.file = config.dataFile("persona-preferences-history.json");
+    this.history = new HistoryFile<
+      PersonaPreferencesHistory["revisions"][number]
+    >(
+      config.dataFile("persona-preferences-history.json"),
+      (row) => {
+        const before = safeSnapshot(row.before);
+        const after = safeSnapshot(row.after);
+        if (!before || !after || isDeepStrictEqual(before, after))
+          return undefined;
+        return { before, after, ...revertedFromField(row, false) };
+      },
+      { max: MAX, durability: "file", dirMode: 0o700, listLimit: 20 },
+    );
   }
 
   private current(): PersonaPreferencesSnapshot {
@@ -66,63 +79,15 @@ export class PersonaPreferencesHistoryService {
     };
   }
 
-  private read(): PersonaPreferencesHistory["revisions"] {
-    try {
-      const value: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(value)) return [];
-      return value
-        .flatMap((raw: unknown) => {
-          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
-          const row = raw as Record<string, unknown>;
-          const before = safeSnapshot(row.before);
-          const after = safeSnapshot(row.after);
-          if (
-            typeof row.id !== "string" ||
-            !/^[0-9a-f-]{36}$/i.test(row.id) ||
-            typeof row.at !== "string" ||
-            !Number.isFinite(Date.parse(row.at)) ||
-            !before ||
-            !after ||
-            isDeepStrictEqual(before, after)
-          )
-            return [];
-          return [
-            {
-              id: row.id,
-              at: new Date(row.at).toISOString(),
-              before,
-              after,
-              ...(typeof row.revertedFrom === "string"
-                ? { revertedFrom: row.revertedFrom }
-                : {}),
-            },
-          ];
-        })
-        .slice(-MAX);
-    } catch {
-      return [];
-    }
-  }
-
-  private write(rows: PersonaPreferencesHistory["revisions"]): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-    const temp = `${this.file}.${process.pid}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(rows.slice(-MAX)), { mode: 0o600 });
-    fs.chmodSync(temp, 0o600);
-    const fd = fs.openSync(temp, "r");
-    try {
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.renameSync(temp, this.file);
+  list(): PersonaPreferencesHistory {
+    return this.history.list();
   }
 
   record(beforeValue: unknown, afterValue: unknown, revertedFrom?: string) {
     const before = safeSnapshot(beforeValue);
     const after = safeSnapshot(afterValue);
     if (!before || !after || isDeepStrictEqual(before, after)) return;
-    const rows = this.read();
+    const rows = this.history.all();
     rows.push({
       id: crypto.randomUUID(),
       at: new Date().toISOString(),
@@ -131,19 +96,14 @@ export class PersonaPreferencesHistoryService {
       ...(revertedFrom ? { revertedFrom } : {}),
     });
     try {
-      this.write(rows);
+      this.history.write(rows);
     } catch {
       // Preserve the requested settings save if a history write fails.
     }
   }
 
-  list(): PersonaPreferencesHistory {
-    const all = this.read();
-    return { revisions: all.slice(-20).reverse(), truncated: all.length > 20 };
-  }
-
   rollback(id: string): PersonaPreferencesRollbackResult {
-    const revision = this.read().find((item) => item.id === id);
+    const revision = this.history.all().find((item) => item.id === id);
     if (!revision)
       throw new NotFoundException(
         "Deze profielwijziging is niet meer beschikbaar.",

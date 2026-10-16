@@ -1,7 +1,5 @@
 import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   OmniRouteKeyModelAccessHistory,
@@ -11,6 +9,8 @@ import type {
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, revertedFromField } from "./history-file.js";
+import { REVISION_ID } from "./request-input.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
@@ -58,7 +58,7 @@ const parseModels = (value: string | null): string[] | null => {
 @Injectable()
 export class OmniRouteKeyModelAccess {
   private readonly inFlight = new Set<string>();
-  private readonly historyFile: string;
+  private readonly revisions: HistoryFile<KeyModelHistoryRow>;
 
   constructor(
     private readonly config: NovaConfig,
@@ -68,107 +68,52 @@ export class OmniRouteKeyModelAccess {
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
   ) {
-    this.historyFile = config.dataFile(
-      "omniroute-key-model-access-history.json",
+    this.revisions = new HistoryFile<KeyModelHistoryRow>(
+      config.dataFile("omniroute-key-model-access-history.json"),
+      (row) => {
+        const validModels = (models: unknown) =>
+          Array.isArray(models) &&
+          models.length <= 100 &&
+          models.every(
+            (model) =>
+              typeof model === "string" &&
+              model.length > 0 &&
+              model.length <= 200 &&
+              !sanitize(model).includes("[redacted]"),
+          ) &&
+          new Set(models).size === models.length;
+        if (
+          typeof row.keyId !== "string" ||
+          !safeId(row.keyId) ||
+          typeof row.name !== "string" ||
+          row.name.length > 160 ||
+          (row.beforeMode !== "all" && row.beforeMode !== "restricted") ||
+          (row.afterMode !== "all" && row.afterMode !== "restricted") ||
+          !validModels(row.beforeModels) ||
+          !validModels(row.afterModels) ||
+          typeof row.beforeRevision !== "string" ||
+          !/^[a-f0-9]{64}$/.test(row.beforeRevision) ||
+          typeof row.afterRevision !== "string" ||
+          !/^[a-f0-9]{64}$/.test(row.afterRevision) ||
+          (row.revertedFrom !== undefined &&
+            (typeof row.revertedFrom !== "string" ||
+              !REVISION_ID.test(row.revertedFrom)))
+        )
+          return undefined;
+        return {
+          keyId: row.keyId,
+          name: String(sanitize(row.name)).slice(0, 160),
+          beforeMode: row.beforeMode,
+          beforeModels: [...(row.beforeModels as string[])],
+          afterMode: row.afterMode,
+          afterModels: [...(row.afterModels as string[])],
+          beforeRevision: row.beforeRevision,
+          afterRevision: row.afterRevision,
+          ...revertedFromField(row),
+        };
+      },
+      { max: MAX_HISTORY, durability: "dir" },
     );
-  }
-
-  private readHistory(): KeyModelHistoryRow[] {
-    try {
-      const value: unknown = JSON.parse(
-        fs.readFileSync(this.historyFile, "utf8"),
-      );
-      if (!Array.isArray(value)) return [];
-      return value
-        .flatMap((candidate): KeyModelHistoryRow[] => {
-          if (
-            !candidate ||
-            typeof candidate !== "object" ||
-            Array.isArray(candidate)
-          )
-            return [];
-          const row = candidate as Record<string, unknown>;
-          const validModels = (models: unknown) =>
-            Array.isArray(models) &&
-            models.length <= 100 &&
-            models.every(
-              (model) =>
-                typeof model === "string" &&
-                model.length > 0 &&
-                model.length <= 200 &&
-                !sanitize(model).includes("[redacted]"),
-            ) &&
-            new Set(models).size === models.length;
-          if (
-            typeof row.id !== "string" ||
-            !/^[0-9a-f-]{36}$/i.test(row.id) ||
-            typeof row.at !== "string" ||
-            !Number.isFinite(Date.parse(row.at)) ||
-            typeof row.keyId !== "string" ||
-            !safeId(row.keyId) ||
-            typeof row.name !== "string" ||
-            row.name.length > 160 ||
-            (row.beforeMode !== "all" && row.beforeMode !== "restricted") ||
-            (row.afterMode !== "all" && row.afterMode !== "restricted") ||
-            !validModels(row.beforeModels) ||
-            !validModels(row.afterModels) ||
-            typeof row.beforeRevision !== "string" ||
-            !/^[a-f0-9]{64}$/.test(row.beforeRevision) ||
-            typeof row.afterRevision !== "string" ||
-            !/^[a-f0-9]{64}$/.test(row.afterRevision) ||
-            (row.revertedFrom !== undefined &&
-              (typeof row.revertedFrom !== "string" ||
-                !/^[0-9a-f-]{36}$/i.test(row.revertedFrom)))
-          )
-            return [];
-          return [
-            {
-              id: row.id,
-              at: new Date(row.at).toISOString(),
-              keyId: row.keyId,
-              name: String(sanitize(row.name)).slice(0, 160),
-              beforeMode: row.beforeMode,
-              beforeModels: [...(row.beforeModels as string[])],
-              afterMode: row.afterMode,
-              afterModels: [...(row.afterModels as string[])],
-              beforeRevision: row.beforeRevision,
-              afterRevision: row.afterRevision,
-              ...(typeof row.revertedFrom === "string"
-                ? { revertedFrom: row.revertedFrom }
-                : {}),
-            },
-          ];
-        })
-        .slice(-MAX_HISTORY);
-    } catch {
-      return [];
-    }
-  }
-
-  private writeHistory(rows: KeyModelHistoryRow[]): void {
-    fs.mkdirSync(path.dirname(this.historyFile), { recursive: true });
-    const temporary = `${this.historyFile}.${process.pid}.tmp`;
-    let fd: number | undefined;
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(rows.slice(-MAX_HISTORY)), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      fd = fs.openSync(temporary, "r");
-      fs.fsyncSync(fd);
-      fs.closeSync(fd);
-      fd = undefined;
-      fs.renameSync(temporary, this.historyFile);
-      const dir = fs.openSync(path.dirname(this.historyFile), "r");
-      try {
-        fs.fsyncSync(dir);
-      } finally {
-        fs.closeSync(dir);
-      }
-    } finally {
-      if (fd !== undefined) fs.closeSync(fd);
-      fs.rmSync(temporary, { force: true });
-    }
   }
 
   private recordHistory(
@@ -209,7 +154,7 @@ export class OmniRouteKeyModelAccess {
       ...(revertedFrom ? { revertedFrom } : {}),
     };
     try {
-      this.writeHistory([...this.readHistory(), row]);
+      this.revisions.append(row);
       return;
     } catch {
       return "Modelrechten zijn gewijzigd en gecontroleerd, maar de geschiedenis kon niet worden opgeslagen.";
@@ -218,7 +163,7 @@ export class OmniRouteKeyModelAccess {
 
   history(id: string): OmniRouteKeyModelAccessHistory {
     if (!safeId(id)) throw new Error(fail);
-    const rows = this.readHistory().filter((row) => row.keyId === id);
+    const rows = this.revisions.all().filter((row) => row.keyId === id);
     return {
       revisions: rows
         .slice(-20)
@@ -439,7 +384,7 @@ export class OmniRouteKeyModelAccess {
         ok: false as const,
         error: "Bevestig de clientbrede impact van dit herstel.",
       };
-    const revisions = this.readHistory().filter((row) => row.keyId === id);
+    const revisions = this.revisions.all().filter((row) => row.keyId === id);
     const entry = revisions.find((row) => row.id === revisionId);
     if (!entry)
       return {

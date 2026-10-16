@@ -19,8 +19,12 @@ export function writePrivateJson(
   file: string,
   value: unknown,
   durability: Durability = "none",
+  dirMode?: number,
 ): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.mkdirSync(path.dirname(file), {
+    recursive: true,
+    ...(dirMode === undefined ? {} : { mode: dirMode }),
+  });
   const temporary = `${file}.${process.pid}.tmp`;
   try {
     fs.writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
@@ -60,6 +64,8 @@ export interface HistoryOptions {
   /** Revisions returned by `list()` (default 50). */
   listLimit?: number;
   durability?: Durability;
+  /** Mode for a data directory this file has to create. */
+  dirMode?: number;
 }
 
 /**
@@ -70,6 +76,7 @@ export class HistoryFile<T extends { id: string; at: string }> {
   private readonly max: number;
   private readonly listLimit: number;
   private readonly durability: Durability;
+  private readonly dirMode: number | undefined;
 
   constructor(
     readonly file: string,
@@ -81,6 +88,7 @@ export class HistoryFile<T extends { id: string; at: string }> {
     this.max = options.max ?? 100;
     this.listLimit = options.listLimit ?? 50;
     this.durability = options.durability ?? "none";
+    this.dirMode = options.dirMode;
   }
 
   all(): T[] {
@@ -108,7 +116,12 @@ export class HistoryFile<T extends { id: string; at: string }> {
   }
 
   write(rows: T[]): void {
-    writePrivateJson(this.file, rows.slice(-this.max), this.durability);
+    writePrivateJson(
+      this.file,
+      rows.slice(-this.max),
+      this.durability,
+      this.dirMode,
+    );
   }
 
   append(revision: T): void {
