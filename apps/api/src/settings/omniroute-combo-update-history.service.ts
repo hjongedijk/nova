@@ -1,9 +1,9 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import type { OmniRouteComboUpdateHistoryEntry } from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, revertedFromField } from "./history-file.js";
+import { REVISION_ID } from "./request-input.js";
 import { sanitize } from "../core/security/sanitize.js";
 
 const MAX_ENTRIES = 100;
@@ -26,92 +26,45 @@ const safeName = (value: unknown): value is string =>
 /** Bounded, private history of the editable, secret-free combo fields only. */
 @Injectable()
 export class OmniRouteComboUpdateHistory {
-  private readonly file: string;
+  private readonly history: HistoryFile<Entry>;
   constructor(config: NovaConfig) {
-    this.file = config.dataFile("omniroute-combo-update-history.json");
-  }
-
-  private read(): Entry[] {
-    try {
-      const raw: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(raw)) return [];
-      return raw
-        .flatMap((item): Entry[] => {
-          if (!item || typeof item !== "object" || Array.isArray(item))
-            return [];
-          const row = item as Record<string, unknown>;
-          const models = (value: unknown): value is string[] =>
-            Array.isArray(value) &&
-            value.length >= 1 &&
-            value.length <= 8 &&
-            value.every(validModel) &&
-            new Set(value).size === value.length;
-          if (
-            typeof row.id !== "string" ||
-            !/^[0-9a-f-]{36}$/i.test(row.id) ||
-            !validId(row.comboId) ||
-            !safeName(row.beforeName) ||
-            !safeName(row.afterName) ||
-            !models(row.beforeModels) ||
-            !models(row.afterModels) ||
-            typeof row.beforeRevision !== "string" ||
-            !/^[a-f0-9]{64}$/.test(row.beforeRevision) ||
-            typeof row.afterRevision !== "string" ||
-            !/^[a-f0-9]{64}$/.test(row.afterRevision) ||
-            typeof row.at !== "string" ||
-            !Number.isFinite(Date.parse(row.at)) ||
-            (row.revertedFrom !== undefined &&
-              (typeof row.revertedFrom !== "string" ||
-                !/^[0-9a-f-]{36}$/i.test(row.revertedFrom)))
-          )
-            return [];
-          return [
-            {
-              id: row.id as string,
-              comboId: row.comboId as string,
-              beforeName: row.beforeName as string,
-              afterName: row.afterName as string,
-              beforeModels: [...(row.beforeModels as string[])],
-              afterModels: [...(row.afterModels as string[])],
-              beforeRevision: row.beforeRevision as string,
-              afterRevision: row.afterRevision as string,
-              at: new Date(row.at).toISOString(),
-              ...(typeof row.revertedFrom === "string"
-                ? { revertedFrom: row.revertedFrom }
-                : {}),
-            },
-          ];
-        })
-        .slice(-MAX_ENTRIES);
-    } catch {
-      return [];
-    }
-  }
-
-  private write(rows: Entry[]): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const temp = `${this.file}.${process.pid}.tmp`;
-    let fd: number | undefined;
-    try {
-      fs.writeFileSync(temp, JSON.stringify(rows.slice(-MAX_ENTRIES)), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temp, 0o600);
-      fd = fs.openSync(temp, "r");
-      fs.fsyncSync(fd);
-      fs.closeSync(fd);
-      fd = undefined;
-      fs.renameSync(temp, this.file);
-      const dir = fs.openSync(path.dirname(this.file), "r");
-      try {
-        fs.fsyncSync(dir);
-      } finally {
-        fs.closeSync(dir);
-      }
-    } finally {
-      if (fd !== undefined) fs.closeSync(fd);
-      fs.rmSync(temp, { force: true });
-    }
+    this.history = new HistoryFile<Entry>(
+      config.dataFile("omniroute-combo-update-history.json"),
+      (row) => {
+        const models = (value: unknown): value is string[] =>
+          Array.isArray(value) &&
+          value.length >= 1 &&
+          value.length <= 8 &&
+          value.every(validModel) &&
+          new Set(value).size === value.length;
+        if (
+          !validId(row.comboId) ||
+          !safeName(row.beforeName) ||
+          !safeName(row.afterName) ||
+          !models(row.beforeModels) ||
+          !models(row.afterModels) ||
+          typeof row.beforeRevision !== "string" ||
+          !/^[a-f0-9]{64}$/.test(row.beforeRevision) ||
+          typeof row.afterRevision !== "string" ||
+          !/^[a-f0-9]{64}$/.test(row.afterRevision) ||
+          (row.revertedFrom !== undefined &&
+            (typeof row.revertedFrom !== "string" ||
+              !REVISION_ID.test(row.revertedFrom)))
+        )
+          return undefined;
+        return {
+          comboId: row.comboId as string,
+          beforeName: row.beforeName,
+          afterName: row.afterName,
+          beforeModels: [...row.beforeModels],
+          afterModels: [...row.afterModels],
+          beforeRevision: row.beforeRevision,
+          afterRevision: row.afterRevision,
+          ...revertedFromField(row),
+        };
+      },
+      { max: MAX_ENTRIES, durability: "dir" },
+    );
   }
 
   record(row: Omit<Entry, "id" | "at">): string | undefined {
@@ -130,8 +83,8 @@ export class OmniRouteComboUpdateHistory {
     )
       return "Combo is gewijzigd, maar de wijziging is overgeslagen omdat veilige historie niet kon worden gemaakt.";
     try {
-      this.write([
-        ...this.read(),
+      this.history.write([
+        ...this.history.all(),
         { ...row, id: crypto.randomUUID(), at: new Date().toISOString() },
       ]);
       return undefined;
@@ -143,14 +96,15 @@ export class OmniRouteComboUpdateHistory {
   list(comboId: string) {
     if (!validId(comboId)) throw new NotFoundException("Combo niet gevonden.");
     return {
-      revisions: this.read()
+      revisions: this.history
+        .all()
         .filter((row) => row.comboId === comboId)
         .slice(-20)
         .reverse()
         .map((row) => ({
           id: row.id,
           at: row.at,
-          comboId: row.comboId,
+          comboId: row.comboId as string,
           beforeName: row.beforeName,
           afterName: row.afterName,
           beforeModels: row.beforeModels,
@@ -161,7 +115,7 @@ export class OmniRouteComboUpdateHistory {
   }
 
   rollbackTarget(comboId: string, revisionId: string) {
-    const rows = this.read().filter((row) => row.comboId === comboId);
+    const rows = this.history.all().filter((row) => row.comboId === comboId);
     const row = rows.find((entry) => entry.id === revisionId);
     if (!row)
       throw new NotFoundException("Deze combo-wijziging bestaat niet meer.");

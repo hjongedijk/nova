@@ -1,11 +1,10 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import type { HomeAssistantAccessPolicy } from "@nova/contracts";
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, listRecent, revertedFromField } from "./history-file.js";
 import { HomeAssistantService } from "../home/home-assistant.service.js";
 
 type Revision = {
@@ -23,7 +22,7 @@ const fields = ["mode", "areaIds", "deviceIds", "entityIds"] as const;
 /** Private bounded history for the Home Assistant access allowlist. */
 @Injectable()
 export class HomeAssistantAccessHistory {
-  private readonly file: string;
+  private readonly history: HistoryFile<Revision>;
   private readonly drafts = new Map<string, Draft>();
   lastWarning: string | undefined;
 
@@ -33,7 +32,18 @@ export class HomeAssistantAccessHistory {
     private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
   ) {
-    this.file = config.dataFile("home-assistant-access-history.json");
+    this.history = new HistoryFile<Revision>(
+      config.dataFile("home-assistant-access-history.json"),
+      (row) =>
+        this.valid(row.before) && this.valid(row.after)
+          ? {
+              before: row.before,
+              after: row.after,
+              ...revertedFromField(row),
+            }
+          : undefined,
+      { durability: "dir" },
+    );
   }
 
   private valid(value: unknown): value is HomeAssistantAccessPolicy {
@@ -55,67 +65,6 @@ export class HomeAssistantAccessHistory {
     );
   }
 
-  private read(): Revision[] {
-    try {
-      const rows: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(rows)) return [];
-      return rows.flatMap((entry: unknown) => {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry))
-          return [];
-        const row = entry as Record<string, unknown>;
-        if (
-          typeof row.id !== "string" ||
-          !/^[0-9a-f-]{36}$/i.test(row.id) ||
-          typeof row.at !== "string" ||
-          !Number.isFinite(Date.parse(row.at)) ||
-          !this.valid(row.before) ||
-          !this.valid(row.after)
-        )
-          return [];
-        return [
-          {
-            id: row.id,
-            at: new Date(row.at).toISOString(),
-            before: row.before,
-            after: row.after,
-            ...(typeof row.revertedFrom === "string" &&
-            /^[0-9a-f-]{36}$/i.test(row.revertedFrom)
-              ? { revertedFrom: row.revertedFrom }
-              : {}),
-          },
-        ];
-      });
-    } catch {
-      return [];
-    }
-  }
-
-  private write(rows: Revision[]) {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const temporary = `${this.file}.${process.pid}.tmp`;
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(rows.slice(-100)), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      const fd = fs.openSync(temporary, "r");
-      try {
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-      fs.renameSync(temporary, this.file);
-      const directory = fs.openSync(path.dirname(this.file), "r");
-      try {
-        fs.fsyncSync(directory);
-      } finally {
-        fs.closeSync(directory);
-      }
-    } finally {
-      fs.rmSync(temporary, { force: true });
-    }
-  }
-
   record(
     before: HomeAssistantAccessPolicy,
     after: HomeAssistantAccessPolicy,
@@ -124,8 +73,8 @@ export class HomeAssistantAccessHistory {
     this.lastWarning = undefined;
     if (digest(before) === digest(after)) return;
     try {
-      this.write([
-        ...this.read(),
+      this.history.write([
+        ...this.history.all(),
         {
           id: crypto.randomUUID(),
           at: new Date().toISOString(),
@@ -141,11 +90,8 @@ export class HomeAssistantAccessHistory {
   }
 
   list() {
-    const rows = this.read();
-    return {
-      revisions: rows.slice(-50).reverse(),
-      truncated: rows.length > 50,
-    };
+    const rows = this.history.all();
+    return listRecent(rows);
   }
 
   prepareRollback(id: string) {
@@ -159,7 +105,7 @@ export class HomeAssistantAccessHistory {
         ok: false as const,
         error: "Wacht tot een open bevestiging verloopt.",
       };
-    const revision = this.read().find((row) => row.id === id);
+    const revision = this.history.all().find((row) => row.id === id);
     if (!revision)
       throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
     const current = this.home.accessPolicy();
@@ -220,7 +166,9 @@ export class HomeAssistantAccessHistory {
         ok: false as const,
         error: "Bevestiging verlopen. Kies opnieuw.",
       };
-    const revision = this.read().find((row) => row.id === draft.revision);
+    const revision = this.history
+      .all()
+      .find((row) => row.id === draft.revision);
     const current = this.home.accessPolicy();
     if (
       !revision ||

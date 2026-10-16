@@ -1,7 +1,5 @@
 import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type {
   HelperHotkeyHistory as History,
@@ -11,6 +9,7 @@ import type {
 } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, revertedFromField } from "./history-file.js";
 import type { WallpaperPort } from "./wallpaper.port.js";
 
 const keys = ["open", "speak", "mute", "desktop"] as const;
@@ -39,64 +38,23 @@ const normalize = (value: unknown): HelperHotkeys | null => {
 @Injectable()
 export class HelperHotkeyHistory {
   lastWarning: string | undefined;
-  private readonly file: string;
+  private readonly history: HistoryFile<HelperHotkeyRevision>;
 
   constructor(
     config: NovaConfig,
     private readonly audit: AuditService,
   ) {
-    this.file = config.dataFile("helper-hotkey-history.json");
-  }
-
-  private read(): HelperHotkeyRevision[] {
-    try {
-      const value: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(value)) return [];
-      return value.flatMap((entry: unknown) => {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry))
-          return [];
-        const row = entry as Record<string, unknown>;
+    this.history = new HistoryFile<HelperHotkeyRevision>(
+      config.dataFile("helper-hotkey-history.json"),
+      (row) => {
         const before = normalize(row.before);
         const after = normalize(row.after);
-        if (
-          typeof row.id !== "string" ||
-          !/^[0-9a-f-]{36}$/i.test(row.id) ||
-          typeof row.at !== "string" ||
-          !Number.isFinite(Date.parse(row.at)) ||
-          !before ||
-          !after
-        )
-          return [];
-        return [
-          {
-            id: row.id,
-            at: new Date(row.at).toISOString(),
-            before,
-            after,
-            ...(typeof row.revertedFrom === "string" &&
-            /^[0-9a-f-]{36}$/i.test(row.revertedFrom)
-              ? { revertedFrom: row.revertedFrom }
-              : {}),
-          },
-        ];
-      });
-    } catch {
-      return [];
-    }
-  }
-
-  private write(revisions: HelperHotkeyRevision[]): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const temporary = `${this.file}.${process.pid}.tmp`;
-    const fd = fs.openSync(temporary, "w", 0o600);
-    try {
-      fs.writeFileSync(fd, JSON.stringify(revisions.slice(-100)));
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.renameSync(temporary, this.file);
-    fs.chmodSync(this.file, 0o600);
+        return before && after
+          ? { before, after, ...revertedFromField(row) }
+          : undefined;
+      },
+      { durability: "file" },
+    );
   }
 
   private auditChange(what: string, revision?: string): void {
@@ -130,7 +88,7 @@ export class HelperHotkeyHistory {
     };
     try {
       this.auditChange("helper_hotkeys_changed");
-      this.write([...this.read(), revision]);
+      this.history.append(revision);
       return;
     } catch {
       this.lastWarning =
@@ -140,7 +98,7 @@ export class HelperHotkeyHistory {
   }
 
   list(): History {
-    const revisions = this.read();
+    const revisions = this.history.all();
     return {
       revisions: revisions.slice(-50),
       truncated: revisions.length > 50,
@@ -151,7 +109,7 @@ export class HelperHotkeyHistory {
     id: string,
     wallpaper?: WallpaperPort,
   ): Promise<HelperHotkeyRollbackResult> {
-    const revision = this.read().find((entry) => entry.id === id);
+    const revision = this.history.all().find((entry) => entry.id === id);
     if (!revision)
       return {
         ok: false,
@@ -200,7 +158,7 @@ export class HelperHotkeyHistory {
       };
       let historyWarning: string | undefined;
       try {
-        this.write([...this.read(), reverse]);
+        this.history.append(reverse);
       } catch {
         historyWarning =
           "Herstel is op de pc bevestigd, maar de geschiedenis kon niet worden bijgewerkt.";

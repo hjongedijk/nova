@@ -1,9 +1,8 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import type { OmniRouteActivationHistoryEntry } from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile } from "./history-file.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 
@@ -17,86 +16,41 @@ type Row = OmniRouteActivationHistoryEntry & {
 /** Private bounded history of upstream account activation; never stores provider credentials. */
 @Injectable()
 export class OmniRouteActivationHistory {
-  private readonly file: string;
+  private readonly history: HistoryFile<Row>;
 
   constructor(config: NovaConfig) {
-    this.file = config.dataFile("omniroute-account-activation-history.json");
-  }
-
-  private read(): Row[] {
-    try {
-      const value: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(value)) return [];
-      return value
-        .flatMap((item): Row[] => {
-          if (!item || typeof item !== "object" || Array.isArray(item))
-            return [];
-          const row = item as Record<string, unknown>;
-          if (
-            typeof row.id !== "string" ||
-            !/^[0-9a-f-]{36}$/i.test(row.id) ||
-            (row.kind !== "account" &&
-              row.kind !== "combo" &&
-              row.kind !== "key") ||
-            typeof row.entityId !== "string" ||
-            !/^[a-zA-Z0-9_.-]{1,100}$/.test(row.entityId) ||
-            typeof row.name !== "string" ||
-            row.name.length > 200 ||
-            typeof row.beforeEnabled !== "boolean" ||
-            typeof row.afterEnabled !== "boolean" ||
-            row.beforeEnabled === row.afterEnabled ||
-            typeof row.beforeRevision !== "string" ||
-            !/^[a-f0-9]{64}$/.test(row.beforeRevision) ||
-            typeof row.afterRevision !== "string" ||
-            !/^[a-f0-9]{64}$/.test(row.afterRevision) ||
-            typeof row.at !== "string" ||
-            !Number.isFinite(Date.parse(row.at))
-          )
-            return [];
-          return [
-            {
-              id: row.id,
-              kind: row.kind,
-              entityId: row.entityId,
-              name: String(sanitize(row.name)).slice(0, 200),
-              beforeEnabled: row.beforeEnabled,
-              afterEnabled: row.afterEnabled,
-              beforeRevision: row.beforeRevision,
-              afterRevision: row.afterRevision,
-              at: new Date(row.at).toISOString(),
-            },
-          ];
-        })
-        .slice(-MAX_ENTRIES);
-    } catch {
-      return [];
-    }
-  }
-
-  private write(rows: Row[]): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const temp = `${this.file}.${process.pid}.tmp`;
-    let fd: number | undefined;
-    try {
-      fs.writeFileSync(temp, JSON.stringify(rows.slice(-MAX_ENTRIES)), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temp, 0o600);
-      fd = fs.openSync(temp, "r");
-      fs.fsyncSync(fd);
-      fs.closeSync(fd);
-      fd = undefined;
-      fs.renameSync(temp, this.file);
-      const dir = fs.openSync(path.dirname(this.file), "r");
-      try {
-        fs.fsyncSync(dir);
-      } finally {
-        fs.closeSync(dir);
-      }
-    } finally {
-      if (fd !== undefined) fs.closeSync(fd);
-      fs.rmSync(temp, { force: true });
-    }
+    this.history = new HistoryFile<Row>(
+      config.dataFile("omniroute-account-activation-history.json"),
+      (row) => {
+        if (
+          (row.kind !== "account" &&
+            row.kind !== "combo" &&
+            row.kind !== "key") ||
+          typeof row.entityId !== "string" ||
+          !/^[a-zA-Z0-9_.-]{1,100}$/.test(row.entityId) ||
+          typeof row.name !== "string" ||
+          row.name.length > 200 ||
+          typeof row.beforeEnabled !== "boolean" ||
+          typeof row.afterEnabled !== "boolean" ||
+          row.beforeEnabled === row.afterEnabled ||
+          typeof row.beforeRevision !== "string" ||
+          !/^[a-f0-9]{64}$/.test(row.beforeRevision) ||
+          typeof row.afterRevision !== "string" ||
+          !/^[a-f0-9]{64}$/.test(row.afterRevision)
+        )
+          return undefined;
+        return {
+          kind: row.kind,
+          entityId: row.entityId,
+          name: String(sanitize(row.name)).slice(0, 200),
+          beforeEnabled: row.beforeEnabled,
+          afterEnabled: row.afterEnabled,
+          beforeRevision: row.beforeRevision,
+          afterRevision: row.afterRevision,
+        };
+      },
+      { max: MAX_ENTRIES, durability: "dir" },
+    );
   }
 
   record(
@@ -110,7 +64,7 @@ export class OmniRouteActivationHistory {
       at: new Date().toISOString(),
     };
     try {
-      this.write([...this.read(), entry]);
+      this.history.append(entry);
       return;
     } catch {
       return "De accountwijziging is gecontroleerd, maar de wijzigingsgeschiedenis kon niet worden opgeslagen.";
@@ -124,7 +78,8 @@ export class OmniRouteActivationHistory {
     if (!/^[a-zA-Z0-9_.-]{1,100}$/.test(entityId))
       throw new ValidationError(["Ongeldig provideraccount."]);
     return {
-      revisions: this.read()
+      revisions: this.history
+        .all()
         .filter((row) => row.entityId === entityId && row.kind === kind)
         .slice(-20)
         .reverse()
@@ -145,7 +100,7 @@ export class OmniRouteActivationHistory {
     revisionId: string,
     kind: Row["kind"] = "account",
   ): { enabled: boolean; expectedCurrentRevision: string } {
-    const rows = this.read();
+    const rows = this.history.all();
     const entry = rows.find(
       (row) =>
         row.entityId === entityId && row.kind === kind && row.id === revisionId,
