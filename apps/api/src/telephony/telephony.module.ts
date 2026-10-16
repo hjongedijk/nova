@@ -4,7 +4,10 @@ import { ConversationModule } from "../conversation/conversation.module.js";
 import { PlanningModule } from "../planning/planning.module.js";
 import { TtsModule } from "../tts/tts.module.js";
 import { AriHttpClient, validateAriUrl } from "./ari.client.js";
+import { ChatModule } from "../chat/chat.module.js";
 import { TelephonyController } from "./telephony.controller.js";
+import { TelephonyMessagingController } from "./messaging.controller.js";
+import { TelephonyMessaging } from "./messaging.js";
 import { TelephonyService } from "./telephony.service.js";
 import { TelephonySource } from "./telephony.source.js";
 import { TelephonyStore } from "./telephony.store.js";
@@ -15,8 +18,8 @@ import { ARI_PORT } from "./telephony.types.js";
  * Asterisk when the user switches it on in the settings.
  */
 @Module({
-  imports: [PlanningModule, TtsModule, ConversationModule],
-  controllers: [TelephonyController],
+  imports: [PlanningModule, TtsModule, ConversationModule, ChatModule],
+  controllers: [TelephonyController, TelephonyMessagingController],
   providers: [
     TelephonyStore,
     {
@@ -33,6 +36,7 @@ import { ARI_PORT } from "./telephony.types.js";
     },
     TelephonyService,
     TelephonySource,
+    TelephonyMessaging,
   ],
   exports: [TelephonyService],
 })

@@ -31,6 +31,7 @@ import {
   validUser,
   assertValid,
   contactUser,
+  DEFAULT_MESSAGE_URL,
 } from "./asterisk-config.js";
 import { linphoneProvisioning } from "./linphone.js";
 import { TelephonyStore } from "./telephony.store.js";
@@ -172,6 +173,7 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
         this.store.get(),
         rtpRangeFromEnv(),
         this.conversation?.dialplan() ?? null,
+        process.env.NOVA_ASTERISK_MESSAGE_URL?.trim() || DEFAULT_MESSAGE_URL,
       ),
     );
   }

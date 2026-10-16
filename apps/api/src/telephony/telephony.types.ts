@@ -43,6 +43,8 @@ export interface TelephonyConfig {
   ringExtensions: string[];
   /** Named people reachable through the trunk. */
   contacts?: Contact[];
+  /** Shared secret the Asterisk dialplan sends with text messages for NOVA (generated, never shown). */
+  messageToken?: string;
   /** Internal extension calls may then run without a confirmation (external numbers never). */
   allowInternalCallsWithoutConfirmation: boolean;
   voice: "edge" | "piper";

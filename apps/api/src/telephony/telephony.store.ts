@@ -10,6 +10,7 @@ export const defaultConfig = (): TelephonyConfig => ({
   enabled: false,
   publicHost: "",
   ariSecret: randomSecret(),
+  messageToken: randomSecret(24),
   extensions: [],
   trunk: null,
   ringExtensions: [],
@@ -47,7 +48,9 @@ export class TelephonyStore {
       /* first start: defaults with a freshly generated ARI secret */
     }
     this.cache = { ...defaultConfig(), ...loaded, version: 1 };
-    if (!fs.existsSync(this.file)) this.save(this.cache);
+    // First start, or a file from before text messages existed: keep the generated token for good.
+    if (!fs.existsSync(this.file) || !loaded.messageToken)
+      this.save(this.cache);
     return this.cache;
   }
 

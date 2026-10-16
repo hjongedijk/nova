@@ -31,6 +31,18 @@ const CONTACT_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,39}$/u;
 const CONTACT_SIP =
   /^[A-Za-z0-9._+-]{1,64}@[a-z0-9]([a-z0-9.-]{1,251}[a-z0-9])$/i;
 export const MAX_CONTACTS = 20;
+export const DEFAULT_MESSAGE_URL =
+  "http://nova:8080/api/integrations/asterisk/message";
+const MESSAGE_URL =
+  /^http:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{2,5})?\/api\/integrations\/asterisk\/message$/i;
+
+/** Text messages from a contact reach NOVA only when the trunk exists and a contact may talk to NOVA. */
+export function messagingEnabled(config: TelephonyConfig): boolean {
+  return (
+    Boolean(config.trunk) &&
+    (config.contacts ?? []).some((c) => c.allowConversation)
+  );
+}
 
 export function validContact(contact: unknown): contact is Contact {
   const c = contact as Partial<Contact> | null;
@@ -177,6 +189,7 @@ export function renderPjsip(config: TelephonyConfig): string {
       "[trunk]",
       "type=endpoint",
       "context=nova-trunk-in",
+      ...(messagingEnabled(config) ? ["message_context=nova-message"] : []),
       "disallow=all",
       "allow=alaw,ulaw",
       // Linphone and sip.linphone.org insist on encrypted audio (RTP/SAVP with SDES keys); without this the call is
@@ -219,6 +232,7 @@ export interface ConversationDialplan {
 export function renderExtensions(
   config: TelephonyConfig,
   conversation: ConversationDialplan | null = null,
+  messageUrl: string = DEFAULT_MESSAGE_URL,
 ): string {
   if (
     conversation &&
@@ -278,6 +292,7 @@ export function renderExtensions(
     "[nova-trunk-in]",
     ...trunkInbound(config, conversation),
     "",
+    ...messageContext(config, messageUrl),
   );
   return lines.join("\n");
 }
@@ -309,6 +324,29 @@ function trunkInbound(
       " same => n,Hangup()",
     );
   return lines;
+}
+
+/**
+ * Text messages from Linphone: Asterisk hands each one to NOVA over the private network (the shared token proves where it
+ * came from) and sends NOVA's answer back to the sender through the trunk. NOVA decides what is answered: only allowed
+ * contacts, only text, and never anything that needs a confirmation. An empty answer means "send nothing".
+ */
+function messageContext(config: TelephonyConfig, messageUrl: string): string[] {
+  const trunk = config.trunk;
+  if (!trunk || !messagingEnabled(config)) return [];
+  const token = config.messageToken ?? "";
+  return [
+    "[nova-message]",
+    "exten => _.,1,NoOp(NOVA message)",
+    " same => n,Set(CURLOPT(conntimeout)=5)",
+    " same => n,Set(CURLOPT(httptimeout)=45)",
+    ` same => n,Set(REPLY=\${CURL(${messageUrl},token=${token}&from=\${URIENCODE(\${MESSAGE(from)})}&type=\${URIENCODE(\${MESSAGE_DATA(Content-Type)})}&body=\${URIENCODE(\${MESSAGE(body)})})})`,
+    " same => n,GotoIf($[${LEN(${REPLY})}=0]?done)",
+    " same => n,Set(MESSAGE(body)=${CUT(REPLY,|,2-)})",
+    ` same => n,MessageSend(pjsip:trunk/\${CUT(REPLY,|,1)},sip:${trunk.username}@${trunk.host})`,
+    " same => n(done),Hangup()",
+    "",
+  ];
 }
 
 export function renderAri(config: TelephonyConfig): string {
@@ -388,11 +426,12 @@ export function renderAll(
   config: TelephonyConfig,
   range: RtpRange = rtpRangeFromEnv(),
   conversation: ConversationDialplan | null = null,
+  messageUrl: string = DEFAULT_MESSAGE_URL,
 ): Record<string, string> {
-  assertValid(config);
+  assertValid(config, messageUrl);
   return {
     "pjsip.conf": renderPjsip(config),
-    "extensions.conf": renderExtensions(config, conversation),
+    "extensions.conf": renderExtensions(config, conversation, messageUrl),
     "ari.conf": renderAri(config),
     "http.conf": renderHttp(),
     "rtp.conf": renderRtp(range),
@@ -402,7 +441,10 @@ export function renderAll(
 }
 
 /** Refuses anything that could inject configuration lines. */
-export function assertValid(config: TelephonyConfig): void {
+export function assertValid(
+  config: TelephonyConfig,
+  messageUrl: string = DEFAULT_MESSAGE_URL,
+): void {
   if (!validSecret(config.ariSecret))
     throw new TelephonyError("Ongeldig ARI-geheim.");
   if (config.extensions.length > MAX_EXTENSIONS)
@@ -425,6 +467,12 @@ export function assertValid(config: TelephonyConfig): void {
     )
   )
     throw new TelephonyError("Ongeldige SIP-trunkgegevens.");
+  if (messagingEnabled(config)) {
+    if (!MESSAGE_URL.test(messageUrl))
+      throw new TelephonyError("Ongeldig adres voor tekstberichten.");
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(config.messageToken ?? ""))
+      throw new TelephonyError("Ongeldig berichtengeheim.");
+  }
   const contacts = config.contacts ?? [];
   if (contacts.length > MAX_CONTACTS)
     throw new TelephonyError("Te veel contacten.");
