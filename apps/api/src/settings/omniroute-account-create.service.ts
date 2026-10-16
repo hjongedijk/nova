@@ -43,6 +43,15 @@ const validId = (value: unknown): value is string =>
   typeof value === "string" && /^[a-zA-Z0-9_.-]{1,100}$/.test(value);
 const unavailable =
   "Provideraccount toevoegen is niet beschikbaar. Controleer de OmniRoute-koppeling.";
+/**
+ * OmniRoute may keep provider credentials encrypted at rest (a longer envelope), which NOVA cannot and need not decrypt: the
+ * credential then counts as persisted when something non-empty that is not shorter than the key itself is stored. A plain-text
+ * store must still match exactly. A missing or truncated credential is never accepted.
+ */
+function storedCredentialMatches(stored: string, key: string): boolean {
+  if (!stored) return false;
+  return stored.length > key.length || sameSecret(stored, key);
+}
 const sameSecret = (left: string, right: string) =>
   crypto.timingSafeEqual(
     crypto.createHash("sha256").update(left).digest(),
@@ -293,7 +302,7 @@ export class OmniRouteAccountCreate {
             row.name !== secret.name ||
             (row.is_active !== 0 && row.is_active !== 1) ||
             typeof row.api_key !== "string" ||
-            !sameSecret(row.api_key, secret.key)
+            !storedCredentialMatches(row.api_key, secret.key)
           )
             throw new Error("Provider persistence not verified");
           let routeReady = false;

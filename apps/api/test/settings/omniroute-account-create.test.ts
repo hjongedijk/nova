@@ -60,6 +60,7 @@ function fixture() {
   vi.spyOn(routing, "verifyForManagement").mockReturnValue(ready);
   const barrier = new RoutingManagementBarrier(config as NovaConfig, routing);
   let persist = true;
+  let stored: string | undefined;
   let duplicate = false;
   const request = vi.fn(
     async (
@@ -90,7 +91,7 @@ function fixture() {
             "mistral",
             "Personal",
             0,
-            secret,
+            stored ?? secret,
           );
         return {
           connection: {
@@ -133,6 +134,7 @@ function fixture() {
     request,
     routing,
     setPersist: (value: boolean) => (persist = value),
+    setStored: (value: string) => (stored = value),
     setDuplicate: (value: boolean) => (duplicate = value),
   };
 }
@@ -231,5 +233,34 @@ describe("OmniRoute provider account creation", () => {
     });
     expect(JSON.stringify(result)).not.toContain(secret);
     expect(f.routing.status().ready).toBe(false);
+  });
+
+  it("accepts a credential that OmniRoute keeps encrypted at rest, but never a missing or truncated one", async () => {
+    const run = async (storedValue: string) => {
+      const f = fixture();
+      f.setStored(storedValue);
+      const prepared = await f.service.prepare(
+        "mistral",
+        "Personal",
+        secret,
+        true,
+      );
+      const action = prepared.action!;
+      return f.service.confirm(action.sessionId, action.confirmationId, true);
+    };
+    // an encrypted envelope is longer than and different from the plain key
+    expect(await run(`enc:v1:${"A".repeat(secret.length + 40)}`)).toMatchObject(
+      {
+        ok: true,
+        verified: true,
+        routeReady: true,
+      },
+    );
+    // empty, or shorter than the key: the credential did not persist intact
+    expect(await run("")).toMatchObject({ ok: false, routeReady: false });
+    expect(await run(secret.slice(0, 4))).toMatchObject({
+      ok: false,
+      routeReady: false,
+    });
   });
 });

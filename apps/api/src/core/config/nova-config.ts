@@ -92,6 +92,8 @@ export class NovaConfig {
   /** "transcriptions" (/audio/transcriptions, e.g. a Whisper model) or "chat-audio" (an audio-capable chat model). */
   readonly sttMode = text("NOVA_STT_MODE", "transcriptions");
   readonly sttFreeVerified = flag("NOVA_STT_FREE_VERIFIED", false);
+  /** A separate OmniRoute key restricted to exactly the STT model and one connection (see docs/conversations.md). */
+  readonly sttKey = text("NOVA_STT_KEY");
   readonly defaultLanguage = setting(
     "NOVA_DEFAULT_LANGUAGE",
     "JARVIS_DEFAULT_LANGUAGE",

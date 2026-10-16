@@ -20,13 +20,15 @@ Code: `apps/api/src/conversation/`.
 
 ## Setup
 
-1. **Speech-to-text.** NOVA never calls a speech provider directly; it goes through OmniRoute like every model, fail-closed. Set
-   `NOVA_STT_MODEL` and `NOVA_STT_FREE_VERIFIED=true`. The model must be inside the verified free key scope of the OmniRoute key, otherwise nothing is sent.
-   - `NOVA_STT_MODE=transcriptions` (default): `/v1/audio/transcriptions`, for a Whisper model such as `cloudflare/@cf/openai/whisper-large-v3-turbo`
-     (fast, recommended). Today's key does **not** allow any transcription model, so you must add one to the key scope and the free policy in OmniRoute
-     first (the same procedure as the embedding model).
-   - `NOVA_STT_MODE=chat-audio`: an audio-capable chat model, for example `gemini/gemini-3.1-flash-lite`. It works with the current key but was measured at about 12 s
-     for a two-second utterance, which is too slow for conversation.
+1. **Speech-to-text.** NOVA never calls a speech provider directly; it goes through OmniRoute, fail-closed, so provider credentials stay there.
+   Whisper models are not part of OmniRoute's chat-oriented free-model inventory, so the speech path uses its own **dedicated OmniRoute key** instead of the chat key:
+   - Add a free **Groq** account in OmniRoute (Settings → Modellen → account toevoegen, or the provider's own dashboard). OmniRoute supports `groq/whisper-large-v3-turbo`;
+     Cloudflare Workers AI is not a transcription provider there.
+   - Create an OmniRoute API key restricted to **exactly** `groq/whisper-large-v3-turbo` and to **that one connection**, and set `NOVA_STT_KEY` to it.
+   - Set `NOVA_STT_MODEL=groq/whisper-large-v3-turbo`, `NOVA_STT_MODE=transcriptions` and `NOVA_STT_FREE_VERIFIED=true` (your declaration that the Groq organisation is on the free plan, no billing).
+   - Before every request NOVA reads OmniRoute's own records (read-only) and sends nothing unless the key is active, restricted to exactly that model, limited to one active connection of the model's provider.
+     A widened key stops speech instead of spending. Measured: about 300 ms for a two-second Dutch sentence, transcribed exactly.
+   - Without `NOVA_STT_KEY`, NOVA falls back to the chat key and requires the model to be inside the verified free key scope (`NOVA_STT_MODE=chat-audio` with Gemini works that way but was measured at about 12 s or a 503).
 2. **Settings → Gesprekken:** switch on, pick language and greeting. Also switch on **Telefonie** (Asterisk) so extension 700 exists.
 3. Asterisk reaches NOVA over **AudioSocket**: `NOVA_AUDIOSOCKET_HOST` (what Asterisk dials; default `nova`), `NOVA_AUDIOSOCKET_PORT` (8093),
    `NOVA_AUDIOSOCKET_BIND` (default `0.0.0.0`; do not publish this port). A connection is accepted only from a private address and only when its first
