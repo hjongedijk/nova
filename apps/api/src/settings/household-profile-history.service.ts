@@ -1,7 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type {
   HouseholdProfile,
@@ -9,6 +7,7 @@ import type {
 } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, revertedFromField } from "./history-file.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { normalizeHouseholdProfiles } from "./settings-validation.js";
 import { SettingsStore } from "./store/settings.store.js";
@@ -73,8 +72,10 @@ function changedProfileIds(
 /** Private ID-only history for switching the active household profile. */
 @Injectable()
 export class HouseholdProfileHistory {
-  private readonly file: string;
-  private readonly definitionsFile: string;
+  private readonly switchHistory: HistoryFile<
+    HouseholdProfileSwitchHistory["revisions"][number]
+  >;
+  private readonly definitionsHistory: HistoryFile<DefinitionsRevision>;
   private definitionsWarning: string | undefined;
 
   constructor(
@@ -82,73 +83,39 @@ export class HouseholdProfileHistory {
     private readonly settings: SettingsStore,
     private readonly audit: AuditService,
   ) {
-    this.file = config.dataFile("household-profile-history.json");
-    this.definitionsFile = config.dataFile(
-      "household-profile-definitions-history.json",
+    this.switchHistory = new HistoryFile<
+      HouseholdProfileSwitchHistory["revisions"][number]
+    >(
+      config.dataFile("household-profile-history.json"),
+      (row) =>
+        typeof row.beforeProfileId === "string" &&
+        /^[a-zA-Z0-9_-]{1,40}$/.test(row.beforeProfileId) &&
+        typeof row.afterProfileId === "string" &&
+        /^[a-zA-Z0-9_-]{1,40}$/.test(row.afterProfileId) &&
+        row.beforeProfileId !== row.afterProfileId
+          ? {
+              beforeProfileId: row.beforeProfileId,
+              afterProfileId: row.afterProfileId,
+              ...revertedFromField(row, false),
+            }
+          : undefined,
+      { max: MAX, durability: "file", dirMode: 0o700, listLimit: 20 },
     );
-  }
-
-  private readDefinitions(): DefinitionsRevision[] {
-    try {
-      const value: unknown = JSON.parse(
-        fs.readFileSync(this.definitionsFile, "utf8"),
-      );
-      if (!Array.isArray(value)) return [];
-      return value
-        .flatMap((entry: unknown) => {
-          if (!entry || typeof entry !== "object" || Array.isArray(entry))
-            return [];
-          const row = entry as Record<string, unknown>;
-          const before = cleanDefinitions(row.before);
-          const after = cleanDefinitions(row.after);
-          if (
-            typeof row.id !== "string" ||
-            !/^[0-9a-f-]{36}$/i.test(row.id) ||
-            typeof row.at !== "string" ||
-            !Number.isFinite(Date.parse(row.at)) ||
-            !before ||
-            !after ||
-            isDeepStrictEqual(before.profiles, after.profiles)
-          )
-            return [];
-          return [
-            {
-              id: row.id,
-              at: new Date(row.at).toISOString(),
-              before,
-              after,
-              ...(typeof row.revertedFrom === "string" &&
-              /^[0-9a-f-]{36}$/i.test(row.revertedFrom)
-                ? { revertedFrom: row.revertedFrom }
-                : {}),
-            },
-          ];
-        })
-        .slice(-MAX);
-    } catch {
-      return [];
-    }
-  }
-
-  private writeDefinitions(rows: DefinitionsRevision[]): void {
-    fs.mkdirSync(path.dirname(this.definitionsFile), {
-      recursive: true,
-      mode: 0o700,
-    });
-    const temp = `${this.definitionsFile}.${process.pid}.tmp`;
-    try {
-      fs.writeFileSync(temp, JSON.stringify(rows.slice(-MAX)), { mode: 0o600 });
-      fs.chmodSync(temp, 0o600);
-      const fd = fs.openSync(temp, "r");
-      try {
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-      fs.renameSync(temp, this.definitionsFile);
-    } finally {
-      fs.rmSync(temp, { force: true });
-    }
+    this.definitionsHistory = new HistoryFile<DefinitionsRevision>(
+      config.dataFile("household-profile-definitions-history.json"),
+      (row) => {
+        const before = cleanDefinitions(row.before);
+        const after = cleanDefinitions(row.after);
+        if (
+          !before ||
+          !after ||
+          isDeepStrictEqual(before.profiles, after.profiles)
+        )
+          return undefined;
+        return { before, after, ...revertedFromField(row) };
+      },
+      { max: MAX, durability: "file", dirMode: 0o700 },
+    );
   }
 
   recordDefinitions(
@@ -173,7 +140,7 @@ export class HouseholdProfileHistory {
       ...(revertedFrom ? { revertedFrom } : {}),
     };
     try {
-      this.writeDefinitions([...this.readDefinitions(), revision]);
+      this.definitionsHistory.append(revision);
     } catch {
       this.definitionsWarning =
         "Profielen opgeslagen, maar de wijzigingsgeschiedenis kon niet worden bijgewerkt.";
@@ -191,7 +158,7 @@ export class HouseholdProfileHistory {
     }>;
     truncated: boolean;
   } {
-    const all = this.readDefinitions();
+    const all = this.definitionsHistory.all();
     return {
       revisions: all
         .slice(-20)
@@ -214,7 +181,7 @@ export class HouseholdProfileHistory {
     activeHouseholdProfileId: string;
     auditWarning?: string;
   } {
-    const revisions = this.readDefinitions();
+    const revisions = this.definitionsHistory.all();
     const revision = revisions.at(-1);
     if (!revision || revision.id !== id)
       throw new NotFoundException(
@@ -245,7 +212,7 @@ export class HouseholdProfileHistory {
     });
     let restoredActiveProfileId = revision.before.activeProfileId;
     this.settings.update((next) => {
-      const latest = this.readDefinitions().at(-1);
+      const latest = this.definitionsHistory.all().at(-1);
       const live = cleanDefinitions({
         profiles: next.householdProfiles,
         activeProfileId: next.activeHouseholdProfileId,
@@ -303,57 +270,8 @@ export class HouseholdProfileHistory {
     };
   }
 
-  private read(): HouseholdProfileSwitchHistory["revisions"] {
-    try {
-      const value: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(value)) return [];
-      return value
-        .flatMap((item: unknown) => {
-          if (!item || typeof item !== "object" || Array.isArray(item))
-            return [];
-          const row = item as Record<string, unknown>;
-          if (
-            typeof row.id !== "string" ||
-            !/^[0-9a-f-]{36}$/i.test(row.id) ||
-            typeof row.at !== "string" ||
-            !Number.isFinite(Date.parse(row.at)) ||
-            typeof row.beforeProfileId !== "string" ||
-            !/^[a-zA-Z0-9_-]{1,40}$/.test(row.beforeProfileId) ||
-            typeof row.afterProfileId !== "string" ||
-            !/^[a-zA-Z0-9_-]{1,40}$/.test(row.afterProfileId) ||
-            row.beforeProfileId === row.afterProfileId
-          )
-            return [];
-          return [
-            {
-              id: row.id,
-              at: new Date(row.at).toISOString(),
-              beforeProfileId: row.beforeProfileId,
-              afterProfileId: row.afterProfileId,
-              ...(typeof row.revertedFrom === "string"
-                ? { revertedFrom: row.revertedFrom }
-                : {}),
-            },
-          ];
-        })
-        .slice(-MAX);
-    } catch {
-      return [];
-    }
-  }
-
-  private write(rows: HouseholdProfileSwitchHistory["revisions"]): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-    const temp = `${this.file}.${process.pid}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(rows.slice(-MAX)), { mode: 0o600 });
-    fs.chmodSync(temp, 0o600);
-    const fd = fs.openSync(temp, "r");
-    try {
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.renameSync(temp, this.file);
+  list(): HouseholdProfileSwitchHistory {
+    return this.switchHistory.list();
   }
 
   record(
@@ -368,7 +286,7 @@ export class HouseholdProfileHistory {
       !profiles.some((profile) => profile.id === afterProfileId)
     )
       return;
-    const rows = this.read();
+    const rows = this.switchHistory.all();
     rows.push({
       id: crypto.randomUUID(),
       at: new Date().toISOString(),
@@ -377,15 +295,10 @@ export class HouseholdProfileHistory {
       ...(revertedFrom ? { revertedFrom } : {}),
     });
     try {
-      this.write(rows);
+      this.switchHistory.write(rows);
     } catch {
       // Do not fail a profile switch if local history cannot be written.
     }
-  }
-
-  list(): HouseholdProfileSwitchHistory {
-    const all = this.read();
-    return { revisions: all.slice(-20).reverse(), truncated: all.length > 20 };
   }
 
   rollback(id: string): {
@@ -393,7 +306,7 @@ export class HouseholdProfileHistory {
     activeHouseholdProfileId: string;
     auditWarning?: string;
   } {
-    const revisions = this.read();
+    const revisions = this.switchHistory.all();
     const revision = revisions.find((item) => item.id === id);
     if (!revision)
       throw new NotFoundException(
@@ -424,7 +337,7 @@ export class HouseholdProfileHistory {
         (profile) => profile.id === revision.beforeProfileId,
       );
       if (
-        this.read().at(-1)?.id !== id ||
+        this.switchHistory.all().at(-1)?.id !== id ||
         current.activeHouseholdProfileId !== revision.afterProfileId ||
         !currentTarget
       )
