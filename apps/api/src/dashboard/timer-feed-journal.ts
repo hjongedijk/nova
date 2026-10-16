@@ -1,5 +1,5 @@
+import { writePrivateJson } from "../settings/history-file.js";
 import fs from "node:fs";
-import path from "node:path";
 import type { FeedEvent } from "@nova/contracts";
 
 const MAX_TIMER_NOTICES = 200;
@@ -65,37 +65,11 @@ export class TimerFeedJournal {
     const next = [...this.read(), { id, event: { ...event } }].slice(
       -MAX_TIMER_NOTICES,
     );
-    const temporary = `${this.file}.${process.pid}.tmp`;
     try {
-      fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      fs.writeFileSync(
-        temporary,
-        JSON.stringify({ version: 1, entries: next }),
-        { mode: 0o600 },
-      );
-      fs.chmodSync(temporary, 0o600);
-      const descriptor = fs.openSync(temporary, "r");
-      try {
-        fs.fsyncSync(descriptor);
-      } finally {
-        fs.closeSync(descriptor);
-      }
-      fs.renameSync(temporary, this.file);
-      const directory = fs.openSync(path.dirname(this.file), "r");
-      try {
-        fs.fsyncSync(directory);
-      } finally {
-        fs.closeSync(directory);
-      }
+      writePrivateJson(this.file, { version: 1, entries: next }, "dir");
       this.entries = next;
     } catch {
       throw new Error("Timer feed history unavailable");
-    } finally {
-      try {
-        fs.rmSync(temporary, { force: true });
-      } catch {
-        /* retain the original failure */
-      }
     }
   }
 }

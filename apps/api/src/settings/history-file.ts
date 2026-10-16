@@ -15,7 +15,7 @@ function fsyncPath(target: string): void {
 }
 
 /** Atomically replaces `file` with `value` as JSON, readable by the owner only. */
-function writePrivateJson(
+export function writePrivateJson(
   file: string,
   value: unknown,
   durability: Durability = "none",
