@@ -38,6 +38,11 @@ export class FabricationController {
     return { templates: listTemplates(), buildVolume: this.fab.buildVolume() };
   }
 
+  @Get("printer")
+  async printer() {
+    return { printer: await this.fab.printerStatus() };
+  }
+
   @Get("providers")
   providers() {
     return { providers: this.fab.providerStates() };

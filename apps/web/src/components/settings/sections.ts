@@ -83,6 +83,14 @@ export const SECTIONS = [
       "bureaublad scherm pc overnemen muis toetsenbord screenshot windows besturen",
   },
   {
+    id: "fabrication",
+    name: "3D-printen",
+    detail:
+      "Ontwerpen, modellen bekijken en printopdrachten van de Bambu Lab P2S.",
+    keywords:
+      "3d print printer bambu p2s ontwerp model stl beugel filament slicen openscad",
+  },
+  {
     id: "telephony",
     name: "Telefonie",
     detail:
