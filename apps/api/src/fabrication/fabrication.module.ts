@@ -1,14 +1,25 @@
 import { Module } from "@nestjs/common";
 import { PlanningModule } from "../planning/planning.module.js";
 import { VisualizationModule } from "../visualization/visualization.module.js";
-import { CAD_WORKER, StackControlCadWorker } from "./cad.worker.js";
+import {
+  CAD_WORKER,
+  CadWorkerRouter,
+  StackControlCadWorker,
+  WindowsAgentCadWorker,
+  WindowsFabAgent,
+} from "./cad.worker.js";
 import { DISCOVERY_PROVIDERS, ThingiverseProvider } from "./discovery.js";
 import { FabricationController } from "./fabrication.controller.js";
 import { FabricationService } from "./fabrication.service.js";
 import { FabricationSource } from "./fabrication.source.js";
 import { FabricationStore } from "./fabrication.store.js";
 import { PRINTER_PORT, PrinterProvider } from "./printer.port.js";
-import { ConfiguredCliSlicer, SLICER_PORT } from "./slicer.port.js";
+import {
+  ConfiguredCliSlicer,
+  SLICER_PORT,
+  SlicerRouter,
+  WindowsAgentSlicer,
+} from "./slicer.port.js";
 
 /**
  * 3D discovery, parametric CAD in a sandbox, validation, slicing and the approval-gated print workflow
@@ -24,11 +35,16 @@ import { ConfiguredCliSlicer, SLICER_PORT } from "./slicer.port.js";
     FabricationSource,
     ThingiverseProvider,
     StackControlCadWorker,
+    WindowsFabAgent,
+    WindowsAgentCadWorker,
+    CadWorkerRouter,
+    WindowsAgentSlicer,
+    SlicerRouter,
     PrinterProvider,
     ConfiguredCliSlicer,
-    { provide: CAD_WORKER, useExisting: StackControlCadWorker },
+    { provide: CAD_WORKER, useExisting: CadWorkerRouter },
     { provide: PRINTER_PORT, useExisting: PrinterProvider },
-    { provide: SLICER_PORT, useExisting: ConfiguredCliSlicer },
+    { provide: SLICER_PORT, useExisting: SlicerRouter },
     {
       provide: DISCOVERY_PROVIDERS,
       useFactory: (t: ThingiverseProvider) => [t],

@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { fabBackend, WindowsFabAgent } from "./cad.worker.js";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -34,7 +35,9 @@ export type SliceResult =
 export interface SlicerPort {
   readonly name: string;
   /** Why slicing cannot run now, or null when it can. */
-  unavailable(): string | null;
+  unavailable(): Promise<string | null>;
+  /** The printer profile this slicer uses (it must name the P2S), or null when there is none. */
+  profileName(): Promise<string | null>;
   slice(request: SliceRequest, signal?: AbortSignal): Promise<SliceResult>;
 }
 export const SLICER_PORT = Symbol("nova:slicer-port");
@@ -87,7 +90,11 @@ export class ConfiguredCliSlicer implements SlicerPort {
     }
   }
 
-  unavailable(): string | null {
+  async profileName(): Promise<string | null> {
+    return process.env.NOVA_SLICER_PRINTER_PROFILE?.trim() || null;
+  }
+
+  async unavailable(): Promise<string | null> {
     const command = this.command();
     if (!command)
       return "Er is geen slicer ingesteld (NOVA_SLICER_COMMAND). Zie docs/fabrication-slicing.md.";
@@ -100,7 +107,7 @@ export class ConfiguredCliSlicer implements SlicerPort {
     request: SliceRequest,
     signal?: AbortSignal,
   ): Promise<SliceResult> {
-    const problem = this.unavailable();
+    const problem = await this.unavailable();
     if (problem) return { ok: false, error: problem };
     if (!/p2s/i.test(request.printerProfile))
       return {
@@ -180,5 +187,146 @@ export class ConfiguredCliSlicer implements SlicerPort {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  }
+}
+
+/** The slicer on the user's Windows PC (Bambu Studio), started by the agent from its own agent.json; NOVA only sends the model and the settings. */
+@Injectable()
+export class WindowsAgentSlicer implements SlicerPort {
+  readonly name = "windows";
+  constructor(private readonly agent: WindowsFabAgent) {}
+
+  async profileName(): Promise<string | null> {
+    return (await this.agent.status()).slicerProfile;
+  }
+
+  async unavailable(): Promise<string | null> {
+    if (!this.agent.configured) return "De Windows-agent is niet ingesteld.";
+    const s = await this.agent.status();
+    if (!s.reachable)
+      return "De Windows-pc antwoordt niet. Staat hij aan en draait de agent?";
+    if (!s.enabled)
+      return "3D-slicen staat uit op de pc (agent.json: fabrication.enabled).";
+    if (!s.slicer)
+      return "Op de pc is geen P2S-slicer ingesteld (agent.json: fabrication.slicer).";
+    return null;
+  }
+
+  async slice(
+    request: SliceRequest,
+    signal?: AbortSignal,
+  ): Promise<SliceResult> {
+    const problem = await this.unavailable();
+    if (problem) return { ok: false, error: problem };
+    const query = new URLSearchParams({
+      profile: request.printerProfile,
+      material: request.material,
+      nozzle: String(request.nozzle),
+      layer: String(request.layerHeight),
+      infill: String(request.infillPercent),
+      walls: String(request.walls),
+      supports: request.supports,
+    });
+    try {
+      const response = await fetch(`${this.agent.url("slice")}?${query}`, {
+        method: "POST",
+        headers: {
+          ...this.agent.headers(),
+          "content-type": "application/octet-stream",
+        },
+        body: new Uint8Array(request.model),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(130_000)])
+          : AbortSignal.timeout(130_000),
+      });
+      if (response.status === 200) {
+        const file = Buffer.from(await response.arrayBuffer());
+        if (file.length < 64)
+          return { ok: false, error: "De pc gaf een leeg printbestand terug." };
+        const encoded = response.headers.get("x-nova-estimate");
+        const estimateText = encoded
+          ? Buffer.from(encoded, "base64").toString("utf8")
+          : "";
+        const raw = response.headers.get("x-nova-file-name") ?? "out.gcode.3mf";
+        const fileName = /^[\w.-]{1,80}$/.test(raw) ? raw : "out.gcode.3mf";
+        return {
+          ok: true,
+          file,
+          fileName,
+          ...parseEstimates(estimateText),
+          log: "",
+        };
+      }
+      if (response.status === 422) {
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          log?: string;
+          timedOut?: boolean;
+        };
+        return {
+          ok: false,
+          error: body.timedOut
+            ? "Het slicen op de pc duurde te lang en is gestopt."
+            : "De slicer op de pc is mislukt.",
+          log: typeof body.log === "string" ? body.log.slice(-1500) : undefined,
+        };
+      }
+      return {
+        ok: false,
+        error:
+          "De Windows-agent weigerde het slicen (profiel, instellingen of pauze).",
+      };
+    } catch {
+      return { ok: false, error: "De Windows-pc antwoordt niet." };
+    }
+  }
+}
+
+/** Prefers the PC's slicer; the server-side command is only used when the PC has none (NOVA_FAB_BACKEND can force either). */
+@Injectable()
+export class SlicerRouter implements SlicerPort {
+  readonly name = "router";
+  constructor(
+    private readonly windows: WindowsAgentSlicer,
+    private readonly cli: ConfiguredCliSlicer,
+  ) {}
+
+  private async choose(): Promise<{
+    slicer: SlicerPort;
+    problem: string | null;
+  }> {
+    const mode = fabBackend();
+    const windowsProblem =
+      mode === "server" ? "uitgeschakeld" : await this.windows.unavailable();
+    if (!windowsProblem) return { slicer: this.windows, problem: null };
+    if (mode === "windows")
+      return { slicer: this.windows, problem: windowsProblem };
+    const cliProblem = await this.cli.unavailable();
+    return cliProblem
+      ? {
+          slicer: this.windows,
+          problem:
+            mode === "server"
+              ? cliProblem
+              : `${windowsProblem} (server: ${cliProblem})`,
+        }
+      : { slicer: this.cli, problem: null };
+  }
+
+  async unavailable(): Promise<string | null> {
+    return (await this.choose()).problem;
+  }
+  async profileName(): Promise<string | null> {
+    const { slicer, problem } = await this.choose();
+    return problem ? null : slicer.profileName();
+  }
+  async slice(
+    request: SliceRequest,
+    signal?: AbortSignal,
+  ): Promise<SliceResult> {
+    const { slicer, problem } = await this.choose();
+    return problem
+      ? { ok: false, error: problem }
+      : slicer.slice(request, signal);
   }
 }

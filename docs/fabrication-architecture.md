@@ -20,6 +20,17 @@ physical sits behind a printer port and an approval gate.
 | Blender, FreeCAD, Fusion engines                                                                                   | **Not integrated**; vetted in [fabrication-mcp-vetting.md](fabrication-mcp-vetting.md).                                                            |
 | 3MF/STEP import, 3D workspace page                                                                                 | **Open.**                                                                                                                                          |
 
+## Where the work runs
+
+The server has no GPU and no desktop, so 3D modelling and slicing run **on your Windows PC** through the NOVA Windows agent
+(agent `2026-10-16.2` or newer): OpenSCAD renders and the Bambu Studio slicer are started there, from the executables named in
+the PC's own `agent.json` (`fabrication` section, off by default). The request cannot choose a program or a printer profile.
+NOVA's choice is `NOVA_FAB_BACKEND`: `auto` (default) uses the PC and falls back to the server's sandbox container only when the PC
+is off or the tool is missing there; a real OpenSCAD error is never retried elsewhere. `windows` and `server` force one.
+The PC must be on for modelling and slicing in `windows` mode. The agent runs one task at a time, so a long slice delays other agent calls
+until it ends (slice limit 120 s). PC-side processes are time-limited and killed as a tree, but they are not container-isolated:
+the OpenSCAD language cannot run programs, and `include/use/import/surface` are refused before rendering. See [the agent guide](../agents/windows/README.md).
+
 ## Flow
 
 search → (download | generate) → validate → preview → modify → slice → prepare (readiness) → approve → submit → monitor → history.
@@ -43,9 +54,9 @@ Pause/resume need a confirmation, cancel a fresh one.
 
 ## Setup
 
-1. `docker build -t nova-cad:openscad deploy/fabrication` on the Docker host that runs stack-control (production: not done yet).
-2. Optional: `THINGIVERSE_TOKEN`, `NOVA_SLICER_COMMAND`, `NOVA_SLICER_PRINTER_PROFILE`, `NOVA_PRINTER_BUILD_VOLUME` (default 256x256x256).
-3. Tests: `npm -w apps/api test -- test/fabrication` (47 tests); `NOVA_TEST_DOCKER_CAD=1` adds the real OpenSCAD renders; `npm run test:mcp-sandbox` covers the CAD sandbox.
+1. On the PC: install OpenSCAD (and Bambu Studio for slicing), set `fabrication.enabled` and the paths in `agent.json`, update the agent. Optional fallback: `docker build -t nova-cad:openscad deploy/fabrication` on the server's Docker host.
+2. Optional: `THINGIVERSE_TOKEN`, `NOVA_FAB_BACKEND`, `NOVA_PRINTER_BUILD_VOLUME` (default 256x256x256); server-side slicer fallback `NOVA_SLICER_COMMAND` + `NOVA_SLICER_PRINTER_PROFILE`.
+3. Tests: `npm -w apps/api test -- test/fabrication` (47 tests); `NOVA_TEST_DOCKER_CAD=1` adds the real OpenSCAD renders; `npm run test:mcp-sandbox` covers the CAD sandbox; `pwsh agents/windows/test/fab.ps1` checks the PC-side rules and the bounded process runner.
 
 ## Extending
 

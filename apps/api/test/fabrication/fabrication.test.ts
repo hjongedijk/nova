@@ -52,9 +52,13 @@ class FakeCad implements CadWorkerPort {
 class FakeSlicer implements SlicerPort {
   name = "fake";
   problem: string | null = null;
+  profile: string | null = "Bambu Lab P2S 0.4 nozzle";
   requests: SliceRequest[] = [];
-  unavailable() {
+  async unavailable() {
     return this.problem;
+  }
+  async profileName() {
+    return this.profile;
   }
   async slice(request: SliceRequest): Promise<SliceResult> {
     this.requests.push(request);
@@ -98,11 +102,9 @@ beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-fab-"));
   emitted.length = 0;
   audit.record.mockClear();
-  process.env.NOVA_SLICER_PRINTER_PROFILE = "Bambu Lab P2S 0.4 nozzle";
 });
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
-  delete process.env.NOVA_SLICER_PRINTER_PROFILE;
 });
 
 const bracket = (service: FabricationService) =>
@@ -223,11 +225,11 @@ describe("slicing", () => {
       /geen slicer/,
     );
     slicer.problem = null;
-    process.env.NOVA_SLICER_PRINTER_PROFILE = "Bambu Lab X1C";
+    slicer.profile = "Bambu Lab X1C";
     await expect(service.slice(design.id, { material: "PLA" })).rejects.toThrow(
-      /P2S-profiel/,
+      /hoort niet bij de Bambu Lab P2S/,
     );
-    process.env.NOVA_SLICER_PRINTER_PROFILE = "Bambu Lab P2S";
+    slicer.profile = "Bambu Lab P2S";
     await expect(
       service.slice(design.id, { material: "unobtainium" }),
     ).rejects.toThrow(/materiaal/i);

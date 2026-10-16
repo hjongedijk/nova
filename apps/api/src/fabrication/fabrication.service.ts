@@ -590,12 +590,12 @@ export class FabricationService implements OnModuleInit {
     const nozzle = options.nozzle ?? 0.4;
     if (!(P2S_PROFILE.nozzles as readonly number[]).includes(nozzle))
       throw new FabricationError("Dit mondstuk bestaat niet voor de P2S.");
-    const problem = this.slicer.unavailable();
+    const problem = await this.slicer.unavailable();
     if (problem) throw new FabricationError(problem);
-    const profile = process.env.NOVA_SLICER_PRINTER_PROFILE?.trim() ?? "";
+    const profile = (await this.slicer.profileName())?.trim() ?? "";
     if (!/p2s/i.test(profile))
       throw new FabricationError(
-        "Stel NOVA_SLICER_PRINTER_PROFILE in op het P2S-profiel van de slicer; er wordt geen ander printerprofiel gebruikt.",
+        "Het slicerprofiel hoort niet bij de Bambu Lab P2S; er wordt geen ander printerprofiel gebruikt.",
       );
     const settings = {
       layerHeight: options.layerHeight ?? 0.2,
