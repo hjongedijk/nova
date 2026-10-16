@@ -372,14 +372,12 @@ export class FabricationSource implements ToolSource {
           }
           return {
             ok: true,
-            result: this.fab
-              .listDesigns()
-              .map((d) => ({
-                id: d.id,
-                title: d.title,
-                revisions: d.revisions.length,
-                updated: new Date(d.updatedAt).toISOString(),
-              })),
+            result: this.fab.listDesigns().map((d) => ({
+              id: d.id,
+              title: d.title,
+              revisions: d.revisions.length,
+              updated: new Date(d.updatedAt).toISOString(),
+            })),
           };
         }
         case "download_3d_model": {

@@ -17,7 +17,7 @@ function fakeDocker({
   hang = false,
 } = {}) {
   const calls = [];
-  const docker = async (path, method = "GET", body, options) => {
+  const docker = async (path, method = "GET", body) => {
     calls.push({ path, method, body });
     if (path.startsWith("/containers/create")) return { Id: "cad1" };
     if (path.includes("/wait")) {

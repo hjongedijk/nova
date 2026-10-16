@@ -457,14 +457,15 @@ export class ToolsService implements OnModuleInit {
       this.audit.record({
         sessionId,
         tool: name,
-        arguments: codeTool(name) || isDesktopTool(name)
-          ? auditArgs(name, args)
-          : (privateMemory?.arguments ??
-            privateNote?.arguments ??
-            privateDocument?.arguments ??
-            privateRoutine?.arguments ??
-            privateRoute?.arguments ??
-            args),
+        arguments:
+          codeTool(name) || isDesktopTool(name)
+            ? auditArgs(name, args)
+            : (privateMemory?.arguments ??
+              privateNote?.arguments ??
+              privateDocument?.arguments ??
+              privateRoutine?.arguments ??
+              privateRoute?.arguments ??
+              args),
         risk,
         confirmation,
         result: isDesktopTool(name)

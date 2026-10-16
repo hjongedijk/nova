@@ -36,7 +36,8 @@ function patchLiteral(source, variants) {
   if (counts.reduce((sum, count) => sum + count, 0) !== 1) {
     throw new Error("Expected exactly one known streaming content expression");
   }
-  const { original, repaired } = variants[counts.findIndex((count) => count === 1)];
+  const { original, repaired } =
+    variants[counts.findIndex((count) => count === 1)];
   return source.replace(original, repaired);
 }
 
@@ -65,7 +66,9 @@ async function main(root) {
     const filename = path.join(chunksDir, entry.name);
     const source = await readFile(filename, "utf8");
     const counts = PATCHES.map((variants, index) => {
-      if (variants.some(({ repaired }) => occurrences(source, repaired) !== 0)) {
+      if (
+        variants.some(({ repaired }) => occurrences(source, repaired) !== 0)
+      ) {
         throw new Error("Streaming content repair already present");
       }
       const count = variants.reduce(
