@@ -47,6 +47,14 @@ const ALIASES: Record<string, string[]> = {
   muziek: ["music", "media", "sonos", "play"],
   timer: ["timer", "reminder"],
   herinnering: ["reminder", "timer"],
+  toon: ["visualization", "visualize", "holographic", "show"],
+  toont: ["visualization", "visualize", "holographic", "show"],
+  visualiseer: ["visualization", "visualize", "holographic"],
+  visualisatie: ["visualization", "visualize", "holographic"],
+  hologram: ["visualization", "holographic"],
+  holografisch: ["visualization", "holographic"],
+  topologie: ["visualization", "topology", "proxmox"],
+  graaf: ["visualization", "graph"],
 };
 
 function words(value: string): Set<string> {

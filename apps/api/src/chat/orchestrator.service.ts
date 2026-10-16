@@ -144,6 +144,13 @@ const REMINDER: ModelMessage = {
     "Dit antwoord hangt af van actuele gegevens. Roep nu een tool aan. Antwoord niet uit je geheugen en niet op basis van eerdere antwoorden in dit gesprek.",
 };
 
+const isVisualizationEvent = (
+  value: unknown,
+): value is Record<string, unknown> =>
+  !!value &&
+  typeof value === "object" &&
+  typeof (value as { id?: unknown }).id === "string";
+
 export type Emit = (event: string, data: Record<string, unknown>) => void;
 
 export interface OrchestrateInput {
@@ -598,6 +605,9 @@ export class OrchestratorService {
           verified: result.verified ?? null,
           status: (result.status as string | undefined) ?? null,
         });
+        // Visualisation tools ask the screen to open or refresh the holographic view.
+        if (result.ok && isVisualizationEvent(result.visualization))
+          emit("visualization", result.visualization);
         if (result.ambiguous && Array.isArray(result.candidates)) {
           const choices = result.candidates
             .flatMap((candidate) => {

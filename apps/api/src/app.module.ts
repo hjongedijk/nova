@@ -28,6 +28,7 @@ import { SettingsModule } from "./settings/settings.module.js";
 import { ToolsModule } from "./tools/tools.module.js";
 import { TelephonyModule } from "./telephony/telephony.module.js";
 import { TtsModule } from "./tts/tts.module.js";
+import { VisualizationModule } from "./visualization/visualization.module.js";
 
 const config = new NovaConfig();
 
@@ -60,6 +61,7 @@ const config = new NovaConfig();
     TermixModule,
     PangolinModule,
     WindowsModule,
+    VisualizationModule,
     BrowserAgentModule,
     DesktopModule,
     BridgesModule,
