@@ -5,11 +5,10 @@ import {
 } from "@nestjs/common";
 import type { NoteWidget } from "@nova/contracts";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, listRecent, revertedFromField } from "./history-file.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { SettingsStore } from "./store/settings.store.js";
 
@@ -62,124 +61,77 @@ const snapshot = (widget: NoteWidget) => ({
 @Injectable()
 export class NoteWidgetHistory {
   lastWarning: string | undefined;
-  private readonly file: string;
+  private readonly history: HistoryFile<Revision>;
   constructor(
     config: NovaConfig,
     private readonly settings: SettingsStore,
     private readonly audit: AuditService,
   ) {
-    this.file = config.dataFile("note-widget-history.json");
-  }
-
-  private read(): Revision[] {
-    try {
-      const value: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(value)) return [];
-      return value
-        .flatMap((raw: unknown) => {
-          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
-          const row = raw as Record<string, unknown>;
-          const before = safeText(row.before);
-          const after = safeText(row.after);
-          const createdSnapshot =
-            row.createdSnapshot &&
-            typeof row.createdSnapshot === "object" &&
-            !Array.isArray(row.createdSnapshot)
-              ? (row.createdSnapshot as Record<string, unknown>)
-              : undefined;
-          const beforeSnapshot = safeSnapshot(row.beforeSnapshot);
-          const afterSnapshot = safeSnapshot(row.afterSnapshot);
-          const createdTitle = safeText(createdSnapshot?.title);
-          const createdText = safeText(createdSnapshot?.text);
-          const isCreated =
-            createdTitle !== null &&
-            createdText !== null &&
-            createdText === after &&
-            typeof createdSnapshot?.enabled === "boolean";
-          const isSnapshotRevision =
-            beforeSnapshot !== undefined &&
-            afterSnapshot !== undefined &&
-            beforeSnapshot.text === before &&
-            afterSnapshot.text === after;
-          if (
-            typeof row.id !== "string" ||
-            !/^[0-9a-f-]{36}$/i.test(row.id) ||
-            typeof row.at !== "string" ||
-            !Number.isFinite(Date.parse(row.at)) ||
-            typeof row.widgetId !== "string" ||
-            !/^[a-z0-9_-]{1,80}$/.test(row.widgetId) ||
-            (before === null && !isCreated) ||
-            ((row.beforeSnapshot !== undefined ||
-              row.afterSnapshot !== undefined) &&
-              !isSnapshotRevision) ||
-            after === null
-          )
-            return [];
-          return [
-            {
-              id: row.id,
-              at: new Date(row.at).toISOString(),
-              widgetId: row.widgetId,
-              before: before ?? "",
-              after,
-              ...(isSnapshotRevision ? { beforeSnapshot, afterSnapshot } : {}),
-              ...(isCreated
-                ? {
-                    createdSnapshot: {
-                      title: createdTitle,
-                      enabled: createdSnapshot.enabled as boolean,
-                      text: createdText,
-                    },
-                  }
-                : {}),
-              ...(typeof row.revertedFrom === "string"
-                ? { revertedFrom: row.revertedFrom }
-                : {}),
-            },
-          ];
-        })
-        .slice(-100);
-    } catch {
-      return [];
-    }
-  }
-
-  private write(rows: Revision[]): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const temp = `${this.file}.${process.pid}.tmp`;
-    try {
-      fs.writeFileSync(temp, JSON.stringify(rows.slice(-100)), { mode: 0o600 });
-      fs.chmodSync(temp, 0o600);
-      const fd = fs.openSync(temp, "r");
-      try {
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-      fs.renameSync(temp, this.file);
-      const directory = fs.openSync(path.dirname(this.file), "r");
-      try {
-        fs.fsyncSync(directory);
-      } finally {
-        fs.closeSync(directory);
-      }
-    } finally {
-      fs.rmSync(temp, { force: true });
-    }
+    this.history = new HistoryFile<Revision>(
+      config.dataFile("note-widget-history.json"),
+      (row) => {
+        const before = safeText(row.before);
+        const after = safeText(row.after);
+        const createdSnapshot =
+          row.createdSnapshot &&
+          typeof row.createdSnapshot === "object" &&
+          !Array.isArray(row.createdSnapshot)
+            ? (row.createdSnapshot as Record<string, unknown>)
+            : undefined;
+        const beforeSnapshot = safeSnapshot(row.beforeSnapshot);
+        const afterSnapshot = safeSnapshot(row.afterSnapshot);
+        const createdTitle = safeText(createdSnapshot?.title);
+        const createdText = safeText(createdSnapshot?.text);
+        const isCreated =
+          createdTitle !== null &&
+          createdText !== null &&
+          createdText === after &&
+          typeof createdSnapshot?.enabled === "boolean";
+        const isSnapshotRevision =
+          beforeSnapshot !== undefined &&
+          afterSnapshot !== undefined &&
+          beforeSnapshot.text === before &&
+          afterSnapshot.text === after;
+        if (
+          typeof row.widgetId !== "string" ||
+          !/^[a-z0-9_-]{1,80}$/.test(row.widgetId) ||
+          (before === null && !isCreated) ||
+          ((row.beforeSnapshot !== undefined ||
+            row.afterSnapshot !== undefined) &&
+            !isSnapshotRevision) ||
+          after === null
+        )
+          return undefined;
+        return {
+          widgetId: row.widgetId,
+          before: before ?? "",
+          after,
+          ...(isSnapshotRevision ? { beforeSnapshot, afterSnapshot } : {}),
+          ...(isCreated
+            ? {
+                createdSnapshot: {
+                  title: createdTitle,
+                  enabled: createdSnapshot.enabled as boolean,
+                  text: createdText,
+                },
+              }
+            : {}),
+          ...revertedFromField(row, false),
+        };
+      },
+      { durability: "dir" },
+    );
   }
 
   list(widgetId: string) {
-    const rows = this.read().filter((row) => row.widgetId === widgetId);
-    return {
-      revisions: rows.slice(-50).reverse(),
-      truncated: rows.length > 50,
-    };
+    const rows = this.history.all().filter((row) => row.widgetId === widgetId);
+    return listRecent(rows);
   }
 
   forget(widgetId: string): void {
-    const rows = this.read();
+    const rows = this.history.all();
     const remaining = rows.filter((row) => row.widgetId !== widgetId);
-    if (remaining.length !== rows.length) this.write(remaining);
+    if (remaining.length !== rows.length) this.history.write(remaining);
   }
 
   record(
@@ -206,7 +158,7 @@ export class NoteWidgetHistory {
       afterSnapshot,
     };
     try {
-      this.write([...this.read(), revision]);
+      this.history.append(revision);
     } catch {
       this.lastWarning =
         "De notitie is opgeslagen, maar de wijzigingsgeschiedenis kon niet worden bijgewerkt.";
@@ -249,7 +201,7 @@ export class NoteWidgetHistory {
       createdSnapshot: { title, enabled: widget.enabled, text },
     };
     try {
-      this.write([...this.read(), revision]);
+      this.history.append(revision);
     } catch {
       this.lastWarning =
         "De notitie is opgeslagen, maar de wijzigingsgeschiedenis kon niet worden bijgewerkt.";
@@ -284,9 +236,9 @@ export class NoteWidgetHistory {
     historyWarning?: string;
   } {
     this.lastWarning = undefined;
-    const revision = this.read().find(
-      (row) => row.widgetId === widgetId && row.id === id,
-    );
+    const revision = this.history
+      .all()
+      .find((row) => row.widgetId === widgetId && row.id === id);
     if (!revision)
       throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
     const widget = this.settings
@@ -424,7 +376,7 @@ export class NoteWidgetHistory {
       revertedFrom: id,
     };
     try {
-      this.write([...this.read(), inverse]);
+      this.history.append(inverse);
     } catch {
       this.lastWarning =
         "De notitie is hersteld, maar de geschiedenis kon niet worden bijgewerkt.";

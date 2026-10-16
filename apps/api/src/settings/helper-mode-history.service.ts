@@ -1,11 +1,10 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { isDeepStrictEqual } from "node:util";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import type { HelperModeRevision, HelperSettings } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, revertedFromField } from "./history-file.js";
 import { SettingsStore } from "./store/settings.store.js";
 
 const normalize = (value: unknown): HelperSettings => {
@@ -29,69 +28,32 @@ const normalize = (value: unknown): HelperSettings => {
 @Injectable()
 export class HelperModeHistory {
   lastWarning: string | undefined;
-  private readonly file: string;
+  private readonly history: HistoryFile<HelperModeRevision>;
 
   constructor(
     config: NovaConfig,
     private readonly settings: SettingsStore,
     private readonly audit: AuditService,
   ) {
-    this.file = config.dataFile("helper-mode-history.json");
-  }
-
-  private read(): HelperModeRevision[] {
-    try {
-      const value: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(value)) return [];
-      return value.flatMap((entry: unknown) => {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry))
-          return [];
-        const row = entry as Record<string, unknown>;
-        if (
-          typeof row.id !== "string" ||
-          !/^[0-9a-f-]{36}$/i.test(row.id) ||
-          typeof row.at !== "string" ||
-          !Number.isFinite(Date.parse(row.at))
-        )
-          return [];
+    this.history = new HistoryFile<HelperModeRevision>(
+      config.dataFile("helper-mode-history.json"),
+      (row) => {
         try {
-          return [
-            {
-              id: row.id,
-              at: new Date(row.at).toISOString(),
-              before: normalize(row.before),
-              after: normalize(row.after),
-              ...(typeof row.revertedFrom === "string" &&
-              /^[0-9a-f-]{36}$/i.test(row.revertedFrom)
-                ? { revertedFrom: row.revertedFrom }
-                : {}),
-            },
-          ];
+          return {
+            before: normalize(row.before),
+            after: normalize(row.after),
+            ...revertedFromField(row),
+          };
         } catch {
-          return [];
+          return undefined;
         }
-      });
-    } catch {
-      return [];
-    }
-  }
-
-  private write(entries: HelperModeRevision[]): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const temporary = `${this.file}.${process.pid}.tmp`;
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(entries.slice(-100)), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      fs.renameSync(temporary, this.file);
-    } finally {
-      fs.rmSync(temporary, { force: true });
-    }
+      },
+      {},
+    );
   }
 
   list(): { revisions: HelperModeRevision[]; truncated: boolean } {
-    const all = this.read();
+    const all = this.history.all();
     return { revisions: all.slice(-50).reverse(), truncated: all.length > 50 };
   }
 
@@ -112,7 +74,7 @@ export class HelperModeHistory {
       ...(revertedFrom ? { revertedFrom } : {}),
     };
     try {
-      this.write([...this.read(), revision]);
+      this.history.append(revision);
     } catch {
       this.lastWarning =
         "Instellingen opgeslagen, maar de wijzigingsgeschiedenis kon niet worden bijgewerkt.";
@@ -134,7 +96,7 @@ export class HelperModeHistory {
   }
 
   rollback(id: string): { settings: HelperSettings; auditWarning?: string } {
-    const revision = this.read().find((entry) => entry.id === id);
+    const revision = this.history.all().find((entry) => entry.id === id);
     if (!revision)
       throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
     const current = normalize(this.settings.get().helper);

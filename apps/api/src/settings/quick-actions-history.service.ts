@@ -10,11 +10,10 @@ import type {
   QuickActionSnapshot,
 } from "@nova/contracts";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile } from "./history-file.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { normalizeQuickActions } from "./settings-validation.js";
 import { SettingsStore } from "./store/settings.store.js";
@@ -48,69 +47,25 @@ const cleanSnapshot = (value: unknown): QuickActionSnapshot | null => {
 @Injectable()
 export class QuickActionsHistory {
   lastWarning: string | undefined;
-  private readonly file: string;
+  private readonly history: HistoryFile<QuickActionRevision>;
   constructor(
     config: NovaConfig,
     private readonly settings: SettingsStore,
     private readonly audit: AuditService,
   ) {
-    this.file = config.dataFile("quick-actions-history.json");
-  }
-
-  private read(): QuickActionRevision[] {
-    try {
-      const value: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(value)) return [];
-      return value
-        .flatMap((entry: unknown) => {
-          if (!entry || typeof entry !== "object" || Array.isArray(entry))
-            return [];
-          const row = entry as Record<string, unknown>;
-          const before = cleanSnapshot(row.before);
-          const after = cleanSnapshot(row.after);
-          if (
-            typeof row.id !== "string" ||
-            !/^[0-9a-f-]{36}$/i.test(row.id) ||
-            typeof row.at !== "string" ||
-            !Number.isFinite(Date.parse(row.at)) ||
-            !before ||
-            !after
-          )
-            return [];
-          return [
-            { id: row.id, at: new Date(row.at).toISOString(), before, after },
-          ];
-        })
-        .slice(-100);
-    } catch {
-      return [];
-    }
-  }
-
-  private write(rows: QuickActionRevision[]): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const temp = `${this.file}.${process.pid}.tmp`;
-    try {
-      fs.writeFileSync(temp, JSON.stringify(rows.slice(-100)), { mode: 0o600 });
-      fs.chmodSync(temp, 0o600);
-      const fd = fs.openSync(temp, "r");
-      try {
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-      fs.renameSync(temp, this.file);
-    } finally {
-      fs.rmSync(temp, { force: true });
-    }
+    this.history = new HistoryFile<QuickActionRevision>(
+      config.dataFile("quick-actions-history.json"),
+      (row) => {
+        const before = cleanSnapshot(row.before);
+        const after = cleanSnapshot(row.after);
+        return before && after ? { before, after } : undefined;
+      },
+      { durability: "file" },
+    );
   }
 
   list(): QuickActionHistory {
-    const rows = this.read();
-    return {
-      revisions: rows.slice(-50).reverse(),
-      truncated: rows.length > 50,
-    };
+    return this.history.list();
   }
 
   current(): QuickActionSnapshot {
@@ -140,7 +95,7 @@ export class QuickActionsHistory {
       after,
     };
     try {
-      this.write([...this.read(), revision]);
+      this.history.append(revision);
     } catch {
       this.lastWarning =
         "Snelle opdrachten zijn opgeslagen, maar de wijzigingsgeschiedenis kon niet worden bijgewerkt.";
@@ -166,7 +121,7 @@ export class QuickActionsHistory {
     quickActions: QuickAction[];
     auditWarning?: string;
   } {
-    const revision = this.read().find((row) => row.id === id);
+    const revision = this.history.all().find((row) => row.id === id);
     if (!revision)
       throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
     const current = cleanSnapshot(this.current());

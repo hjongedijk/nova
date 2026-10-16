@@ -5,12 +5,11 @@ import {
 } from "@nestjs/common";
 import type { ToolSwitchRevision } from "@nova/contracts";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { ToolsService } from "../tools/tools.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, revertedFromField } from "./history-file.js";
 import { SettingsStore } from "./store/settings.store.js";
 
 const namePattern = /^[A-Za-z0-9_-]{1,64}$/;
@@ -28,7 +27,7 @@ const toolMap = (value: unknown): Record<string, boolean> => {
 @Injectable()
 export class ToolSwitchHistory {
   lastWarning: string | undefined;
-  private readonly file: string;
+  private readonly history: HistoryFile<ToolSwitchRevision>;
 
   constructor(
     config: NovaConfig,
@@ -36,23 +35,9 @@ export class ToolSwitchHistory {
     private readonly tools: ToolsService,
     private readonly audit: AuditService,
   ) {
-    this.file = config.dataFile("tool-switch-history.json");
-  }
-
-  private read(): ToolSwitchRevision[] {
-    try {
-      const value: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(value)) return [];
-      return value.flatMap((raw: unknown) => {
-        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
-        const row = raw as Record<string, unknown>;
-        if (
-          typeof row.id !== "string" ||
-          !/^[0-9a-f-]{36}$/i.test(row.id) ||
-          typeof row.at !== "string" ||
-          !Number.isFinite(Date.parse(row.at))
-        )
-          return [];
+    this.history = new HistoryFile<ToolSwitchRevision>(
+      config.dataFile("tool-switch-history.json"),
+      (row) => {
         const before = toolMap(row.before);
         const after = toolMap(row.after);
         if (
@@ -60,40 +45,15 @@ export class ToolSwitchHistory {
           Object.keys(before).length !== Object.keys(after).length ||
           Object.keys(before).some((key) => !Object.hasOwn(after, key))
         )
-          return [];
-        return [
-          {
-            id: row.id,
-            at: new Date(row.at).toISOString(),
-            before,
-            after,
-            ...(typeof row.revertedFrom === "string"
-              ? { revertedFrom: row.revertedFrom }
-              : {}),
-          },
-        ];
-      });
-    } catch {
-      return [];
-    }
-  }
-
-  private write(entries: ToolSwitchRevision[]): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const temporary = `${this.file}.${process.pid}.tmp`;
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(entries.slice(-100)), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      fs.renameSync(temporary, this.file);
-    } finally {
-      fs.rmSync(temporary, { force: true });
-    }
+          return undefined;
+        return { before, after, ...revertedFromField(row, false) };
+      },
+      {},
+    );
   }
 
   list(): { revisions: ToolSwitchRevision[]; truncated: boolean } {
-    const entries = this.read();
+    const entries = this.history.all();
     return {
       revisions: entries.slice(-50).reverse(),
       truncated: entries.length > 50,
@@ -137,7 +97,7 @@ export class ToolSwitchHistory {
       ...(revertedFrom ? { revertedFrom } : {}),
     };
     try {
-      this.write([...this.read(), revision]);
+      this.history.append(revision);
     } catch {
       this.lastWarning =
         "De wijziging is opgeslagen, maar de schakelgeschiedenis kon niet worden bijgewerkt.";
@@ -163,7 +123,7 @@ export class ToolSwitchHistory {
   }
 
   rollback(id: string): { ok: true; auditWarning?: string } {
-    const revision = this.read().find((entry) => entry.id === id);
+    const revision = this.history.all().find((entry) => entry.id === id);
     if (!revision)
       throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
     const current = this.current(Object.keys(revision.after));

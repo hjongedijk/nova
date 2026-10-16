@@ -5,11 +5,10 @@ import {
 } from "@nestjs/common";
 import type { SidebarItem, SidebarRevision } from "@nova/contracts";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { HistoryFile, revertedFromField } from "./history-file.js";
 import { SettingsStore } from "./store/settings.store.js";
 import { resolveSidebar } from "./settings-validation.js";
 
@@ -43,31 +42,16 @@ const clean = (value: unknown): SidebarItem[] => {
 @Injectable()
 export class SidebarHistory {
   lastWarning: string | undefined;
-  private readonly file: string;
+  private readonly history: HistoryFile<SidebarRevision>;
 
   constructor(
     config: NovaConfig,
     private readonly settings: SettingsStore,
     private readonly audit: AuditService,
   ) {
-    this.file = config.dataFile("sidebar-history.json");
-  }
-
-  private read(): SidebarRevision[] {
-    try {
-      const value: unknown = JSON.parse(fs.readFileSync(this.file, "utf8"));
-      if (!Array.isArray(value)) return [];
-      return value.flatMap((entry: unknown) => {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry))
-          return [];
-        const row = entry as Record<string, unknown>;
-        if (
-          typeof row.id !== "string" ||
-          !/^[0-9a-f-]{36}$/i.test(row.id) ||
-          typeof row.at !== "string" ||
-          !Number.isFinite(Date.parse(row.at))
-        )
-          return [];
+    this.history = new HistoryFile<SidebarRevision>(
+      config.dataFile("sidebar-history.json"),
+      (row) => {
         const before = clean(row.before);
         const after = clean(row.after);
         if (
@@ -77,44 +61,15 @@ export class SidebarHistory {
           after.length !== row.after.length ||
           !before.length
         )
-          return [];
-        return [
-          {
-            id: row.id,
-            at: new Date(row.at).toISOString(),
-            before,
-            after,
-            ...(typeof row.revertedFrom === "string"
-              ? { revertedFrom: row.revertedFrom }
-              : {}),
-          },
-        ];
-      });
-    } catch {
-      return [];
-    }
-  }
-
-  private write(entries: SidebarRevision[]): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const temporary = `${this.file}.${process.pid}.tmp`;
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(entries.slice(-100)), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      fs.renameSync(temporary, this.file);
-    } finally {
-      fs.rmSync(temporary, { force: true });
-    }
+          return undefined;
+        return { before, after, ...revertedFromField(row, false) };
+      },
+      {},
+    );
   }
 
   list() {
-    const entries = this.read();
-    return {
-      revisions: entries.slice(-50).reverse(),
-      truncated: entries.length > 50,
-    };
+    return this.history.list();
   }
 
   record(
@@ -132,7 +87,7 @@ export class SidebarHistory {
       ...(revertedFrom ? { revertedFrom } : {}),
     };
     try {
-      this.write([...this.read(), revision]);
+      this.history.append(revision);
     } catch {
       this.lastWarning =
         "De indeling is opgeslagen, maar de wijzigingsgeschiedenis kon niet worden bijgewerkt.";
@@ -158,7 +113,7 @@ export class SidebarHistory {
     sidebar: SidebarItem[];
     auditWarning?: string;
   } {
-    const revision = this.read().find((entry) => entry.id === id);
+    const revision = this.history.all().find((entry) => entry.id === id);
     if (!revision)
       throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
     const current = resolveSidebar(this.settings.get());
