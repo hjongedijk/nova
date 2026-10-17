@@ -16,9 +16,7 @@ export function looksLikeWsdl(text: string): boolean {
 }
 
 /** Basic WSDL 1.1: operations, SOAPAction, flat request parameters, endpoint address. SOAP 1.1 document/literal and rpc only. */
-export function parseWsdl(
-  text: string,
-): {
+export function parseWsdl(text: string): {
   operations: ApiOperation[];
   endpoint?: string;
   title: string;
