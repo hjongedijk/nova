@@ -1,4 +1,8 @@
 import type { ModelRoleId } from "@nova/contracts";
+import {
+  isApiOperationTool,
+  MAX_API_OPERATION_TOOLS,
+} from "../apis/api-tool-names.js";
 
 export interface SelectableTool {
   type: "function";
@@ -82,6 +86,23 @@ const ALIASES: Record<string, string[]> = {
   gezond: ["objective", "monitor", "server", "health"],
   blijft: ["objective", "monitor"],
   doelen: ["objective", "monitor"],
+  api: ["api", "connect", "integration", "endpoint"],
+  apis: ["api", "connect", "integration", "endpoint"],
+  koppel: ["api", "connect", "integration"],
+  koppelen: ["api", "connect", "integration"],
+  koppeling: ["api", "connect", "integration"],
+  integreer: ["api", "connect", "integration"],
+  integreren: ["api", "connect", "integration"],
+  integratie: ["api", "connect", "integration"],
+  verbind: ["api", "connect", "integration"],
+  verbinden: ["api", "connect", "integration"],
+  endpoint: ["api", "endpoint", "connect", "call"],
+  token: ["api", "token", "connect"],
+  leer: ["api", "connect", "describe"],
+  swagger: ["api", "connect", "describe"],
+  openapi: ["api", "connect", "describe"],
+  graphql: ["api", "connect", "describe"],
+  soap: ["api", "connect", "describe"],
 };
 
 function words(value: string): Set<string> {
@@ -93,6 +114,27 @@ function words(value: string): Set<string> {
       .replace(/[^a-z0-9_]+/g, " ")
       .split(/\s+/)
       .filter((word) => word.length > 2 && !STOP_WORDS.has(word)),
+  );
+}
+
+/** Per-operation tools of connected APIs: only the ones that match the request, at most MAX_API_OPERATION_TOOLS. */
+export function capApiOperationTools<T extends SelectableTool>(
+  tools: T[],
+  message: string,
+  role: ModelRoleId,
+): T[] {
+  const operations = tools.filter((tool) =>
+    isApiOperationTool(tool.function.name),
+  );
+  if (!operations.length) return tools;
+  const keep = new Set(
+    rankToolsForRequest(operations, message, role).slice(
+      0,
+      MAX_API_OPERATION_TOOLS,
+    ),
+  );
+  return tools.filter(
+    (tool) => !isApiOperationTool(tool.function.name) || keep.has(tool),
   );
 }
 
@@ -143,6 +185,7 @@ export function selectToolsForRequest<T extends SelectableTool>(
   role: ModelRoleId,
   maxTools = MAX_MODEL_TOOLS,
 ): T[] {
+  tools = capApiOperationTools(tools, message, role);
   if (tools.length <= maxTools) return tools;
   const discovery = tools.find(
     (tool) => tool.function.name === TOOL_DISCOVERY_NAME,

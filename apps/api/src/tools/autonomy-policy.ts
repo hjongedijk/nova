@@ -57,6 +57,7 @@ export const UNTRUSTED_SOURCES: ReadonlySet<string> = new Set([
   "documents",
   "mcp",
   "world",
+  "api",
   "browser",
   "desktop",
 ]);
