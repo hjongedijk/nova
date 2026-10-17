@@ -83,10 +83,59 @@ jobs:
           cache-from: type=gha,scope=omniroute
           cache-to: type=gha,mode=max,scope=omniroute
 
-  agents:
-    runs-on: ubuntu-latest
+  # NOVA Desk (apps/desk): the native Windows helper and wallpaper. continue-on-error: a failing desk build must never
+  # hold back or fail the release; the agent zip below is then simply built without nova-desk.exe.
+  desk:
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desk
+      - name: Test the pure core
+        working-directory: apps/desk
+        run: cargo test -p nova-desk-core
+      - name: Build nova-desk.exe
+        working-directory: apps/desk
+        run: cargo build --release -p nova-desk
+      - name: Collect
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force desk-out | Out-Null
+          Copy-Item apps/desk/target/release/nova-desk.exe desk-out/nova-desk.exe
+          Compress-Archive -Path desk-out/nova-desk.exe -DestinationPath nova-desk-windows.zip
+      - uses: actions/upload-artifact@v5
+        with:
+          name: nova-desk
+          path: |
+            desk-out/nova-desk.exe
+            nova-desk-windows.zip
+          if-no-files-found: error
+
+  agents:
+    runs-on: ubuntu-latest
+    needs: desk
+    # Runs whether or not the desk job worked.
+    if: ${{ always() }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fetch nova-desk.exe (only when the desk job succeeded)
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          name: nova-desk
+          path: desk-artifact
+      - name: Put nova-desk.exe next to the agent
+        run: |
+          if [ -f desk-artifact/desk-out/nova-desk.exe ]; then
+            cp desk-artifact/desk-out/nova-desk.exe agents/windows/nova-desk.exe
+            echo "nova-desk.exe included in the agent zip"
+          else
+            echo "No nova-desk.exe (the desk job did not succeed): the agent zip is built without it"
+          fi
       - run: |
           cd agents
           zip -r ../nova-windows-agent.zip windows -x "windows/test/*"
@@ -98,5 +147,6 @@ jobs:
           body_path: docs/release-notes/${{ github.ref_name }}.md
           files: |
             nova-windows-agent.zip
+            desk-artifact/nova-desk-windows.zip
             deploy/docker-compose.yml
             nova-compose.tar.gz
