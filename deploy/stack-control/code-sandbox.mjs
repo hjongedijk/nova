@@ -223,8 +223,3 @@ export function createCodeSandbox({
     },
   };
 }
-
-export const codeSandboxLimits = Object.freeze({
-  maxRuntimeMs: MAX_RUNTIME_MS,
-  maxOutputBytes: MAX_OUTPUT,
-});
