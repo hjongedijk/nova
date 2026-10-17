@@ -208,6 +208,44 @@ if (-not $failed) {
   }
 }
 
+# NOVA Desk (nova-desk.exe): the agent steers it through arguments. The pure builders run from the script's own source,
+# and the exact lists they produce are the same ones that apps/desk/crates/nova-desk-core/src/args.rs parses in its tests
+# ("the agent's arguments"), so both sides stay in step.
+if (-not $failed) {
+  $deskAst = [System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null)
+  foreach ($fn in 'Get-DeskArguments', 'Get-DeskWallpaperArguments', 'ConvertTo-DeskNotification') {
+    $def = $deskAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $fn }, $true) | Select-Object -First 1
+    if (-not $def) { $failed = $true; Write-Host "nova-agent.ps1: function $fn is missing" } else { . ([scriptblock]::Create($def.Extent.Text)) }
+  }
+  if (-not $failed) {
+    $a = (Get-DeskArguments @{ url = 'http://nova:8080'; display = 2 } 'both') -join ' '
+    if ($a -ne '--url http://nova:8080 --mode both --display 2') { $failed = $true; Write-Host "Get-DeskArguments: unexpected '$a'" }
+    $a = (Get-DeskArguments @{ url = 'https://nova.example.nl'; display = 0 } 'helper') -join ' '
+    if ($a -ne '--url https://nova.example.nl --mode helper') { $failed = $true; Write-Host "Get-DeskArguments: display 0 must leave the display out, got '$a'" }
+    $screens = @([pscustomobject]@{ DeviceName = '\\.\DISPLAY1' }, [pscustomobject]@{ DeviceName = '\\.\DISPLAY2' }, [pscustomobject]@{ DeviceName = '\\.\DISPLAY3' })
+    $w = (Get-DeskWallpaperArguments $screens @{ '\\.\DISPLAY1' = @{ mode = 'full' }; '\\.\DISPLAY3' = @{ mode = 'neon' } }) -join ' '
+    if ($w -ne '--wallpaper 1:full --wallpaper 2:off --wallpaper 3:off') { $failed = $true; Write-Host "Get-DeskWallpaperArguments: unexpected '$w'" }
+    $w = (Get-DeskWallpaperArguments $screens @{ '\\.\DISPLAY2' = @{ mode = 'sphere' } }) -join ' '
+    if ($w -ne '--wallpaper 1:off --wallpaper 2:sphere --wallpaper 3:off') { $failed = $true; Write-Host "Get-DeskWallpaperArguments: unexpected '$w'" }
+    $n = ConvertTo-DeskNotification @{ seq = [long]5; severity = 'info'; title = 'Hé ~ ? Ü'; detail = ''; at = '2026-10-18T09:00:00+02:00' }
+    $padded = $n.Replace('-', '+').Replace('_', '/'); while ($padded.Length % 4) { $padded += '=' }
+    $round = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($padded)) | ConvertFrom-Json
+    if ($n -match '[+/=]' -or $round.title -ne 'Hé ~ ? Ü' -or $round.seq -ne 5) { $failed = $true; Write-Host 'ConvertTo-DeskNotification: must be base64url without padding and round-trip' }
+    if (-not $failed) { Write-Host 'NOVA Desk arguments: state, wallpaper and notification builders ok' }
+  }
+  $deskOpen = $deskAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Open-Helper' }, $true) | Select-Object -First 1
+  $deskOpenText = if ($deskOpen) { $deskOpen.Extent.Text } else { '' }
+  if ($deskOpenText.IndexOf('Test-DeskHelper') -lt 0 -or $deskOpenText.IndexOf('Test-DeskHelper') -gt $deskOpenText.IndexOf('Close-Helper') -or $deskOpenText -notmatch '--app=\$baseUrl/helper') {
+    $failed = $true; Write-Host 'Open-Helper: NOVA Desk must be tried first and the Edge helper must remain as the fallback'
+  } else { Write-Host 'Open-Helper: NOVA Desk first, Edge as the fallback' }
+  if ([regex]::Matches($text, '(?m)Start-Process\s+-FilePath\s+\$deskExe').Count -ne 1) { $failed = $true; Write-Host 'NOVA Desk must only be started through Invoke-Desk (one place, never two helpers)' }
+  if ($text -notmatch '\[string\]\$config\.desk' -or $text -notmatch "'auto', 'helper', 'off'") { $failed = $true; Write-Host 'agent.json: desk must accept auto, helper and off' }
+  $example = Get-Content -Raw (Join-Path $root 'agent.example.json') | ConvertFrom-Json
+  if ([string]$example.desk -ne 'auto') { $failed = $true; Write-Host 'agent.example.json: desk should be auto' }
+  foreach ($anchor in "'/v1/status'", "'/v1/mode'", "'/v1/displays'", "'/v1/wallpaper'", "'/v1/helper/size'") {
+    if ($text.IndexOf($anchor) -lt 0) { $failed = $true; Write-Host "nova-agent.ps1: route $anchor is missing" }
+  }
+}
 # The browser tools talk to Edge through NovaCdp. Run it against a fake DevTools page socket: it must skip events,
 # return the reply with its id, and fail (not hang) when nothing answers.
 if (-not $failed) {

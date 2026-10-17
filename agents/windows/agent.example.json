@@ -3,6 +3,7 @@
   "allowedIps": [],
   "mode": "wallpaper",
   "helperDisplay": 0,
+  "desk": "auto",
   "browser": {
     "port": 9322,
     "defaultEngine": "google",

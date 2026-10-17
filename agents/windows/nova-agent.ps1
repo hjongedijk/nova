@@ -13,6 +13,9 @@ A "mode" (wallpaper, helper or both) chooses what NOVA shows: the wallpaper, a s
 top-centre on one display (an Edge app window, /helper), or both. agent.json sets the default; POST /v1/mode changes it
 at runtime and is remembered in mode.json.
 
+With nova-desk.exe next to this script (NOVA Desk, a native Tauri app) the helper, and with "desk": "auto" the wallpaper,
+are NOVA Desk's own frameless windows instead of Edge windows; without it, or with "desk": "off", everything works through Edge as before.
+
 It also gives NOVA a browser of its own (/v1/browser/*): a separate, visible Edge window with its own profile
 (browser-profile) that NOVA can search, read, click and type in, driven through Edge's DevTools channel.
 #>
@@ -21,7 +24,7 @@ param(
   [string]$ConfigPath = (Join-Path $PSScriptRoot 'agent.json')
 )
 $ErrorActionPreference = 'Stop'
-$agentVersion = '2026-10-17.1'
+$agentVersion = '2026-10-18.1'
 
 # However the agent is started (task, double-click, a terminal), it runs on without a window: this copy starts
 # a hidden one and ends. (conhost --headless also keeps Windows Terminal from opening a window.)
@@ -1553,6 +1556,14 @@ function Get-Displays {
 function Set-DisplayWallpaper($screen, [string]$mode, [string]$baseUrl) {
   Stop-WallpaperEdge $screen
   [NovaClick]::RemoveTarget([int]$screen.Bounds.X, [int]$screen.Bounds.Y)
+  if (Test-DeskWallpaper) {
+    # NOVA Desk shows the wallpaper itself; the agent only tells it which display gets which style.
+    $number = [Array]::IndexOf(@([System.Windows.Forms.Screen]::AllScreens | ForEach-Object { $_.DeviceName }), $screen.DeviceName) + 1
+    $deskState = Get-ModeState
+    $deskState.url = $baseUrl
+    Invoke-Desk ((Get-DeskArguments $deskState ([string]$deskState.mode)) + @('--wallpaper', "${number}:$mode"))
+    return
+  }
   if ($mode -eq 'off') { return }
   if (-not $edgeExe) { throw 'Microsoft Edge is not installed on this PC' }
   $b = $screen.Bounds
@@ -1615,6 +1626,8 @@ function Set-DisplayWallpaper($screen, [string]$mode, [string]$baseUrl) {
 
 function Update-ClickRegions {
   [NovaClick]::Forward = ([string]$config.wallpaperInput -ne 'window')
+  # NOVA Desk's wallpaper does not take part in input forwarding yet (phase 2): no click on the desktop is taken over.
+  if (Test-DeskWallpaper) { [NovaClick]::Regions = [int[]]@(); return }
   # Without a wallpaper on screen (helper mode) no click on the desktop may be taken over.
   $state = if (Test-WallpaperWanted) { Get-WallpaperState } else { @{} }
   $regions = New-Object System.Collections.Generic.List[int]
@@ -1741,9 +1754,13 @@ function Send-HelperNotification($value) {
   $state = Get-ModeState
   if (@('helper', 'both') -notcontains $state.mode) { return @{ delivered = $false; reason = 'helper-disabled' } }
   if (-not $state.url) { throw 'The NOVA address is not known' }
-  if (-not $script:helper -or -not [NovaHelper]::Alive([IntPtr]$script:helper.handle)) { Open-Helper $state.url ([int]$state.display) }
+  if (-not (Test-HelperOpen)) { Open-Helper $state.url ([int]$state.display) }
   $notificationView = if ($script:helper.view -eq 'confirmation') { 'confirmation' } else { 'overview' }
   Set-HelperSize $true $notificationView $false $false
+  if (Test-DeskHelper) {
+    Invoke-Desk ((Get-DeskArguments $state ([string]$state.mode)) + @('--notify', (ConvertTo-DeskNotification $event)))
+    return @{ delivered = $true; seq = $event.seq }
+  }
   $json = $event | ConvertTo-Json -Compress
   # Buffer first, then dispatch. The page consumes this bounded queue after mounting, including on a fresh launch.
   $expression = "(() => { if (document.readyState !== 'complete' || location.pathname !== '/helper') return false; const event = $json; window.__novaHelperNotifications = [...(window.__novaHelperNotifications || []).filter(item => item.seq !== event.seq), event].slice(-20); window.dispatchEvent(new CustomEvent('nova-helper-notification',{detail:event})); return true; })()"
@@ -1795,9 +1812,16 @@ function Invoke-HelperControl([string]$action) {
   if ($action -eq 'pause') { $script:agentPaused = -not $script:agentPaused; [NovaControls]::SetPaused($script:agentPaused) }
   $state = Get-ModeState
   if (-not $state.url) { throw 'Set the NOVA address before opening the helper' }
-  if (-not $script:helper -or -not [NovaHelper]::Alive([IntPtr]$script:helper.handle)) { Open-Helper $state.url ([int]$state.display) }
+  if (-not (Test-HelperOpen)) { Open-Helper $state.url ([int]$state.display) }
   Set-HelperSize $false 'compact' $false $false
   if ($action -eq 'open') { return }
+  if (Test-DeskHelper) {
+    if (@('speak', 'mute', 'settings', 'pause') -notcontains $action) { return }
+    $arguments = (Get-DeskArguments $state ([string]$state.mode)) + @('--show', '--action', $action)
+    if ($action -eq 'pause') { $arguments += @('--paused', $(if ($script:agentPaused) { 'true' } else { 'false' })) }
+    Invoke-Desk $arguments
+    return
+  }
   $targets = @(Invoke-RestMethod -Uri "http://127.0.0.1:$helperPort/json/list" -TimeoutSec 2)
   $page = $targets | Where-Object { $_.type -eq 'page' -and $_.webSocketDebuggerUrl } | Select-Object -First 1
   if (-not $page) { throw 'The helper page is not ready' }
@@ -1856,6 +1880,71 @@ function Get-EdgeSecurityArgs([string]$baseUrl) {
   if ($baseUrl -match '^http://') { return @("--unsafely-treat-insecure-origin-as-secure=$baseUrl", '--test-type') }
   return @()
 }
+# ---------- NOVA Desk: the native helper and wallpaper (nova-desk.exe next to this script) ----------
+# With nova-desk.exe present, the helper window (and, with "desk": "auto", the wallpaper windows) are NOVA Desk's frameless
+# windows instead of Edge windows. agent.json "desk": "auto" (default) = helper and wallpaper, "helper" = only the helper (the
+# wallpaper stays in Edge, which keeps its input forwarding), "off" = always Edge. A second start of nova-desk.exe hands its
+# arguments to the running one (it is a single instance app) and ends: that is how the agent steers it, so there is never a
+# second helper. Shortcuts, the agent tray and notifications keep coming from the agent.
+$deskExe = Join-Path $PSScriptRoot 'nova-desk.exe'
+$deskSetting = if (@('auto', 'helper', 'off') -contains [string]$config.desk) { [string]$config.desk } else { 'auto' }
+function Test-DeskHelper { return ($deskSetting -ne 'off') -and (Test-Path -LiteralPath $deskExe) }
+function Test-DeskWallpaper { return ($deskSetting -eq 'auto') -and (Test-Path -LiteralPath $deskExe) }
+function Get-DeskProcess { return @(Get-Process -Name 'nova-desk' -ErrorAction SilentlyContinue) }
+function Invoke-Desk([string[]]$arguments) {
+  Start-Process -FilePath $deskExe -ArgumentList $arguments -WindowStyle Hidden | Out-Null
+}
+function Close-Desk { if (@(Get-DeskProcess).Count -gt 0) { Invoke-Desk @('--quit') } }
+# Pure: the arguments that make NOVA Desk match the agent's state. Display 0 leaves the display it remembers.
+function Get-DeskArguments($state, [string]$mode) {
+  $list = @('--url', [string]$state.url, '--mode', $mode)
+  if ([int]$state.display -gt 0) { $list += @('--display', [string][int]$state.display) }
+  return $list
+}
+# Pure: one --wallpaper argument per display, from the wallpaper.json choices (a display without a choice is off).
+function Get-DeskWallpaperArguments($screens, $wallpaperState) {
+  $list = @()
+  $number = 0
+  foreach ($screen in $screens) {
+    $number++
+    $entry = $wallpaperState[$screen.DeviceName]
+    $style = if ($entry -and @('full', 'sphere') -contains [string]$entry.mode) { [string]$entry.mode } else { 'off' }
+    $list += @('--wallpaper', "${number}:$style")
+  }
+  return $list
+}
+# Pure: a notification as the argument NOVA Desk reads (base64url of compact JSON, no padding).
+function ConvertTo-DeskNotification($event) {
+  $json = $event | ConvertTo-Json -Compress
+  return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+function Test-HelperOpen {
+  if (-not $script:helper) { return $false }
+  if ($script:helper.desk) { return @(Get-DeskProcess).Count -gt 0 }
+  return [NovaHelper]::Alive([IntPtr]$script:helper.handle)
+}
+# Makes NOVA Desk show what the mode asks. With the wallpaper in Edge it only does the helper.
+function Sync-Desk {
+  $state = Get-ModeState
+  if (-not $state.url) { throw 'The NOVA address is not known yet: set the mode from NOVA once' }
+  $mode = [string]$state.mode
+  if (-not (Test-DeskWallpaper)) {
+    if ($mode -eq 'wallpaper') { Close-Desk; return }
+    $mode = 'helper'
+  }
+  $arguments = Get-DeskArguments $state $mode
+  if (Test-DeskWallpaper) { $arguments += Get-DeskWallpaperArguments ([System.Windows.Forms.Screen]::AllScreens) (Get-WallpaperState) }
+  Invoke-Desk $arguments
+}
+function Open-DeskHelper([string]$baseUrl, [int]$display) {
+  if ($baseUrl -notmatch '^https?://[^\s/]+$') { throw 'Invalid NOVA address' }
+  Get-HelperEdge | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }   # never an Edge helper next to it
+  $state = Get-ModeState
+  $state.url = $baseUrl
+  $state.display = $display
+  Invoke-Desk ((Get-DeskArguments $state ([string]$state.mode)) + @('--show', '--view', [string]$state.view))
+  $script:helper = @{ desk = $true; handle = [IntPtr]::Zero; device = ''; display = $display; expanded = ($state.view -ne 'compact'); view = $state.view; hidden = $false }
+}
 function Get-HelperEdge {
   Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*nova-helper*' }
 }
@@ -1864,6 +1953,8 @@ function Close-Helper {
   $script:helper = $null
 }
 function Open-Helper([string]$baseUrl, [int]$display) {
+  if (Test-DeskHelper) { Open-DeskHelper $baseUrl $display; return }
+  if ($deskSetting -eq 'off') { Close-Desk }   # "desk": "off": only the Edge helper may run
   Close-Helper
   if (-not $edgeExe) { throw 'Microsoft Edge is not installed on this PC' }
   if ($baseUrl -notmatch '^https?://[^\s/]+$') { throw 'Invalid NOVA address' }
@@ -1920,15 +2011,21 @@ function Get-PersistedHelperView([string]$current, [string]$requested, [bool]$hi
 function Set-HelperSize([bool]$expanded, [string]$view = '', [bool]$hidden = $false, [bool]$reducedMotion = $false) {
   if (-not $view) { $view = if ($expanded) { 'chat' } else { 'compact' } }
   if (-not $helperSizes.ContainsKey($view)) { throw 'Unknown helper view' }
-  if (-not $script:helper -or -not [NovaHelper]::Alive([IntPtr]$script:helper.handle)) {
+  if (-not (Test-HelperOpen)) {
     $state = Get-ModeState
     if (@('helper', 'both') -notcontains $state.mode) { throw 'The helper is disabled' }
     Open-Helper $state.url ([int]$state.display)
   }
-  $screen = Get-HelperScreen ([int]$script:helper.display)
-  $rect = Get-HelperRect $screen $view $hidden
-  $duration = if ($reducedMotion) { 0 } else { 200 }
-  [NovaHelper]::Animate([IntPtr]$script:helper.handle, $rect.x, $rect.y, $rect.w, $rect.h, $duration)
+  if (Test-DeskHelper) {
+    # NOVA Desk resizes its own window (it also does so when its page asks); the agent only passes the view on.
+    $current = Get-ModeState
+    Invoke-Desk ((Get-DeskArguments $current ([string]$current.mode)) + @('--view', $view) + $(if ($hidden) { @('--hidden') } else { @() }))
+  } else {
+    $screen = Get-HelperScreen ([int]$script:helper.display)
+    $rect = Get-HelperRect $screen $view $hidden
+    $duration = if ($reducedMotion) { 0 } else { 200 }
+    [NovaHelper]::Animate([IntPtr]$script:helper.handle, $rect.x, $rect.y, $rect.w, $rect.h, $duration)
+  }
   $script:helper.expanded = $view -ne 'compact'
   $script:helper.view = $view
   $script:helper.hidden = $hidden
@@ -1944,6 +2041,19 @@ function Apply-Mode {
   $state = Get-ModeState
   $wallpaperWanted = @('wallpaper', 'both') -contains $state.mode
   $helperWanted = @('helper', 'both') -contains $state.mode
+  if (-not (Test-DeskHelper) -and @(Get-DeskProcess).Count -gt 0) { Close-Desk }   # the desk is not wanted (anymore): Edge takes over
+  if (Test-DeskHelper) {
+    # NOVA Desk shows the windows. Edge copies from before an update must not run next to it.
+    Get-HelperEdge | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    if ((Test-DeskWallpaper) -or -not $wallpaperWanted) {
+      foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) { Stop-WallpaperEdge $screen; [NovaClick]::RemoveTarget([int]$screen.Bounds.X, [int]$screen.Bounds.Y) }
+      Update-ClickRegions
+    } else { Restore-Wallpapers }
+    if ($helperWanted -and -not $state.url) { throw 'The NOVA address is not known yet: set the mode from NOVA once' }
+    if ($state.url) { Sync-Desk }
+    $script:helper = if ($helperWanted) { @{ desk = $true; handle = [IntPtr]::Zero; device = ''; display = [int]$state.display; expanded = ($state.view -ne 'compact'); view = $state.view; hidden = $false } } else { $null }
+    return
+  }
   if ($wallpaperWanted) { Restore-Wallpapers }
   else {
     # The choices in wallpaper.json stay, so switching back brings the wallpaper back.
@@ -2371,7 +2481,7 @@ while ($listener.IsListening) {
       '/v1/status' {
         $running = @($apps.Keys | Where-Object { $p = $apps[$_].process; $p -and (Get-Process -Name $p -ErrorAction SilentlyContinue) })
         $os = Get-CimInstance Win32_OperatingSystem
-        Send $ctx 200 @{ ok = $true; hostname = $env:COMPUTERNAME; user = $env:USERNAME; uptimeHours = [Math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1); features = @('wallpaper', 'browser', 'helper'); mode = (Get-ModeState).mode; helperDisplay = (Get-ModeState).display; helperView = (Get-ModeState).view; helperWarnings = @([NovaControls]::Warnings()); agentPaused = [bool]$script:agentPaused; helperOpen = [bool]($script:helper -and [NovaHelper]::Alive([IntPtr]$script:helper.handle)); agent = $agentVersion; apps = @($apps.Keys | Sort-Object); running = $running }
+        Send $ctx 200 @{ ok = $true; hostname = $env:COMPUTERNAME; user = $env:USERNAME; uptimeHours = [Math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1); features = @('wallpaper', 'browser', 'helper'); mode = (Get-ModeState).mode; helperDisplay = (Get-ModeState).display; helperView = (Get-ModeState).view; helperWarnings = @([NovaControls]::Warnings()); agentPaused = [bool]$script:agentPaused; helperOpen = [bool](Test-HelperOpen); deskInstalled = [bool](Test-Path -LiteralPath $deskExe); deskRunning = [bool](@(Get-DeskProcess).Count -gt 0); agent = $agentVersion; apps = @($apps.Keys | Sort-Object); running = $running }
       }
       '/v1/open-app' {
         $app = Get-App (Read-Body $ctx).app
@@ -2405,7 +2515,7 @@ while ($listener.IsListening) {
         Send $ctx 200 @{ ok = $true; agent = $agentVersion; build = $os.BuildNumber; version = $os.Version; forward = [NovaClick]::Forward; corrections = [NovaDesk]::Corrections; input = [NovaClick]::State(); placed = $details }
       }
       '/v1/helper-debug' {
-        Send $ctx 200 @{ ok = $true; agent = $agentVersion; helper = $(if ($script:helper) { [NovaHelper]::Debug([IntPtr]$script:helper.handle) } else { 'not open' }); view = $(if ($script:helper) { $script:helper.view } else { $null }); display = (Get-ModeState).display }
+        Send $ctx 200 @{ ok = $true; agent = $agentVersion; helper = $(if ($script:helper -and $script:helper.desk) { 'NOVA Desk (native window; see desk.log in %LOCALAPPDATA%\NOVA)' } elseif ($script:helper) { [NovaHelper]::Debug([IntPtr]$script:helper.handle) } else { 'not open' }); view = $(if ($script:helper) { $script:helper.view } else { $null }); display = (Get-ModeState).display }
       }
       '/v1/displays' {
         $m = Get-ModeState
