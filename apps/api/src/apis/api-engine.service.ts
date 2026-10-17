@@ -291,6 +291,21 @@ export class ApiEngine {
       url.username = "";
       url.password = "";
     }
+    let queryName = input.queryName;
+    for (const [key, value] of [...url.searchParams.entries()])
+      if (
+        !token &&
+        value &&
+        /^(?:api[_-]?key|apikey|access[_-]?token|token|key|auth|secret|sig|signature)$/i.test(
+          key,
+        )
+      ) {
+        // A key in the address must not be stored or shown: it moves to the vault and is sent as a query parameter.
+        token = value;
+        authType ??= "query";
+        queryName ??= key;
+      }
+    url.search = "";
     url.hash = "";
     const local = input.local === true;
     const clean = url.toString().replace(/\/$/, "");
@@ -327,7 +342,7 @@ export class ApiEngine {
         `This credential belongs to ${this.vault.hostOf(ref)} and is never sent to another host.`,
       );
     const provisional: AuthScheme = ref
-      ? (this.schemeFor({ ...input, authType }, ref, undefined) ?? {
+      ? (this.schemeFor({ ...input, authType, queryName }, ref, undefined) ?? {
           type: "bearer",
           ref,
         })
@@ -379,7 +394,8 @@ export class ApiEngine {
     });
     const hint = report.auth;
     const scheme =
-      this.schemeFor({ ...input, authType }, ref, hint) ?? provisional;
+      this.schemeFor({ ...input, authType, queryName }, ref, hint) ??
+      provisional;
     const next: ApiIntegration = {
       ...shell,
       protocol: report.protocol ?? "rest",

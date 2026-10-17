@@ -558,4 +558,45 @@ describe("discovery", () => {
     void bearerOk;
     void OPENAPI3;
   });
+
+  it("moves a key written into the base URL to the vault and never stores or shows the URL with it", async () => {
+    api = await startFakeApi((hit) => {
+      if (hit.url.startsWith("/openapi.json"))
+        return {
+          body: {
+            openapi: "3.0.0",
+            info: { title: "q" },
+            paths: { "/me": { get: { operationId: "me" } } },
+          },
+        };
+      if (hit.url.startsWith("/me"))
+        return hit.url.includes(`api_key=${SECRET}`)
+          ? { body: { ok: 1 } }
+          : { status: 401, body: {} };
+      return undefined;
+    });
+    const { integration, verified } = await connect(
+      `${api.url}?api_key=${SECRET}`,
+      { name: "Q" },
+    );
+    expect(verified).toBe(true);
+    expect(integration.baseUrl).toBe(api.url);
+    expect(integration.auth).toMatchObject({ type: "query", name: "api_key" });
+    expect(JSON.stringify(env.registry.list())).not.toContain(SECRET);
+  });
+
+  it("refuses path parameters that would climb out of the operation path", async () => {
+    api = await startFakeApi(petShop);
+    const { integration } = await connect(api.url, {
+      token: SECRET,
+      name: "Pets",
+    });
+    await expect(
+      env.engine.call(integration.id, "getPet", { id: ".." }),
+    ).rejects.toThrow(/may not be/);
+    const encoded = await env.engine.call(integration.id, "getPet", {
+      id: "1",
+    });
+    expect(encoded.ok).toBe(true);
+  });
 });

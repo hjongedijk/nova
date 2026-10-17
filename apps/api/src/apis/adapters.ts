@@ -76,12 +76,14 @@ function buildRest(
   for (const param of op.params) {
     const value = args[param.name];
     if (value === undefined || value === null) continue;
-    if (param.in === "path")
+    if (param.in === "path") {
+      if (/^\.{1,2}$/.test(scalar(value)))
+        throw new AdapterError("A path parameter may not be '.' or '..'.");
       path = path.replaceAll(
         `{${wire(param)}}`,
         encodeURIComponent(scalar(value)),
       );
-    else if (param.in === "query")
+    } else if (param.in === "query")
       for (const item of Array.isArray(value) ? value : [value])
         query.push([wire(param), scalar(item)]);
     else if (param.in === "header" && /^[\w-]{1,60}$/.test(wire(param)))

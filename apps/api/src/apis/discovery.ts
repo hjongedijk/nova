@@ -33,6 +33,8 @@ const SPEC_PATHS = [
   "/.well-known/openapi",
   "/.well-known/api-catalog",
 ];
+const BUDGET_NOTE =
+  "Discovery stopped after its time/request budget (20 s, 40 requests); some places may not have been checked.";
 const DOC_PAGES = ["/docs", "/redoc", "/swagger-ui/", "/"];
 
 export interface DiscoverOptions {
@@ -110,6 +112,7 @@ export async function discover(
   const notes: string[] = [];
   const denied: ApiHttpResponse[] = [];
   let probes = 0;
+  const started = Date.now();
 
   const request = async (
     probe: string,
@@ -117,19 +120,22 @@ export async function discover(
     method = "GET",
     body?: unknown,
   ): Promise<ApiHttpResponse | null> => {
-    if (probes++ > 40) return null;
+    if (probes++ > 40 || Date.now() - started > 20_000) {
+      if (!notes.includes(BUDGET_NOTE)) notes.push(BUDGET_NOTE);
+      return null;
+    }
     const sameOrigin = new URL(url).origin === base.origin;
     try {
       const response = await options.http.request({
         url,
         method,
-        integrationId: options.integrationId,
+        integrationId: `${options.integrationId}:discovery`,
         headers:
           body !== undefined ? { "content-type": "application/json" } : {},
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
         credentials: sameOrigin && options.auth ? options.auth : undefined,
         local: options.local,
-        timeoutMs: 8_000,
+        timeoutMs: 6_000,
         rateLimit: 200,
         signal: options.signal,
       });

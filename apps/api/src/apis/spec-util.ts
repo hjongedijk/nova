@@ -75,7 +75,11 @@ export function cleanSchema(
   if (Array.isArray(out.enum))
     out.enum = (out.enum as unknown[])
       .slice(0, 40)
-      .filter((item) => ["string", "number", "boolean"].includes(typeof item));
+      .filter(
+        (item) =>
+          ["string", "number", "boolean"].includes(typeof item) &&
+          String(item).length <= 80,
+      );
   if (!Array.isArray(out.enum) || !(out.enum as unknown[]).length)
     delete out.enum;
   if (
