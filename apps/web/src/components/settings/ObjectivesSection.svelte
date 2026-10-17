@@ -90,9 +90,7 @@
   {#if !loaded}
     <p class="hint">Laden…</p>
   {:else if !objectives.length}
-    <p class="hint">
-      Je hebt nog geen doelen. Zeg tegen NOVA: “houd mijn servers in de gaten”.
-    </p>
+    <p class="hint">Je hebt nog geen doelen.</p>
   {:else}
     <ul class="goals">
       {#each objectives as o (o.id)}
