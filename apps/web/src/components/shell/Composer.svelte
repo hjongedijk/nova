@@ -19,6 +19,7 @@
   import { dialogs } from "#lib/stores/dialogs.svelte.ts";
   import { shell } from "#lib/stores/shell.svelte.ts";
   import { pressCore } from "#lib/voice/core.ts";
+  import VoiceSession from "./VoiceSession.svelte";
   import { stopSpeaking } from "#lib/voice/speaker.ts";
   import { stopListening } from "#lib/voice/recognition.ts";
   import { cancelAwait } from "#lib/voice/wake.ts";
@@ -323,6 +324,7 @@
       <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
     </svg>
   </button>
+  <VoiceSession />
   <button
     id="sendButton"
     class="icon"

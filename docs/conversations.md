@@ -45,6 +45,23 @@ Your Linphone account (`gebruiker@sip.linphone.org`) lives at Linphone's server,
    calls and talks with you. A contact with "Mag met NOVA praten" who calls NOVA's Linphone address goes straight into a conversation; any other caller only raises an alert and rings the configured phones.
    Contacts must live on the trunk's domain.
 
+## Hands-free session in the browser ("Gesprek")
+
+The waveform button next to the microphone (aria-label "Gesprek starten/stoppen") starts a hands-free session; it never starts without a click. NOVA
+then loops: listen, send the sentence after ~1 s of silence through the normal `ask` path (voice input mode), speak the answer, listen again. It ends on
+"stop", "tot straks", "dat was het", "bye" (only as the whole sentence), the Stop button in the "Luistert" pill, 60 s without speech (quiet, shown in the
+pill), or a tab that stayed hidden for 2 minutes. Silence and idle times can be tuned per browser with the localStorage keys `novaConvSilenceMs`
+(700-2500) and `novaConvIdleMs`.
+
+- **Barge-in:** while NOVA speaks the recognizer is off (no echo loop). A microphone level meter (getUserMedia with echoCancellation, noise suppression)
+  must stay above a conservative threshold for ~350 ms; then playback fades out in ~120 ms, the stream is aborted and the new speech is the next turn.
+- **Microphone:** the device chosen in the pill (or in the existing helper settings, key `novaAudioInput`) is remembered; a missing device falls back to
+  the default with a message; permission denied, no device, busy or unplugged microphone each get a Dutch message. Device labels are read after permission was granted.
+- **Recovery:** `no-speech`/`aborted` just restart listening (the idle timer ends the session); network and other errors retry with backoff
+  (0.4, 0.8, 1.6 s) up to 3 times, then the session ends with a message.
+- **Wake word** stays optional and unchanged; a session cannot start while "Hey NOVA" listening is on (they would share the microphone).
+- Code: `apps/web/src/lib/voice/conversation-logic.ts` (pure, tested), `conversation-session.svelte.ts` (browser glue), `components/shell/VoiceSession.svelte`.
+
 ## Tests
 
 `npm -w apps/api test -- test/conversation test/telephony`: segmenter, chunker, STT gating, session behaviour (barge-in, echo, idle, failures), the AudioSocket protocol over real TCP,
