@@ -265,7 +265,7 @@ describe("conversation service on the phone link", () => {
         }),
       },
       {
-        speak: async () => ({
+        speakProfile: async () => ({
           audio: Buffer.alloc(0),
           contentType: "audio/wav",
         }),

@@ -1,5 +1,6 @@
 import { storage } from "#lib/util/storage.ts";
 import type { AssistantMood } from "#lib/stores/chat.svelte.ts";
+import { pushVoiceProfile } from "#lib/api/voice-profile.ts";
 import { publishLocalPreferenceReceipt } from "#lib/util/local-preference-receipts.ts";
 
 export const TTS_VOICES = [
@@ -63,7 +64,14 @@ export function saveTtsVoice(voice: string): TtsVoiceId {
     ? (voice as TtsVoiceId)
     : DEFAULT_VOICE;
   storage.set(KEY, selected, "tts-voice");
+  syncVoiceProfile();
   return selected;
+}
+
+/** Sends the saved voice, speed and pitch to the server for phone calls and spoken conversations. */
+export function syncVoiceProfile(): void {
+  const { rate, pitch } = ttsProsody();
+  void pushVoiceProfile({ voice: ttsVoiceForSpeech(), rate, pitch });
 }
 
 function localeOf(voice: TtsVoiceId): string {
@@ -135,6 +143,7 @@ export function saveTtsProsody(
   };
   storage.set(RATE_KEY, String(selected.rate));
   storage.set(PITCH_KEY, String(selected.pitch));
+  syncVoiceProfile();
   if (recordChange)
     publishLocalPreferenceReceipt(
       "tts-prosody",

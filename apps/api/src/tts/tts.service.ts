@@ -1,7 +1,8 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { sanitize } from "../core/security/sanitize.js";
 import { ValidationError } from "../core/errors/validation.error.js";
+import { VoiceProfileStore } from "./voice-profile.store.js";
 
 export const TTS_DEFAULT_VOICE = "nl-NL-FennaNeural";
 export const TTS_PIPER_VOICE = "jarvis-en-GB-piper";
@@ -53,6 +54,8 @@ export const TTS_MAX_CHARS = 5000;
  */
 @Injectable()
 export class TtsService {
+  constructor(@Optional() private readonly profile?: VoiceProfileStore) {}
+
   private readonly log = new Logger("TTS");
   private readonly cache = new Map<string, Buffer>();
   private readonly cacheSize = 64;
@@ -72,6 +75,19 @@ export class TtsService {
       piperAvailable: Boolean(this.piperUrl()),
       ...DEFAULT_PROSODY,
     };
+  }
+
+  /** Speech in the voice and prosody saved in Settings (phone calls, spoken conversations, announcements). */
+  speakProfile(
+    raw: unknown,
+    options: { piper?: boolean } = {},
+  ): Promise<{ audio: Buffer; cached: boolean; contentType: string }> {
+    const saved = this.profile?.get();
+    return this.speak(
+      raw,
+      options.piper ? TTS_PIPER_VOICE : saved?.voice,
+      saved ? { rate: saved.rate, pitch: saved.pitch } : undefined,
+    );
   }
 
   async speak(

@@ -190,7 +190,7 @@ export class ConversationService implements OnModuleInit, OnModuleDestroy {
   /** Text to 16 kHz PCM through the normal TTS service (Piper or Edge). */
   async speak(text: string, signal: AbortSignal): Promise<Int16Array> {
     if (!text.trim() || signal.aborted) return new Int16Array(0);
-    const { audio, contentType } = await this.tts.speak(text);
+    const { audio, contentType } = await this.tts.speakProfile(text);
     if (signal.aborted) return new Int16Array(0);
     return wavToPcm16k(await decodeToPhoneWav(audio, contentType));
   }

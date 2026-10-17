@@ -10,7 +10,7 @@ import crypto from "node:crypto";
 import { ConversationService } from "../conversation/conversation.service.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { JarvisStateStore } from "../planning/jarvis-state.store.js";
-import { TtsService, TTS_PIPER_VOICE } from "../tts/tts.service.js";
+import { TtsService } from "../tts/tts.service.js";
 import {
   AnnouncementFiles,
   type AudioDecoder,
@@ -701,10 +701,10 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
     text: string,
   ): Promise<{ media: string; file: string }> {
     const voice = this.store.get().voice;
-    const speech = await this.tts.speak(
-      text,
-      voice === "piper" ? TTS_PIPER_VOICE : undefined,
-    );
+    // Piper stays a deliberate choice on the phone page; otherwise the voice saved in Settings is used.
+    const speech = await this.tts.speakProfile(text, {
+      piper: voice === "piper",
+    });
     const wav = await this.decode(speech.audio, speech.contentType);
     return this.files.write(wav);
   }

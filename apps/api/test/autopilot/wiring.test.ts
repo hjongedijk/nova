@@ -38,7 +38,7 @@ describe("TelephonyService.sendText over ARI", () => {
       ari,
       { emit: () => undefined } as never,
       {
-        speak: async () => ({
+        speakProfile: async () => ({
           audio: Buffer.from("x"),
           contentType: "audio/mpeg",
         }),

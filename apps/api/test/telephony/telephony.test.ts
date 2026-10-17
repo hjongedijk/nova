@@ -53,7 +53,7 @@ const speak = vi.fn(async () => ({
   audio: Buffer.from("mp3"),
   contentType: "audio/mpeg",
 }));
-const tts = { speak };
+const tts = { speakProfile: speak };
 const decoder = vi.fn(async () =>
   encodeWav16k(new Int16Array([0, 1000, -1000, 0])),
 );

@@ -14,6 +14,7 @@
     saveTtsProsody,
     saveTtsVoice,
     setServerDefaultVoice,
+    syncVoiceProfile,
     ttsLocale,
     ttsProsody,
     ttsVoice,
@@ -42,6 +43,8 @@
   let pronunciationNote = $state("");
   let piperVoiceAvailable = $state(false);
   onMount(() => {
+    // Opening this page also hands the voice you already chose to the server, so calls match it right away.
+    syncVoiceProfile();
     fetch("/api/tts/health")
       .then((response) => (response.ok ? response.json() : null))
       .then((health: { piperAvailable?: boolean; voice?: string } | null) => {
@@ -211,7 +214,8 @@
       {/if}
     </select>
     <p class="help">
-      Deze keuze geldt voor de helper, wallpaper en PWA in deze browser.
+      Deze stem, snelheid en toonhoogte gelden voor de helper, wallpaper, PWA én
+      voor telefoongesprekken en gesproken gesprekken met NOVA.
     </p>
   </div>
   <div class="field">
