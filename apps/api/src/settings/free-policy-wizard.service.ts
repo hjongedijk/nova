@@ -95,6 +95,42 @@ type HistoryEntry = {
 };
 
 /** A complete policy replacement, kept blocked until configuration and operator account evidence are bound. */
+/**
+ * Models the policy already trusts stay selectable even when the gateway's free list no longer shows them (for example a
+ * provider flagged as having a paid plan next to its free quota). Without this a replacement silently drops them.
+ */
+export function withCurrentlyEnabled(
+  models: PlanModel[],
+  settings: Record<string, unknown>,
+): PlanModel[] {
+  const current = Array.isArray(settings.enabledModels)
+    ? settings.enabledModels
+    : [];
+  const known = new Set(models.map((m) => `${m.provider}/${m.modelId}`));
+  const extra: PlanModel[] = [];
+  for (const entry of current) {
+    if (typeof entry !== "string" || known.has(entry)) continue;
+    const slash = entry.indexOf("/");
+    const provider = identifier(entry.slice(0, slash));
+    const modelId = entry.slice(slash + 1);
+    if (
+      slash < 1 ||
+      !provider ||
+      !/^[a-zA-Z0-9_.:/@-]{1,200}$/.test(modelId) ||
+      sanitize(modelId) !== modelId
+    )
+      continue;
+    extra.push({
+      provider,
+      modelId,
+      name: modelId,
+      freeType: "recurring-daily",
+      tos: "caution",
+    });
+  }
+  return [...models, ...extra];
+}
+
 @Injectable()
 export class FreePolicyWizard implements OnModuleDestroy {
   private readonly inventorySecret = crypto.randomBytes(32);
@@ -587,7 +623,10 @@ export class FreePolicyWizard implements OnModuleDestroy {
   async options(): Promise<FreePolicyOptions> {
     try {
       const snapshot = this.snapshot();
-      const models = await this.models();
+      const models = withCurrentlyEnabled(
+        await this.models(),
+        snapshot.settings,
+      );
       return {
         available: true,
         inventoryToken: this.inventoryToken(
@@ -652,7 +691,10 @@ export class FreePolicyWizard implements OnModuleDestroy {
       this.verifyInventory(value.inventoryToken, snapshot);
       const { inventoryToken: _token, ...planInput } = value;
       void _token;
-      const models = await this.models();
+      const models = withCurrentlyEnabled(
+        await this.models(),
+        snapshot.settings,
+      );
       const knownProviders = [
         ...snapshot.accounts.map((account) => account.provider),
         ...(Array.isArray(snapshot.settings.blockedProviders)
