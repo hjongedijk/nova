@@ -708,11 +708,13 @@ export class FreePolicyWizard implements OnModuleDestroy {
       ]
         .map(identifier)
         .filter(Boolean);
-      const plan = buildFreePolicyPlan(
-        planInput,
-        snapshot.accounts,
-        models,
-        knownProviders,
+      const plan = this.keepEmbeddings(
+        buildFreePolicyPlan(
+          planInput,
+          snapshot.accounts,
+          models,
+          knownProviders,
+        ),
       );
       if (
         snapshot.overrides.some((id) => plan.verifiedConnectionIds.includes(id))
@@ -798,6 +800,44 @@ export class FreePolicyWizard implements OnModuleDestroy {
         throw new Error("Account binding changed");
     }
   }
+  /**
+   * Embedding models (the memory depends on them) are not chat candidates and cannot be built by the wizard, so the ones
+   * the current policy already trusts are carried over, as long as their provider account stays selected.
+   */
+  private keepEmbeddings(plan: FreePolicyPlan): FreePolicyPlan {
+    const current = this.safePolicy();
+    const rows = Array.isArray(current?.catalog) ? current.catalog : [];
+    const kept = rows.flatMap((raw) => {
+      const row = object(raw);
+      const id = `${String(row.provider)}/${String(row.modelId)}`;
+      return row.modelType === "embedding" &&
+        typeof row.provider === "string" &&
+        typeof row.modelId === "string" &&
+        plan.verifiedProviders.includes(row.provider) &&
+        !plan.enabledModels.includes(id)
+        ? [{ id, row: row as unknown as FreePolicyPlan["catalog"][number] }]
+        : [];
+    });
+    if (!kept.length) return plan;
+    const previousAllowlist = Array.isArray(current?.nativeModelAllowlist)
+      ? current.nativeModelAllowlist
+      : [];
+    return {
+      ...plan,
+      enabledModels: [...plan.enabledModels, ...kept.map((k) => k.id)],
+      catalog: [...plan.catalog, ...kept.map((k) => k.row)],
+      nativeModelAllowlist: [
+        ...plan.nativeModelAllowlist,
+        ...kept
+          .map((k) => k.id)
+          .filter(
+            (id) =>
+              previousAllowlist.includes(id) &&
+              !plan.nativeModelAllowlist.includes(id),
+          ),
+      ],
+    };
+  }
   private verifyStructure(raw: unknown, plan: FreePolicyPlan): void {
     const data = object(raw);
     if (
@@ -809,6 +849,9 @@ export class FreePolicyWizard implements OnModuleDestroy {
     const rows = data.candidates.map(object);
     const failures: string[] = [];
     for (const model of plan.catalog) {
+      // Embedding models are never chat candidates.
+      if ((model as { modelType?: unknown }).modelType === "embedding")
+        continue;
       const canonical = `${model.provider}/${model.modelId}`;
       const binding = plan.verifiedConnections.find(
         (account) => account.provider === model.provider,

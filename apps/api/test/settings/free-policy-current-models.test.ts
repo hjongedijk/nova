@@ -83,3 +83,47 @@ describe("model ids with an @ prefix", () => {
     ]);
   });
 });
+
+describe("keepEmbeddings", () => {
+  it("carries an existing embedding model through a replacement while its provider stays selected", async () => {
+    const { FreePolicyWizard } =
+      await import("../../src/settings/free-policy-wizard.service.js");
+    const wizard = Object.create(FreePolicyWizard.prototype) as {
+      safePolicy: () => unknown;
+      keepEmbeddings: (plan: unknown) => {
+        enabledModels: string[];
+        nativeModelAllowlist: string[];
+        catalog: { modelId: string }[];
+      };
+    };
+    wizard.safePolicy = () => ({
+      catalog: [
+        {
+          provider: "gemini",
+          modelId: "gemini-embedding-2",
+          modelType: "embedding",
+        },
+        { provider: "gemini", modelId: "gemini-2.5-flash" },
+      ],
+      nativeModelAllowlist: ["gemini/gemini-embedding-2"],
+    });
+    const base = {
+      enabledModels: ["gemini/gemini-2.5-flash"],
+      verifiedProviders: ["gemini"],
+      nativeModelAllowlist: [],
+      catalog: [{ provider: "gemini", modelId: "gemini-2.5-flash" }],
+    };
+    const kept = wizard.keepEmbeddings(base);
+    expect(kept.enabledModels).toEqual([
+      "gemini/gemini-2.5-flash",
+      "gemini/gemini-embedding-2",
+    ]);
+    expect(kept.nativeModelAllowlist).toEqual(["gemini/gemini-embedding-2"]);
+    expect(kept.catalog.map((c) => c.modelId)).toContain("gemini-embedding-2");
+    // Provider no longer selected: nothing is carried.
+    expect(
+      wizard.keepEmbeddings({ ...base, verifiedProviders: ["mistral"] })
+        .enabledModels,
+    ).toEqual(["gemini/gemini-2.5-flash"]);
+  });
+});
