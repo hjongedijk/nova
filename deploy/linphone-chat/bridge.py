@@ -251,6 +251,8 @@ def make_core(linphone, data: str, *, user_agent: str = USER_AGENT, lime_url: st
     core.auto_send_ringing_enabled = False
     core.inc_timeout = 60
     core.keep_alive_enabled = True
+    # The compose network has no IPv6 route: trying AAAA first made the LIME server and TLS connects fail with 'Network is unreachable'.
+    core.ipv6_enabled = False
     core.set_user_agent(user_agent, BRIDGE_VERSION)
     core.lime_x3dh_server_url = lime_url
     core.lime_x3dh_enabled = True
