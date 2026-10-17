@@ -242,7 +242,11 @@ def make_core(linphone, data: str, *, user_agent: str = USER_AGENT, lime_url: st
     cfg = linphone.Config.new_with_factory(os.path.join(data, "linphonerc"), None)
     cfg.set_string("misc", "uuid", load_device_id(data))  # stable +sip.instance, survives container recreation
     core = factory.create_core_with_config(cfg, None)
-    linphone.LoggingService.get().set_log_level(linphone.LogLevel.LogLevelWarning)  # never trace/debug: SIP bodies
+    # Warning by default. 'message' adds chat room and LIME events (no SIP bodies); never use debug/trace in production.
+    level = {"warning": linphone.LogLevel.LogLevelWarning, "message": linphone.LogLevel.LogLevelMessage}.get(
+        os.environ.get("NOVA_CHAT_LOG_LEVEL", "warning").lower(), linphone.LogLevel.LogLevelWarning
+    )
+    linphone.LoggingService.get().set_log_level(level)
     # Calls: no codec at all => the SDK refuses an INVITE itself (488 Not Acceptable Here), no ringing, no answer.
     for pts in (core.audio_payload_types, core.video_payload_types, core.text_payload_types):
         for pt in pts:

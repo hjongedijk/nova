@@ -101,3 +101,11 @@ Alles als root in de map met `docker-compose.yml` (meestal `/opt/nova`). Eerst e
 - **Afhankelijkheid van Belledonne**: wheels alleen voor cp312/x86_64, niet op PyPI; pin en bewaar de wheel. Elke liblinphone-update opnieuw rooktesten (`smoke_core.py`).
 - **Vertrouwen**: de brug ziet de platte tekst en geeft die aan NOVA door; het eind-tot-eind-karakter eindigt in de brug (op je eigen server).
 - **Omvang**: image 881 MB, eerste bouw ~2 min; limiet in de compose 768 MB RAM, 1 CPU.
+
+## Stand van zaken (18-10-2026)
+
+Werkt in productie op het bestaande NOVA-account (tweede apparaat naast Asterisk): een versleuteld (hangslot) 1-op-1-bericht van de toegestane contactpersoon wordt ontsleuteld, door NOVA beantwoord en het antwoord komt versleuteld terug in dezelfde chat. Gecontroleerd met een echt bericht vanaf de Linphone-app; platte berichten gaan nog steeds via Asterisk en de relay, gesprekken zijn ongewijzigd.
+
+Bij de eerste uitrol gingen twee dingen mis die alleen live zichtbaar waren: de image had geen CA-certificaten (TLS naar Linphone faalde) en de verbinding met de LIME-sleutelserver faalde door IPv6 zonder route (IPv6 staat nu uit in de SDK). Zet `NOVA_CHAT_LOG_LEVEL=message` in `.env` om chatkamer- en LIME-gebeurtenissen te zien (zonder berichtinhoud); laat het niet aan staan.
+
+Nog niet gecontroleerd: gedrag na een lange periode zonder verkeer (her-registratie, LIME-sleutels vernieuwen), meerdere toegestane contacten tegelijk, en een tweede apparaat van dezelfde persoon.

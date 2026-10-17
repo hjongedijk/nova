@@ -159,6 +159,7 @@ services:
       NOVA_URL: http://nova:8080/api/integrations/linphone-chat
       NOVA_CHAT_TOKEN_FILE: /run/secrets/nova_message_token
       LINPHONE_PASSWORD_FILE: /run/secrets/linphone_password
+      NOVA_CHAT_LOG_LEVEL: ${NOVA_CHAT_LOG_LEVEL:-warning}
       LINPHONE_LIME_URL: ${LINPHONE_LIME_URL:-https://lime.linphone.org/lime-server/lime-server.php}
       LINPHONE_CONFERENCE_FACTORY: ${LINPHONE_CONFERENCE_FACTORY:-sip:conference-factory@sip.linphone.org}
     secrets: [linphone_password, nova_message_token]
