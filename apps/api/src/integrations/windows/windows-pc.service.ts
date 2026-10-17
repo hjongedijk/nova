@@ -93,8 +93,32 @@ interface AgentBody {
 
 const controlsWarning =
   "Windows-bediening meldde een probleem. Controleer de agent op de pc.";
+/**
+ * The agent's own warnings are only ever shortcut names, key chords and error codes, but they come from another machine, so
+ * only these exact shapes are turned into a Dutch explanation; anything else stays the generic message.
+ */
+export function explainAgentWarning(raw: unknown): string {
+  if (typeof raw !== "string") return controlsWarning;
+  const shortcut =
+    /^(open|speak|mute|desktop|[a-z]{3,12}): ((?:Ctrl|Alt|Shift|Win)(?:\+(?:Ctrl|Alt|Shift|Win))*\+[A-Za-z0-9]{1,8}) \(Windows error (\d{1,5})\)$/i.exec(
+      raw,
+    );
+  if (shortcut)
+    return shortcut[3] === "1409"
+      ? `Sneltoets ${shortcut[2]} wordt al gebruikt door een ander programma of door een tweede NOVA-agent. Sluit de andere agent (Taakbeheer) of kies een andere sneltoets in de instellingen.`
+      : `Sneltoets ${shortcut[2]} kon niet worden gekoppeld (Windows-foutcode ${shortcut[3]}). Kies een andere sneltoets in de instellingen.`;
+  if (/^Tray(?: status)?:/.test(raw))
+    return "Het NOVA-pictogram bij de klok kon niet worden gemaakt. Start de agent opnieuw in je Windows-sessie.";
+  if (raw === "Shortcut registration did not complete")
+    return "De sneltoetsen zijn niet op tijd gekoppeld. Start de agent opnieuw.";
+  if (/^Agent controls:/.test(raw))
+    return "De sneltoetsen en het pictogram konden niet starten. Start de agent opnieuw in je Windows-sessie.";
+  return controlsWarning;
+}
 const safeWarnings = (value: unknown) =>
-  Array.isArray(value) && value.length > 0 ? [controlsWarning] : [];
+  Array.isArray(value) && value.length > 0
+    ? [...new Set(value.slice(0, 6).map(explainAgentWarning))]
+    : [];
 const safePreferences = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const source = value as Record<string, unknown>;
