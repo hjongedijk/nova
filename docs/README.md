@@ -30,4 +30,47 @@
 | [Conversation handoff](conversation-handoff.md)     | Save a small local handoff card and resume a conversation later                               |
 | [Urgent phone notifications](push-notifications.md) | Private ntfy setup and what NOVA sends to the phone                                           |
 
+## More topic pages
+
+Reference pages that are not listed above.
+
+| Page                                                                      | File                             |
+| ------------------------------------------------------------------------- | -------------------------------- |
+| [CalDAV calendar](caldav-calendar.md)                                     | `caldav-calendar.md`             |
+| [HTTPS certificate monitoring](certificate-monitoring.md)                 | `certificate-monitoring.md`      |
+| [Code-role evaluation set](code-evaluation.md)                            | `code-evaluation.md`             |
+| [Compose notification integration test](compose-notification-test.md)     | `compose-notification-test.md`   |
+| [Container and NOVA release alerts](container-monitoring.md)              | `container-monitoring.md`        |
+| [Real conversations (phone and voice)](conversations.md)                  | `conversations.md`               |
+| [Scheduled data backups](data-backups.md)                                 | `data-backups.md`                |
+| [Bureaublad zien en bedienen (API-contract)](desktop-control-api.md)      | `desktop-control-api.md`         |
+| [Desktop view and control (Windows agent)](desktop-control.md)            | `desktop-control.md`             |
+| [Current state](development-state.md)                                     | `development-state.md`           |
+| [Energy monitoring](energy-monitoring.md)                                 | `energy-monitoring.md`           |
+| [Helper design and validation](helper-design.md)                          | `helper-design.md`               |
+| [Household profiles](household-profiles.md)                               | `household-profiles.md`          |
+| [Long-term memory](long-term-memory.md)                                   | `long-term-memory.md`            |
+| [MCP server selection policy](mcp-server-policy.md)                       | `mcp-server-policy.md`           |
+| [Memory model (lifecycle)](memory.md)                                     | `memory.md`                      |
+| [Network and device monitoring](network-monitoring.md)                    | `network-monitoring.md`          |
+| [Checklist voor een nieuwe tool](new-tool-checklist.md)                   | `new-tool-checklist.md`          |
+| [News and RSS](news-feeds.md)                                             | `news-feeds.md`                  |
+| [`node-red-contrib-nova`](node-red-contrib-nova.md)                       | `node-red-contrib-nova.md`       |
+| [Embedded Node-RED editor](node-red-editor.md)                            | `node-red-editor.md`             |
+| [Node-RED flows in NOVA](node-red-flows.md)                               | `node-red-flows.md`              |
+| [Node-RED health heartbeat](node-red-health-heartbeat.md)                 | `node-red-health-heartbeat.md`   |
+| [Node-RED, MQTT and HTTP boundaries](node-red-mqtt.md)                    | `node-red-mqtt.md`               |
+| [Doelen om in de gaten te houden (standing objectives)](objectives.md)    | `objectives.md`                  |
+| [OmniRoute administration API: verified baseline](omniroute-admin-api.md) | `omniroute-admin-api.md`         |
+| [Persona evaluation set](persona-evaluation.md)                           | `persona-evaluation.md`          |
+| [Optional local Piper voice](piper-jarvis-voice.md)                       | `piper-jarvis-voice.md`          |
+| [Proactive speech policy](proactive-speech.md)                            | `proactive-speech.md`            |
+| [Settings workspace](settings-design.md)                                  | `settings-design.md`             |
+| [Settings inventory](settings-inventory.md)                               | `settings-inventory.md`          |
+| [Settings service inventory](settings-services-inventory.md)              | `settings-services-inventory.md` |
+| [Presence-aware unsolicited speech](speech-presence.md)                   | `speech-presence.md`             |
+| [Telefonie: Asterisk en Linphone](telephony.md)                           | `telephony.md`                   |
+| [Timer recovery](timer-recovery.md)                                       | `timer-recovery.md`              |
+| [Weekly overview](weekly-overview.md)                                     | `weekly-overview.md`             |
+
 Back to the [README](../README.md).

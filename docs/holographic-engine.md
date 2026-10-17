@@ -1,6 +1,6 @@
 # Holografische visualisatie (Universal Holographic Viewer)
 
-Eén herbruikbaar platformonderdeel om gegevens als 3D-/2D-graaf, grafiek of 3D-model te tonen. Het is niet gekoppeld aan 3D-printen of aan Proxmox: aanbieders (providers) leveren een scène, de viewer tekent hem. Alles wat getoond wordt komt uit echte gegevens van bestaande diensten; wat onbekend is blijft onbekend.
+Eén herbruikbaar platformonderdeel om gegevens als 3D-/2D-graaf, grafiek of 3D-model te tonen. Het is niet gekoppeld aan één bron: aanbieders (providers) leveren een scène, de viewer tekent hem. Alles wat getoond wordt komt uit echte gegevens van bestaande diensten; wat onbekend is blijft onbekend.
 
 Status en open punten staan onderaan ("Eerlijke stand"). Taakblok: `tasks-09-10-2026.md`, fase O.
 
@@ -11,7 +11,7 @@ Voorbeelden uit de browsercheck (gemockte, niet-persoonlijke gegevens): ![Proxmo
 ```
 chat / spraak ("toon mijn Proxmox")
    └─ tool create_visualization ──► VisualizationService ──► provider.build()  (echte data)
-                                         │                       Proxmox · Home Assistant · netwerk · AI-activiteit · (later: 3D-printen)
+                                         │                       Proxmox · Home Assistant · netwerk · AI-activiteit
                                          ├─ SSE-event "visualization" in de chatstroom → scherm opent de weergave
                                          └─ GET /api/visualizations/:id (poll voor live scènes)
 web: HoloPanel ── HoloViewer ── HoloEngine (three.js, lazy) | HoloChart (SVG) | HoloTable (tekstversie)
@@ -80,7 +80,7 @@ const scene: VizScene = {
   id: "viz-…",
   title: "Onderdeel",
   kind: "model",
-  providerId: "print",
+  providerId: "example",
   typeId: "model",
   revision: 1,
   updatedAt: new Date().toISOString(),
@@ -89,7 +89,7 @@ const scene: VizScene = {
       id: "m1",
       label: "Beugel",
       format: "stl",
-      url: "/api/print/jobs/42/model.stl",
+      url: "/models/beugel.stl",
     },
   ],
   units: "mm",
@@ -226,4 +226,4 @@ Browsercheck: `NOVA_HOLO_ONLY=card node scripts/check-holo.mjs` (fixtures in `sc
 
 ## Eerlijke stand
 
-Zie `docs/development-state.md`. Kort: gebouwd en lokaal getest; niet gedeployed en niet tegen een echte Proxmox/Home Assistant/netwerk geprobeerd in een echt gesprek. Open: een echt model dat via spraak `create_visualization` kiest (modelkeuze blijft model-afhankelijk), WebGPU, Draco/KTX2, volledige SSE per scène, een eigen plattegrond-editor voor Home Assistant, en de 3D-printprovider (andere werkstroom).
+Zie `docs/development-state.md`. Kort: gebouwd en lokaal getest; niet gedeployed en niet tegen een echte Proxmox/Home Assistant/netwerk geprobeerd in een echt gesprek. Open: een echt model dat via spraak `create_visualization` kiest (modelkeuze blijft model-afhankelijk), WebGPU, Draco/KTX2, volledige SSE per scène, een eigen plattegrond-editor voor Home Assistant.
