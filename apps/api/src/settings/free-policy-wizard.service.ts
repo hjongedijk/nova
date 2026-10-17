@@ -577,7 +577,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
       if (
         !provider ||
         typeof row.modelId !== "string" ||
-        !/^[a-zA-Z0-9_.:/-]{1,200}$/.test(row.modelId) ||
+        !/^[a-zA-Z0-9_.:/@-]{1,200}$/.test(row.modelId) ||
         sanitize(row.modelId) !== row.modelId
       )
         return [];
@@ -625,7 +625,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
       const snapshot = this.snapshot();
       const models = withCurrentlyEnabled(
         await this.models(),
-        snapshot.settings,
+        this.safePolicy() ?? {},
       );
       return {
         available: true,
@@ -693,7 +693,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
       void _token;
       const models = withCurrentlyEnabled(
         await this.models(),
-        snapshot.settings,
+        this.safePolicy() ?? {},
       );
       const knownProviders = [
         ...snapshot.accounts.map((account) => account.provider),
