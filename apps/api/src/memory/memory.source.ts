@@ -1,6 +1,13 @@
 import { SemanticMemoryService } from "./semantic-memory.service.js";
 import { memoryCandidate, MEMORY_TYPES } from "./semantic/candidate.js";
 import {
+  MEMORY_KINDS,
+  MEMORY_ORIGINS,
+  isKind,
+  type LifecycleRecord,
+} from "./semantic/lifecycle.js";
+import {
+  integer,
   schema,
   text,
   ToolSourceProvider,
@@ -18,6 +25,7 @@ const safeErrors = new Set([
   "Memory index is rebuilding; retry shortly",
   "Verified free embeddings are not configured",
   "Long-term memory is not configured",
+  "Memory not found",
 ]);
 
 function safeMemoryError(error: unknown): string {
@@ -27,7 +35,24 @@ function safeMemoryError(error: unknown): string {
     : "Long-term memory is temporarily unavailable";
 }
 
-/** memory_search, memory_remember and memory_forget: NOVA's long-term memory as tools. */
+function publicRecord(record: LifecycleRecord) {
+  return {
+    id: record.id,
+    text: record.text,
+    kind: record.kind,
+    type: record.type,
+    origin: record.origin,
+    confidence: record.confidence,
+    sensitive: record.sensitive,
+    created_at: record.created_at,
+    updated_at: record.updated_at,
+    last_accessed_at: record.last_accessed_at ?? null,
+    superseded_by: record.superseded_by ?? null,
+    valid_until: record.valid_until ?? null,
+  };
+}
+
+/** memory_search/_remember/_list/_correct/_forget: NOVA's long-term memory as tools. */
 @ToolSourceProvider()
 export class MemorySource implements ToolSource {
   readonly source = "memory";
@@ -47,11 +72,14 @@ export class MemorySource implements ToolSource {
       {
         name: "memory_remember",
         description:
-          "Store only durable facts the user explicitly asked NOVA to remember (for example ‘Onthoud dat…’). Include that request prefix in text. Use PERSON/PET/HABIT/PROJECT/PREFERENCE when appropriate; never infer or save secrets/transient state.",
+          "Store only durable facts the user explicitly asked NOVA to remember (for example ‘Onthoud dat…’). Include that request prefix in text. Use PERSON/PET/HABIT/PROJECT/PREFERENCE when appropriate; never save secrets/transient state. Duplicates are merged; a changed fact (same subject, new value) replaces the old one and the result message says what changed, so relay it. Only when you are guessing (user did not say it), set origin=inferred: it is saved as an unconfirmed assumption and never overrides what the user said.",
         parameters: schema(
           {
             text: { type: "string", minLength: 5, maxLength: 2000 },
             type: { type: "string", enum: [...MEMORY_TYPES] },
+            kind: { type: "string", enum: [...MEMORY_KINDS] },
+            origin: { type: "string", enum: [...MEMORY_ORIGINS] },
+            valid_until: text(40),
             related_entity: text(),
           },
           ["text"],
@@ -60,10 +88,35 @@ export class MemorySource implements ToolSource {
         timeoutMs: 15000,
       },
       {
+        name: "memory_list",
+        description:
+          "List what NOVA remembers, newest page first, with kind (fact/preference/decision/assumption/episode/project), confidence and origin. Optional filter by kind or text; pass next as offset for the following page. Superseded history only with include_history.",
+        parameters: schema({
+          kind: { type: "string", enum: [...MEMORY_KINDS] },
+          search: text(),
+          limit: integer(1, 50),
+          offset: text(),
+          include_history: { type: "boolean" },
+        }),
+        risk: "READ_ONLY",
+        timeoutMs: 15000,
+      },
+      {
+        name: "memory_correct",
+        description:
+          "Correct one memory by ID when the user says it is wrong: the new text replaces it and the old text is kept as superseded history. Get the ID from memory_search or memory_list.",
+        parameters: schema({ id: text(), text: text(2000) }, ["id", "text"]),
+        risk: "SAFE",
+        timeoutMs: 15000,
+      },
+      {
         name: "memory_forget",
         description:
-          "Delete exactly one semantic memory by ID. Requires confirmation.",
-        parameters: schema({ id: text() }),
+          "Delete exactly one semantic memory by ID. include_history=true also deletes the older versions that were replaced by it. Requires confirmation.",
+        parameters: schema(
+          { id: text(), include_history: { type: "boolean" } },
+          ["id"],
+        ),
         risk: "CONFIRM",
         timeoutMs: 15000,
       },
@@ -76,6 +129,8 @@ export class MemorySource implements ToolSource {
   ): Promise<ToolPlan | ToolPlanError> {
     if (name === "memory_remember" && !memoryCandidate(args.text, args))
       return { error: "Memory rejected: not durable or contains secrets" };
+    if (name === "memory_list" && args.kind !== undefined && !isKind(args.kind))
+      return { error: "Invalid memory kind" };
     const risk =
       name === "memory_forget"
         ? "CONFIRM"
@@ -118,9 +173,47 @@ export class MemorySource implements ToolSource {
         return { ok: false, error: safeMemoryError(error) };
       }
     }
+    if (name === "memory_list") {
+      try {
+        const page = await this.memory.listMemories({
+          limit: typeof args.limit === "number" ? args.limit : undefined,
+          offset: args.offset === undefined ? undefined : String(args.offset),
+          kind: isKind(args.kind) ? args.kind : undefined,
+          search: typeof args.search === "string" ? args.search : undefined,
+          includeHistory: args.include_history === true,
+        });
+        if (page.unavailable)
+          return {
+            ok: false,
+            result: [],
+            error: "Long-term memory is not configured",
+          };
+        return {
+          ok: true,
+          result: {
+            memories: page.memories.map(publicRecord),
+            next: page.next,
+          },
+        };
+      } catch (error) {
+        return { ok: false, result: [], error: safeMemoryError(error) };
+      }
+    }
+    if (name === "memory_correct") {
+      try {
+        const result = await this.memory.correct(String(args.id), args.text);
+        return result.ok
+          ? { ...result }
+          : { ok: false, error: safeMemoryError(result.error) };
+      } catch (error) {
+        return { ok: false, error: safeMemoryError(error) };
+      }
+    }
     if (name === "memory_forget") {
       try {
-        return await this.memory.remove(String(args.id));
+        return await this.memory.remove(String(args.id), {
+          history: args.include_history === true,
+        });
       } catch (error) {
         return { ok: false, error: safeMemoryError(error) };
       }

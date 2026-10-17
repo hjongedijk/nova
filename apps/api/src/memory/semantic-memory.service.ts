@@ -8,12 +8,20 @@ import type {
   MemoryHealth,
   MemoryListResponse,
   MemoryRecord,
-  MemoryWriteResult,
 } from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingService } from "../routing/routing.service.js";
-import type { SemanticBackend } from "./semantic/backend.js";
+import type {
+  MemoryWriteOutcome,
+  SemanticBackend,
+} from "./semantic/backend.js";
+import {
+  matchesFilter,
+  normalizeRecord,
+  type ListFilter,
+  type LifecycleRecord,
+} from "./semantic/lifecycle.js";
 import type { CandidateMetadata } from "./semantic/candidate.js";
 import { OmniRouteMemory } from "./semantic/omniroute.backend.js";
 import { QdrantMemory, RemoteEmbeddings } from "./semantic/qdrant.backend.js";
@@ -39,7 +47,7 @@ class UnavailableMemory implements SemanticBackend {
   async search(): Promise<MemoryRecord[]> {
     return [];
   }
-  async write(): Promise<MemoryWriteResult> {
+  async write(): Promise<MemoryWriteOutcome> {
     return { ok: false, error: this.lastError };
   }
   async list(): Promise<MemoryListResponse> {
@@ -173,16 +181,58 @@ export class SemanticMemoryService implements OnModuleInit, OnModuleDestroy {
   write(
     text: unknown,
     metadata?: CandidateMetadata,
-  ): Promise<MemoryWriteResult> {
+  ): Promise<MemoryWriteOutcome> {
     return this.backend.write(text, metadata);
+  }
+
+  /** Replace one record's text (the old text stays as history). */
+  async correct(id: string, text: unknown): Promise<MemoryWriteOutcome> {
+    const backend = this.backend;
+    if (!backend.correct)
+      return {
+        ok: false,
+        error: "Long-term memory is not configured",
+      };
+    return backend.correct(id, text);
+  }
+
+  /**
+   * The user's view of memory: lifecycle fields filled in for old records, superseded/expired
+   * records hidden unless `includeHistory`, filtered by kind and text, paginated by cursor.
+   */
+  async listMemories(
+    options: ListFilter & { limit?: number; offset?: unknown } = {},
+  ): Promise<{
+    memories: LifecycleRecord[];
+    next: string | number | null;
+    unavailable?: string;
+  }> {
+    const limit = Math.min(100, Math.max(1, options.limit ?? 20));
+    let cursor: unknown = options.offset;
+    // One backend page per call (so the cursor stays exact); empty filtered pages are skipped.
+    for (let pages = 0; pages < 50; pages++) {
+      const page = await this.backend.list(limit, cursor);
+      if (page.unavailable)
+        return { memories: [], next: null, unavailable: page.unavailable };
+      const memories = page.memories
+        .map(normalizeRecord)
+        .filter((record) => matchesFilter(record, options));
+      const next = page.next ?? null;
+      if (memories.length || !next) return { memories, next };
+      cursor = next;
+    }
+    return { memories: [], next: cursor as string | number | null };
   }
 
   list(limit?: number, offset?: unknown): Promise<MemoryListResponse> {
     return this.backend.list(limit, offset);
   }
 
-  remove(id: string): Promise<{ ok: true }> {
-    return this.backend.remove(id);
+  remove(
+    id: string,
+    options?: { history?: boolean },
+  ): Promise<{ ok: true; removed?: number }> {
+    return this.backend.remove(id, options);
   }
 
   maintain(): Promise<Record<string, unknown>> {

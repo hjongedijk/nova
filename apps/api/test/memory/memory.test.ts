@@ -1039,6 +1039,8 @@ describe("SemanticMemoryService and MemorySource", () => {
     ).toEqual({
       memory_search: "READ_ONLY",
       memory_remember: "SAFE",
+      memory_list: "READ_ONLY",
+      memory_correct: "SAFE",
       memory_forget: "CONFIRM",
     });
     expect(source.definitions().every((d) => d.enabled !== false)).toBe(true);

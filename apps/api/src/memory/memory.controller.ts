@@ -21,6 +21,7 @@ import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { ToolsService } from "../tools/tools.service.js";
 import type { ToolResult } from "../tools/tool.types.js";
+import { isKind, type MemoryKind } from "./semantic/lifecycle.js";
 import { SemanticMemoryService } from "./semantic-memory.service.js";
 import {
   normalizeSessionId,
@@ -103,8 +104,23 @@ export class MemoryController {
     @Res({ passthrough: true }) response: Response,
     @Query("limit") limit?: string,
     @Query("offset") offset?: string,
+    @Query("kind") kind?: string,
+    @Query("q") q?: string,
+    @Query("history") history?: string,
   ): Promise<MemoryListResponse | { error: string }> {
+    if (kind !== undefined && !isKind(kind))
+      throw new ValidationError(["Ongeldig geheugentype."]);
     try {
+      if (kind || q || history === "true") {
+        const page = await this.semantic.listMemories({
+          limit: Number(limit) || 50,
+          offset,
+          kind: kind as MemoryKind | undefined,
+          search: q?.slice(0, 200),
+          includeHistory: history === "true",
+        });
+        return sanitize(page) as MemoryListResponse;
+      }
       return sanitize(
         await this.semantic.list(Number(limit) || 50, offset),
       ) as MemoryListResponse;
@@ -152,15 +168,33 @@ export class MemoryController {
     return result;
   }
 
-  /** DELETE /api/memories/:id: forget one memory (asks for confirmation first). */
+  /** POST /api/memories/:id/correct: replace the text, keeping the old one as history. */
+  @Post("memories/:id/correct")
+  @HttpCode(200)
+  async correct(
+    @Param("id") id: string,
+    @Body() body: { text?: unknown; sessionId?: unknown } | undefined,
+  ): Promise<ToolResult> {
+    return this.tools.execute(
+      "memory_correct",
+      { id, text: body?.text },
+      normalizeSessionId(body?.sessionId ?? "admin"),
+    );
+  }
+
+  /**
+   * DELETE /api/memories/:id: forget one memory (asks for confirmation first). `?history=true`
+   * also removes the older versions it replaced.
+   */
   @Delete("memories/:id")
   async forget(
     @Param("id") id: string,
     @Body() body: { sessionId?: unknown } | undefined,
+    @Query("history") history?: string,
   ): Promise<ToolResult> {
     return this.tools.execute(
       "memory_forget",
-      { id },
+      { id, ...(history === "true" ? { include_history: true } : {}) },
       normalizeSessionId(body?.sessionId ?? "admin"),
     );
   }

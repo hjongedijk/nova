@@ -5,10 +5,28 @@ import type {
   MemoryHealth,
   MemoryListResponse,
   MemoryRecord,
-  MemoryWriteResult,
 } from "@nova/contracts";
-import { messageOf, validMemoryId, type SemanticBackend } from "./backend.js";
-import { memoryCandidate, type CandidateMetadata } from "./candidate.js";
+import {
+  messageOf,
+  validMemoryId,
+  type MemoryWriteOutcome,
+  type SemanticBackend,
+} from "./backend.js";
+import {
+  memoryCandidate,
+  type CandidateMetadata,
+  type MemoryCandidate,
+} from "./candidate.js";
+import {
+  ancestorsOf,
+  contradicts,
+  isActive,
+  normalizeRecord,
+  normalizeText,
+  planConsolidation,
+  rankMatches,
+  type LifecycleRecord,
+} from "./lifecycle.js";
 import { sanitize } from "../../core/security/sanitize.js";
 
 type Fetcher = typeof fetch;
@@ -118,9 +136,6 @@ export interface QdrantIndexRevision {
   embeddingModel: string;
   dimensions: number;
 }
-
-const normalized = (value: string) =>
-  value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 
 /** Long-term memory in a Qdrant collection, found by cosine similarity on remote embeddings. */
 export class QdrantMemory implements SemanticBackend {
@@ -356,25 +371,19 @@ export class QdrantMemory implements SemanticBackend {
     if (!this.embeddings.configured) return [];
     try {
       await this.init();
+      const wanted = Math.min(20, Math.max(1, limit));
+      // Over-fetch: superseded and expired records occupy neighbour slots but are not returned.
       const points = await this.nearest(
         await this.embeddings.embed(text),
-        Math.min(20, Math.max(1, limit)),
+        Math.min(60, wanted * 3),
       );
-      const matches = points
-        .filter((point) => point.score >= 0.65)
-        .map((point) => {
-          const ageDays =
-            (Date.now() - Date.parse(point.payload.updated_at)) / 86_400_000;
-          return {
-            id: point.id,
-            ...point.payload,
-            score:
-              point.score *
-              (0.8 + 0.2 * point.payload.importance) *
-              Math.max(0.7, 1 - ageDays / 3650),
-          } as MemoryRecord;
-        })
-        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+      const matches = rankMatches(
+        points.map((point) => ({
+          record: { id: point.id, ...point.payload } as MemoryRecord,
+          similarity: point.score,
+        })),
+        text,
+      ).slice(0, wanted);
       if (markAccess && this.beginMutation()) {
         try {
           await Promise.all(
@@ -400,10 +409,72 @@ export class QdrantMemory implements SemanticBackend {
     }
   }
 
+  private async setPayload(
+    id: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    await this.request(`${this.base}/points/payload?wait=true`, "POST", {
+      points: [id],
+      payload,
+    });
+  }
+
+  private async retrieve(id: string): Promise<LifecycleRecord | null> {
+    const data = await this.request(`${this.base}/points`, "POST", {
+      ids: [id],
+      with_payload: true,
+      with_vector: false,
+    });
+    const point = (data.result as Point[] | undefined)?.[0];
+    return point
+      ? normalizeRecord({ id: point.id, ...point.payload } as MemoryRecord)
+      : null;
+  }
+
+  /** Every stored record (bounded), for consolidation and chain deletion. */
+  private async everything(cap = 10_000): Promise<MemoryRecord[]> {
+    const out: MemoryRecord[] = [];
+    let offset: unknown;
+    do {
+      const page = await this.list(100, offset);
+      out.push(...page.memories);
+      offset = page.next;
+    } while (offset && out.length < cap);
+    return out;
+  }
+
+  /** Mark `old` as replaced by `newId`: kept as history, no longer retrievable. */
+  private async supersede(old: LifecycleRecord, newId: string, now: string) {
+    await this.setPayload(old.id, {
+      superseded_by: newId,
+      valid_until: now,
+      updated_at: now,
+    });
+  }
+
+  private buildPayload(
+    id: string,
+    candidate: MemoryCandidate,
+    now: string,
+    previous?: LifecycleRecord,
+  ): Record<string, unknown> {
+    return {
+      id,
+      embedding_model: this.embeddings.model,
+      ...candidate,
+      created_at: previous?.created_at ?? now,
+      updated_at: now,
+      last_accessed_at: previous?.last_accessed_at ?? null,
+      access_count: previous?.access_count ?? 0,
+      archived: false,
+      superseded_by: null,
+    };
+  }
+
   async write(
     text: unknown,
     metadata: CandidateMetadata = {},
-  ): Promise<MemoryWriteResult> {
+  ): Promise<MemoryWriteOutcome> {
     const candidate = memoryCandidate(text, metadata);
     if (!candidate)
       return {
@@ -415,26 +486,84 @@ export class QdrantMemory implements SemanticBackend {
     try {
       await this.init();
       const vector = await this.embeddings.embed(candidate.text);
-      const candidates = await this.nearest(vector);
-      const existing = candidates.find(
-        (point) =>
-          point.payload.type === candidate.type &&
-          (normalized(point.payload.text) === normalized(candidate.text) ||
-            (point.score >= 0.97 &&
-              point.payload.related_entity === candidate.related_entity)),
-      );
+      const neighbours = (await this.nearest(vector, 12))
+        .map((point) => ({
+          point,
+          record: normalizeRecord({
+            id: point.id,
+            ...point.payload,
+          } as MemoryRecord),
+        }))
+        .filter(({ record }) => isActive(record));
       const now = new Date().toISOString();
-      const id = existing?.id ?? crypto.randomUUID();
-      const payload = {
-        id,
-        embedding_model: this.embeddings.model,
-        ...candidate,
-        created_at: existing?.payload.created_at ?? now,
-        updated_at: now,
-        last_accessed_at: existing?.payload.last_accessed_at ?? null,
-        access_count: existing?.payload.access_count ?? 0,
-        archived: false,
-      };
+      const inferred = candidate.origin === "inferred";
+
+      // 1. Near-duplicate: update instead of storing a second copy.
+      const same = neighbours.find(
+        ({ point, record }) =>
+          record.type === candidate.type &&
+          (normalizeText(record.text) === normalizeText(candidate.text) ||
+            (point.score >= 0.97 &&
+              record.related_entity === candidate.related_entity &&
+              !contradicts(record.text, candidate.text))),
+      );
+      if (same) {
+        const previous = same.record;
+        if (inferred && previous.origin === "user_stated")
+          return {
+            ok: true,
+            id: previous.id,
+            operation: "merged",
+            unchanged: true,
+            memory: previous,
+            message: "Dit wist je al van de gebruiker; niets gewijzigd.",
+          };
+        const keepsUserWords = previous.origin === "user_stated" || !inferred;
+        const merged = {
+          ...this.buildPayload(previous.id, candidate, now, previous),
+          origin: keepsUserWords ? "user_stated" : "inferred",
+          kind:
+            keepsUserWords && candidate.kind === "assumption"
+              ? previous.kind
+              : candidate.kind,
+          confidence: Math.max(previous.confidence, candidate.confidence),
+          superseded_by: previous.superseded_by ?? null,
+        };
+        await this.request(`${this.base}/points?wait=true`, "PUT", {
+          points: [{ id: previous.id, vector, payload: merged }],
+        });
+        this.lastError = null;
+        return {
+          ok: true,
+          id: previous.id,
+          operation: "merged",
+          memory: merged as unknown as MemoryRecord,
+        };
+      }
+
+      // 2. Contradiction with the same subject: the embedding only found the candidates.
+      const conflicts = neighbours.filter(({ record }) =>
+        contradicts(record.text, candidate.text),
+      );
+      const id = crypto.randomUUID();
+      let payload = this.buildPayload(id, candidate, now);
+      let message: string | undefined;
+      const replaced: { id: string; text: string }[] = [];
+      const blocking = conflicts.find(
+        ({ record }) => inferred && record.origin === "user_stated",
+      );
+      if (blocking) {
+        // An assumption never overrides what the user said; it stays an unconfirmed assumption.
+        payload = { ...payload, kind: "assumption", origin: "inferred" };
+        message = `Je zei eerder: "${blocking.record.text}". Dit nieuwe is een aanname (niet bevestigd) en overschrijft dat niet.`;
+      } else {
+        for (const { record } of conflicts) {
+          await this.supersede(record, id, now);
+          replaced.push({ id: record.id, text: record.text });
+        }
+        if (replaced.length)
+          message = `Eerder zei je "${replaced.map((r) => r.text).join('"; "')}", nu "${candidate.text}": bijgewerkt.`;
+      }
       await this.request(`${this.base}/points?wait=true`, "PUT", {
         points: [{ id, vector, payload }],
       });
@@ -442,8 +571,61 @@ export class QdrantMemory implements SemanticBackend {
       return {
         ok: true,
         id,
-        operation: existing ? "merged" : "created",
-        memory: payload as MemoryRecord,
+        operation: "created",
+        memory: payload as unknown as MemoryRecord,
+        ...(replaced.length ? { superseded: replaced } : {}),
+        ...(blocking ? { conflictWith: blocking.record.id } : {}),
+        ...(message ? { message } : {}),
+      };
+    } catch (error) {
+      this.lastError = messageOf(error);
+      return { ok: false, error: this.lastError };
+    } finally {
+      this.endMutation();
+    }
+  }
+
+  /** Replace a record's text with supersede semantics: the old text stays as history. */
+  async correct(id: string, text: unknown): Promise<MemoryWriteOutcome> {
+    if (!validMemoryId(id)) throw new Error("Invalid memory ID");
+    if (!this.beginMutation())
+      return { ok: false, error: "Memory index is rebuilding; retry shortly" };
+    try {
+      await this.init();
+      const old = await this.retrieve(id);
+      if (!old || !isActive(old))
+        return { ok: false, error: "Memory not found" };
+      const candidate = memoryCandidate(text, {
+        explicit: true,
+        type: old.type,
+        related_entity: old.related_entity,
+        related_area: old.related_area,
+        related_device: old.related_device,
+        tags: old.tags,
+        importance: old.importance,
+        kind: old.kind === "assumption" ? "fact" : old.kind,
+      });
+      if (!candidate)
+        return {
+          ok: false,
+          error: "Memory rejected: not durable or contains secrets",
+        };
+      const vector = await this.embeddings.embed(candidate.text);
+      const now = new Date().toISOString();
+      const newId = crypto.randomUUID();
+      const payload = this.buildPayload(newId, candidate, now);
+      await this.request(`${this.base}/points?wait=true`, "PUT", {
+        points: [{ id: newId, vector, payload }],
+      });
+      await this.supersede(old, newId, now);
+      this.lastError = null;
+      return {
+        ok: true,
+        id: newId,
+        operation: "created",
+        memory: payload as unknown as MemoryRecord,
+        superseded: [{ id: old.id, text: old.text }],
+        message: `Eerder zei je "${old.text}", nu "${candidate.text}": bijgewerkt.`,
       };
     } catch (error) {
       this.lastError = messageOf(error);
@@ -476,15 +658,23 @@ export class QdrantMemory implements SemanticBackend {
     };
   }
 
-  async remove(id: string): Promise<{ ok: true }> {
+  /** Delete one record; with `history` also every record that was superseded into it. */
+  async remove(
+    id: string,
+    options: { history?: boolean } = {},
+  ): Promise<{ ok: true; removed?: number }> {
     if (!validMemoryId(id)) throw new Error("Invalid memory ID");
     if (!this.beginMutation())
       throw new Error("Memory index is rebuilding; retry shortly");
     try {
+      await this.init();
+      const ids = [id];
+      if (options.history)
+        ids.push(...ancestorsOf(id, await this.everything()));
       await this.request(`${this.base}/points/delete?wait=true`, "POST", {
-        points: [id],
+        points: ids,
       });
-      return { ok: true };
+      return { ok: true, removed: ids.length };
     } finally {
       this.endMutation();
     }
@@ -526,10 +716,86 @@ export class QdrantMemory implements SemanticBackend {
           }
         }
       } while (offset && scanned < 10_000);
-      return { ok: true, scanned, archived, more: Boolean(offset) };
+      const consolidated = await this.consolidate();
+      return {
+        ok: true,
+        scanned,
+        archived,
+        more: Boolean(offset),
+        ...consolidated,
+      };
     } finally {
       this.endMutation();
     }
+  }
+
+  /**
+   * Deterministic housekeeping, no model calls: archive expired records, merge exact duplicates
+   * and fold old episodes into one summary line per day. New rows are written before old ones go.
+   */
+  private async consolidate(): Promise<{
+    expired: number;
+    duplicatesMerged: number;
+    episodesTrimmed: number;
+  }> {
+    const plan = planConsolidation(await this.everything());
+    const now = new Date().toISOString();
+    for (const id of plan.expire)
+      await this.setPayload(id, { archived: true, archived_at: now });
+    let duplicatesMerged = 0;
+    for (const group of plan.duplicates) {
+      await this.setPayload(group.keep, { access_count: group.accessCount });
+      await this.request(`${this.base}/points/delete?wait=true`, "POST", {
+        points: group.remove,
+      });
+      duplicatesMerged += group.remove.length;
+    }
+    let episodesTrimmed = 0;
+    for (const day of plan.episodeDays) {
+      const id = crypto.randomUUID();
+      const vector = await this.embeddings.embed(day.text);
+      await this.request(`${this.base}/points?wait=true`, "PUT", {
+        points: [
+          {
+            id,
+            vector,
+            payload: {
+              id,
+              text: day.text,
+              type: "CONVERSATION_SUMMARY",
+              kind: "episode",
+              origin: "tool",
+              source: "scheduled_summary",
+              importance: 0.4,
+              confidence: 1,
+              sensitive: false,
+              consolidated: true,
+              tags: [],
+              related_entity: null,
+              related_area: null,
+              related_device: null,
+              embedding_model: this.embeddings.model,
+              created_at: `${day.day}T12:00:00.000Z`,
+              updated_at: now,
+              last_accessed_at: null,
+              access_count: 0,
+              archived: false,
+              superseded_by: null,
+              valid_until: null,
+            },
+          },
+        ],
+      });
+      await this.request(`${this.base}/points/delete?wait=true`, "POST", {
+        points: day.ids,
+      });
+      episodesTrimmed += day.ids.length;
+    }
+    return {
+      expired: plan.expire.length,
+      duplicatesMerged,
+      episodesTrimmed,
+    };
   }
 
   /** Build and verify a replacement off-path; switch only through a durable local pointer. */

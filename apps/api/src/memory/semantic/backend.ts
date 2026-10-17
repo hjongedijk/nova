@@ -6,6 +6,15 @@ import type {
 } from "@nova/contracts";
 import type { CandidateMetadata } from "./candidate.js";
 
+/** A write result that can also say what it replaced (all extra fields are optional). */
+export type MemoryWriteOutcome = MemoryWriteResult & {
+  /** Sentence the model can relay, e.g. 'Eerder zei je X, nu Y: bijgewerkt.' */
+  message?: string;
+  superseded?: { id: string; text: string }[];
+  conflictWith?: string;
+  unchanged?: boolean;
+};
+
 /** What a long-term memory store can do; Qdrant and OmniRoute's native memory both do it. */
 export interface SemanticBackend {
   readonly configured: boolean;
@@ -18,9 +27,15 @@ export interface SemanticBackend {
   write(
     text: unknown,
     metadata?: CandidateMetadata,
-  ): Promise<MemoryWriteResult>;
+  ): Promise<MemoryWriteOutcome>;
   list(limit?: number, offset?: unknown): Promise<MemoryListResponse>;
-  remove(id: string): Promise<{ ok: true }>;
+  /** `history` also deletes the records that were superseded into this one. */
+  remove(
+    id: string,
+    options?: { history?: boolean },
+  ): Promise<{ ok: true; removed?: number }>;
+  /** Replace a record's text, keeping the old one as history. Optional per backend. */
+  correct?(id: string, text: unknown): Promise<MemoryWriteOutcome>;
   maintain(): Promise<Record<string, unknown>>;
   health(): Promise<MemoryHealth>;
 }
