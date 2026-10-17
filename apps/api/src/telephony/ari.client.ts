@@ -8,7 +8,7 @@ import {
   TelephonyError,
 } from "./telephony.types.js";
 
-const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "asterisk"]);
+export const ARI_HOSTS = new Set(["localhost", "127.0.0.1", "asterisk"]);
 
 /** The ARI URL is a private service address, never a general proxy target. */
 export function validateAriUrl(raw: string): URL {
@@ -22,7 +22,7 @@ export function validateAriUrl(raw: string): URL {
     url.protocol !== "http:" ||
     url.username ||
     url.password ||
-    !ALLOWED_HOSTS.has(url.hostname) ||
+    !ARI_HOSTS.has(url.hostname) ||
     (url.pathname !== "/" && url.pathname !== "") ||
     url.search ||
     url.hash

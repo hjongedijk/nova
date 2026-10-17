@@ -34,6 +34,12 @@ import {
   DEFAULT_MESSAGE_URL,
 } from "./asterisk-config.js";
 import { linphoneProvisioning } from "./linphone.js";
+import {
+  SipRelay,
+  peerAllowlist,
+  type RelayStatus,
+} from "./sip-relay/relay.js";
+import { type RelaySettings, relaySettings } from "./sip-relay/relay-config.js";
 import { TelephonyStore } from "./telephony.store.js";
 import {
   ARI_PORT,
@@ -100,6 +106,8 @@ export interface TelephonyStatus {
   rtpRange: string;
   novaExtension: string;
   doorbellExtension: string;
+  /** The SIP relay between Asterisk and the trunk (text messages from Linphone); null when it is not in use. */
+  sipRelay: RelayStatus | null;
 }
 
 /** Telephony on top of Asterisk: status, calls, announcements, inbound alerts and doorbell ringing. */
@@ -117,6 +125,11 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
   private readonly links = new Map<string, { id: string; expiresAt: number }>();
   private readonly started: number[] = [];
   private offEvents: (() => void) | null = null;
+  private relay: SipRelay | null = null;
+  private closing = false;
+  private relayChain: Promise<void> = Promise.resolve();
+  /** Replaced in tests. */
+  relaySettings: () => RelaySettings | null = () => relaySettings();
   private files: AnnouncementFiles;
   now = () => Date.now();
 
@@ -147,12 +160,75 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
     if (this.enabled) this.activate();
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
+    this.closing = true;
     this.deactivate();
+    await this.syncRelay();
+  }
+
+  /** The relay is wanted while telephony is on and a trunk exists (and the stack runs Asterisk next to NOVA). */
+  private relayWanted(): { settings: RelaySettings; host: string } | null {
+    const config = this.store.get();
+    const settings = this.relaySettings();
+    if (this.closing || !config.enabled || !config.trunk || !settings)
+      return null;
+    return { settings, host: config.trunk.host };
+  }
+
+  private relayProxy() {
+    const wanted = this.relayWanted();
+    return wanted
+      ? { host: wanted.settings.proxyHost, port: wanted.settings.listenPort }
+      : null;
+  }
+
+  /** Starts, retargets or stops the relay so it matches the current settings; calls are serialised. */
+  syncRelay(): Promise<void> {
+    this.relayChain = this.relayChain.then(async () => {
+      const wanted = this.relayWanted();
+      const current = this.relay;
+      if (current && !wanted) {
+        this.relay = null;
+        await current.stop();
+        return;
+      }
+      if (!wanted) return;
+      const { settings, host } = wanted;
+      const target = `${host}:${settings.upstreamPort}`;
+      const listen = `${settings.listenHost}:${settings.listenPort}`;
+      if (
+        current &&
+        current.status().target === target &&
+        current.status().listen === listen &&
+        current.status().listening
+      )
+        return;
+      if (current) {
+        this.relay = null;
+        await current.stop();
+      }
+      const relay = new SipRelay({
+        listen: { host: settings.listenHost, port: settings.listenPort },
+        target: { host, port: settings.upstreamPort },
+        proxy: { host: settings.proxyHost, port: settings.listenPort },
+        allow: peerAllowlist(settings.allow),
+        logger: this.log,
+      });
+      this.relay = relay;
+      try {
+        await relay.start();
+      } catch {
+        this.log.warn(
+          "SIP relay could not start; text messages will not arrive",
+        );
+      }
+    });
+    return this.relayChain;
   }
 
   private activate(): void {
     this.renderConfig();
+    void this.syncRelay();
     this.offEvents ??= this.ari.onEvent((event) => {
       void this.handle(event).catch(() => this.log.warn("ARI event failed"));
     });
@@ -175,6 +251,7 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
         rtpRangeFromEnv(),
         this.conversation?.dialplan() ?? null,
         process.env.NOVA_ASTERISK_MESSAGE_URL?.trim() || DEFAULT_MESSAGE_URL,
+        this.relayProxy(),
       ),
     );
   }
@@ -182,6 +259,7 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
   private commit(change: (draft: ReturnType<TelephonyStore["get"]>) => void) {
     const next = this.store.update(change);
     if (next.enabled) this.renderConfig();
+    void this.syncRelay();
     return next;
   }
 
@@ -362,6 +440,7 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
       rtpRange: `${rtpRangeFromEnv().start}-${rtpRangeFromEnv().end}/udp`,
       novaExtension: NOVA_EXTENSION,
       doorbellExtension: DOORBELL_EXTENSION,
+      sipRelay: this.relay?.status() ?? null,
     };
     if (!config.enabled) return base;
     try {
