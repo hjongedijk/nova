@@ -9,6 +9,11 @@ import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { PlaybooksService } from "../settings/playbooks.service.js";
 import type { ModelMessage } from "./omniroute-client.service.js";
 import { buildSystemPrompt, type PromptContext } from "./prompt.js";
+import {
+  classifyTurn,
+  isConversational,
+  topicHint,
+} from "./conversation-style.js";
 import type { CommunicationPreference, ModelRoleId } from "@nova/contracts";
 import { socialTimeContext } from "./social-time.js";
 import { sanitize } from "../core/security/sanitize.js";
@@ -110,12 +115,16 @@ export class ContextBuilder {
     promptContext?: Omit<PromptContext, "message">,
   ): Promise<ModelMessage[]> {
     message = sanitize(message);
+    const recent = this.session.recent(sessionId, 12);
+    const turn = classifyTurn(message, recent);
     const messages: ModelMessage[] = [
       {
         role: "system",
         content: buildSystemPrompt({
           toolNames: [],
           role,
+          turn,
+          topic: isConversational(turn) ? topicHint(recent) : null,
           ...promptContext,
           message,
         }),
@@ -190,7 +199,7 @@ export class ContextBuilder {
         content: `Recent cached component summary (use live tools for live questions): ${JSON.stringify(this.state.all())}`,
       });
 
-    messages.push(...this.session.recent(sessionId, 12));
+    messages.push(...recent);
     messages.push({ role: "user", content: message });
 
     if (this.config.extensionsEnabled)

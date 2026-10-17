@@ -1,3 +1,9 @@
+import {
+  classifyTurn,
+  isConversational,
+  type TurnKind,
+} from "./conversation-style.js";
+
 /*
  * What NOVA is told about itself. These texts were tuned carefully against free models:
  * change the wording only with a test run against real answers.
@@ -216,8 +222,28 @@ function carve(): { id: PromptSectionId; line: string }[] {
 }
 const CARVED = carve();
 
+/*
+ * The conversation-partner guidance. It lives outside SYSTEM_PROMPT on purpose: it is added per turn kind,
+ * so the core stays as small as it was. Full text for discussion/brainstorm/small talk, one line for questions,
+ * nothing for commands. It never mentions tools or completion markers.
+ */
+export const GESPREK_SECTION = `
+GESPREK — je bent een gesprekspartner, geen vraag-en-antwoordautomaat:
+- Geef een echte mening met een korte reden. Is de gebruiker het mis of is iets een slecht idee, zeg dat dan beleefd en benoem de afwegingen.
+- Reageer eerst op wat er gezegd is en voeg een relevante gedachte toe. Stel hooguit één vervolgvraag, alleen als die het gesprek verder helpt; herhaal nooit een vraag die al beantwoord is. Geen menu met opties.
+- Weet je iets niet zeker, zeg dat dan in plaats van iets te verzinnen. Geen disclaimers, robotachtige openers of onnodige opsommingen; humor alleen als het vanzelf past.
+- Sluit aan bij de toon van de gebruiker en verwijs terug naar eerdere onderwerpen uit dit gesprek.
+`.trim();
+
+export const GESPREK_SHORT =
+  "Praat als gesprekspartner: kort, met een eigen mening waar dat past, zonder vaste openers.";
+
 export interface PromptContext {
   message: string;
+  /** Turn kind from classifyTurn; when absent it is derived from the message alone. */
+  turn?: TurnKind;
+  /** One-line "we talked about X" hint, only used on conversational turns. */
+  topic?: string | null;
   /** Names of the tools offered to the model for this request. */
   toolNames: string[];
   hasAttachments?: boolean;
@@ -360,16 +386,24 @@ const DOMAIN_RULES: [
 /** The prompt for one request: always the core, plus the sections whose domain the request touches. */
 export function buildSystemPrompt(context: PromptContext): string {
   const message = context.message.toLocaleLowerCase("nl-NL");
+  const turn = context.turn ?? classifyTurn(context.message);
+  const talk = isConversational(turn);
   const wanted = new Set<PromptSectionId>(["core"]);
-  for (const [id, applies] of DOMAIN_RULES)
-    if (applies(context, message)) wanted.add(id);
+  for (const [id, applies] of DOMAIN_RULES) {
+    // On a talking turn words like "aan" or "laat" must not pull in tool rules: only offered tools do.
+    const matches = talk ? applies(context, "") : applies(context, message);
+    if (matches) wanted.add(id);
+  }
   // Pure conversation keeps the tone examples; a request that matched a domain does not need them.
   if (wanted.size === 1) wanted.add("examples");
-  return CARVED.filter((entry) => wanted.has(entry.id))
+  const body = CARVED.filter((entry) => wanted.has(entry.id))
     .map((entry) => entry.line)
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  if (talk)
+    return [body, GESPREK_SECTION, context.topic].filter(Boolean).join("\n\n");
+  return turn === "question" ? `${body}\n\n${GESPREK_SHORT}` : body;
 }
 
 /** For tests and diagnostics: which section each line of the full prompt belongs to. */
