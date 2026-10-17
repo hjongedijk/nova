@@ -15,7 +15,7 @@
       title: "Verbind OmniRoute",
       detail:
         "Controleer het gateway-adres en stel de sleutel in bij de bestaande service-instellingen.",
-      href: "/settings?section=models",
+      href: "/settings?section=modellen",
       link: "Open Modellen",
       required: true,
     },
@@ -24,7 +24,7 @@
       title: "Koppel een gratis account en verifieer het beleid",
       detail:
         "Gebruik de accountweergave en de beleid-wizard. Een gratis cataloguslabel bewijst geen kosteloze toegang.",
-      href: "/settings?section=models",
+      href: "/settings?section=modellen",
       link: "Open Modellen",
       required: true,
     },
@@ -33,7 +33,7 @@
       title: "Test stem en microfoon op dit apparaat",
       detail:
         "Speel een voorbeeld af en controleer de microfoon. Browserrechten en aangesloten apparaten verschillen per apparaat.",
-      href: "/settings?section=voice",
+      href: "/settings?section=gesprek#stem",
       link: "Open Stem en geluid",
       required: true,
     },
@@ -42,7 +42,7 @@
       title: "Test de koppelingen die je gebruikt",
       detail:
         "Test elke gewenste service zelf. Niet ingestelde optionele services worden overgeslagen.",
-      href: "/settings?section=connections",
+      href: "/settings?section=huis#home-assistant",
       link: "Open Koppelingen",
       required: false,
     },

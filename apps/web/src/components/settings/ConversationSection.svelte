@@ -140,8 +140,8 @@
     </SectionCard>
 
     <Disclosure
-      kind="advanced"
-      title="Geavanceerd"
+      kind="more"
+      title="Meer opties"
       hint="Wachttijden en maximale duur"
     >
       <Field

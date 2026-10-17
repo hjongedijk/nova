@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Disclosure from "./ui/Disclosure.svelte";
   import { onMount } from "svelte";
   import Button from "#components/ui/Button.svelte";
   import {
@@ -75,8 +76,8 @@
   });
 </script>
 
-<section class="desktop-section" aria-label="Bureaublad zien en bedienen">
-  <h2>Bureaublad zien en bedienen</h2>
+<section class="desktop-section" aria-label="Meekijken op je pc">
+  <h2>Laat NOVA meekijken op je pc</h2>
   <p class="hint">
     NOVA kan op je Windows-pc meekijken en, na jouw bevestiging, de muis en het
     toetsenbord kort overnemen. Alles staat standaard uit. Wat op het scherm
@@ -84,7 +85,8 @@
   </p>
   {#if overview}
     {#if !overview.configured}<p role="status">
-        Er is geen Windows-agent ingesteld. Stel die eerst in bij Apparaten.
+        NOVA is nog niet gekoppeld aan je Windows-pc. Koppel die eerst
+        hierboven.
       </p>
     {:else if overview.agentError}<p role="status">{overview.agentError}</p>
     {:else if overview.agent}<p>
@@ -108,8 +110,8 @@
               : "Zien en bedienen staan uit.",
           )}
       />
-      Bureaublad zien: schermafbeeldingen worden door het gratis visiemodel via OmniRoute
-      gelezen en niet bewaard
+      NOVA mag meekijken: ze bekijkt een schermafbeelding via een gratis AI-dienst.
+      De afbeelding wordt niet bewaard
     </label>
     <label class="switch">
       <input
@@ -123,7 +125,8 @@
           } else void save({ controlEnabled: false }, "Bedienen staat uit.");
         }}
       />
-      Bureaublad bedienen: elke overname vraagt eerst een nieuwe bevestiging
+      NOVA mag de muis en het toetsenbord gebruiken: elke keer vraagt ze eerst om
+      bevestiging
     </label>
     {#if confirmControl}
       <div class="connection-pending" role="alert">
@@ -155,10 +158,10 @@
             "Instelling opgeslagen.",
           )}
       />
-      Beschrijving van het scherm 10 seconden onthouden
+      Onthoud wat er op het scherm staat even (10 seconden), dat gaat sneller
     </label>
 
-    <h3>Sessie</h3>
+    <h3>Bezig met de pc</h3>
     {#if overview.session}
       <p role="status">
         Bezig: “{overview.session.goal}” · {overview.session.actions}/{overview
@@ -176,19 +179,24 @@
       onclick={stop}>Stop overname nu</Button
     >
 
-    <h3>Actielog</h3>
-    {#if overview.audit.length}
-      <ul>
-        {#each overview.audit as row (row.id)}
-          <li>
-            <time datetime={row.at}>{time(row.at)}</time>
-            {describe(row)}{row.confirmation === "pending"
-              ? " · wacht op bevestiging"
-              : ""}{row.ok === false ? " · mislukt" : ""}
-          </li>
-        {/each}
-      </ul>
-    {:else}<p>Nog niets gedaan.</p>{/if}
+    <Disclosure
+      kind="more"
+      title="Wat NOVA op je pc deed"
+      hint="De laatste acties"
+    >
+      {#if overview.audit.length}
+        <ul>
+          {#each overview.audit as row (row.id)}
+            <li>
+              <time datetime={row.at}>{time(row.at)}</time>
+              {describe(row)}{row.confirmation === "pending"
+                ? " · wacht op bevestiging"
+                : ""}{row.ok === false ? " · mislukt" : ""}
+            </li>
+          {/each}
+        </ul>
+      {:else}<p>Nog niets gedaan.</p>{/if}
+    </Disclosure>
   {:else}<p>Laden…</p>{/if}
 </section>
 

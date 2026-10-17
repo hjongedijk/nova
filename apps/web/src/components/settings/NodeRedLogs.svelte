@@ -74,7 +74,7 @@
                 >
                 · {row.level === "unknown" ? row.stream : row.level}
                 {#if row.flowId}<a
-                    href={`/settings?section=connections&nodeRedFlow=${encodeURIComponent(row.flowId)}#node-red-flows`}
+                    href={`/settings?section=geavanceerd&nodeRedFlow=${encodeURIComponent(row.flowId)}#node-red-flows`}
                     >Open flow</a
                   >{/if}
               </div>

@@ -452,7 +452,7 @@ try {
       await inspectReceipts(1);
       assert.equal(abilityWrites, 2);
 
-      await settingsSection("connections");
+      await settingsSection("automation");
       const service = () =>
         page.locator("details.connection-editor").filter({
           has: page.locator("summary strong", { hasText: "Node-RED" }),
@@ -470,7 +470,7 @@ try {
         .waitFor();
       await inspectReceipts(2);
 
-      await settingsSection("connections");
+      await settingsSection("automation");
       await service().locator("summary").click();
       const paletteRegion = page.getByRole("region", {
         name: "Node-RED-palette",
@@ -491,7 +491,7 @@ try {
       // Preparing an operation must not create a success card.
       await inspectReceipts(2);
 
-      await settingsSection("connections");
+      await settingsSection("automation");
       await service().locator("summary").click();
       await paletteRegion
         .getByRole("button", { name: "Palette laden", exact: true })
@@ -507,7 +507,7 @@ try {
         .waitFor();
       await inspectReceipts(2);
 
-      await settingsSection("connections");
+      await settingsSection("automation");
       await service().locator("summary").click();
       await paletteRegion
         .getByRole("button", { name: "Palette laden", exact: true })
@@ -531,7 +531,7 @@ try {
         /niet|ontbreekt|geen/i,
       );
       async function openFixtureTool() {
-        await settingsSection("abilities");
+        await settingsSection("tools");
         return page
           .locator("li.set-row")
           .filter({ has: page.getByText(privateTool, { exact: true }) });
@@ -1017,7 +1017,7 @@ try {
         /Browseropslag opnieuw gelezen en gecontroleerd/,
       );
       // Rejected fetches and local export failures must never display diagnostics.
-      await settingsSection("connections");
+      await settingsSection("automation");
       await service().locator("summary").click();
       const privateDiagnostic =
         "private-host.invalid /srv/private token=fixture-secret";

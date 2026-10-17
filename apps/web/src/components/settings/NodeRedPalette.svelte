@@ -138,7 +138,8 @@
         {/each}
       </ul>
       {#if palette.modules.some((module) => module.restartRequired)}
-        <a href="/settings?section=services">Node-RED herstarten via Services</a
+        <a href="/settings?section=geavanceerd#services"
+          >Node-RED herstarten via Services</a
         >
       {/if}
     {:else}

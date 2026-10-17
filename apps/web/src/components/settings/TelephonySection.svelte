@@ -302,8 +302,8 @@
       </SectionCard>
 
       <Disclosure
-        kind="advanced"
-        title="Geavanceerd"
+        kind="more"
+        title="Meer opties"
         hint="Adres, gewone telefoonnummers, contacten en Linphone-uitleg"
       >
         <h3>Adres van de telefooncentrale</h3>

@@ -250,8 +250,8 @@
   </div>
   <p class="hint">{micNote}</p>
   <Disclosure
-    kind="advanced"
-    title="Geavanceerd"
+    kind="more"
+    title="Meer opties"
     hint="Spreeksnelheid, toonhoogte, wake word en uitspraaklijst"
   >
     <div class="field">

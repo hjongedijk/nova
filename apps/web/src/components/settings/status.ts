@@ -5,7 +5,7 @@ import { getDesktop } from "#lib/api/desktop.ts";
 import { getServiceConnections } from "#lib/api/settings.ts";
 import { getTelephony } from "#lib/api/telephony.ts";
 import type { SettingsOverview } from "@nova/contracts";
-import type { SettingsSection } from "./sections.ts";
+import type { SettingsTopic } from "./sections.ts";
 
 export type StatusTone = "ok" | "warn" | "bad" | "neutral";
 export interface PartStatus {
@@ -22,7 +22,7 @@ const count = (n: number, one: string, many: string) =>
  * comforting guess. Never throws: an unreachable API is a status too.
  */
 export async function partStatus(
-  id: SettingsSection,
+  id: SettingsTopic,
   data: SettingsOverview | null,
 ): Promise<PartStatus> {
   try {
@@ -104,18 +104,17 @@ export async function partStatus(
       case "devices": {
         const { services } = await getServiceConnections();
         const wanted = services.filter((s) =>
-          id === "devices"
-            ? s.id === "windows"
-            : s.id !== "omniroute" && s.id !== "windows",
+          id === "devices" ? s.id === "windows" : s.id === "home-assistant",
         );
         const ready = wanted.filter((s) =>
           s.fields.every((f) =>
             f.kind === "secret" ? f.set : !!f.value || f.kind === "boolean",
           ),
         ).length;
+        const name = id === "devices" ? "Windows-pc" : "Home Assistant";
         return ready
-          ? { tone: "ok", label: `${ready} van ${wanted.length} ingesteld` }
-          : { tone: "warn", label: "Nog niets ingesteld" };
+          ? { tone: "ok", label: `${name} is gekoppeld` }
+          : { tone: "warn", label: `${name} is nog niet gekoppeld` };
       }
       case "desktop": {
         const desktop = await getDesktop();

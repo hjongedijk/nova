@@ -1,6 +1,5 @@
 <script lang="ts">
   import OmniRouteAccountRemoval from "./OmniRouteAccountRemoval.svelte";
-  import OmniRouteAccountCreate from "./OmniRouteAccountCreate.svelte";
   import OmniRouteAccountKeyUpdate from "./OmniRouteAccountKeyUpdate.svelte";
   import OmniRouteAccountRename from "./OmniRouteAccountRename.svelte";
   import OmniRouteAccountActivation from "./OmniRouteAccountActivation.svelte";
@@ -13,7 +12,6 @@
   import OmniRouteComboUpdate from "./OmniRouteComboUpdate.svelte";
   import type {
     OmniRouteAccountRemovalResult,
-    OmniRouteAccountCreateResult,
     OmniRouteAccountKeyUpdateResult,
     OmniRouteAccountRenameResult,
     OmniRouteAccountActivationResult,
@@ -45,13 +43,6 @@
       notice = `Account verwijderd en gecontroleerd. ${result.routeReady ? "Gratis route opnieuw geverifieerd." : "AI blijft geblokkeerd. Controleer je gratis routebeleid."}${result.auditWarning ? ` ${result.auditWarning}` : ""}`;
     }
     selection = null;
-  }
-  async function accountCreated(result?: OmniRouteAccountCreateResult) {
-    if (!result?.verified) return;
-    notice = result.routeReady
-      ? `Provideraccount ${result.name || result.provider} toegevoegd en gecontroleerd; de gratis route blijft geverifieerd.${result.auditWarning ? ` ${result.auditWarning}` : ""}`
-      : `Provideraccount ${result.name || result.provider} toegevoegd en gecontroleerd. NOVA houdt AI geblokkeerd tot het gratis routebeleid is geverifieerd.${result.auditWarning ? ` ${result.auditWarning}` : ""}`;
-    await load();
   }
   async function accountKeyUpdated(result?: OmniRouteAccountKeyUpdateResult) {
     if (!result?.verified) return;
@@ -375,7 +366,9 @@
         staan.
       </p>{/if}
     <h3>Aangesloten accounts ({report.connections.length})</h3>
-    <OmniRouteAccountCreate done={accountCreated} />
+    <p class="ds-hint">
+      Een nieuwe dienst toevoegen kan op de pagina Slimme modellen.
+    </p>
     <OmniRouteAccountKeyUpdate
       connections={report.connections}
       done={accountKeyUpdated}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import type {
     FreePolicyOptions,
     FreePolicyPrepared,
@@ -7,6 +7,7 @@
     FreePolicyHistorySnapshot,
   } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
+  import Disclosure from "./ui/Disclosure.svelte";
   import {
     getFreePolicyOptions,
     getFreePolicyHistory,
@@ -14,6 +15,8 @@
     confirmFreePolicy,
   } from "#lib/api/settings.ts";
 
+  let { done, autoload = false }: { done?: () => void; autoload?: boolean } =
+    $props();
   let options = $state<FreePolicyOptions | null>(null);
   let selection = $state<
     { connectionId: string; modelId: string; officialSource: string }[]
@@ -41,6 +44,9 @@
     options?.models.filter((item) => item.provider === account?.provider) || [],
   );
   onDestroy(() => clearTimeout(timer));
+  onMount(() => {
+    if (autoload) void load();
+  });
 
   async function loadHistory() {
     historyBusy = true;
@@ -74,10 +80,10 @@
       accountId = modelId = source = "";
       billing = hardStop = terms = allClients = quotaRefresh = false;
       if (!options.available)
-        message = options.error || "Accountkeuze is niet beschikbaar.";
+        message = options.error || "De diensten kunnen nu niet worden geladen.";
     } catch {
       message =
-        "Accountkeuze kon niet worden geladen. Controleer je PIN en de gateway.";
+        "De diensten konden niet worden geladen. Controleer je PIN en of de AI-verbinding aan staat.";
     } finally {
       busy = false;
     }
@@ -97,7 +103,7 @@
             ?.provider === account.provider,
       )
     ) {
-      message = "Dit model staat al in je keuze.";
+      message = "Dit model staat al in je lijst.";
       return;
     }
     if (
@@ -108,7 +114,7 @@
             ?.provider === account.provider,
       )
     ) {
-      message = "Kies één account per provider voor dit beleid.";
+      message = "Kies per aanbieder één account.";
       return;
     }
     billing = hardStop = terms = allClients = quotaRefresh = false;
@@ -132,7 +138,7 @@
         acknowledgeQuotaRefresh: true,
       });
       if (!result.ok || !result.action) {
-        message = result.error || "Beleid kon niet worden voorbereid.";
+        message = result.error || "Voorbereiden lukte niet.";
         return;
       }
       pending = result;
@@ -145,7 +151,7 @@
       );
     } catch {
       message =
-        "Beleid kon niet worden voorbereid. Controleer je keuze, bronadressen en PIN.";
+        "Voorbereiden lukte niet. Controleer je keuze, de webadressen en je PIN.";
     } finally {
       busy = false;
     }
@@ -165,23 +171,23 @@
         message =
           result.error ||
           "Uitkomst onbekend. Controleer de gateway en gratis route.";
-      else if (!approve) message = "Beleidswijziging geannuleerd.";
+      else if (!approve) message = "Geannuleerd.";
       else if (
         result.verified === true &&
         result.evidenceSource === "operator-account" &&
         result.nativeQuotaVerified === false
       ) {
-        message =
-          "Beleid opgeslagen. Accountbinding en instellingen gecontroleerd. Facturering en harde limiet zijn door jou bevestigd; native quota is niet geverifieerd.";
-        if (!result.routeReady)
-          message += " De gratis route blijft geblokkeerd.";
+        message = result.routeReady
+          ? "Gelukt. NOVA kan weer antwoorden via je gratis diensten."
+          : "Opgeslagen, maar NOVA blijft geblokkeerd. De controle van de diensten is nog niet geslaagd.";
         if (result.auditWarning) message += ` ${result.auditWarning}`;
+        done?.();
       } else
         message =
-          "Uitkomst onbekend. Controleer het beleid voordat NOVA verdergaat.";
+          "We weten niet zeker of het gelukt is. Controleer de status voordat je verdergaat.";
     } catch {
       message =
-        "Uitkomst onbekend. Instellingen kunnen al gewijzigd zijn. Controleer de gateway en gratis route.";
+        "We weten niet zeker of het gelukt is. Controleer de status op de pagina Slimme modellen.";
     } finally {
       clearTimeout(timer);
       pending = null;
@@ -192,31 +198,27 @@
 </script>
 
 <section class="policy-wizard" aria-label="Gratis beleid maken">
-  <h2>Gratis beleid maken</h2>
+  <h2>Gratis diensten bevestigen</h2>
   <p>
-    Kies actieve accounts en terugkerend gratis modellen. Je bevestigt zelf de
-    accountvoorwaarden, facturering en harde limiet.
-  </p>
-  <p>
-    Modelnamen en gecachte quota bewijzen geen gratis gebruik. NOVA controleert
-    de accountbinding en opgeslagen instellingen. Beschikbare quota en
-    bronadressen worden niet onafhankelijk geverifieerd.
+    NOVA gebruikt alleen diensten waarvan jij hebt bevestigd dat ze gratis zijn.
+    Kies hieronder welke diensten en modellen NOVA mag gebruiken. Jij weet het
+    best of je account echt gratis is, want NOVA kan dat niet zelf controleren.
   </p>
   <Button onclick={load} disabled={busy || !!pending}
-    >Keuzes voor gratis beleid laden</Button
+    >Mijn diensten laden</Button
   >
   {#if message}<p role="status">{message}</p>{/if}
   {#if options?.available}
     <fieldset disabled={busy || !!pending}>
-      <legend>Accounts en modellen</legend>
+      <legend>Diensten en modellen kiezen</legend>
       <label
-        >Account<select
+        >Dienst<select
           bind:value={accountId}
           onchange={() => {
             modelId = "";
           }}
         >
-          <option value="">Kies een account</option>
+          <option value="">Kies een dienst</option>
           {#each options.accounts as item (item.id)}<option value={item.id}
               >{item.name} ({item.provider})</option
             >{/each}
@@ -231,7 +233,7 @@
         </select></label
       >
       <label
-        >Officiële bron voor gratis account en harde limiet<input
+        >Webpagina van de aanbieder waar staat dat dit gratis is<input
           type="url"
           bind:value={source}
           maxlength="2048"
@@ -243,7 +245,7 @@
         disabled={!accountId ||
           !modelId ||
           !source.trim() ||
-          selection.length >= 20}>Model toevoegen aan beleid</Button
+          selection.length >= 20}>Model toevoegen</Button
       >
       <ul>
         {#each selection as item, index (`${item.connectionId}:${item.modelId}`)}
@@ -260,29 +262,29 @@
         {/each}
       </ul>
       <label class="check"
-        ><input type="checkbox" bind:checked={billing} />Ik heb voor elk gekozen
-        account gecontroleerd dat betaalde facturering en automatisch
-        opwaarderen uitstaan.</label
+        ><input type="checkbox" bind:checked={billing} />Ik heb bij elke gekozen
+        dienst gecontroleerd dat betalen en automatisch tegoed bijkopen
+        uitstaan.</label
       >
       <label class="check"
         ><input type="checkbox" bind:checked={hardStop} />Ik heb gecontroleerd
-        dat elke provider gegarandeerd stopt bij de gratis limiet, zonder
-        betaalde fallback.</label
+        dat elke dienst stopt zodra het gratis tegoed op is en dan niet
+        automatisch gaat rekenen.</label
       >
       <label class="check"
-        ><input type="checkbox" bind:checked={terms} />Deze accounts hebben
-        recht op de terugkerende gratis toegang en de voorwaarden staan dit
-        gebruik toe.</label
+        ><input type="checkbox" bind:checked={terms} />Mijn accounts hebben
+        recht op dit gratis gebruik en de voorwaarden van de aanbieder staan het
+        toe.</label
       >
       <label class="check"
-        ><input type="checkbox" bind:checked={allClients} />Dit vervangt het
-        gratis beleid, wijzigt de globale modelkeuze voor alle gateway-clients
-        en beperkt de NOVA-sleutel tot deze accounts.</label
+        ><input type="checkbox" bind:checked={allClients} />Ik snap dat deze
+        keuze de vorige lijst vervangt en geldt voor alle programma’s die deze
+        server gebruiken.</label
       >
       <label class="check"
-        ><input type="checkbox" bind:checked={quotaRefresh} />De
-        kandidaatcontrole mag quota-informatie bij providers verversen. Die
-        informatie geldt niet als bewijs van gratis gebruik.</label
+        ><input type="checkbox" bind:checked={quotaRefresh} />NOVA mag bij de
+        aanbieders opvragen hoeveel tegoed er nog is. Dat bewijst niet dat het
+        gratis is.</label
       >
       <Button
         onclick={prepare}
@@ -291,69 +293,72 @@
           !hardStop ||
           !terms ||
           !allClients ||
-          !quotaRefresh}>Gratis beleid voorbereiden</Button
+          !quotaRefresh}>Controleren en voorbereiden</Button
       >
     </fieldset>
   {/if}
   {#if pending?.action}
     <div class="confirmation">
-      <h3>Beleidswijziging bevestigen</h3>
+      <h3>Nog één keer bevestigen</h3>
       <p>
-        NOVA blokkeert AI vóór de wijziging. Alleen gecontroleerde instellingen
-        en accountbinding kunnen de route vrijgeven. Native strict blijft aan.
+        Tijdens het wijzigen blokkeert NOVA haar antwoorden. Pas na de controle
+        kan ze weer antwoorden.
       </p>
-      <p>
-        Risicovolle wijziging. Toestemming is 60 seconden geldig en één keer
-        bruikbaar.
-      </p>
+      <p>Je hebt 60 seconden om te bevestigen.</p>
       {#if expired}<p role="status">
-          Toestemming verlopen. Annuleer en bereid opnieuw voor.
+          Te lang gewacht. Annuleer en begin opnieuw.
         </p>{/if}
       <Button onclick={() => confirm(true)} disabled={busy || expired}
-        >Bevestig gratis beleid</Button
+        >Ja, dit zijn gratis diensten</Button
       >
-      <Button onclick={() => confirm(false)} disabled={busy}
-        >Annuleer gratis beleid</Button
-      >
+      <Button onclick={() => confirm(false)} disabled={busy}>Annuleren</Button>
     </div>
   {/if}
 </section>
 
-<section class="policy-history" aria-label="Gratis beleidsgeschiedenis">
-  <h3>Beleidswijzigingen</h3>
-  <p>
-    Privégeschiedenis op deze server. Sleutelwaarden worden niet opgeslagen.
-  </p>
-  <Button onclick={loadHistory} disabled={historyBusy || busy}>
-    {historyBusy ? "Geschiedenis laden…" : "Beleidsgeschiedenis laden"}
-  </Button>
-  {#if historyError}<p role="status">{historyError}</p>{/if}
-  {#if history}
-    {#if history.truncated}<p>
-        Alleen de tien nieuwste wijzigingen worden getoond.
-      </p>{/if}
-    {#if !history.revisions.length}<p>
-        Er zijn nog geen beleidswijzigingen.
-      </p>{/if}
-    <ol>
-      {#each [...history.revisions].reverse() as revision (revision.id)}
-        <li>
-          <strong>{new Date(revision.at).toLocaleString("nl-NL")}</strong>
-          <p>
-            Van: {describe(revision.before)} → Naar: {describe(revision.after)}
-          </p>
-        </li>
-      {/each}
-    </ol>
-    {#if history.revisions.length}
-      <p role="status">
-        Terugzetten is geblokkeerd totdat OmniRoute sleutelrechten met een
-        revisiecontrole kan wijzigen. Zo voorkomen we dat een rollback een
-        gelijktijdige toegangsaanpassing overschrijft.
-      </p>
+<Disclosure
+  title="Eerdere wijzigingen"
+  kind="history"
+  id="gratis-beleid-geschiedenis"
+>
+  <section class="policy-history" aria-label="Gratis beleidsgeschiedenis">
+    <h3>Eerdere keuzes</h3>
+    <p>
+      Privégeschiedenis op deze server. Sleutelwaarden worden niet opgeslagen.
+    </p>
+    <Button onclick={loadHistory} disabled={historyBusy || busy}>
+      {historyBusy ? "Geschiedenis laden…" : "Beleidsgeschiedenis laden"}
+    </Button>
+    {#if historyError}<p role="status">{historyError}</p>{/if}
+    {#if history}
+      {#if history.truncated}<p>
+          Alleen de tien nieuwste wijzigingen worden getoond.
+        </p>{/if}
+      {#if !history.revisions.length}<p>
+          Er zijn nog geen beleidswijzigingen.
+        </p>{/if}
+      <ol>
+        {#each [...history.revisions].reverse() as revision (revision.id)}
+          <li>
+            <strong>{new Date(revision.at).toLocaleString("nl-NL")}</strong>
+            <p>
+              Van: {describe(revision.before)} → Naar: {describe(
+                revision.after,
+              )}
+            </p>
+          </li>
+        {/each}
+      </ol>
+      {#if history.revisions.length}
+        <p role="status">
+          Terugzetten is geblokkeerd totdat OmniRoute sleutelrechten met een
+          revisiecontrole kan wijzigen. Zo voorkomen we dat een rollback een
+          gelijktijdige toegangsaanpassing overschrijft.
+        </p>
+      {/if}
     {/if}
-  {/if}
-</section>
+  </section>
+</Disclosure>
 
 <style>
   .policy-wizard {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Disclosure from "./ui/Disclosure.svelte";
   import type {
     HelperModeHistory,
     WallpaperHistory,
@@ -228,7 +229,7 @@
 {/snippet}
 
 <section>
-  <h3>NOVA als app</h3>
+  <h2>NOVA als app</h2>
   <p class="hint">
     Een app opent in een eigen venster of op je beginscherm, zonder adresbalk.
     Dit werkt op Windows, Mac, Android en iPhone.
@@ -253,7 +254,7 @@
     </div>
   {/if}
 
-  <h3>NOVA op je Windows-pc</h3>
+  <h2>NOVA op je Windows-pc</h2>
   <p class="hint">
     Kies wat je pc laat zien: NOVA als levende achtergrond, een kleine helper
     bovenaan je scherm (de bol, een invoerveld en de microfoon; hij klapt open
@@ -302,39 +303,44 @@
       </select>
     </div>
   {/if}
-  <section class="helper-history" aria-label="Helpergeschiedenis">
-    <h4>Wijzigingsgeschiedenis</h4>
-    <Button disabled={helperHistoryBusy} onclick={loadHelperHistory}
-      >{helperHistoryBusy
-        ? "Geschiedenis laden…"
-        : "Geschiedenis laden"}</Button
-    >
-    {#if helperHistory}
-      {#if helperHistory.revisions.length}
-        <ol>
-          {#each helperHistory.revisions as revision (revision.id)}
-            <li>
-              <span>
-                {new Date(revision.at).toLocaleString("nl-NL")}: {revision
-                  .before.mode}, scherm {revision.before.display}
-                → {revision.after.mode}, scherm {revision.after.display}
-              </span>
-              <Button
-                disabled={helperBusy}
-                onclick={() => rollbackHelperHistory(revision.id)}
-                >Terugzetten</Button
-              >
-            </li>
-          {/each}
-        </ol>
-      {:else}<p>Geen wijzigingen opgeslagen.</p>{/if}
-      {#if helperHistory.truncated}<small
-          >Alleen de nieuwste 50 wijzigingen getoond.</small
-        >{/if}
-    {/if}
-  </section>
+  <Disclosure
+    kind="history"
+    title="Wijzigingsgeschiedenis"
+    hint="Eerdere keuzes terugzetten"
+  >
+    <section class="helper-history" aria-label="Helpergeschiedenis">
+      <Button disabled={helperHistoryBusy} onclick={loadHelperHistory}
+        >{helperHistoryBusy
+          ? "Geschiedenis laden…"
+          : "Geschiedenis laden"}</Button
+      >
+      {#if helperHistory}
+        {#if helperHistory.revisions.length}
+          <ol>
+            {#each helperHistory.revisions as revision (revision.id)}
+              <li>
+                <span>
+                  {new Date(revision.at).toLocaleString("nl-NL")}: {revision
+                    .before.mode}, scherm {revision.before.display}
+                  → {revision.after.mode}, scherm {revision.after.display}
+                </span>
+                <Button
+                  disabled={helperBusy}
+                  onclick={() => rollbackHelperHistory(revision.id)}
+                  >Terugzetten</Button
+                >
+              </li>
+            {/each}
+          </ol>
+        {:else}<p>Geen wijzigingen opgeslagen.</p>{/if}
+        {#if helperHistory.truncated}<small
+            >Alleen de nieuwste 50 wijzigingen getoond.</small
+          >{/if}
+      {/if}
+    </section>
+  </Disclosure>
 
-  <h3>NOVA als bureaublad-achtergrond</h3>
+  <h3>Bureaublad-achtergrond</h3>
   <p class="hint">
     Je Windows-pc laat NOVA bewegen achter je bureaubladiconen, per beeldscherm.
     Je eigen achtergrond blijft ongemoeid: zet je het uit, dan zie je die weer.
@@ -391,51 +397,59 @@
       </ul>
     {/if}
   </div>
-  <section class="helper-history" aria-label="Achtergrondgeschiedenis">
-    <h4>Wijzigingsgeschiedenis</h4>
-    <Button disabled={wallpaperHistoryBusy} onclick={loadWallpaperHistory}
-      >{wallpaperHistoryBusy
-        ? "Geschiedenis laden…"
-        : "Geschiedenis laden"}</Button
-    >
-    {#if wallpaperHistory}
-      {#if wallpaperHistory.revisions.length}
-        <ol>
-          {#each wallpaperHistory.revisions as revision (revision.id)}
-            <li>
-              <span
-                >{new Date(revision.at).toLocaleString("nl-NL")}: beeldscherm {revision.display},
-                {revision.before} → {revision.after}</span
-              >
-              <Button
-                disabled={wallpaperHistoryBusy}
-                onclick={() => restoreWallpaper(revision.id)}
-                >Terugzetten</Button
-              >
-            </li>
-          {/each}
-        </ol>
-      {:else}<p>Geen wijzigingen opgeslagen.</p>{/if}
-      {#if wallpaperHistory.truncated}<small
-          >Alleen de nieuwste 50 wijzigingen getoond.</small
-        >{/if}
-    {/if}
-  </section>
+  <Disclosure
+    kind="history"
+    title="Wijzigingsgeschiedenis"
+    hint="Eerdere keuzes terugzetten"
+  >
+    <section class="helper-history" aria-label="Achtergrondgeschiedenis">
+      <Button disabled={wallpaperHistoryBusy} onclick={loadWallpaperHistory}
+        >{wallpaperHistoryBusy
+          ? "Geschiedenis laden…"
+          : "Geschiedenis laden"}</Button
+      >
+      {#if wallpaperHistory}
+        {#if wallpaperHistory.revisions.length}
+          <ol>
+            {#each wallpaperHistory.revisions as revision (revision.id)}
+              <li>
+                <span
+                  >{new Date(revision.at).toLocaleString("nl-NL")}: beeldscherm {revision.display},
+                  {revision.before} → {revision.after}</span
+                >
+                <Button
+                  disabled={wallpaperHistoryBusy}
+                  onclick={() => restoreWallpaper(revision.id)}
+                  >Terugzetten</Button
+                >
+              </li>
+            {/each}
+          </ol>
+        {:else}<p>Geen wijzigingen opgeslagen.</p>{/if}
+        {#if wallpaperHistory.truncated}<small
+            >Alleen de nieuwste 50 wijzigingen getoond.</small
+          >{/if}
+      {/if}
+    </section>
+  </Disclosure>
   <div class="set-toolbar">
     <Button href="/windows-agent/nova-agent.ps1" download="nova-agent.ps1"
       >Download de NOVA-agent</Button
     >
-    <Button href="/windows-agent/nova-agent.ps1" download="nova-agent.ps1"
-      >Download voor bestaande installatie</Button
-    >
   </div>
-  <p class="hint">
-    Nieuwe installatie: gebruik nova-agent.ps1 en install.ps1. Bij een bestaande
-    installatie kun je via de tweede download de huidige implementatie opslaan
-    als nova-agent.ps1; vervang daarmee het oude bestand en start NOVAAgent
-    opnieuw in Taakplanner. Voer install.ps1 uit om ook de oude taaknaam te
-    vernieuwen.
-  </p>
+  <Disclosure
+    kind="more"
+    title="Meer uitleg"
+    hint="De agent installeren of bijwerken"
+  >
+    <p class="hint">
+      De NOVA-agent is het kleine programma op je pc waarmee NOVA je achtergrond
+      en helper kan tonen. Nieuwe installatie: gebruik nova-agent.ps1 en
+      install.ps1. Heb je de agent al, dan vervang je het oude bestand met deze
+      download, start je NOVAAgent opnieuw in Taakplanner en voer je install.ps1
+      uit.
+    </p>
+  </Disclosure>
 </section>
 
 <style>

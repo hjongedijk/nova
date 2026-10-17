@@ -13,16 +13,14 @@
   import Badge from "#components/ui/Badge.svelte";
   import Button from "#components/ui/Button.svelte";
   import Field from "#components/ui/Field.svelte";
-  import QuickActionsEditor from "./QuickActionsEditor.svelte";
   import PersonaHistory from "./PersonaHistory.svelte";
   import PersonaPreferencesHistory from "./PersonaPreferencesHistory.svelte";
   import HouseholdProfileHistory from "./HouseholdProfileHistory.svelte";
   import Disclosure from "./ui/Disclosure.svelte";
   import HistoryGroup from "./ui/HistoryGroup.svelte";
-  import SoundSection from "./SoundSection.svelte";
   import { afterChange, fail, settings } from "./state.svelte.ts";
 
-  let { part = "all" }: { part?: "all" | "persona" | "approvals" } = $props();
+  let { part = "persona" }: { part?: "persona" | "approvals" } = $props();
 
   let persona = $state(settings.data?.persona ?? "");
   let personaStyle = $state<PersonaStyleId>(
@@ -169,11 +167,8 @@
   }
 </script>
 
-{#if part === "all"}
-  <h3>Geluid op dit apparaat</h3>
-  <SoundSection />
-{/if}
 {#if part !== "approvals"}
+  <h2>Persoonlijkheid</h2>
   <section>
     <p class="hint">
       Eigen regels voor hoe NOVA zich gedraagt. Ze gaan voor zijn standaardstijl
@@ -210,8 +205,8 @@
       <Badge text="{persona.length} / 2000" />
     </div>
     <Disclosure
-      kind="advanced"
-      title="Geavanceerd: gezinsleden en aanspreekvorm"
+      kind="more"
+      title="Meer opties: gezinsleden en aanspreekvorm"
       hint="Meerdere personen, naam, karakter en voorkeuren"
     >
       <p class="hint">
@@ -318,16 +313,14 @@
     />
   </HistoryGroup>
 {/if}
-{#if part === "all"}
-  <h3>Snelle opdrachten op het beginscherm</h3>
-  <QuickActionsEditor />
-{/if}
 {#if part !== "persona"}
-  <h3>Altijd goedgekeurde handelingen</h3>
+  <h2>Blijvende toestemmingen</h2>
   <section>
     <p class="hint">
-      Elke toestemming geldt voor één tool met exact dezelfde parameters.
-      Risicovolle handelingen blijven bevestiging vragen.
+      Soms kies je bij een vraag van NOVA voor “altijd toestaan”. Zulke
+      toestemmingen staan hier. Elke toestemming geldt voor precies die ene
+      handeling. Je kunt ze altijd intrekken. Risicovolle handelingen blijven
+      sowieso om bevestiging vragen.
     </p>
     {#each settings.data?.standingApprovals ?? [] as grant (grant.id)}
       <div class="set-toolbar">

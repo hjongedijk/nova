@@ -168,10 +168,11 @@
 
   <h2>Zelfstandige taken</h2>
   <p class="hint">
-    Taken die NOVA zelf uitvoert, ook zonder nieuw bericht en na een herstart:
-    eenmalig, herhalend of bij een gebeurtenis uit Node-RED (blok “NOVA taak
-    starten”). Risicovolle stappen wachten hier op jouw goedkeuring; gevaarlijke
-    acties worden nooit zelfstandig uitgevoerd. Vraag NOVA om een taak te maken.
+    Taken die NOVA zelf uitvoert, ook zonder nieuw bericht: eenmalig, herhalend
+    of als er iets gebeurt. Risicovolle stappen wachten hier op jouw
+    goedkeuring; gevaarlijke acties doet NOVA nooit zelf. Vraag NOVA in het
+    gesprek om een taak te maken, bijvoorbeeld “herinner me elke maandag aan de
+    vuilnisbakken”.
   </p>
   {#if tasks.length}
     <ul class="tasks">

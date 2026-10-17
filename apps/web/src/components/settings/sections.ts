@@ -1,228 +1,370 @@
 /**
  * Navigation and search share one catalogue.
  *
- * Seven groups in plain Dutch; each group holds one or more pages ("parts").
- * Part ids are the stable deep links (`/settings?section=<id>`), so every
- * older link keeps working. Rarely used items sit under "Geavanceerd" on the
- * page itself, but stay searchable through the keywords here.
+ * Six task-based pages plus one expert area ("Geavanceerd"). Every setting
+ * lives in exactly one place. A "topic" is one searchable block on a page and
+ * keeps its old section id, so every older link (`/settings?section=voice`,
+ * `?section=system#actielog`, ...) still resolves to the page and anchor that
+ * now holds it.
  */
-export const GROUPS = [
+export const PAGES = [
   {
-    id: "algemeen",
-    name: "Algemeen",
-    purpose: "Hoe NOVA eruitziet, klinkt en wat ze onthoudt.",
-    parts: ["general", "personality", "memory", "documents"],
-  },
-  {
-    id: "stem",
-    name: "Stem en gesprekken",
-    purpose: "Hoe je met NOVA praat en hoe ze terugpraat.",
-    parts: ["voice", "conversation"],
+    id: "gesprek",
+    name: "Gesprek en stem",
+    detail: "Hoe je met NOVA praat, en hoe zij terugpraat.",
   },
   {
     id: "huis",
-    name: "Slimme huis en apparaten",
-    purpose: "Koppel je huis, je pc en je telefoon aan NOVA.",
-    parts: ["connections", "devices", "desktop"],
+    name: "Slimme huis",
+    detail: "Koppel je huis, je pc en je telefoon aan NOVA.",
   },
   {
     id: "telefoon",
     name: "Telefoon",
-    purpose: "Bellen en gebeld worden via NOVA, ook de deurbel.",
-    parts: ["telephony"],
+    detail: "Bellen en gebeld worden via NOVA, ook de deurbel.",
   },
   {
-    id: "ai",
-    name: "Modellen en AI",
-    purpose: "Welke AI NOVA gebruikt en wat ze zelf mag doen.",
-    parts: ["models", "abilities", "skills", "code"],
+    id: "modellen",
+    name: "Slimme modellen",
+    detail: "Zo antwoordt NOVA: welke diensten zijn verbonden en werken ze?",
   },
   {
-    id: "automatisering",
-    name: "Automatisering",
-    purpose: "Taken en routines die NOVA zelf uitvoert.",
-    parts: ["autonomy", "objectives", "automation"],
+    id: "zelf",
+    name: "Wat NOVA zelf mag doen",
+    detail: "Hoe zelfstandig NOVA is, wat ze mag en waar ze op let.",
   },
   {
-    id: "beheer",
-    name: "Geavanceerd en beheer",
-    purpose: "Installatie, veiligheid, back-ups en techniek.",
-    parts: ["setup", "safety", "services", "system"],
+    id: "geheugen",
+    name: "Geheugen en privacy",
+    detail: "Wat NOVA onthoudt, je documenten en je back-up.",
+  },
+  {
+    id: "geavanceerd",
+    name: "Geavanceerd",
+    detail: "Alleen voor als je weet wat je doet.",
   },
 ] as const;
 
-export type SettingsGroup = (typeof GROUPS)[number]["id"];
+export type SettingsPage = (typeof PAGES)[number]["id"];
 
-export const SECTIONS = [
-  {
-    id: "setup",
-    name: "Installatie",
-    detail: "Loop na een nieuwe installatie de stappen langs.",
-    keywords:
-      "installatie starten instellen onboarding sleutel account stem verbinding",
-  },
+/** The pages in the main navigation; "Geavanceerd" is reachable but set apart. */
+export const MAIN_PAGES = PAGES.filter((page) => page.id !== "geavanceerd");
+
+export const TOPICS = [
   {
     id: "general",
-    name: "Beginscherm",
-    detail: "Kies wat je op het beginscherm en in de zijbalk ziet.",
-    keywords:
-      "algemeen widget panelen sidebar zijbalk snelle opdrachten knoppen zoeken",
+    page: "gesprek",
+    anchor: "snelle-opdrachten",
+    name: "Snelle opdrachten",
+    detail: "De knoppen op het beginscherm.",
+    keywords: "beginscherm knoppen widget zoeken algemeen",
   },
   {
     id: "voice",
+    page: "gesprek",
+    anchor: "stem",
     name: "Stem en geluid",
     detail: "Kies de stem, het volume en test je microfoon.",
-    keywords: "spraak audio luidspreker luisteren microfoon volume",
+    keywords:
+      "spraak audio luidspreker luisteren microfoon volume snelheid wake word uitspraak",
+  },
+  {
+    id: "conversation",
+    page: "gesprek",
+    anchor: "gesprekken",
+    name: "Praten met NOVA",
+    detail: "Praat gewoon met NOVA, ook via de telefoon (nummer 700).",
+    keywords: "gesprek bellen telefoon spraak praten luisteren onderbreken 700",
   },
   {
     id: "personality",
+    page: "gesprek",
+    anchor: "persoonlijkheid",
     name: "Persoonlijkheid",
     detail: "Bepaal hoe NOVA tegen je praat.",
-    keywords: "gedrag persona toon butler naam karakter gezin profiel stijl",
-  },
-  {
-    id: "models",
-    name: "Modellen",
-    detail: "Kies welke AI NOVA gebruikt. Gratis modellen staan standaard aan.",
     keywords:
-      "ai provider account route combo model gateway limieten omniroute sleutel",
-  },
-  {
-    id: "code",
-    name: "Codeprojecten",
-    detail: "Maak een project aan en kies welk project actief is.",
-    keywords: "code werkruimte workspace projecten aanmaken openen",
-  },
-  {
-    id: "abilities",
-    name: "Wat NOVA mag doen",
-    detail: "Zet vaardigheden en gereedschappen aan of uit.",
-    keywords: "gereedschappen vaardigheden tools risico rechten toestemming",
-  },
-  {
-    id: "skills",
-    name: "Eigen vaardigheden",
-    detail: "Leer NOVA zelf bedachte instructies en koppelingen.",
-    keywords: "skill webhook testen geschiedenis",
-  },
-  {
-    id: "automation",
-    name: "Node-RED-flows",
-    detail: "Bekijk en beheer de flows achter je automatiseringen.",
-    keywords: "flows nodes node-red planning routines editor palet logs",
-  },
-  {
-    id: "services",
-    name: "Services en MCP",
-    detail: "Zie of de achtergrondservices en MCP-servers draaien.",
-    keywords:
-      "workers containers broker verbinding services mcp server status herstarten",
+      "gedrag persona toon butler naam karakter gezin profiel stijl regels aanspreekvorm",
   },
   {
     id: "connections",
-    name: "Koppelingen",
-    detail: "Verbind NOVA met Home Assistant en andere diensten.",
-    keywords:
-      "home assistant proxmox termix pangolin mqtt qdrant integraties huis domotica",
+    page: "huis",
+    anchor: "home-assistant",
+    name: "Home Assistant",
+    detail: "Verbind NOVA met je slimme huis.",
+    keywords: "home assistant domotica lampen huis koppelen token toegang",
   },
   {
     id: "devices",
-    name: "Apparaten",
-    detail: "Beheer de Windows-helper, achtergrond en je telefoon.",
+    page: "huis",
+    anchor: "pc",
+    name: "Je pc en NOVA als app",
+    detail: "Achtergrond, helper en NOVA als app op je telefoon of pc.",
     keywords:
-      "windows agent helper wallpaper achtergrond scherm display sneltoets pwa downloaden telefoon",
+      "windows helper wallpaper achtergrond scherm display pwa app installeren telefoon downloaden",
   },
   {
     id: "desktop",
+    page: "huis",
+    anchor: "pc-bedienen",
     name: "Pc bedienen",
     detail: "Laat NOVA meekijken op je scherm en de pc kort bedienen.",
     keywords:
       "bureaublad scherm pc overnemen muis toetsenbord screenshot windows besturen",
   },
   {
-    id: "conversation",
-    name: "Gesprekken",
-    detail: "Praat echt met NOVA, ook via de telefoon (nummer 700).",
-    keywords:
-      "gesprek bellen telefoon spraak praten stem luisteren onderbreken",
-  },
-  {
-    id: "autonomy",
-    name: "Zelfstandige taken",
-    detail: "Taken die NOVA zelf doet: op een tijdstip of bij een gebeurtenis.",
-    keywords:
-      "autonoom taak automatisering gebeurtenis node-red goedkeuren plannen herhalend",
-  },
-  {
-    id: "objectives",
-    name: "Doelen",
-    detail:
-      "Dingen die NOVA blijft controleren en alleen meldt als er iets afwijkt.",
-    keywords:
-      "doel doelen monitoren in de gaten houden bewaken controle afwijking storing valse alarm servers stille uren pauzeren hervatten",
-  },
-  {
     id: "telephony",
+    page: "telefoon",
+    anchor: null,
     name: "Telefoon",
-    detail: "Eigen telefooncentrale met Linphone-toestellen en deurbel.",
+    detail: "Eigen telefooncentrale met toestellen en deurbel.",
     keywords:
       "telefonie bellen telefoon asterisk linphone sip deurbel intercom toestel nummer trunk voip sms berichten",
   },
   {
-    id: "memory",
-    name: "Geheugen en privacy",
-    detail: "Zoek in wat NOVA onthoudt, corrigeer het of laat het vergeten.",
+    id: "models",
+    page: "modellen",
+    anchor: null,
+    name: "Slimme modellen",
+    detail: "Verbonden diensten, een gratis dienst toevoegen.",
     keywords:
-      "geheugen onthouden vergeten corrigeren persoonsgegevens privacy herinneringen feit voorkeur besluit aanname episode project eerdere versies gevoelig",
+      "ai model modellen dienst provider account sleutel api gratis groq openrouter antwoorden geblokkeerd omniroute",
   },
   {
-    id: "documents",
-    name: "Documenten",
-    detail: "Upload privédocumenten en zoek er later in via de chat.",
+    id: "autonomy",
+    page: "zelf",
+    anchor: "taken",
+    name: "Zelfstandige taken",
+    detail: "Hoe zelfstandig NOVA is en welke taken ze zelf doet.",
     keywords:
-      "documentbibliotheek pdf docx upload bibliotheek qdrant bestanden",
+      "autonoom taak automatisering gebeurtenis goedkeuren plannen herhalend voorzichtig zelfstandig",
+  },
+  {
+    id: "abilities",
+    page: "zelf",
+    anchor: "wat-mag",
+    name: "Wat NOVA mag doen",
+    detail: "Zet vaardigheden en gereedschappen aan of uit.",
+    keywords: "gereedschappen vaardigheden tools risico rechten toestemming",
   },
   {
     id: "safety",
-    name: "Toestemmingen",
+    page: "zelf",
+    anchor: "toestemmingen",
+    name: "Blijvende toestemmingen",
     detail: "Bekijk en trek blijvende toestemmingen in.",
     keywords:
-      "veiligheid altijd goedkeuring confirm pin bevestiging beveiliging",
+      "veiligheid altijd goedkeuring confirm pin bevestiging beveiliging toestemmingen intrekken",
   },
   {
-    id: "system",
-    name: "Back-up en updates",
-    detail: "Maak een back-up, zet er een terug en bekijk het actielog.",
+    id: "objectives",
+    page: "zelf",
+    anchor: "doelen",
+    name: "Doelen",
+    detail: "Dingen die NOVA in de gaten houdt en alleen meldt bij problemen.",
     keywords:
-      "systeem export import backup back-up audit logs status updates versie actielog",
+      "doel doelen monitoren in de gaten houden bewaken controle afwijking storing valse alarm servers stille uren pauzeren hervatten",
+  },
+  {
+    id: "memory",
+    page: "geheugen",
+    anchor: null,
+    name: "Wat NOVA onthoudt",
+    detail: "Zoek in wat NOVA onthoudt, corrigeer het of laat het vergeten.",
+    keywords:
+      "geheugen onthouden vergeten corrigeren persoonsgegevens privacy herinneringen feit voorkeur besluit gevoelig",
+  },
+  {
+    id: "documents",
+    page: "geheugen",
+    anchor: "documenten",
+    name: "Documenten",
+    detail: "Upload privédocumenten en zoek er later in via de chat.",
+    keywords: "documentbibliotheek pdf docx upload bibliotheek bestanden",
+  },
+  {
+    id: "backup",
+    page: "geheugen",
+    anchor: "backup",
+    name: "Back-up maken en terugzetten",
+    detail: "Bewaar je instellingen en zet ze later terug.",
+    keywords: "backup back-up export import exporteren importeren bewaren",
+  },
+  {
+    id: "integrations",
+    page: "geavanceerd",
+    anchor: "koppelingen",
+    name: "Overige koppelingen",
+    detail: "Proxmox, Qdrant, MQTT, Node-RED, Termix en Pangolin.",
+    keywords:
+      "proxmox termix pangolin mqtt qdrant integraties servers vm beheer node-red url token",
+  },
+  {
+    id: "automation",
+    page: "geavanceerd",
+    anchor: "koppelingen",
+    name: "Node-RED-flows",
+    detail: "Flows, palet en logs achter je automatiseringen.",
+    keywords: "flows nodes node-red planning routines editor palet logs",
+  },
+  {
+    id: "services",
+    page: "geavanceerd",
+    anchor: "services",
+    name: "Services en MCP",
+    detail: "Zie of de achtergrondservices en MCP-servers draaien.",
+    keywords:
+      "workers containers broker verbinding services mcp server status herstarten stack",
+  },
+  {
+    id: "modelexpert",
+    page: "geavanceerd",
+    anchor: "modellen-expert",
+    name: "Modellen en accounts (expert)",
+    detail: "Accounts, routes, metingen, native gateway en gratis-beleid.",
+    keywords:
+      "provider account route combo model gateway limieten omniroute sleutel native beleid metingen rollen model per taak",
+  },
+  {
+    id: "windowsagent",
+    page: "geavanceerd",
+    anchor: "windows-agent",
+    name: "Windows-agent en helper",
+    detail: "Status, sneltoetsen en geschiedenis van de Windows-agent.",
+    keywords: "windows agent helper sneltoets hotkey versie debug",
+  },
+  {
+    id: "tools",
+    page: "geavanceerd",
+    anchor: "gereedschappen",
+    name: "Alle gereedschappen",
+    detail: "Elk gereedschap met risico, beschrijving en gebruik.",
+    keywords: "tools gereedschappen risico gebruik beschrijving",
+  },
+  {
+    id: "skills",
+    page: "geavanceerd",
+    anchor: "vaardigheden",
+    name: "Eigen vaardigheden",
+    detail: "Leer NOVA zelf bedachte instructies en koppelingen.",
+    keywords: "skill vaardigheid webhook testen geschiedenis instructies",
+  },
+  {
+    id: "code",
+    page: "geavanceerd",
+    anchor: "codeprojecten",
+    name: "Codeprojecten",
+    detail: "Maak een project aan en kies welk project actief is.",
+    keywords: "code werkruimte workspace projecten aanmaken openen",
+  },
+  {
+    id: "sidebar",
+    page: "geavanceerd",
+    anchor: "zijbalk",
+    name: "Zijbalk en panelen",
+    detail: "Kies welke informatiepanelen je ziet en waar.",
+    keywords: "sidebar zijbalk panelen widgets notitie",
+  },
+  {
+    id: "updates",
+    page: "geavanceerd",
+    anchor: "updates",
+    name: "Updates",
+    detail: "Welke versie draait er en is er een nieuwe?",
+    keywords: "updates versie bijwerken release",
+  },
+  {
+    id: "audit",
+    page: "geavanceerd",
+    anchor: "actielog",
+    name: "Actielog",
+    detail: "Alles wat NOVA heeft gedaan, voor controle.",
+    keywords: "audit logs actielog geschiedenis controle",
+  },
+  {
+    id: "setup",
+    page: "geavanceerd",
+    anchor: "installatie",
+    name: "Installatie opnieuw doorlopen",
+    detail: "Loop de installatiestappen nog eens langs.",
+    keywords: "installatie starten instellen onboarding aan de slag",
   },
 ] as const;
 
-export type SettingsSection = (typeof SECTIONS)[number]["id"];
+export type SettingsTopic = (typeof TOPICS)[number]["id"];
+export type Topic = (typeof TOPICS)[number];
 
-export const GROUP_OF: Record<SettingsSection, SettingsGroup> =
-  Object.fromEntries(
-    GROUPS.flatMap((group) => group.parts.map((part) => [part, group.id])),
-  ) as Record<SettingsSection, SettingsGroup>;
+/** Old section ids that no longer have a page of their own. */
+const LEGACY: Record<string, { page: SettingsPage; anchor: string | null }> = {
+  system: { page: "geavanceerd", anchor: "updates" },
+  behavior: { page: "gesprek", anchor: "persoonlijkheid" },
+  more: { page: "geavanceerd", anchor: "updates" },
+  // Old group ids from the first redesign.
+  algemeen: { page: "gesprek", anchor: null },
+  stem: { page: "gesprek", anchor: null },
+  ai: { page: "modellen", anchor: null },
+  automatisering: { page: "zelf", anchor: null },
+  beheer: { page: "geavanceerd", anchor: null },
+};
 
-export function sectionInfo(id: SettingsSection) {
-  return SECTIONS.find((section) => section.id === id)!;
+/** Histories and logs that moved: an old `#hash` decides the page. */
+const HASH_HOME: Record<string, SettingsPage> = {
+  ...Object.fromEntries(
+    TOPICS.filter((topic) => topic.anchor).map((topic) => [
+      topic.anchor as string,
+      topic.page,
+    ]),
+  ),
+  "modellen-expert": "geavanceerd",
+  "sidebar-history": "geavanceerd",
+  "tool-switch-history": "geavanceerd",
+  "model-role-history-title": "geavanceerd",
+  modelrollen: "geavanceerd",
+  actielog: "geavanceerd",
+  "persona-history": "gesprek",
+  "persona-preferences-history": "gesprek",
+  "quick-actions-history": "gesprek",
+};
+
+export interface SettingsTarget {
+  page: SettingsPage;
+  anchor: string | null;
 }
 
-export function groupInfo(id: SettingsGroup) {
-  return GROUPS.find((group) => group.id === id)!;
+export function isPage(value: string | null): value is SettingsPage {
+  return PAGES.some((page) => page.id === value);
 }
 
-export function settingsSection(value: string | null): SettingsSection {
-  const legacy: Record<string, SettingsSection> = {
-    behavior: "personality",
-    sidebar: "general",
-    more: "system",
-  };
-  const id = value ? (legacy[value] ?? value) : "general";
-  const group = GROUPS.find((item) => item.id === id);
-  if (group) return group.parts[0];
-  return SECTIONS.find((section) => section.id === id)?.id ?? "general";
+/**
+ * Any old or new `?section=` value (and optional `#hash`) to the page that
+ * holds it. A hash that already names an anchor is kept by the caller.
+ */
+export function resolveSettingsTarget(
+  value: string | null,
+  hash = "",
+): SettingsTarget {
+  const wanted = hash.replace(/^#/, "");
+  const home = wanted ? HASH_HOME[wanted] : undefined;
+  if (isPage(value)) return { page: value, anchor: null };
+  if (home) return { page: home, anchor: wanted };
+  if (value && LEGACY[value]) return LEGACY[value];
+  const topic = TOPICS.find((item) => item.id === value);
+  if (topic) return { page: topic.page, anchor: topic.anchor };
+  return { page: "gesprek", anchor: null };
+}
+
+export function settingsSection(value: string | null): SettingsPage {
+  return resolveSettingsTarget(value).page;
+}
+
+export function pageInfo(id: SettingsPage) {
+  return PAGES.find((page) => page.id === id)!;
+}
+
+export function topicHref(topic: {
+  page: string;
+  anchor: string | null;
+}): string {
+  return `/settings?section=${topic.page}${topic.anchor ? `#${topic.anchor}` : ""}`;
 }
 
 export function searchSettings(query: string) {
@@ -232,12 +374,11 @@ export function searchSettings(query: string) {
     .split(/\s+/)
     .filter(Boolean);
   const lower = (text: string) => text.toLocaleLowerCase("nl-NL");
-  const rank = (section: (typeof SECTIONS)[number]) =>
-    words.every((word) => lower(section.name).includes(word)) ? 0 : 1;
-  return SECTIONS.filter((section) => {
-    const group = groupInfo(GROUP_OF[section.id]);
+  const rank = (topic: Topic) =>
+    words.every((word) => lower(topic.name).includes(word)) ? 0 : 1;
+  return TOPICS.filter((topic) => {
     const text = lower(
-      `${section.name} ${section.detail} ${section.keywords} ${group.name}`,
+      `${topic.name} ${topic.detail} ${topic.keywords} ${pageInfo(topic.page).name}`,
     );
     return words.every((word) => text.includes(word));
   }).sort((a, b) => rank(a) - rank(b));

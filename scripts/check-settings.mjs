@@ -8,21 +8,13 @@ const base = process.env.NOVA_SETTINGS_TEST_URL ?? "https://localhost:5173";
 const screenshots = path.resolve("docs/img");
 fs.mkdirSync(screenshots, { recursive: true });
 const sections = [
-  "setup",
-  "general",
-  "voice",
-  "personality",
-  "models",
-  "code",
-  "abilities",
-  "skills",
-  "automation",
-  "connections",
-  "services",
-  "devices",
-  "memory",
-  "safety",
-  "system",
+  "gesprek",
+  "huis",
+  "telefoon",
+  "modellen",
+  "zelf",
+  "geheugen",
+  "geavanceerd",
 ];
 const overview = {
   persona: "Spreek kort en duidelijk.",
@@ -245,11 +237,13 @@ const browser = await chromium.launch({
   args: ["--no-sandbox"],
 });
 try {
+  // NOVA_SETTINGS_WIDTHS=1280 runs a single viewport while iterating locally.
+  const only = process.env.NOVA_SETTINGS_WIDTHS?.split(",").map(Number);
   for (const [width, scale] of [
     [1280, 1],
     [1280, 2],
     [390, 1],
-  ]) {
+  ].filter(([w]) => !only || only.includes(w))) {
     overview.widgets = structuredClone(initialOverviewWidgets);
     overview.sidebar = structuredClone(initialOverviewSidebar);
     overview.skills[0] = {
@@ -268,6 +262,13 @@ try {
     await page.clock.install();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    if (process.env.NOVA_SETTINGS_DEBUG)
+      page.on(
+        "console",
+        (m) =>
+          m.type() === "error" &&
+          console.error("CONSOLE", m.text().slice(0, 500)),
+      );
     let pinned = false;
     const services = structuredClone(initialServices);
     let tested = false;
@@ -574,6 +575,70 @@ try {
       )
         helperAgentWrites++;
       let data = {};
+      // Pages that only had to render, not be exercised, in this script.
+      if (request.method() === "GET") {
+        if (endpoint === "/settings/conversation")
+          data = {
+            settings: {
+              version: 1,
+              enabled: false,
+              language: "nl",
+              greeting: "Hallo, met Nova.",
+              idleSeconds: 20,
+              maxMinutes: 15,
+            },
+            status: {
+              enabled: false,
+              listening: false,
+              port: 4000,
+              dialTarget: "700",
+              speechToText: {
+                ready: true,
+                problem: null,
+                model: "m",
+                mode: "x",
+              },
+              active: null,
+              calls: 0,
+            },
+          };
+        else if (endpoint === "/telephony/status")
+          data = {
+            enabled: true,
+            connected: true,
+            version: "22.0",
+            error: null,
+            publicHostSet: true,
+            extensions: [],
+            trunk: { configured: false },
+            ringExtensions: [],
+            contacts: [],
+            allowInternalCallsWithoutConfirmation: false,
+            voice: "edge",
+            activeCalls: 0,
+            rtpRange: "10000-10100",
+            novaExtension: "700",
+            doorbellExtension: "710",
+            events: [],
+          };
+        else if (endpoint === "/settings/desktop")
+          data = {
+            configured: false,
+            settings: {
+              viewEnabled: false,
+              controlEnabled: false,
+              cacheEnabled: true,
+            },
+            session: null,
+            disarmPending: false,
+            audit: [],
+          };
+        else if (endpoint === "/autonomy/tasks") data = { tasks: [] };
+        else if (endpoint === "/settings/autonomy-level")
+          data = { level: "balanced" };
+        else if (endpoint === "/agent/runs") data = { runs: [] };
+        else if (endpoint === "/objectives") data = { objectives: [] };
+      }
       if (endpoint === "/node-red-editor/") {
         assert.equal(request.method(), "GET");
         assert.equal(url.origin, new URL(base).origin);
@@ -3828,7 +3893,7 @@ try {
         };
       await route.fulfill({ json: data });
     });
-    await page.goto(`${base}/settings?section=general`);
+    await page.goto(`${base}/settings?section=general#zijbalk`);
     await page
       .locator("#settingsSearch")
       .waitFor()
@@ -3917,14 +3982,22 @@ try {
     await page.locator("#settingsSearch").fill("model");
     assert((await page.locator(".settings-results a").count()) >= 1);
     await page.locator("#settingsSearch").press("Enter");
-    await page.waitForURL("**/settings?section=models");
-    assert.equal(
-      accountsReads,
-      0,
-      "Opening models must not fetch account metadata",
+    await page.waitForURL("**/settings?section=modellen");
+    await page
+      .getByText("NOVA staat geblokkeerd", { exact: false })
+      .or(page.getByText("NOVA kan nu antwoorden", { exact: false }))
+      .first()
+      .waitFor();
+    assert(
+      accountsReads <= 1,
+      "The guided models page lists the connected services once",
     );
+    accountsReads = 0;
     assert.equal(policyReads, 0, "Opening models must not load policy options");
     assert.equal(policyWrites, 0);
+    // The expert tools for models live in one collapsed group on Geavanceerd.
+    await page.goto(`${base}/settings?section=geavanceerd#modellen-expert`);
+    await page.locator("details#modellen-expert[open]").waitFor();
     const conversationRole = page.getByRole("group", { name: "Gesprek" });
     await conversationRole
       .getByLabel("free/provider-a", { exact: true })
@@ -3947,6 +4020,52 @@ try {
         .isChecked(),
       false,
     );
+    // Adding a service is a guided three-step flow on the Slimme modellen page.
+    await page.goto(`${base}/settings?section=modellen`);
+    await page
+      .getByRole("button", { name: "Gratis dienst toevoegen", exact: true })
+      .click();
+    const accountCreator = page.getByRole("region", {
+      name: "Provideraccount toevoegen",
+    });
+    assert.equal(
+      await accountCreator.getByRole("heading", { level: 4 }).count(),
+      3,
+      "three numbered steps",
+    );
+    await accountCreator
+      .getByLabel("Bij welke dienst?")
+      .selectOption({ label: "Een andere dienst" });
+    await accountCreator.getByLabel("Provider-ID").fill("mistral");
+    await accountCreator.getByLabel("Accountnaam").fill("Mijn Mistral");
+    await accountCreator
+      .getByLabel("API-sleutel")
+      .fill("provider-key-test-secret");
+    await accountCreator
+      .getByRole("button", { name: "Controleren en voorbereiden" })
+      .click();
+    await accountCreator.getByText(/Toe te voegen: Mijn Mistral/).waitFor();
+    assert.equal(await accountCreator.getByLabel("API-sleutel").count(), 0);
+    assert.doesNotMatch(
+      await accountCreator.innerText(),
+      /provider-key-test-secret/,
+    );
+    const accountCreateConfirm = accountCreator.getByRole("button", {
+      name: "Dienst toevoegen",
+      exact: true,
+    });
+    assert.equal(await accountCreateConfirm.isDisabled(), true);
+    await accountCreator.getByRole("checkbox").check();
+    await accountCreateConfirm.click();
+    await page.getByText(/Mijn Mistral is toegevoegd/).waitFor();
+    assert.equal(accountCreateWrites, 1);
+    assert.doesNotMatch(
+      await page.locator("main").innerText(),
+      /provider-key-test-secret/,
+    );
+    accountsReads = 0;
+    await page.goto(`${base}/settings?section=geavanceerd#modellen-expert`);
+    await page.locator("details#modellen-expert[open]").waitFor();
     await page
       .getByRole("button", { name: "Accounts en catalogus laden", exact: true })
       .click();
@@ -3991,37 +4110,6 @@ try {
       .waitFor();
     assert.equal(apiKeyInventoryReads, 1);
     assert.doesNotMatch(await accounts.innerText(), /private-fixture-secret/);
-    const accountCreator = accounts.getByRole("region", {
-      name: "Provideraccount toevoegen",
-    });
-    await accountCreator.getByLabel("Provider-ID").fill("mistral");
-    await accountCreator.getByLabel("Accountnaam").fill("Mijn Mistral");
-    await accountCreator
-      .getByLabel("API-sleutel")
-      .fill("provider-key-test-secret");
-    await accountCreator
-      .getByRole("button", { name: "Controleren en voorbereiden" })
-      .click();
-    await accountCreator.getByText(/Toe te voegen: Mijn Mistral/).waitFor();
-    assert.equal(await accountCreator.getByLabel("API-sleutel").count(), 0);
-    assert.doesNotMatch(
-      await accountCreator.innerText(),
-      /provider-key-test-secret/,
-    );
-    const accountCreateConfirm = accountCreator.getByRole("button", {
-      name: "Account toevoegen",
-      exact: true,
-    });
-    assert.equal(await accountCreateConfirm.isDisabled(), true);
-    await accountCreator.getByRole("checkbox").check();
-    await accountCreateConfirm.click();
-    await accounts
-      .getByText(
-        /Provideraccount Mijn Mistral toegevoegd en gecontroleerd; de gratis route blijft geverifieerd/,
-      )
-      .waitFor();
-    assert.equal(accountCreateWrites, 1);
-    assert.doesNotMatch(await accounts.innerText(), /provider-key-test-secret/);
     const accountKeyUpdater = accounts.getByRole("region", {
       name: "API-sleutel vervangen",
     });
@@ -4544,20 +4632,18 @@ try {
     assert.equal(accountWrites, 1);
     assert.match(await accounts.innerText(), /AI blijft geblokkeerd/);
 
-    const policy = page.getByRole("region", { name: "Gratis beleid maken" });
+    await page.goto(`${base}/settings?section=modellen`);
     assert.equal(policyReads, 0);
-    await policy
-      .getByRole("button", {
-        name: "Keuzes voor gratis beleid laden",
-        exact: true,
-      })
+    await page
+      .getByRole("button", { name: "Gratis diensten bevestigen", exact: true })
       .click();
+    const policy = page.getByRole("region", { name: "Gratis beleid maken" });
     await policy
-      .getByRole("combobox", { name: "Account", exact: true })
+      .getByRole("combobox", { name: "Dienst", exact: true })
       .waitFor();
     assert.equal(policyReads, 1);
     await policy
-      .getByRole("combobox", { name: "Account", exact: true })
+      .getByRole("combobox", { name: "Dienst", exact: true })
       .selectOption(policyAccountId);
     const policyModel = policy.getByRole("combobox", {
       name: "Model",
@@ -4576,7 +4662,7 @@ try {
     );
     await policy
       .getByRole("textbox", {
-        name: "Officiële bron voor gratis account en harde limiet",
+        name: "Webpagina van de aanbieder waar staat dat dit gratis is",
         exact: true,
       })
       .fill("https://groq.example/free-account-terms");
@@ -4585,7 +4671,7 @@ try {
     for (let index = 0; index < 5; index++)
       await selectionAcknowledgements.nth(index).check();
     await policy
-      .getByRole("button", { name: "Model toevoegen aan beleid", exact: true })
+      .getByRole("button", { name: "Model toevoegen", exact: true })
       .click();
     await policy
       .getByRole("button", { name: "Verwijder keuze 1", exact: true })
@@ -4611,13 +4697,13 @@ try {
         "Removing a model must reset every account attestation",
       );
     await policy
-      .getByRole("button", { name: "Model toevoegen aan beleid", exact: true })
+      .getByRole("button", { name: "Model toevoegen", exact: true })
       .click();
     await policy
       .getByRole("button", { name: "Verwijder keuze 1", exact: true })
       .waitFor();
     const preparePolicy = policy.getByRole("button", {
-      name: "Gratis beleid voorbereiden",
+      name: "Controleren en voorbereiden",
       exact: true,
     });
     const prepareChosenPolicy = async () => {
@@ -4632,7 +4718,7 @@ try {
       await preparePolicy.click();
       await policy
         .getByRole("heading", {
-          name: "Beleidswijziging bevestigen",
+          name: "Nog één keer bevestigen",
           exact: true,
         })
         .waitFor();
@@ -4643,14 +4729,14 @@ try {
       );
       assert.equal(
         await policy
-          .getByRole("combobox", { name: "Account", exact: true })
+          .getByRole("combobox", { name: "Dienst", exact: true })
           .isDisabled(),
         true,
       );
       assert.equal(
         await policy
           .getByRole("button", {
-            name: "Keuzes voor gratis beleid laden",
+            name: "Mijn diensten laden",
             exact: true,
           })
           .isDisabled(),
@@ -4665,24 +4751,24 @@ try {
       ),
     });
     const cancelPolicy = policy.getByRole("button", {
-      name: "Annuleer gratis beleid",
+      name: "Annuleren",
       exact: true,
     });
     await cancelPolicy.click();
     await policy
       .getByRole("status")
-      .filter({ hasText: "Beleidswijziging geannuleerd." })
+      .filter({ hasText: "Geannuleerd." })
       .waitFor();
     assert.equal(policyWrites, 0);
     await prepareChosenPolicy();
     await page.clock.fastForward(60001);
     const confirmPolicy = policy.getByRole("button", {
-      name: "Bevestig gratis beleid",
+      name: "Ja, dit zijn gratis diensten",
       exact: true,
     });
     assert.equal(await confirmPolicy.isDisabled(), true);
     await policy
-      .getByText("Toestemming verlopen. Annuleer en bereid opnieuw voor.", {
+      .getByText("Te lang gewacht. Annuleer en begin opnieuw.", {
         exact: true,
       })
       .waitFor();
@@ -4690,7 +4776,7 @@ try {
     await cancelPolicy.click();
     await policy
       .getByRole("heading", {
-        name: "Beleidswijziging bevestigen",
+        name: "Nog één keer bevestigen",
         exact: true,
       })
       .waitFor({ state: "detached" });
@@ -4698,13 +4784,12 @@ try {
     await confirmPolicy.click();
     await policy
       .getByRole("status")
-      .filter({ hasText: "native quota is niet geverifieerd." })
+      .filter({
+        hasText: "Gelukt. NOVA kan weer antwoorden via je gratis diensten.",
+      })
       .waitFor();
     assert.equal(policyWrites, 1);
-    assert.match(
-      await policy.innerText(),
-      /Facturering en harde limiet zijn door jou bevestigd/,
-    );
+    assert.match(await policy.innerText(), /Gelukt\. NOVA kan weer antwoorden/);
     assert.doesNotMatch(
       await policy.innerText(),
       /De gratis route blijft geblokkeerd/,
@@ -4723,6 +4808,8 @@ try {
       .getByText(/Terugzetten is geblokkeerd totdat OmniRoute sleutelrechten/)
       .waitFor();
     assert.equal(policyHistoryReads, 1);
+    await page.goto(`${base}/settings?section=geavanceerd#modellen-expert`);
+    await page.locator("details#modellen-expert[open]").waitFor();
 
     await page
       .getByRole("button", { name: "OmniRoute-overzicht laden", exact: true })
@@ -5260,7 +5347,13 @@ try {
     await page.locator("#settingsSearch").fill("");
     let documentScrollTested = false;
     for (const section of sections) {
-      await clickSection(page, section);
+      await clickSection(page, section).catch(async (error) => {
+        console.error(
+          page.url(),
+          (await page.locator("body").innerText()).slice(0, 600),
+        );
+        throw error;
+      });
       await page.waitForURL(`**/settings?section=${section}`);
       assert(await page.locator(".settings-content h1").isVisible());
       const scroll = await page.evaluate(() => ({
@@ -5641,7 +5734,7 @@ try {
         `settings-skill-versions-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
-    await clickSection(page, "abilities");
+    await clickSection(page, "tools");
     const usage = page.getByRole("region", {
       name: "Gebruik van gereedschappen",
       exact: true,
@@ -5653,7 +5746,7 @@ try {
     await clickSection(page, "safety");
     await page
       .getByRole("heading", {
-        name: "Altijd goedgekeurde handelingen",
+        name: "Blijvende toestemmingen",
         exact: true,
       })
       .waitFor();
@@ -5662,9 +5755,9 @@ try {
       .waitFor();
     assert.match(
       await page.locator(".settings-content").innerText(),
-      /Risicovolle handelingen blijven bevestiging vragen/,
+      /Risicovolle handelingen blijven\s+sowieso om bevestiging vragen/,
     );
-    await clickSection(page, "abilities");
+    await clickSection(page, "tools");
     await usage
       .getByRole("button", { name: "Gebruiksstatistieken laden", exact: true })
       .click();
@@ -5793,6 +5886,7 @@ try {
         `settings-system-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
+    await clickSection(page, "backup");
     const backupFile = page.getByLabel("Back-upbestand", { exact: true });
     await page.getByText(/Node-RED-flowlogica/).waitFor();
     const helperWritesBeforeImport = helperAgentWrites;
@@ -6012,9 +6106,9 @@ try {
       undefined,
     );
     await page.evaluate(() => globalThis.restoreBackupFileText());
-    await page.goto(`${base}/settings?section=devices`);
+    await page.goto(`${base}/settings?section=geavanceerd#windows-agent`);
     await page.getByText("2026-10-10.fixture", { exact: true }).waitFor();
-    const helperDebugPanel = page.locator("details").filter({
+    const helperDebugPanel = page.locator("details:not(:has(details))").filter({
       has: page.locator("summary", { hasText: "Helpervenster meten" }),
     });
     assert.equal(
@@ -6044,11 +6138,13 @@ try {
       .getByText("Sneltoetsen opgeslagen op de Windows-pc.", { exact: true })
       .waitFor();
     assert.equal(hotkeys.open, "Ctrl+Alt+J");
-    const hotkeyHistoryPanel = page.locator("details").filter({
-      has: page.locator("summary", {
-        hasText: "Wijzigingsgeschiedenis sneltoetsen",
-      }),
-    });
+    const hotkeyHistoryPanel = page
+      .locator("details:not(:has(details))")
+      .filter({
+        has: page.locator("summary", {
+          hasText: "Wijzigingsgeschiedenis sneltoetsen",
+        }),
+      });
     await hotkeyHistoryPanel.locator("summary").click();
     assert.equal(hotkeyHistoryReads, 0);
     await hotkeyHistoryPanel
@@ -6076,6 +6172,8 @@ try {
         `settings-devices-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
+    // The helper and wallpaper choices (and their history) are on Slimme huis.
+    await page.goto(`${base}/settings?section=huis`);
     assert.equal(helperModeHistoryReads, 0);
     const helperHistoryPanel = page.getByRole("region", {
       name: "Helpergeschiedenis",
@@ -6105,7 +6203,7 @@ try {
       .click();
     await wallpaperHistoryPanel.locator("ol li").waitFor();
     assert.equal(wallpaperHistoryWrites, 1);
-    await page.goto(`${base}/settings?section=connections`);
+    await page.goto(`${base}/settings?section=geavanceerd#koppelingen`);
     await page.getByRole("button", { name: "Doelen laden" }).click();
     await page.getByText(/guest-one/).waitFor();
     await page.getByText(/tunnel/).waitFor();
@@ -6275,7 +6373,7 @@ try {
       await logbook
         .getByRole("link", { name: "Open flow", exact: true })
         .getAttribute("href"),
-      "/settings?section=connections&nodeRedFlow=tab-home#node-red-flows",
+      "/settings?section=geavanceerd&nodeRedFlow=tab-home#node-red-flows",
     );
     const logWindow = logbook.getByRole("region", {
       name: "Recente Node-RED-logregels",
@@ -6464,7 +6562,7 @@ try {
       .waitFor();
     assert.equal(nodeRedFlowReads, 5);
     await page.goto(
-      `${base}/settings?section=connections&nodeRedFlow=tab-home`,
+      `${base}/settings?section=geavanceerd&nodeRedFlow=tab-home#node-red-flows`,
     );
     await page.locator("#node-red-failed-flow").waitFor();
     assert.equal(
@@ -6472,7 +6570,7 @@ try {
       6,
       "a flow error link loads and highlights its flow",
     );
-    await page.goto(`${base}/settings?section=connections`);
+    await page.goto(`${base}/settings?section=geavanceerd#koppelingen`);
     await page.getByRole("button", { name: "Doelen laden" }).waitFor();
     const mqtt = page
       .locator(".connection-editor")
@@ -6536,6 +6634,8 @@ try {
         `settings-qdrant-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
+    // Home Assistant is the one everyday connection, on Slimme huis.
+    await page.goto(`${base}/settings?section=huis#home-assistant`);
     const connection = page
       .locator(".connection-editor")
       .filter({ has: page.locator("summary", { hasText: "Home Assistant" }) });
@@ -6600,13 +6700,17 @@ try {
     await page.reload();
     await page
       .getByText("Gecontroleerd herstarten is uitgeschakeld.")
+      .first()
       .waitFor();
-    await page.getByRole("button", { name: "Herstart NOVA" }).waitFor({
+    await page.getByRole("button", { name: "Herstart NOVA" }).first().waitFor({
       state: "detached",
     });
     await page.goto(`${base}/settings?section=personality`);
     await page.locator("#behaviorText").fill("Wees warm en duidelijk.");
-    await page.getByRole("button", { name: "Opslaan", exact: true }).click();
+    await page
+      .locator("#persoonlijkheid")
+      .getByRole("button", { name: "Opslaan", exact: true })
+      .click();
     await page.getByText("De eigen regels zijn opgeslagen.").waitFor();
     assert.equal(persona, "Wees warm en duidelijk.");
     await page.getByRole("button", { name: "Grappig" }).click();
@@ -6708,7 +6812,7 @@ try {
         `settings-personality-${width === 390 ? "mobile" : `${scale}x`}.png`,
       ),
     });
-    await clickSection(page, "devices");
+    await clickSection(page, "windowsagent");
     const helperHistory = page.getByRole("region", {
       name: "Helper wijzigingsgeschiedenis",
     });
@@ -6735,7 +6839,7 @@ try {
       .waitFor();
     assert.equal(helperPreferenceHistoryReads, 2);
     assert.equal(helperPreferenceHistoryWrites, 1);
-    await clickSection(page, "abilities");
+    await clickSection(page, "tools");
     const toolHistory = page.getByRole("region", {
       name: "Gereedschap wijzigingsgeschiedenis",
     });
@@ -6762,7 +6866,7 @@ try {
       .waitFor();
     assert.equal(toolSwitchHistoryReads, 2);
     assert.equal(toolSwitchHistoryWrites, 1);
-    await clickSection(page, "general");
+    await clickSection(page, "sidebar");
     const sidebarHistory = page.getByRole("region", {
       name: "Zijbalk wijzigingsgeschiedenis",
     });
@@ -6817,8 +6921,8 @@ try {
     await context.close();
   }
   {
-    // The real default: nothing expert is open, history is one closed disclosure, and
-    // seven groups (not 21 sections) are in the navigation.
+    // The real default: every expert group is closed and loads nothing, six
+    // everyday pages plus Geavanceerd are in the navigation, old links resolve.
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
       viewport: { width: 1280, height: 900 },
@@ -6832,24 +6936,64 @@ try {
             : {},
       }),
     );
-    await page.goto(`${base}/settings?section=abilities`);
+    await page.goto(`${base}/settings?section=geavanceerd`);
     await page.locator(".settings-content h1").waitFor();
+    // Six everyday pages plus the set-apart expert page.
     assert.equal(await page.locator(".settings-groups a").count(), 7);
-    const open = await page.locator("details.ds-disclosure[open]").count();
-    assert.equal(open, 0, "Geavanceerd and history start closed");
-    assert(
+    assert.equal(
       await page
-        .getByText("Wijzigingsgeschiedenis", { exact: true })
-        .isVisible(),
+        .locator(".settings-groups a:not(.settings-expert-link)")
+        .count(),
+      6,
+    );
+    await page
+      .getByText("Alleen voor als je weet wat je doet.")
+      .first()
+      .waitFor();
+    const groups = await page.locator("details.ds-disclosure.advanced").count();
+    assert(groups >= 10, "the expert page holds collapsed groups");
+    assert.equal(
+      await page.locator("details.ds-disclosure[open]").count(),
+      0,
+      "Every expert group starts closed",
+    );
+    assert.equal(
+      await page.locator("details#actielog .ds-disclosure-body *").count(),
+      0,
+      "A closed expert group has not loaded anything",
     );
     await page.goto(`${base}/settings?section=system#actielog`);
     await page.waitForFunction(
       () => document.querySelector("#actielog")?.open === true,
     );
+    assert.match(page.url(), /section=geavanceerd#actielog/);
+    // Old links keep working and land on the page that holds the setting now.
+    const legacy = {
+      voice: ["gesprek", "stem"],
+      models: ["modellen", ""],
+      connections: ["huis", "home-assistant"],
+      telephony: ["telefoon", ""],
+      safety: ["zelf", "toestemmingen"],
+      documents: ["geheugen", "documenten"],
+      system: ["geavanceerd", "updates"],
+      services: ["geavanceerd", "services"],
+    };
+    for (const [old, [target, anchor]] of Object.entries(legacy)) {
+      await page.goto(`${base}/settings?section=${old}`);
+      await page.waitForURL(
+        new RegExp(`section=${target}${anchor ? `#${anchor}` : "$"}`),
+      );
+    }
+    // Search finds expert items too and points at the right page.
+    await page.locator("#settingsSearch").fill("mcp");
+    assert.match(
+      await page.locator(".settings-results a").first().innerText(),
+      /Services en MCP/,
+    );
     await context.close();
   }
   console.log(
-    "Settings browser checks passed: seven-group navigation with closed Geavanceerd/history by default and deep links that open them, explicit same-origin Node-RED editor grant/open/renew without iframe remount/close/revoke, safe grant failure and pending-open cancellation, on-demand Node-RED logs with scrolling, clear, current-flow links, empty state and failed-refresh cleanup, pinned palette install/cancel/upgrade with exact-version confirmation, pending restart and active readback, and legacy warnings, all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP and GitHub secret entry with cleared secret fields and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
+    "Settings browser checks passed: six task pages plus a set-apart Geavanceerd page with closed lazy groups, old deep links resolved to the new pages, guided Slimme modellen page (status sentence, three-step add flow, free-service confirmation), and deep links that open groups, explicit same-origin Node-RED editor grant/open/renew without iframe remount/close/revoke, safe grant failure and pending-open cancellation, on-demand Node-RED logs with scrolling, clear, current-flow links, empty state and failed-refresh cleanup, pinned palette install/cancel/upgrade with exact-version confirmation, pending restart and active readback, and legacy warnings, all sections, search/keyboard/deep links, mobile, save, memory-only PIN expiry/lock, model metrics and explicit release checks, Windows shortcuts, native gateway skills and on-demand native memory record editing, single deletion and selected bulk deletion with cancellation, note text rollback and unchanged-note creation undo, value-widget history rollback, persona style/profile history rollback, instruction skill update and creation history, prompt and client-wide memory controls, confirmed native modes and NOVA-skill removal, global prompt replacement, private account/catalog inventory, cached quota display and API-key rights without secret exposure, confirmed account activation and status-history rollback, account deletion/creation and key replacement with secret privacy and client-wide impact acknowledgement, API-key activation with NOVA-owner protection, impact acknowledgement, status-history rollback and warning display, scoped combo creation and update, globally scoped combo activation and history rollback, confirmed combo deletion, PIN-protected Qdrant archive maintenance, explicit free-policy options and acknowledged/cancelled/expired/confirmed policy changes with honest quota evidence, bounded backup parsing and reviewed/cancelled/expired/confirmed imports with provider-account exclusion and Node-RED credential omission, explicit helper/tool/sidebar settings history and rollback, confirmed container restart flow with DANGEROUS confirmation, MCP catalog add/remove with disabled-by-default and fresh confirmation, CalDAV/IMAP and GitHub secret entry with cleared secret fields and secret-free status, MCP server activity, per-tool risk change and history rollback, server disable and history rollback with privacy filtering, source/name filters and unused tools.",
   );
 } finally {
   await browser.close();
