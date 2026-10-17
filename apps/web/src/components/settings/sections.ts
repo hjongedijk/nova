@@ -41,7 +41,7 @@ export const GROUPS = [
     id: "automatisering",
     name: "Automatisering",
     purpose: "Taken en routines die NOVA zelf uitvoert.",
-    parts: ["autonomy", "automation"],
+    parts: ["autonomy", "objectives", "automation"],
   },
   {
     id: "beheer",
@@ -154,6 +154,14 @@ export const SECTIONS = [
       "autonoom taak automatisering gebeurtenis node-red goedkeuren plannen herhalend",
   },
   {
+    id: "objectives",
+    name: "Doelen",
+    detail:
+      "Dingen die NOVA blijft controleren en alleen meldt als er iets afwijkt.",
+    keywords:
+      "doel doelen monitoren in de gaten houden bewaken controle afwijking storing valse alarm servers stille uren pauzeren hervatten",
+  },
+  {
     id: "telephony",
     name: "Telefoon",
     detail: "Eigen telefooncentrale met Linphone-toestellen en deurbel.",
@@ -163,8 +171,9 @@ export const SECTIONS = [
   {
     id: "memory",
     name: "Geheugen en privacy",
-    detail: "Bekijk wat NOVA onthoudt en verwijder het als je wilt.",
-    keywords: "onthouden vergeten persoonsgegevens privacy herinneringen",
+    detail: "Zoek in wat NOVA onthoudt, corrigeer het of laat het vergeten.",
+    keywords:
+      "geheugen onthouden vergeten corrigeren persoonsgegevens privacy herinneringen feit voorkeur besluit aanname episode project eerdere versies gevoelig",
   },
   {
     id: "documents",

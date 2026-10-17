@@ -14,7 +14,10 @@
     data,
     say,
     reload,
+    formOnly = false,
   }: {
+    /** Only the "Onthouden" form: the settings page lists memories itself. */
+    formOnly?: boolean;
     data: MemoryListResponse;
     say: (text: string) => void;
     reload: () => Promise<void>;
@@ -27,6 +30,8 @@
   let type = $state("USER_FACT");
   let relatedEntity = $state("");
   let saving = $state(false);
+
+  const shown = $derived(formOnly ? [] : (data.memories ?? []));
 
   const memoryTypes = [
     { value: "USER_FACT", label: "Feit" },
@@ -81,7 +86,7 @@
   }
 </script>
 
-{#each data.memories ?? [] as item (item.id)}
+{#each shown as item (item.id)}
   <section class="admin-row">
     <strong>{labels[item.type ?? ""] ?? item.type ?? "Feit"}</strong>
     {#if item.related_entity}<small>Bij: {item.related_entity}</small>{/if}
@@ -95,7 +100,7 @@
     {/if}
   </section>
 {/each}
-{#if !data.memories?.length && !data.unavailable}
+{#if !formOnly && !data.memories?.length && !data.unavailable}
   <section class="admin-row">
     <strong>Geheugen</strong>
     <p>Nog geen duurzame herinneringen opgeslagen.</p>

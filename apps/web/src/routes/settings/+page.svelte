@@ -21,6 +21,8 @@
   import DesktopSection from "#components/settings/DesktopSection.svelte";
   import ConversationSection from "#components/settings/ConversationSection.svelte";
   import AutonomySection from "#components/settings/AutonomySection.svelte";
+  import ObjectivesSection from "#components/settings/ObjectivesSection.svelte";
+  import MemorySection from "#components/settings/MemorySection.svelte";
   import WindowsAgentPanel from "#components/settings/WindowsAgentPanel.svelte";
   import AbilitiesTab from "#components/settings/AbilitiesTab.svelte";
   import SkillsTab from "#components/settings/SkillsTab.svelte";
@@ -345,8 +347,8 @@
           {:else if section === "conversation"}<ConversationSection />
           {:else if section === "autonomy"}<AutonomySection />
           {:else if section === "telephony"}<TelephonySection />
-          {:else if section === "memory"}
-            <AdminDialog embedded initialView="memories" />
+          {:else if section === "objectives"}<ObjectivesSection />
+          {:else if section === "memory"}<MemorySection />
           {:else if section === "documents"}<DocumentsLibrary />
           {:else if section === "safety"}<BehaviorTab part="approvals" />
           {:else if section === "system"}

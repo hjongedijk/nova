@@ -23,7 +23,12 @@
   let {
     embedded = false,
     initialView = "integrations",
-  }: { embedded?: boolean; initialView?: View } = $props();
+    memoriesFormOnly = false,
+  }: {
+    embedded?: boolean;
+    initialView?: View;
+    memoriesFormOnly?: boolean;
+  } = $props();
   const VIEWS: [View, string][] = [
     ["integrations", "Integraties"],
     ["providers", "Gratis AI"],
@@ -255,6 +260,7 @@
       {:else if loaded.view === "memories"}
         <MemoriesView
           data={loaded.data}
+          formOnly={memoriesFormOnly}
           say={(text) => (message = text)}
           reload={() => load("memories")}
         />

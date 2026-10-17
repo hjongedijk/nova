@@ -1,5 +1,6 @@
 import { getConversation } from "#lib/api/conversation.ts";
 import { getAutonomyTasks } from "#lib/api/autonomy.ts";
+import { getObjectives } from "#lib/api/objectives.ts";
 import { getDesktop } from "#lib/api/desktop.ts";
 import { getServiceConnections } from "#lib/api/settings.ts";
 import { getTelephony } from "#lib/api/telephony.ts";
@@ -143,6 +144,21 @@ export async function partStatus(
               label: count(tasks.length, "taak actief", "taken actief"),
             }
           : { tone: "neutral", label: "Nog geen taken" };
+      }
+      case "objectives": {
+        const { objectives } = await getObjectives();
+        const deviating = objectives.filter(
+          (o) => o.enabled && o.activeAnomaly && !o.activeAnomaly.dismissed,
+        ).length;
+        if (deviating)
+          return { tone: "warn", label: `${deviating} met een afwijking` };
+        const active = objectives.filter((o) => o.enabled).length;
+        return active
+          ? {
+              tone: "ok",
+              label: count(active, "doel actief", "doelen actief"),
+            }
+          : { tone: "neutral", label: "Nog geen doelen" };
       }
       case "automation": {
         const { services } = await getServiceConnections();
