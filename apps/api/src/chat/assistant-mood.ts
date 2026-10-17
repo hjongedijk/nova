@@ -10,7 +10,8 @@ export type AssistantMood = (typeof ASSISTANT_MOODS)[number];
 
 export const MOOD_MARKER_PATTERN =
   /^\s*<!--NOVA_MOOD:(happy|thoughtful|concerned|enthusiastic|neutral)-->\s*/i;
-const PRIVATE_MARKER = /<!--NOVA_MOOD:[^>]{0,40}-->/gi;
+// Any NOVA_xxx tag, so a model typo such as NOVA_MOED is stripped as well.
+const PRIVATE_MARKER = /<!--\s*NOVA_[A-Z_]{2,12}\s*:[^>]{0,40}-->/gi;
 
 export function stripPrivateMoodMarkers(content: string): string {
   return content.replace(PRIVATE_MARKER, "");

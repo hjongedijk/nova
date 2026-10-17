@@ -301,3 +301,13 @@ describe("dialplan for text messages", () => {
     expect(new TelephonyStore(cfg).get().messageToken).toBe(first);
   });
 });
+
+describe("private mood tags never reach the phone", () => {
+  it("strips NOVA_MOOD tags, including a misspelled one, from text replies", () => {
+    expect(
+      chatText("<!--NOVA_MOOD:NEUTRAL-->Hallo, hoe kan ik je helpen?"),
+    ).toBe("Hallo, hoe kan ik je helpen?");
+    expect(chatText("<!--NOVA_MOED:NEUTRAL-->Hallo!")).toBe("Hallo!");
+    expect(chatText("Hoi <!-- NOVA_MOOD:happy --> daar")).toBe("Hoi daar");
+  });
+});

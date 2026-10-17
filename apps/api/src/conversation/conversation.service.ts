@@ -1,3 +1,4 @@
+import { stripPrivateMoodMarkers } from "../chat/assistant-mood.js";
 import {
   Inject,
   Injectable,
@@ -212,7 +213,8 @@ export class ConversationService implements OnModuleInit, OnModuleDestroy {
       this.memory?.add(input.sessionId, "assistant", result.reply);
     }
     return {
-      reply: result.reply,
+      // Never read a private mood tag aloud.
+      reply: stripPrivateMoodMarkers(result.reply),
       confirmation: result.confirmation,
       unavailable: result.unavailable,
     };

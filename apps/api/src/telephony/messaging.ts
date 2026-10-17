@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import crypto from "node:crypto";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
+import { stripPrivateMoodMarkers } from "../chat/assistant-mood.js";
 import { OrchestratorService } from "../chat/orchestrator.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
@@ -49,7 +50,7 @@ export function sipAddress(from: string): string | null {
 
 /** Plain, short chat text: no code fences or emphasis markers, bounded length. */
 export function chatText(text: string): string {
-  const clean = text
+  const clean = stripPrivateMoodMarkers(text)
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/[*_~]{1,3}([^*_~\n]+)[*_~]{1,3}/g, "$1")
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
