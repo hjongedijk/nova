@@ -89,24 +89,27 @@ describe("keepEmbeddings", () => {
     const { FreePolicyWizard } =
       await import("../../src/settings/free-policy-wizard.service.js");
     const wizard = Object.create(FreePolicyWizard.prototype) as {
-      safePolicy: () => unknown;
+      rawPolicy: () => unknown;
       keepEmbeddings: (plan: unknown) => {
         enabledModels: string[];
         nativeModelAllowlist: string[];
         catalog: { modelId: string }[];
       };
     };
-    wizard.safePolicy = () => ({
-      catalog: [
-        {
-          provider: "gemini",
-          modelId: "gemini-embedding-2",
-          modelType: "embedding",
-        },
-        { provider: "gemini", modelId: "gemini-2.5-flash" },
-      ],
-      nativeModelAllowlist: ["gemini/gemini-embedding-2"],
-    });
+    wizard.rawPolicy = (suffix?: string) =>
+      suffix
+        ? null
+        : {
+            catalog: [
+              {
+                provider: "gemini",
+                modelId: "gemini-embedding-2",
+                modelType: "embedding",
+              },
+              { provider: "gemini", modelId: "gemini-2.5-flash" },
+            ],
+            nativeModelAllowlist: ["gemini/gemini-embedding-2"],
+          };
     const base = {
       enabledModels: ["gemini/gemini-2.5-flash"],
       verifiedProviders: ["gemini"],
@@ -125,5 +128,34 @@ describe("keepEmbeddings", () => {
       wizard.keepEmbeddings({ ...base, verifiedProviders: ["mistral"] })
         .enabledModels,
     ).toEqual(["gemini/gemini-2.5-flash"]);
+  });
+
+  it("falls back to the backup policy when the current one no longer has the embedding model", async () => {
+    const { FreePolicyWizard } =
+      await import("../../src/settings/free-policy-wizard.service.js");
+    const wizard = Object.create(FreePolicyWizard.prototype) as {
+      rawPolicy: (suffix?: string) => unknown;
+      keepEmbeddings: (plan: unknown) => { enabledModels: string[] };
+    };
+    wizard.rawPolicy = (suffix?: string) =>
+      suffix
+        ? {
+            catalog: [
+              {
+                provider: "gemini",
+                modelId: "gemini-embedding-2",
+                modelType: "embedding",
+              },
+            ],
+            nativeModelAllowlist: [],
+          }
+        : { catalog: [] };
+    const kept = wizard.keepEmbeddings({
+      enabledModels: ["gemini/gemini-2.5-flash"],
+      verifiedProviders: ["gemini"],
+      nativeModelAllowlist: [],
+      catalog: [],
+    });
+    expect(kept.enabledModels).toContain("gemini/gemini-embedding-2");
   });
 });

@@ -176,6 +176,16 @@ export class FreePolicyWizard implements OnModuleDestroy {
   private historyPath(): string {
     return this.config.dataFile("free-policy-history/history.json");
   }
+  /** The stored policy exactly as saved (carries fields the history projection leaves out, such as modelType). */
+  private rawPolicy(suffix = ""): Record<string, unknown> | null {
+    try {
+      const filename = `${this.config.dataFile("free-routing-policy.json")}${suffix}`;
+      if (fs.statSync(filename).size > 1_000_000) return null;
+      return object(JSON.parse(fs.readFileSync(filename, "utf8")));
+    } catch {
+      return null;
+    }
+  }
   private safePolicy(): Record<string, unknown> | null {
     try {
       const source = JSON.parse(
@@ -225,7 +235,11 @@ export class FreePolicyWizard implements OnModuleDestroy {
         projected.catalog = projected.catalog.map((item) =>
           Object.fromEntries(
             fields
-              .filter((field) => Object.hasOwn(object(item), field))
+              .filter(
+                (field) =>
+                  Object.hasOwn(object(item), field) &&
+                  object(item)[field] !== null,
+              )
               .map((field) => [field, object(item)[field]]),
           ),
         );
@@ -805,8 +819,11 @@ export class FreePolicyWizard implements OnModuleDestroy {
    * the current policy already trusts are carried over, as long as their provider account stays selected.
    */
   private keepEmbeddings(plan: FreePolicyPlan): FreePolicyPlan {
-    const current = this.safePolicy();
-    const rows = Array.isArray(current?.catalog) ? current.catalog : [];
+    // The one-time backup of the very first policy still holds entries an earlier replacement dropped.
+    const sources = [this.rawPolicy(), this.rawPolicy(".backup")];
+    const rows = sources.flatMap((source) =>
+      Array.isArray(source?.catalog) ? source.catalog : [],
+    );
     const kept = rows.flatMap((raw) => {
       const row = object(raw);
       const id = `${String(row.provider)}/${String(row.modelId)}`;
@@ -818,10 +835,16 @@ export class FreePolicyWizard implements OnModuleDestroy {
         ? [{ id, row: row as unknown as FreePolicyPlan["catalog"][number] }]
         : [];
     });
+    const unique = kept.filter(
+      (item, index) => kept.findIndex((k) => k.id === item.id) === index,
+    );
+    kept.splice(0, kept.length, ...unique);
     if (!kept.length) return plan;
-    const previousAllowlist = Array.isArray(current?.nativeModelAllowlist)
-      ? current.nativeModelAllowlist
-      : [];
+    const previousAllowlist = sources.flatMap((source) =>
+      Array.isArray(source?.nativeModelAllowlist)
+        ? source.nativeModelAllowlist
+        : [],
+    );
     return {
       ...plan,
       enabledModels: [...plan.enabledModels, ...kept.map((k) => k.id)],
