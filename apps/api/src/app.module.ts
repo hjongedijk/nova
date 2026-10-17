@@ -31,6 +31,7 @@ import { TtsModule } from "./tts/tts.module.js";
 import { VisualizationModule } from "./visualization/visualization.module.js";
 import { AgentModule } from "./agent/agent.module.js";
 import { ConversationModule } from "./conversation/conversation.module.js";
+import { ObjectivesModule } from "./objectives/objectives.module.js";
 
 const config = new NovaConfig();
 
@@ -66,6 +67,7 @@ const config = new NovaConfig();
     VisualizationModule,
     ConversationModule,
     AgentModule,
+    ObjectivesModule,
     BrowserAgentModule,
     DesktopModule,
     BridgesModule,
