@@ -41,6 +41,8 @@ import {
   OmniRouteClient,
 } from "./omniroute-client.service.js";
 import { OrchestratorService, type Reply } from "./orchestrator.service.js";
+import { ApiVault } from "../apis/api-vault.js";
+import { interceptChatBody } from "./secret-intercept.js";
 import { matchesNodeRedToken } from "../dashboard/node-red-token.js";
 
 interface ChatBody {
@@ -159,6 +161,7 @@ export class ChatController {
     private readonly mqtt: MqttService,
     private readonly config: NovaConfig,
     @Optional() private readonly milestone?: ConversationMilestoneService,
+    @Optional() private readonly vault?: ApiVault,
   ) {}
 
   private remember(
@@ -185,7 +188,9 @@ export class ChatController {
 
   /** POST /api/chat: one question, one complete answer. */
   @Post("chat")
-  async chat(@Body() body: ChatBody): Promise<Record<string, unknown>> {
+  async chat(@Body() raw: ChatBody): Promise<Record<string, unknown>> {
+    // A pasted token goes to the vault before anything else sees the text.
+    const body = interceptChatBody(raw, this.vault);
     const {
       sessionId,
       message,
@@ -307,9 +312,10 @@ export class ChatController {
   /** POST /api/chat-stream: the same, as Server-Sent Events (token, tool_start, tool_result, confirmation, done). */
   @Post("chat-stream")
   async stream(
-    @Body() body: ChatBody,
+    @Body() raw: ChatBody,
     @Res() response: Response,
   ): Promise<void> {
+    const body = interceptChatBody(raw, this.vault);
     const {
       sessionId,
       message,
