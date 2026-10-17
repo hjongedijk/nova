@@ -67,7 +67,7 @@
     const wanted = untrack(() => resolveSettingsTarget(raw, page.url.hash));
     if (raw === wanted.page && !(wanted.anchor && !page.url.hash)) return;
     const hash = page.url.hash || (wanted.anchor ? `#${wanted.anchor}` : "");
-    const params = new SvelteURLSearchParams(page.url.searchParams);
+    const params = new SvelteURLSearchParams(page.url.search);
     params.set("section", wanted.page);
     void goto(`/settings?${params}${hash}`, { replaceState: true });
   });
