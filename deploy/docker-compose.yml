@@ -134,6 +134,52 @@ services:
       retries: 5
       start_period: 20s
 
+  # Encrypted (LIME) Linphone chat with NOVA, profile linphone-chat. Logs in with the SAME Linphone account as Asterisk (the
+  # trunk), as a second device: it never touches calls and ignores cleartext texts (Asterisk handles those). BUILT LOCALLY
+  # (docker compose build linphone-chat), never pushed to a registry: the Belledonne wheel inside is GPLv3.
+  # Needs two secret files you create once (see docs/linphone-encrypted-chat.md): secrets/linphone_password and
+  # secrets/nova_message_token, mode 0400, owner uid 10001. Data (LIME keys, chat DB, device id): nova-data/linphone-chat,
+  # owner uid 10001, mode 0700. Anyone who can read that folder can read the chats.
+  linphone-chat:
+    <<: *restart
+    profiles: [linphone-chat]
+    build: ./linphone-chat
+    image: nova-linphone-chat:local
+    user: "10001:10001"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 768m
+    cpus: 1
+    stop_grace_period: 15s
+    environment:
+      # SIP username and domain come from NOVA's trunk (token-protected endpoint); only the password is a secret file.
+      NOVA_URL: http://nova:8080/api/integrations/linphone-chat
+      NOVA_CHAT_TOKEN_FILE: /run/secrets/nova_message_token
+      LINPHONE_PASSWORD_FILE: /run/secrets/linphone_password
+      LINPHONE_LIME_URL: ${LINPHONE_LIME_URL:-https://lime.linphone.org/lime-server/lime-server.php}
+      LINPHONE_CONFERENCE_FACTORY: ${LINPHONE_CONFERENCE_FACTORY:-sip:conference-factory@sip.linphone.org}
+    secrets: [linphone_password, nova_message_token]
+    volumes:
+      - ./nova-data/linphone-chat:/data
+    networks: [nova]
+    depends_on:
+      nova:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - /opt/venv/bin/python
+        - -I
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8099/health', timeout=4)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
   # The only component with Docker socket access. It exposes fixed, token-protected
   # status/restart and project-sandbox routes on a private network shared only with NOVA.
   stack-control:
@@ -268,6 +314,13 @@ services:
     environment:
       TZ: ${TZ:-Europe/Amsterdam}
     volumes: ["./home-assistant-data:/config"]
+
+# Only used by the linphone-chat profile; the files must exist before that profile starts (docs/linphone-encrypted-chat.md).
+secrets:
+  linphone_password:
+    file: ./secrets/linphone_password
+  nova_message_token:
+    file: ./secrets/nova_message_token
 
 networks:
   nova:

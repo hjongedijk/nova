@@ -12,6 +12,7 @@ build/
 !.env.example
 dev-data/
 dev-data-backups/
+deploy/secrets/
 nova-backups/
 *.pem
 *.key

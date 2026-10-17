@@ -92,7 +92,7 @@ jobs:
           zip -r ../nova-windows-agent.zip windows -x "windows/test/*"
       - name: Package Compose runtime sources
         run: |
-          tar --exclude='*/test' --exclude='*/node_modules' -czf nova-compose.tar.gz -C deploy docker-compose.yml nodered piper asterisk
+          tar --exclude='*/test' --exclude='*/node_modules' -czf nova-compose.tar.gz -C deploy docker-compose.yml nodered piper asterisk linphone-chat
       - uses: softprops/action-gh-release@v3
         with:
           body_path: docs/release-notes/${{ github.ref_name }}.md

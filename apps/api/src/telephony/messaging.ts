@@ -156,6 +156,16 @@ export class TelephonyMessaging {
       .map((c) => c.sip.toLowerCase());
   }
 
+  /**
+   * SIP identity (`sip:username@host`) of the trunk account: the encrypted-chat bridge logs in as this SAME account next to Asterisk
+   * (Flexisip forks to both registrations). Never the password: that stays in a secret file the operator creates.
+   */
+  chatIdentity(token: unknown): string | null {
+    this.checkToken(token);
+    const trunk = this.store.get().trunk;
+    return trunk ? `sip:${trunk.username}@${trunk.host}`.toLowerCase() : null;
+  }
+
   /** The reply text (possibly a fixed notice), or "" for nothing. */
   private async answer(
     contact: { name: string },

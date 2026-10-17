@@ -63,14 +63,23 @@ export class LinphoneChatController {
     }
   }
 
-  /** SIP addresses of contacts marked "Mag met NOVA praten": the bridge accepts encrypted rooms only from these. */
+  /**
+   * SIP addresses of contacts marked "Mag met NOVA praten": the bridge accepts encrypted rooms only from these.
+   * `identity` is the trunk account (username@host, no password) the bridge shares with Asterisk; null while no trunk exists.
+   */
   @Post("allowlist")
   @AppAccessPublic()
   @HttpCode(200)
   @Header("Cache-Control", "no-store")
-  allowlist(@Body() body: Record<string, unknown>): { contacts: string[] } {
+  allowlist(@Body() body: Record<string, unknown>): {
+    contacts: string[];
+    identity: string | null;
+  } {
     try {
-      return { contacts: this.messaging.allowedContacts(body?.token) };
+      return {
+        contacts: this.messaging.allowedContacts(body?.token),
+        identity: this.messaging.chatIdentity(body?.token),
+      };
     } catch (error) {
       if (error instanceof MessageAuthError) throw new UnauthorizedException();
       throw error;

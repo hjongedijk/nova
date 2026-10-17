@@ -135,10 +135,42 @@ describe("Linphone encrypted chat bridge contract", () => {
     expect((await bridge(b)).reply).toMatch(/ging iets mis/);
   });
 
-  it("lists only contacts that may talk to NOVA, lower case", () => {
+  it("lists only contacts that may talk to NOVA, lower case, and no identity while there is no trunk", () => {
     const b = boot();
     expect(
       b.controller.allowlist({ token: b.store.get().messageToken }),
-    ).toEqual({ contacts: ["hjongedijk@sip.linphone.org"] });
+    ).toEqual({ contacts: ["hjongedijk@sip.linphone.org"], identity: null });
+  });
+
+  it("gives the bridge the trunk identity (username@host) of the shared account, never the password", () => {
+    const b = boot();
+    b.store.update((d) => {
+      d.trunk = {
+        host: "sip.linphone.org",
+        username: "Nova-Techlepp",
+        secret: "TOP-SECRET-PASSWORD",
+        number: "",
+        allowExtensionsToDialOut: false,
+      };
+    });
+    const out = b.controller.allowlist({ token: b.store.get().messageToken });
+    expect(out.identity).toBe("sip:nova-techlepp@sip.linphone.org");
+    expect(JSON.stringify(out)).not.toContain("TOP-SECRET-PASSWORD");
+    expect(() => b.controller.allowlist({ token: "nope" })).toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it("keeps the bridge's decrypted text out of the audit trail and logs", async () => {
+    const b = boot();
+    const logged: string[] = [];
+    for (const m of ["log", "warn", "error"] as const)
+      vi.spyOn(console, m).mockImplementation((...a) => {
+        logged.push(a.join(" "));
+      });
+    await bridge(b, { text: "GEHEIM-BERICHT-4711" });
+    vi.restoreAllMocks();
+    expect(JSON.stringify(audits)).not.toContain("GEHEIM-BERICHT-4711");
+    expect(logged.join("\n")).not.toContain("GEHEIM-BERICHT-4711");
   });
 });
