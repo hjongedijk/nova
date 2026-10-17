@@ -95,6 +95,8 @@ export interface AriPort {
     timeoutSeconds?: number;
   }): Promise<AriChannel>;
   hangup(channelId: string): Promise<void>;
+  /** Out-of-dialog SIP MESSAGE (a text) through ARI's /endpoints/sendMessage. */
+  sendMessage(input: { to: string; from: string; body: string }): Promise<void>;
   answer(channelId: string): Promise<void>;
   play(channelId: string, media: string): Promise<{ id: string }>;
   createBridge(): Promise<{ id: string }>;

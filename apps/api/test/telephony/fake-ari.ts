@@ -13,6 +13,7 @@ export class FakeAri implements AriPort {
   channelList: AriChannel[] = [];
   commands: Array<{ op: string; [key: string]: unknown }> = [];
   failOriginate = false;
+  failSendMessage = false;
   private handlers = new Set<(event: AriEvent) => void>();
   private counter = 0;
 
@@ -31,6 +32,10 @@ export class FakeAri implements AriPort {
   }
   async endpoints() {
     return this.endpointList;
+  }
+  async sendMessage(input: { to: string; from: string; body: string }) {
+    if (this.failSendMessage) throw new Error("rejected");
+    this.commands.push({ op: "sendMessage", ...input });
   }
   async channels() {
     return this.channelList;

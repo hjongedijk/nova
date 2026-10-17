@@ -1,6 +1,7 @@
 import { attachmentMessage } from "./attachments.js";
 import { directAnswer } from "./direct-answer.js";
 import { directCallQuery } from "./direct-call.js";
+import { directGoalQuery, type DirectGoal } from "./direct-goal.js";
 import {
   directDefinitionQuery,
   directDefinitionReply,
@@ -215,6 +216,12 @@ export function classifyModelRole(
   return "conversation";
 }
 
+/** Returns the reply to give, or null to let the model handle the message. */
+export type GoalDelegator = (
+  goal: DirectGoal,
+  context: { sessionId: string },
+) => Promise<string | null>;
+
 /**
  * One turn of conversation: a "ja"/"nee" answers a pending confirmation; anything else goes to the
  * model with the tools, which may call tools for several rounds before it answers. Risky tools come
@@ -231,6 +238,13 @@ export class OrchestratorService {
     private readonly confirmationHandler: ConfirmationHandler,
     private readonly context: ContextBuilder,
   ) {}
+
+  /** Set by the autopilot: starts explicit delegation ("regel dat", "houd ... in de gaten") without a model call. */
+  private goalDelegator?: GoalDelegator;
+
+  setGoalDelegator(handler: GoalDelegator | undefined): void {
+    this.goalDelegator = handler;
+  }
 
   /**
    * First round for live-data questions. Tool use is required; if the gateway or model refuses that,
@@ -382,6 +396,25 @@ export class OrchestratorService {
           emit("token", { text: callReply });
         }
         return { reply: callReply, model: null, usage: null, role };
+      }
+      // Background goals never start further goals, and text chats from contacts stay read-only.
+      const delegation =
+        this.goalDelegator &&
+        !input.readOnlyOnly &&
+        !sessionId.startsWith("agent_")
+          ? directGoalQuery(message)
+          : null;
+      if (delegation && this.goalDelegator) {
+        const role = modelRole ?? "conversation";
+        const delegated = await this.goalDelegator(delegation, { sessionId });
+        if (delegated !== null) {
+          this.confirmations.cancel(sessionId);
+          if (stream) {
+            emit("route", { role });
+            emit("token", { text: delegated });
+          }
+          return { reply: delegated, model: null, usage: null, role };
+        }
       }
       const definition = directDefinitionQuery(message, responseLanguage);
       if (definition) {

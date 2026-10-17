@@ -52,6 +52,7 @@ const MAX_EVENTS = 50;
 const MAX_CALLS_PER_HOUR = 5;
 const MAX_CONCURRENT_CALLS = 2;
 const MESSAGE_MAX = 500;
+const TEXT_MAX = 900;
 const LINK_TTL_MS = 10 * 60_000;
 const RING_TIMEOUT_S = 30;
 const EXTERNAL_NUMBER = /^\+?[0-9]{6,15}$/;
@@ -447,6 +448,51 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
     return (this.store.get().contacts ?? []).some(
       (c) => c.name.toLowerCase() === name.toLowerCase(),
     );
+  }
+
+  /** Saved contacts that may talk with NOVA ("Mag met NOVA praten"): the only ones she texts on her own initiative. */
+  conversationContacts(): string[] {
+    return (this.store.get().contacts ?? [])
+      .filter((c) => c.allowConversation)
+      .map((c) => c.name);
+  }
+
+  /** Can a text go out right now? Telephony on, a trunk set, Asterisk reachable and the trunk not reported offline. */
+  async textReady(): Promise<{ ready: boolean; reason?: string }> {
+    const config = this.store.get();
+    if (!config.enabled) return { ready: false, reason: "telefonie staat uit" };
+    if (!config.trunk)
+      return { ready: false, reason: "er is geen SIP-trunk ingesteld" };
+    try {
+      const endpoints = await this.ari.endpoints();
+      // Asterisk reports "offline" while the trunk registration fails; "unknown" is common before the first qualify.
+      if (endpoints.find((e) => e.resource === "trunk")?.state === "offline")
+        return { ready: false, reason: "de trunk is niet geregistreerd" };
+      return { ready: true };
+    } catch {
+      return { ready: false, reason: "Asterisk is niet bereikbaar" };
+    }
+  }
+
+  /** Sends a text (SIP MESSAGE) to a saved contact through the trunk. */
+  async sendText(contactName: unknown, body: unknown): Promise<void> {
+    this.requireEnabled();
+    const config = this.store.get();
+    if (!config.trunk)
+      throw new TelephonyError("Voor berichten is een SIP-trunk nodig.");
+    const wanted =
+      typeof contactName === "string" ? contactName.trim().toLowerCase() : "";
+    const contact = (config.contacts ?? []).find(
+      (c) => c.name.toLowerCase() === wanted,
+    );
+    if (!contact) throw new TelephonyError("Onbekend contact.");
+    const text = sanitize(typeof body === "string" ? body : "").trim();
+    if (!text) throw new TelephonyError("Het bericht is leeg.");
+    await this.ari.sendMessage({
+      to: `pjsip:trunk/sip:${contact.sip}`,
+      from: `sip:${config.trunk.username}@${config.trunk.host}`,
+      body: text.slice(0, TEXT_MAX),
+    });
   }
 
   /** Replaces the contact list; every contact must live on the trunk's domain. */

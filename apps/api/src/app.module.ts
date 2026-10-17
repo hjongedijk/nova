@@ -32,6 +32,7 @@ import { VisualizationModule } from "./visualization/visualization.module.js";
 import { AgentModule } from "./agent/agent.module.js";
 import { ConversationModule } from "./conversation/conversation.module.js";
 import { ObjectivesModule } from "./objectives/objectives.module.js";
+import { AutopilotModule } from "./autopilot/autopilot.module.js";
 
 const config = new NovaConfig();
 
@@ -72,6 +73,7 @@ const config = new NovaConfig();
     DesktopModule,
     BridgesModule,
     TelephonyModule,
+    AutopilotModule,
     // In production the built Svelte app is served from here; while developing, Vite serves it.
     ...(fs.existsSync(config.webDir)
       ? [
