@@ -99,6 +99,9 @@ type HistoryEntry = {
  * Models the policy already trusts stay selectable even when the gateway's free list no longer shows them (for example a
  * provider flagged as having a paid plan next to its free quota). Without this a replacement silently drops them.
  */
+/** A verification failure whose message is ours alone and safe to show. */
+class PolicyStageError extends Error {}
+
 export function withCurrentlyEnabled(
   models: PlanModel[],
   settings: Record<string, unknown>,
@@ -782,7 +785,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
       snapshot.key.allow_auto_combos !== 1 ||
       snapshot.overrides.some((id) => plan.verifiedConnectionIds.includes(id))
     )
-      throw new Error("Native policy persistence not verified");
+      throw new PolicyStageError("writes");
     for (const binding of plan.verifiedConnections) {
       const row = snapshot.accounts.find(
         (account) => account.id === binding.id,
@@ -804,6 +807,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
     )
       throw new Error("Native pool unavailable");
     const rows = data.candidates.map(object);
+    const failures: string[] = [];
     for (const model of plan.catalog) {
       const canonical = `${model.provider}/${model.modelId}`;
       const binding = plan.verifiedConnections.find(
@@ -816,19 +820,31 @@ export class FreePolicyWizard implements OnModuleDestroy {
           row.connectionId === binding?.id,
       );
       const row = matches[0];
-      if (
-        matches.length !== 1 ||
-        !row ||
-        row.connectionId !== binding?.id ||
-        row.modelStr !== canonical ||
-        row.reachable !== true ||
-        row.excluded !== false ||
-        row.breakerState !== "CLOSED" ||
-        row.connectionCooldown !== false ||
-        row.modelLocked !== false
-      )
-        throw new Error("Selected native account structure not verified");
+      const reason = !row
+        ? matches.length > 1
+          ? "duplicate"
+          : "missing"
+        : matches.length !== 1
+          ? "duplicate"
+          : row.connectionId !== binding?.id || row.modelStr !== canonical
+            ? "binding"
+            : row.reachable !== true
+              ? "unreachable"
+              : row.excluded !== false
+                ? "excluded"
+                : row.breakerState !== "CLOSED"
+                  ? "breaker_open"
+                  : row.connectionCooldown !== false
+                    ? "cooldown"
+                    : row.modelLocked !== false
+                      ? "locked"
+                      : null;
+      if (reason) failures.push(`${canonical}: ${reason}`);
     }
+    if (failures.length)
+      throw new PolicyStageError(
+        `candidates not ready: ${failures.slice(0, 20).join("; ")}`,
+      );
   }
   private savePolicy(plan: VerifiedPlan): void {
     const filename = this.config.dataFile("free-routing-policy.json");
@@ -939,7 +955,9 @@ export class FreePolicyWizard implements OnModuleDestroy {
           arguments: metadata,
         });
         operation.block("policy_change");
+        let stage = "start";
         try {
+          stage = "settings_patch";
           await this.management.request("/api/settings", {
             method: "PATCH",
             body: {
@@ -951,6 +969,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
               blockedProviders: plan.blockedProviders,
             },
           });
+          stage = "key_patch";
           await this.management.request(`/api/keys/${before.key.id}`, {
             method: "PATCH",
             body: {
@@ -962,17 +981,21 @@ export class FreePolicyWizard implements OnModuleDestroy {
               allowAutoCombos: true,
             },
           });
+          stage = "readback";
           const persisted = this.snapshot();
           if (
             persisted.key.id !== before.key.id ||
             persisted.revision !== before.revision + 1
           )
             throw new Error("Native revision changed");
+          stage = "writes";
           this.verifyWrites(persisted, plan);
+          stage = "candidates";
           const candidates = await this.management.request(
             "/api/v1/auto-combo/auto/candidates",
           );
           this.verifyStructure(candidates, plan);
+          stage = "recheck";
           const latest = this.snapshot();
           if (
             latest.key.id !== before.key.id ||
@@ -983,6 +1006,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
               "Native or local policy changed during verification",
             );
           this.verifyWrites(latest, plan);
+          stage = "save";
           const verifiedPlan: VerifiedPlan = {
             ...plan,
             catalog: plan.catalog.map((model) => ({
@@ -1023,7 +1047,9 @@ export class FreePolicyWizard implements OnModuleDestroy {
               "Beleid opgeslagen en gecontroleerd; afronding kon niet in het actielog worden geschreven.";
           }
           return result;
-        } catch {
+        } catch (failure) {
+          const diagnostic =
+            failure instanceof PolicyStageError ? failure.message : stage;
           try {
             this.audit.record({
               sessionId: "settings",
@@ -1032,7 +1058,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
               confirmation: "confirmed_admin_ui",
               phase: "after_execute",
               arguments: metadata,
-              result: { ok: false },
+              result: { ok: false, stage: diagnostic },
               verification: { persisted: null, routeReady: false },
             });
           } catch {
@@ -1042,6 +1068,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
             ok: false,
             verified: null,
             routeReady: false,
+            diagnostic,
             error:
               "Beleid is niet volledig geverifieerd. Gateway-instellingen kunnen al gewijzigd zijn. AI blijft geblokkeerd. Accountbinding en opgeslagen instellingen moeten overeenkomen; native quota is niet als kostenbewijs gebruikt. Controleer OmniRoute en bereid het beleid opnieuw voor.",
           };

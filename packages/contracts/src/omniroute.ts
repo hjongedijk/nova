@@ -549,6 +549,8 @@ export interface FreePolicyResult {
   verified?: boolean | null;
   routeReady?: boolean;
   auditWarning?: string;
+  /** Which verification step stopped the change (stage name or model and reason; never upstream text). */
+  diagnostic?: string;
 }
 export interface FreePolicyHistorySnapshot {
   settings: Record<string, unknown>;
