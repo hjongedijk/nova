@@ -142,7 +142,7 @@ apps/desk/
     src/win.rs        Win32: bureaubladindeling vinden, achter de pictogrammen zetten, Run-sleutel
     src/commands.rs   de zes opdrachten die een pagina mag aanroepen (elk een eigen recht)
     src/tray.rs       tray-menu
-    capabilities/setup.json, dist/  alleen het instelvenster
+    capabilities/setup.json, ui/  alleen het instelvenster
 ```
 
 - Testen: `cd apps/desk && cargo test -p nova-desk-core`. Controleren of de Windows-code compileert (op Linux met `gcc-mingw-w64-x86-64` en `rustup target add x86_64-pc-windows-gnu`): `cargo check --target x86_64-pc-windows-gnu -p nova-desk`. CI doet beide ([ci.yml](../.github/workflows/ci.yml), job `desk`).

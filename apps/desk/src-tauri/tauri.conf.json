@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "nl.nova.desk",
   "build": {
-    "frontendDist": "./dist"
+    "frontendDist": "./ui"
   },
   "app": {
     "withGlobalTauri": true,
