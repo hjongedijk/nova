@@ -37,6 +37,10 @@ Captured with Chromium at CSS sizes matching native targets, at device scales 1 
 | Settings     | [Image](img/helper-preferences-1x.png)  | [Image](img/helper-preferences-2x.png)  |
 | Contrast     | [Image](img/helper-contrast-1x.png)     | [Image](img/helper-contrast-2x.png)     |
 
+## NOVA Desk look and header layout
+
+Inside [NOVA Desk](nova-desk.md) (or with `?desk=1`) the page is transparent and the panel itself is the rounded shape (16 px radius, border, soft shadow, 12 px transparent margin for the window). The header adapts to its own width with container queries: below 1000 px the toolbar labels (such as "Scherm") go, below 780 px the status pill and spacing shrink, below 560 px the wordmark goes, and tabs may shorten their label instead of running over the toolbar. `node scripts/check-helper-layout.mjs` (dev server running) asserts with bounding boxes that nothing in the header overlaps at 640, 800, 960 and 1280 px, at 100, 125 and 150% scaling, with a wide font, in both looks, and writes screenshots (`NOVA_HELPER_SHOTS`).
+
 ## Repeat the checks
 
 With dependencies installed, install Chromium once using `npx playwright-core install chromium`. Start NOVA's dev server, then run `node scripts/check-helper.mjs`. `NOVA_HELPER_TEST_URL` optionally selects another local preview origin. The check mocks chat/TTS/confirmation requests and captures screenshots; it verifies draft/file retry, successful cleanup, model/ticker, optional views, snoozing, choice buttons, pause, confirmation persistence/Y-N behavior and autohide recovery.

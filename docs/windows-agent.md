@@ -1,11 +1,13 @@
 # Windows agent
 
-The Windows agent (`agents/windows/nova-agent.ps1`, agent version `2026-10-11.1`) is a small authenticated HTTP service written in PowerShell with embedded C#. It runs in your own desktop session on a Windows PC and lets NOVA:
+The Windows agent (`agents/windows/nova-agent.ps1`, agent version `2026-10-18.1`) is a small authenticated HTTP service written in PowerShell with embedded C#. It runs in your own desktop session on a Windows PC and lets NOVA:
 
 - open (and, with confirmation, close) programs from an allow-list, open `http(s)` URLs and lock the screen,
 - show NOVA as a **living wallpaper** behind the desktop icons, per display,
 - show NOVA as a small always-on-top **helper panel** at the top of a display,
 - drive a **browser of its own** (a separate Microsoft Edge window) for search, reading, clicking and typing.
+
+- optionally start **NOVA Desk** (`nova-desk.exe`, a native Rust/Tauri app) instead of Edge for the helper and the wallpaper, see [NOVA Desk](nova-desk.md).
 
 It is the only agent; there is no separate browser agent. The (Dutch) texts inside the agent and the NOVA interface are in Dutch.
 
@@ -49,17 +51,18 @@ The agent refuses to start if the token in `agent.json` is shorter than 24 chara
 
 ## `agent.json`
 
-| Key              | Default                  | Meaning                                                                                                                                                   |
-| ---------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `token`          | set by `install.ps1`     | Bearer token, at least 24 characters.                                                                                                                     |
-| `allowedIps`     | set by `install.ps1`     | Source addresses that may call the agent; empty means any.                                                                                                |
-| `apps`           | see `agent.example.json` | Map of app name to `{ "path": ..., "process": ... }`. `process` is needed for closing the app and for the "running" list. Edit it, then restart the task. |
-| `mode`           | `wallpaper`              | Default mode: `wallpaper`, `helper` or `both`. NOVA changes it at runtime; the runtime choice is kept in `mode.json` and wins.                            |
-| `helperDisplay`  | `0`                      | Display for the helper (0 = primary).                                                                                                                     |
-| `novaUrl`        | none                     | `http(s)://host[:port]` of NOVA, only needed when the agent must open the helper before NOVA ever set a mode.                                             |
-| `novaPort`       | `8080`                   | Port used to build NOVA's address from the caller's IP when no address is passed.                                                                         |
-| `wallpaperInput` | forwarded                | Set to `"window"` to open a small NOVA window on click instead of forwarding clicks to the wallpaper.                                                     |
-| `browser`        | see below                | Settings of the browser, with `port` (9322), `defaultEngine` (`google`), `maxActionsPerMinute` (60), `blockedHosts`, `allowedHosts` and `enabled`.        |
+| Key              | Default                  | Meaning                                                                                                                                                                                                              |
+| ---------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token`          | set by `install.ps1`     | Bearer token, at least 24 characters.                                                                                                                                                                                |
+| `allowedIps`     | set by `install.ps1`     | Source addresses that may call the agent; empty means any.                                                                                                                                                           |
+| `apps`           | see `agent.example.json` | Map of app name to `{ "path": ..., "process": ... }`. `process` is needed for closing the app and for the "running" list. Edit it, then restart the task.                                                            |
+| `mode`           | `wallpaper`              | Default mode: `wallpaper`, `helper` or `both`. NOVA changes it at runtime; the runtime choice is kept in `mode.json` and wins.                                                                                       |
+| `helperDisplay`  | `0`                      | Display for the helper (0 = primary).                                                                                                                                                                                |
+| `novaUrl`        | none                     | `http(s)://host[:port]` of NOVA, only needed when the agent must open the helper before NOVA ever set a mode.                                                                                                        |
+| `novaPort`       | `8080`                   | Port used to build NOVA's address from the caller's IP when no address is passed.                                                                                                                                    |
+| `desk`           | `auto`                   | With `nova-desk.exe` next to the agent: `auto` = helper and wallpaper in NOVA Desk, `helper` = only the helper (wallpaper stays in Edge, with input forwarding), `off` = always Edge. See [NOVA Desk](nova-desk.md). |
+| `wallpaperInput` | forwarded                | Set to `"window"` to open a small NOVA window on click instead of forwarding clicks to the wallpaper.                                                                                                                |
+| `browser`        | see below                | Settings of the browser, with `port` (9322), `defaultEngine` (`google`), `maxActionsPerMinute` (60), `blockedHosts`, `allowedHosts` and `enabled`.                                                                   |
 
 NOVA passes its own address to the agent when you pick a wallpaper or mode: with `NOVA_PUBLIC_URL` set that address is used, otherwise the agent builds `http://<caller ip>:<novaPort>`.
 
@@ -83,6 +86,10 @@ Microsoft Edge shows the NOVA page in a window that is parented to the desktop, 
 | `both`      | Quiet wallpaper windows (no input or voice) with the helper on top, which does the listening and typing. |
 
 Change it in NOVA under **Instellingen, Meer, "NOVA op je Windows-pc"**; no reinstall is needed. Endpoints: `POST /v1/mode` with `{ "mode": ..., "display": ... }`, `GET /v1/status` and `GET /v1/displays` (both report `mode` and `helperDisplay`), and `POST /v1/helper/size` with `{ "view": "compact|overview|chat|notifications|weather|lists|confirmation" }` (legacy `expanded` remains supported).
+
+### NOVA Desk instead of Edge
+
+When `nova-desk.exe` (from `nova-windows-agent.zip`, if the desk build succeeded) sits next to `nova-agent.ps1`, the agent shows the helper, and with `"desk": "auto"` the wallpaper too, in NOVA Desk's frameless windows instead of Edge windows. The endpoints and their meaning stay the same (`/v1/mode`, `/v1/displays`, `/v1/wallpaper`, `/v1/helper/size`, `/v1/helper/notify`); the agent starts `nova-desk.exe` with `--url`, `--mode`, `--display`, `--wallpaper N:style`, and later starts hand `--view`, `--action` or `--notify` to the running copy (single instance), so no restart and never two helpers. Without the exe, or with `"desk": "off"`, everything below works as before through Edge. Phase 2 and not included: the agent's input forwarding to NOVA Desk's wallpaper (use `"desk": "helper"` to keep Edge for the wallpaper). Unverified on a real PC, see [NOVA Desk](nova-desk.md#wat-is-niet-geverifieerd).
 
 ### Choosing the helper's screen
 
