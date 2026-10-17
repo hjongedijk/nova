@@ -693,10 +693,10 @@ type Row = {
 describe("tools and controller", () => {
   const defs = () => new ObjectivesSource({} as never).definitions();
 
-  test("risks: list is READ_ONLY, delete is CONFIRM, the rest SAFE", () => {
+  test("risks: list is READ_ONLY, create and delete are CONFIRM, the rest SAFE", () => {
     const risk = Object.fromEntries(defs().map((d) => [d.name, d.risk]));
     expect(risk).toEqual({
-      objective_create: "SAFE",
+      objective_create: "CONFIRM",
       objective_list: "READ_ONLY",
       objective_update: "SAFE",
       objective_pause: "SAFE",

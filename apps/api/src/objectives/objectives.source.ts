@@ -94,7 +94,7 @@ export class ObjectivesSource implements ToolSource {
           },
           ["title", "template"],
         ),
-        risk: "SAFE",
+        risk: "CONFIRM",
       },
       {
         name: "objective_list",

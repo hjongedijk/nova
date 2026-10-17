@@ -137,7 +137,7 @@ export class AriHttpClient implements AriPort {
   }
 
   async sendMessage(input: { to: string; from: string; body: string }) {
-    await this.call("POST", "/endpoints/sendMessage", {
+    await this.call("PUT", "/endpoints/sendMessage", {
       to: input.to,
       from: input.from,
       body: input.body,
