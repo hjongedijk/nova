@@ -115,11 +115,3 @@ export function classifyAction(
     return { level: "risky", reason: "submit in browser" };
   return { level: "benign", reason: "ordinary window" };
 }
-
-const RANK: Record<DesktopActionLevel, number> = {
-  benign: 0,
-  unknown: 1,
-  risky: 2,
-};
-export const worse = (a: DesktopActionLevel, b: DesktopActionLevel) =>
-  RANK[b] > RANK[a];
