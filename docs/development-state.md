@@ -49,6 +49,7 @@ CI (`.github/workflows/ci.yml`) also runs the privacy OCR check on `docs/img`, t
 - Memory lifecycle (kinds, supersede, ranking, consolidation) exists only for the Qdrant backend, and only against a fake Qdrant in tests.
 - Data backups cover NOVA's own data folder; Qdrant, OmniRoute, Node-RED and Home Assistant volumes are excluded.
 - Rolling back free-policy changes is disabled, because OmniRoute's key-permission endpoint has no compare-and-swap.
+- Linphone end-to-end encrypted (LIME) chat is not supported by the Asterisk route; `deploy/linphone-chat` is an untested spike (headless liblinphone wheel verified to start with LIME and DB support, no real account tried); see [Linphone encrypted chat](linphone-encrypted-chat.md).
 - No end-to-end suite for the web interface; open tasks are listed in the task file.
 - Removed on purpose: 3D printing (fabrication, CAD worker, slicer, `/v1/fab/*` agent endpoints) and YouTube subtitles with their OAuth. Do not rebuild without a new request.
 

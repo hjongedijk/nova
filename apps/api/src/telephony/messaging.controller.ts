@@ -33,3 +33,47 @@ export class TelephonyMessagingController {
     }
   }
 }
+
+/**
+ * Called by the Linphone end-to-end encrypted chat bridge (deploy/linphone-chat) over the private network.
+ * The bridge decrypts, so `text` is plain; same shared token as the Asterisk endpoint, same allow-list, rate limit and read-only tools.
+ */
+@Controller("integrations/linphone-chat")
+export class LinphoneChatController {
+  constructor(private readonly messaging: TelephonyMessaging) {}
+
+  @Post("message")
+  @AppAccessPublic()
+  @HttpCode(200)
+  @Header("Cache-Control", "no-store")
+  async message(
+    @Body() body: Record<string, unknown>,
+  ): Promise<{ reply: string }> {
+    try {
+      return {
+        reply: await this.messaging.handleChat({
+          token: body?.token,
+          from: body?.from,
+          text: body?.text,
+        }),
+      };
+    } catch (error) {
+      if (error instanceof MessageAuthError) throw new UnauthorizedException();
+      throw error;
+    }
+  }
+
+  /** SIP addresses of contacts marked "Mag met NOVA praten": the bridge accepts encrypted rooms only from these. */
+  @Post("allowlist")
+  @AppAccessPublic()
+  @HttpCode(200)
+  @Header("Cache-Control", "no-store")
+  allowlist(@Body() body: Record<string, unknown>): { contacts: string[] } {
+    try {
+      return { contacts: this.messaging.allowedContacts(body?.token) };
+    } catch (error) {
+      if (error instanceof MessageAuthError) throw new UnauthorizedException();
+      throw error;
+    }
+  }
+}

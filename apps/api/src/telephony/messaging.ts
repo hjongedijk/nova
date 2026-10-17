@@ -90,22 +90,14 @@ export class TelephonyMessaging {
     @Optional() private readonly memory?: SessionMemoryService,
   ) {}
 
-  /** `to|reply` for Asterisk, or an empty string when nothing should be sent. */
-  async handle(input: {
-    token: unknown;
-    from: unknown;
-    type: unknown;
-    body: unknown;
-  }): Promise<string> {
+  private checkToken(token: unknown): void {
     const expected = this.store.get().messageToken ?? "";
-    if (
-      typeof input.token !== "string" ||
-      !expected ||
-      !same(input.token, expected)
-    )
+    if (typeof token !== "string" || !expected || !same(token, expected))
       throw new MessageAuthError();
-    const address =
-      typeof input.from === "string" ? sipAddress(input.from) : null;
+  }
+
+  private findContact(from: unknown) {
+    const address = typeof from === "string" ? sipAddress(from) : null;
     const contact = address
       ? (this.store.get().contacts ?? []).find(
           (c) => c.allowConversation && c.sip.toLowerCase() === address,
@@ -115,36 +107,83 @@ export class TelephonyMessaging {
       this.record("rejected", {
         reason: address ? "unknown_contact" : "bad_sender",
       });
-      return "";
+      return null;
     }
+    return { address, contact };
+  }
+
+  /** `to|reply` for Asterisk, or an empty string when nothing should be sent. */
+  async handle(input: {
+    token: unknown;
+    from: unknown;
+    type: unknown;
+    body: unknown;
+  }): Promise<string> {
+    this.checkToken(input.token);
+    const found = this.findContact(input.from);
+    if (!found) return "";
     const text = messageText(
       typeof input.type === "string" ? input.type : "",
       typeof input.body === "string" ? input.body.slice(0, MAX_IN * 4) : "",
     );
     if (!text) return "";
+    const r = await this.answer(found.contact, found.address, text);
+    return r ? `sip:${found.address}|${r}` : "";
+  }
+
+  /**
+   * Linphone end-to-end encrypted chat bridge (deploy/linphone-chat): the bridge already decrypted the text,
+   * so there is no CPIM here. Same token, allow-list, rate limit and read-only tools as `handle`. Returns the reply text, or "" for nothing.
+   */
+  async handleChat(input: {
+    token: unknown;
+    from: unknown;
+    text: unknown;
+  }): Promise<string> {
+    this.checkToken(input.token);
+    const found = this.findContact(input.from);
+    if (!found || typeof input.text !== "string") return "";
+    const text = input.text.slice(0, MAX_IN * 4).trim();
+    if (!text) return "";
+    return this.answer(found.contact, found.address, text);
+  }
+
+  /** SIP addresses the bridge may accept encrypted chat rooms from (contacts marked "Mag met NOVA praten"). */
+  allowedContacts(token: unknown): string[] {
+    this.checkToken(token);
+    return (this.store.get().contacts ?? [])
+      .filter((c) => c.allowConversation)
+      .map((c) => c.sip.toLowerCase());
+  }
+
+  /** The reply text (possibly a fixed notice), or "" for nothing. */
+  private async answer(
+    contact: { name: string },
+    address: string,
+    text: string,
+  ): Promise<string> {
     const lang = this.config.defaultLanguage.toLowerCase().startsWith("en")
       ? "en"
       : "nl";
     const t = TEXT[lang];
-    const to = `sip:${address}`;
     const key = contact.name.toLowerCase();
+    const sessionId = `sipchat_${key.replace(/[^a-z0-9]+/g, "_").slice(0, 40)}`;
     const cutoff = this.now() - 60_000;
     const hits = (this.recent.get(key) ?? []).filter((at) => at > cutoff);
-    if (hits.length >= PER_MINUTE) return `${to}|${t.slow}`;
+    if (hits.length >= PER_MINUTE) return t.slow;
     hits.push(this.now());
     this.recent.set(key, hits);
-    if (this.active.has(key)) return `${to}|${t.busy}`;
+    if (this.active.has(key)) return t.busy;
     this.active.add(key);
     try {
       const result = await this.orchestrator.run({
-        sessionId: `sipchat_${key.replace(/[^a-z0-9]+/g, "_").slice(0, 40)}`,
+        sessionId,
         message: text.slice(0, MAX_IN),
         inputMode: "text",
         responseLanguage: lang,
         readOnlyOnly: true,
         signal: AbortSignal.timeout(40_000),
       });
-      const sessionId = `sipchat_${key.replace(/[^a-z0-9]+/g, "_").slice(0, 40)}`;
       if (!result.unavailable) {
         this.memory?.add(sessionId, "user", text.slice(0, MAX_IN));
         this.memory?.add(sessionId, "assistant", result.reply);
@@ -154,12 +193,11 @@ export class TelephonyMessaging {
         inChars: text.length,
         outChars: result.reply.length,
       });
-      if (result.confirmation) return `${to}|${t.screen}`;
-      const reply = chatText(result.reply);
-      return reply ? `${to}|${reply}` : "";
+      if (result.confirmation) return t.screen;
+      return chatText(result.reply);
     } catch {
       this.record("failed", { contact: contact.name });
-      return `${to}|${t.failed}`;
+      return t.failed;
     } finally {
       this.active.delete(key);
     }

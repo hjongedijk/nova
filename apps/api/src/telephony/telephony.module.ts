@@ -6,7 +6,10 @@ import { TtsModule } from "../tts/tts.module.js";
 import { AriHttpClient, validateAriUrl } from "./ari.client.js";
 import { ChatModule } from "../chat/chat.module.js";
 import { TelephonyController } from "./telephony.controller.js";
-import { TelephonyMessagingController } from "./messaging.controller.js";
+import {
+  LinphoneChatController,
+  TelephonyMessagingController,
+} from "./messaging.controller.js";
 import { TelephonyMessaging } from "./messaging.js";
 import { TelephonyService } from "./telephony.service.js";
 import { TelephonySource } from "./telephony.source.js";
@@ -19,7 +22,11 @@ import { ARI_PORT } from "./telephony.types.js";
  */
 @Module({
   imports: [PlanningModule, TtsModule, ConversationModule, ChatModule],
-  controllers: [TelephonyController, TelephonyMessagingController],
+  controllers: [
+    TelephonyController,
+    TelephonyMessagingController,
+    LinphoneChatController,
+  ],
   providers: [
     TelephonyStore,
     {
