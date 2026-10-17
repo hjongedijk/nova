@@ -51,51 +51,44 @@
   }
 </script>
 
-{#if appAccess.checking || (appAccess.required && !appAccess.unlocked)}
+{#if !appAccess.checking && appAccess.required && !appAccess.unlocked}
   <div class="access-shade">
-    {#if appAccess.checking}
-      <div class="access-card" role="status">
-        <p class="eyebrow">NOVA</p>
-        <h1>{english ? "Checking access" : "Toegang controleren"}</h1>
-      </div>
-    {:else}
-      <form class="access-card" onsubmit={unlock}>
-        <p class="eyebrow">NOVA</p>
-        <h1>{english ? "Unlock NOVA" : "NOVA ontgrendelen"}</h1>
-        <p>
-          {english
-            ? "Enter the app access token configured by your administrator."
-            : "Voer het app-toegangstoken in dat op de server is ingesteld."}
-        </p>
-        <label for="app-access-token">
-          {english ? "Access token" : "Toegangstoken"}
-        </label>
-        <input
-          id="app-access-token"
-          bind:value={token}
-          placeholder={english ? "App access token" : "App-toegangscode"}
-          aria-invalid={Boolean(error || appAccess.error)}
-          aria-describedby={error || appAccess.error
-            ? "app-access-error"
-            : undefined}
-          type="password"
-          autocomplete="current-password"
-          required
-        />
-        {#if error || appAccess.error}
-          <p class="access-error" role="alert">{error || appAccess.error}</p>
-        {/if}
-        <button type="submit" disabled={busy || !token}>
-          {busy
-            ? english
-              ? "Checking…"
-              : "Controleren…"
-            : english
-              ? "Unlock"
-              : "Ontgrendelen"}
-        </button>
-      </form>
-    {/if}
+    <form class="access-card" onsubmit={unlock}>
+      <p class="eyebrow">NOVA</p>
+      <h1>{english ? "Unlock NOVA" : "NOVA ontgrendelen"}</h1>
+      <p>
+        {english
+          ? "Enter the app access token configured by your administrator."
+          : "Voer het app-toegangstoken in dat op de server is ingesteld."}
+      </p>
+      <label for="app-access-token">
+        {english ? "Access token" : "Toegangstoken"}
+      </label>
+      <input
+        id="app-access-token"
+        bind:value={token}
+        placeholder={english ? "App access token" : "App-toegangscode"}
+        aria-invalid={Boolean(error || appAccess.error)}
+        aria-describedby={error || appAccess.error
+          ? "app-access-error"
+          : undefined}
+        type="password"
+        autocomplete="current-password"
+        required
+      />
+      {#if error || appAccess.error}
+        <p class="access-error" role="alert">{error || appAccess.error}</p>
+      {/if}
+      <button type="submit" disabled={busy || !token}>
+        {busy
+          ? english
+            ? "Checking…"
+            : "Controleren…"
+          : english
+            ? "Unlock"
+            : "Ontgrendelen"}
+      </button>
+    </form>
   </div>
 {/if}
 
