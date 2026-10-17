@@ -21,7 +21,7 @@ param(
   [string]$ConfigPath = (Join-Path $PSScriptRoot 'agent.json')
 )
 $ErrorActionPreference = 'Stop'
-$agentVersion = '2026-10-16.4'
+$agentVersion = '2026-10-17.1'
 
 # However the agent is started (task, double-click, a terminal), it runs on without a window: this copy starts
 # a hidden one and ends. (conhost --headless also keeps Windows Terminal from opening a window.)
@@ -1671,7 +1671,7 @@ function Restore-Wallpapers {
 # The mode comes from agent.json ("mode") until NOVA sets it at runtime (POST /v1/mode); the runtime choice is kept
 # in mode.json and survives a restart. The rectangular helper touches the top edge of the selected display.
 $modeStore = Join-Path $PSScriptRoot 'mode.json'
-$helperSizes = @{ compact = @(360, 44); overview = @(640, 180); notifications = @(640, 180); weather = @(640, 180); lists = @(640, 180); chat = @(640, 340); confirmation = @(640, 170) }
+$helperSizes = @{ compact = @(360, 44); overview = @(960, 280); notifications = @(960, 280); weather = @(960, 280); lists = @(960, 280); chat = @(960, 420); confirmation = @(960, 200) }
 $helperPort = 9340    # DevTools port of the helper window, 127.0.0.1 only
 $script:helper = $null
 function Get-ModeState {

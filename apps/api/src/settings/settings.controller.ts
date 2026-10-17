@@ -50,6 +50,7 @@ import type {
   NoteWidget,
   Widget,
   HelperState,
+  HelperDisplays,
   HelperSettings,
   WallpaperState,
 } from "@nova/contracts";
@@ -1714,6 +1715,78 @@ export class SettingsController {
     const restored = this.helperModeHistory.rollback(id);
     this.log("helper_mode_rollback", { revision: id });
     return this.applyHelperMode(restored.settings, restored.auditWarning);
+  }
+
+  /**
+   * The displays the helper can appear on, for the helper's own "Scherm" menu. Open like helper/size (the page has no
+   * PIN) and read-only; device names are left out, only number, size and which one is the main display.
+   */
+  @Get("helper/displays")
+  @PublicRoute()
+  async helperDisplays(): Promise<HelperDisplays> {
+    const saved = this.settings.get().helper;
+    if (!this.wallpaper?.configured)
+      return { available: false, display: saved.display, mode: saved.mode };
+    const outcome = await this.wallpaper.displays();
+    if (!outcome.ok)
+      return { available: false, display: saved.display, mode: saved.mode };
+    return {
+      available: true,
+      mode: saved.mode,
+      display: saved.display,
+      displays: outcome.displays.map((screen) => ({
+        index: screen.index,
+        primary: screen.primary,
+        width: screen.width,
+        height: screen.height,
+      })),
+    };
+  }
+
+  /**
+   * Move the helper to another display and remember the choice. Only the display changes (never the mode), the number
+   * must be a display the PC reports right now (0 = main display), and the agent restarts the helper window there.
+   */
+  @Post("helper/display")
+  @PublicRoute()
+  @HttpCode(200)
+  async setHelperDisplay(@Body() body: Body_): Promise<HelperDisplays> {
+    const display = body?.display;
+    if (typeof display !== "number" || !Number.isInteger(display))
+      throw new ValidationError(["Kies een beeldscherm."]);
+    if (!this.wallpaper?.configured)
+      throw new ValidationError(["Er is geen Windows-agent ingesteld."]);
+    const current = await this.wallpaper.displays();
+    if (!current.ok) throw new ValidationError([WALLPAPER_UNAVAILABLE]);
+    if (
+      display !== 0 &&
+      !current.displays.some((screen) => screen.index === display)
+    )
+      throw new ValidationError(["Dit beeldscherm bestaat niet meer."]);
+    const before = this.settings.get().helper;
+    const after: HelperSettings = { mode: before.mode, display };
+    this.settings.update((next) => {
+      next.helper = after;
+    });
+    this.helperModeHistory.record(before, after);
+    this.log("helper_display", { display });
+    const applied = await this.applyHelperMode(
+      after,
+      this.helperModeHistory.lastWarning,
+    );
+    return {
+      available: true,
+      mode: after.mode,
+      display,
+      displays: current.displays.map((screen) => ({
+        index: screen.index,
+        primary: screen.primary,
+        width: screen.width,
+        height: screen.height,
+      })),
+      applied: applied.applied === true,
+      ...(applied.error ? { error: applied.error } : {}),
+    };
   }
 
   /**

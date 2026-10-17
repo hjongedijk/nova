@@ -14,7 +14,13 @@
   import HelperUi from "#components/helper/HelperUi.svelte";
   import HelperDevices from "#components/helper/HelperDevices.svelte";
   import HelperConfirm from "#components/helper/HelperConfirm.svelte";
-  import { requestHelperSize } from "#lib/api/helper.ts";
+  import {
+    displayLabel,
+    getHelperDisplays,
+    requestHelperSize,
+    setHelperDisplay,
+  } from "#lib/api/helper.ts";
+  import type { HelperDisplays } from "@nova/contracts";
   import { claimAlertSpeech } from "#lib/api/shell.ts";
   import { ApiError } from "#lib/api/client.ts";
   import { friendlyApiError } from "#lib/api/error-copy.ts";
@@ -39,6 +45,7 @@
   import {
     dashboard,
     startDashboard,
+    pollOverview,
     onFeedEvents,
   } from "#lib/stores/dashboard.svelte.ts";
   import { shell } from "#lib/stores/shell.svelte.ts";
@@ -209,59 +216,158 @@
   const visibleNotices = $derived(
     notices.filter((event) => !((snoozed[event.seq] ?? 0) > now)),
   );
-  const overviewBlocks = $derived([
-    {
-      name: "Server",
-      value: dashboard.overview?.proxmox
-        ? `${dashboard.overview.proxmox.guests.length} machines`
-        : "Niet bereikbaar",
-      detail:
-        dashboard.overview?.proxmox?.guests
-          .map((guest) => `${guest.name} (${guest.status})`)
-          .join(" · ") || "Servergegevens niet bereikbaar.",
-      available: !!dashboard.overview?.proxmox,
-    },
-    {
-      name: "Thuis",
-      value: dashboard.overview?.home ? "Verbonden" : "Niet bereikbaar",
-      detail: dashboard.overview?.home
-        ? "Home Assistant verbonden."
-        : "Thuisgegevens niet bereikbaar.",
-      available: !!dashboard.overview?.home,
-    },
-    {
-      name: "Timers",
-      value: dashboard.overview?.timers
-        ? `${dashboard.overview.timers.length} actief`
-        : "Onbekend",
-      detail:
-        dashboard.overview?.timers?.map((timer) => timer.label).join(" · ") ||
-        "Geen actieve timers.",
-      available: !!dashboard.overview?.timers,
-    },
-    {
-      name: "Agenda",
-      value: nextAppointment
-        ? appointmentStart()
-        : dashboard.overview?.calendarStatus === "ready"
-          ? "Geen komende afspraak"
-          : dashboard.overview?.calendarStatus === "error"
-            ? "Niet bereikbaar"
-            : dashboard.overview?.calendarStatus === "not-configured"
-              ? "Niet gekoppeld"
-              : "Beveiliging vereist",
-      detail: nextAppointment
-        ? `${nextAppointment.summary} · ${appointmentStart()}`
-        : dashboard.overview?.calendarStatus === "ready"
-          ? "Er staan geen komende afspraken in de gekoppelde agenda."
-          : dashboard.overview?.calendarStatus === "error"
-            ? "De gekoppelde agenda kon niet worden opgehaald."
-            : dashboard.overview?.calendarStatus === "not-configured"
-              ? "Koppel een agenda via de instellingen om afspraken te tonen."
-              : "Stel NOVA_APP_TOKEN in om agenda-afspraken veilig in dit overzicht te tonen.",
-      available: dashboard.overview?.calendarStatus === "ready",
-    },
-  ]);
+  type BlockState = "ok" | "loading" | "error" | "off";
+  type Block = {
+    name: string;
+    value: string;
+    detail: string;
+    state: BlockState;
+    available: boolean;
+  };
+  /** Not loaded yet: show "Laden…". Only a failed request says "Niet bereikbaar". */
+  const overviewLoading = $derived(
+    !dashboard.overview && !dashboard.overviewFailed,
+  );
+  const overviewDown = $derived(
+    !dashboard.overview && dashboard.overviewFailed,
+  );
+  function block(
+    name: string,
+    state: BlockState,
+    value: string,
+    detail: string,
+  ): Block {
+    return { name, state, value, detail, available: state === "ok" };
+  }
+  function unreachable(name: string, off: boolean, what: string): Block {
+    if (overviewLoading) return block(name, "loading", "Laden…", "");
+    if (off)
+      return block(
+        name,
+        "off",
+        "Niet gekoppeld",
+        `${what} is niet gekoppeld. Dat doe je in de volledige app onder Instellingen.`,
+      );
+    return block(
+      name,
+      "error",
+      "Niet bereikbaar",
+      `${what} geeft nu geen antwoord. NOVA probeert het zo opnieuw.`,
+    );
+  }
+  const overviewBlocks = $derived.by((): Block[] => {
+    const o = dashboard.overview;
+    const services = dashboard.health?.services;
+    const server = o?.proxmox
+      ? block(
+          "Server",
+          "ok",
+          `${o.proxmox.guests.length} machines`,
+          o.proxmox.guests
+            .map((guest) => `${guest.name} (${guest.status})`)
+            .join(" · ") || "Geen machines gevonden.",
+        )
+      : unreachable(
+          "Server",
+          !overviewDown &&
+            !!dashboard.health &&
+            !dashboard.health.state?.proxmox,
+          "De server (Proxmox)",
+        );
+    const home = o?.home
+      ? block("Thuis", "ok", "Verbonden", "Home Assistant is verbonden.")
+      : unreachable(
+          "Thuis",
+          !overviewDown && services?.homeAssistant?.configured === false,
+          "Home Assistant",
+        );
+    const timers = o?.timers
+      ? block(
+          "Timers",
+          "ok",
+          `${o.timers.length} actief`,
+          o.timers.map((timer) => timer.label).join(" · ") ||
+            "Geen actieve timers.",
+        )
+      : overviewLoading
+        ? block("Timers", "loading", "Laden…", "")
+        : block(
+            "Timers",
+            "error",
+            "Onbekend",
+            "De timers konden niet worden opgehaald.",
+          );
+    const status = o?.calendarStatus;
+    const agenda = nextAppointment
+      ? block(
+          "Agenda",
+          "ok",
+          appointmentStart(),
+          `${nextAppointment.summary} · ${appointmentStart()}`,
+        )
+      : overviewLoading
+        ? block("Agenda", "loading", "Laden…", "")
+        : status === "ready"
+          ? block(
+              "Agenda",
+              "ok",
+              "Geen komende afspraak",
+              "Er staan geen komende afspraken in de gekoppelde agenda.",
+            )
+          : status === "not-configured"
+            ? block(
+                "Agenda",
+                "off",
+                "Niet gekoppeld",
+                "Koppel een agenda via de instellingen om afspraken te tonen.",
+              )
+            : status === "protected"
+              ? block(
+                  "Agenda",
+                  "off",
+                  "Verborgen",
+                  "Je afspraken staan hier pas als de beveiliging van NOVA is ingesteld. Dat doe je in de volledige app onder Instellingen.",
+                )
+              : block(
+                  "Agenda",
+                  "error",
+                  "Niet bereikbaar",
+                  "De gekoppelde agenda kon niet worden opgehaald.",
+                );
+    return [server, home, timers, agenda];
+  });
+
+  /* The screen menu: which display the helper appears on. */
+  let screens = $state<HelperDisplays | null>(null);
+  let screenMenu = $state(false);
+  let screenNote = $state("");
+  async function loadScreens(): Promise<void> {
+    try {
+      screens = await getHelperDisplays();
+    } catch {
+      screens = null;
+    }
+  }
+  const currentScreen = $derived.by(() => {
+    const list = screens?.displays ?? [];
+    return (
+      list.find((screen) => screen.index === screens?.display) ??
+      list.find((screen) => screen.primary)
+    );
+  });
+  async function chooseScreen(index: number): Promise<void> {
+    screenMenu = false;
+    screenNote = "De helper verhuist…";
+    try {
+      const result = await setHelperDisplay(index);
+      screens = result;
+      screenNote = result.applied
+        ? ""
+        : "Keuze opgeslagen, maar de pc nam hem nog niet over.";
+    } catch {
+      screenNote = "Verhuizen is niet gelukt. Controleer de verbinding.";
+    }
+  }
   const busy = () =>
     fullscreen ||
     chat.busy ||
@@ -484,6 +590,7 @@
     contrast = storage.get("nova.helper.contrast", "false") === "true";
     let disposed = false;
     loadHelperPreferences();
+    void loadScreens();
     void getHelperHotkeys()
       .then((result) => {
         if (disposed) return;
@@ -746,73 +853,20 @@
     <button
       class="hp-core"
       aria-label="Spreek met NOVA"
+      title="Spreek met NOVA"
       onclick={microphone}
       onpointerdown={() => !paused && cuePlayer?.play("touch")}><Orb /></button
     >
-    <button class="hp-title" onclick={() => open()}
-      ><strong>NOVA</strong><span
-        >{paused
+    <button class="hp-title" onclick={() => open()} title="NOVA openen"
+      ><strong>NOVA</strong><span class="hp-pill" class:busy={chat.busy}
+        ><i></i>{paused
           ? "Gepauzeerd"
           : chat.uiState === "ready" && !chat.history.length
             ? greeting
             : status}</span
       ></button
     >
-    <meter
-      class="hp-meter"
-      min="0"
-      max="1"
-      value={audioLevel.level}
-      aria-label="Stemvolume tijdens spreken"
-    ></meter>
-    <span
-      class="hp-indicator"
-      class:busy={chat.busy}
-      aria-label={chat.busy ? "Bezig" : "Gereed"}
-    ></span>
-    <HelperUi
-      class="hp-button"
-      aria-label="Helperinstellingen"
-      onclick={() => {
-        settings = !settings;
-        open("overview");
-      }}>⚙</HelperUi
-    >
-    {#if expanded}
-      <HelperUi
-        class="hp-button"
-        aria-label={fullscreen ? "Volledig scherm verlaten" : "Volledig scherm"}
-        onclick={() => {
-          if (document.fullscreenElement) void document.exitFullscreen();
-          else void panel?.requestFullscreen().catch(() => undefined);
-        }}>⛶</HelperUi
-      >
-      <HelperUi
-        class="hp-button"
-        aria-label="Helper verbergen"
-        disabled={waiting}
-        onclick={() => {
-          close();
-          hidden = true;
-        }}>×</HelperUi
-      >
-    {/if}
-    <HelperUi
-      class="hp-button"
-      aria-label={expanded ? "Inklappen" : "Uitklappen"}
-      disabled={waiting}
-      onclick={() => (expanded ? close() : open())}
-      >{expanded ? "−" : "+"}</HelperUi
-    >
-  </header>
-  {#if expanded}
-    {#if waiting}
-      <section class="hp-content hp-confirm" aria-label="Bevestiging nodig">
-        {#each cards.filter((card) => !card.done) as card (card.id)}<HelperConfirm
-            {card}
-          />{/each}
-      </section>
-    {:else}
+    {#if expanded && !waiting}
       <nav class="hp-tabs" aria-label="Helperweergaven">
         {#each tabs as tab (tab.id)}<HelperUi
             variant="tab"
@@ -829,10 +883,11 @@
         <HelperUi
           class="hp-more"
           aria-label="Extra weergave toevoegen"
+          title="Extra weergave toevoegen"
           aria-expanded={extraMenu}
           onclick={() => (extraMenu = !extraMenu)}>+</HelperUi
         >
-        {#if extraMenu}<div class="hp-extra-menu">
+        {#if extraMenu}<div class="hp-menu hp-extra-menu">
             {#each [{ id: "weather", label: "Weer" }, { id: "lists", label: "Lijsten" }] as extra (extra.id)}<HelperUi
                 onclick={() => {
                   if (!extraViews.includes(extra.id as "weather" | "lists"))
@@ -843,6 +898,122 @@
               >{/each}
           </div>{/if}
       </nav>
+    {/if}
+    <meter
+      class="hp-sr"
+      min="0"
+      max="1"
+      value={audioLevel.level}
+      aria-label="Stemvolume tijdens spreken"
+    ></meter>
+    <div class="hp-tools" role="toolbar" aria-label="Helper">
+      {#if screens?.available}
+        <div class="hp-screen">
+          <HelperUi
+            class="hp-icon"
+            aria-label="Scherm kiezen"
+            title={currentScreen
+              ? `Scherm: ${displayLabel(currentScreen)}`
+              : "Scherm kiezen"}
+            aria-expanded={screenMenu}
+            aria-haspopup="menu"
+            onclick={() => {
+              screenMenu = !screenMenu;
+              if (screenMenu) void loadScreens();
+            }}
+            ><svg viewBox="0 0 20 20" aria-hidden="true"
+              ><rect x="2.5" y="4" width="15" height="10" rx="1.5" /><path
+                d="M7 17h6M10 14v3"
+              /></svg
+            ><span class="hp-icon-label">Scherm</span></HelperUi
+          >
+          {#if screenMenu}
+            <div
+              class="hp-menu hp-screen-menu"
+              role="menu"
+              aria-label="Scherm voor de helper"
+            >
+              <p>Scherm voor de helper</p>
+              {#each screens.displays ?? [] as screen (screen.index)}
+                <HelperUi
+                  role="menuitemradio"
+                  aria-checked={currentScreen?.index === screen.index}
+                  class={currentScreen?.index === screen.index ? "current" : ""}
+                  onclick={() => chooseScreen(screen.index)}
+                  ><span aria-hidden="true"
+                    >{currentScreen?.index === screen.index ? "✓" : ""}</span
+                  >{displayLabel(screen)}</HelperUi
+                >
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
+      <HelperUi
+        class="hp-icon"
+        aria-label="Helperinstellingen"
+        title="Instellingen"
+        aria-pressed={settings}
+        onclick={() => {
+          settings = !settings;
+          open("overview");
+        }}
+        ><svg viewBox="0 0 20 20" aria-hidden="true"
+          ><circle cx="10" cy="10" r="2.6" /><path
+            d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"
+          /></svg
+        ></HelperUi
+      >
+      {#if expanded}
+        <HelperUi
+          class="hp-icon"
+          aria-label={fullscreen
+            ? "Volledig scherm verlaten"
+            : "Volledig scherm"}
+          title={fullscreen ? "Volledig scherm verlaten" : "Volledig scherm"}
+          onclick={() => {
+            if (document.fullscreenElement) void document.exitFullscreen();
+            else void panel?.requestFullscreen().catch(() => undefined);
+          }}
+          ><svg viewBox="0 0 20 20" aria-hidden="true"
+            ><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" /></svg
+          ></HelperUi
+        >
+        <HelperUi
+          class="hp-icon"
+          aria-label="Helper verbergen"
+          title="Verbergen (komt terug bij een melding)"
+          disabled={waiting}
+          onclick={() => {
+            close();
+            hidden = true;
+          }}
+          ><svg viewBox="0 0 20 20" aria-hidden="true"
+            ><path d="M5 5l10 10M15 5L5 15" /></svg
+          ></HelperUi
+        >
+      {/if}
+      <HelperUi
+        class="hp-icon"
+        aria-label={expanded ? "Inklappen" : "Uitklappen"}
+        title={expanded ? "Inklappen" : "Uitklappen"}
+        disabled={waiting}
+        onclick={() => (expanded ? close() : open())}
+        ><svg viewBox="0 0 20 20" aria-hidden="true"
+          ><path d={expanded ? "M4 7l6 6 6-6" : "M4 13l6-6 6 6"} /></svg
+        ></HelperUi
+      >
+    </div>
+  </header>
+  {#if screenNote}<p class="hp-screen-note" role="status">{screenNote}</p>{/if}
+  {#if expanded}
+    {#if waiting}
+      <section class="hp-content hp-confirm" aria-label="Bevestiging nodig">
+        {#each cards.filter((card) => !card.done) as card (card.id)}<HelperConfirm
+            {card}
+          />{/each}
+      </section>
+    {:else}
       {#if settings}
         <section
           class="hp-content hp-preferences"
@@ -1155,32 +1326,33 @@
         </section>
       {:else if view === "overview"}
         <section class="hp-content hp-overview-layout" aria-label="Overzicht">
-          <div class="hp-overview-orb" aria-hidden="true"><Orb /></div>
           <div class="hp-overview">
             {#each overviewBlocks as block (block.name)}
               <button
                 class="hp-block"
+                data-state={block.state}
                 class:available={block.available}
                 aria-expanded={detail === block.name}
                 onclick={() =>
                   (detail = detail === block.name ? "" : block.name)}
-                ><span>{block.name}</span><strong>{block.value}</strong></button
+                ><span class="hp-block-name"><i></i>{block.name}</span><strong
+                  class:skeleton={block.state === "loading"}
+                  >{block.value}</strong
+                >{#if block.state !== "loading"}<small title={block.detail}
+                    >{block.detail}</small
+                  >{/if}</button
               >
             {/each}
           </div>
+          {#if overviewDown}
+            <div class="hp-retry" role="status">
+              <span>Het overzicht kon niet worden geladen.</span>
+              <HelperUi class="hp-button" onclick={() => pollOverview()}
+                >Opnieuw proberen</HelperUi
+              >
+            </div>
+          {/if}
         </section>
-        <div class="hp-integrations" aria-label="Koppelingen">
-          {#each [{ name: "Proxmox", prefix: "proxmox_", ok: !!dashboard.overview?.proxmox }, { name: "Home Assistant", prefix: "ha_", ok: !!dashboard.overview?.home }, { name: "Node-RED", prefix: "nodered_", ok: dashboard.health?.nodeRed === true }, { name: "MQTT", prefix: "mqtt_", ok: dashboard.health?.mqtt === true }] as service (service.name)}<span
-              class="hp-chip"
-              ><i
-                class:online={service.ok}
-                class:busy={chat.activeTool.startsWith(service.prefix)}
-                data-service={service.name}
-              ></i>{service.name}<span class="hp-sr"
-                >{service.ok ? "Verbonden" : "Niet verbonden"}</span
-              ></span
-            >{/each}
-        </div>
         {#if detail}<div class="hp-detail">
             <strong>{detail}</strong><span
               >{overviewBlocks.find((block) => block.name === detail)
@@ -1360,11 +1532,27 @@
             </p>{/each}
         </section>
       {/if}
-      <footer class="hp-ticker" role="status">
-        <i class:busy={chat.busy}></i>{chat.hint ||
-          chat.toolResult ||
-          (chat.busy ? "NOVA denkt na…" : "Gereed voor je volgende vraag")}
-      </footer>
+      <div class="hp-foot">
+        <footer class="hp-ticker" role="status">
+          <i class:busy={chat.busy}></i>{chat.hint ||
+            chat.toolResult ||
+            (chat.busy ? "NOVA denkt na…" : "Gereed voor je volgende vraag")}
+        </footer>
+        {#if view === "overview" && !settings}
+          <div class="hp-integrations" aria-label="Koppelingen">
+            {#each [{ name: "Proxmox", prefix: "proxmox_", ok: !!dashboard.overview?.proxmox }, { name: "Home Assistant", prefix: "ha_", ok: !!dashboard.overview?.home }, { name: "Node-RED", prefix: "nodered_", ok: dashboard.health?.nodeRed === true }, { name: "MQTT", prefix: "mqtt_", ok: dashboard.health?.mqtt === true }] as service (service.name)}<span
+                class="hp-chip"
+                ><i
+                  class:online={service.ok}
+                  class:busy={chat.activeTool.startsWith(service.prefix)}
+                  data-service={service.name}
+                ></i>{service.name}<span class="hp-sr"
+                  >{service.ok ? "Verbonden" : "Niet verbonden"}</span
+                ></span
+              >{/each}
+          </div>
+        {/if}
+      </div>
     {/if}
   {/if}
   {#if dragging}<div class="hp-drop">

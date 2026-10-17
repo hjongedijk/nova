@@ -631,6 +631,22 @@ export type WallpaperState =
       historyWarning?: string;
     };
 
+/** The displays the helper can appear on (no device names) and which one it uses; display 0 = the main display. */
+export interface HelperDisplays {
+  available: boolean;
+  mode: HelperMode;
+  display: number;
+  displays?: {
+    index: number;
+    primary: boolean;
+    width: number;
+    height: number;
+  }[];
+  /** After choosing a display: whether the agent has moved the helper. */
+  applied?: boolean;
+  error?: string;
+}
+
 /** The helper choice as saved in NOVA, next to what the agent on the PC reports. */
 export interface HelperState {
   settings: HelperSettings;

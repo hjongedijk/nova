@@ -84,6 +84,10 @@ Microsoft Edge shows the NOVA page in a window that is parented to the desktop, 
 
 Change it in NOVA under **Instellingen, Meer, "NOVA op je Windows-pc"**; no reinstall is needed. Endpoints: `POST /v1/mode` with `{ "mode": ..., "display": ... }`, `GET /v1/status` and `GET /v1/displays` (both report `mode` and `helperDisplay`), and `POST /v1/helper/size` with `{ "view": "compact|overview|chat|notifications|weather|lists|confirmation" }` (legacy `expanded` remains supported).
 
+### Choosing the helper's screen
+
+The helper appears on the display saved in NOVA (`helperDisplay`; 0 = main display). Choose it in the helper itself (toolbar button **Scherm**, which lists the connected displays such as "Scherm 2 (2560x1440)" and marks the current one) or in NOVA under Instellingen, "Scherm voor de helper". Choosing moves the helper at once (the agent restarts the helper window on that display through `POST /v1/mode`) and the choice is kept. The helper page uses `GET /api/settings/helper/displays` and `POST /api/settings/helper/display` (only the display number, which must be a display the PC reports now; no PIN, like the resize route). The helper is always centred on the top edge; a corner position is not offered.
+
 ### The rectangular helper
 
 The helper uses a dedicated Edge fullscreen kiosk window at `<NOVA>/helper`. NOVA removes the native frame, preserves tool-window/topmost styles, and positions the visible rectangle against the chosen monitor's top edge. There is no `SetWindowRgn`, rounded clipping or region repair timer. Edge kiosk mode is InPrivate; NOVA persists appearance/sound preferences on the server and native view/display/hotkeys in `mode.json`.
@@ -91,9 +95,9 @@ The helper uses a dedicated Edge fullscreen kiosk window at `<NOVA>/helper`. NOV
 | View                                    | Size in CSS pixels |
 | --------------------------------------- | ------------------ |
 | Compact                                 | 360 × 44           |
-| Overview, notifications, weather, lists | 640 × 180          |
-| Chat                                    | 640 × 340          |
-| Confirmation                            | 640 × 170          |
+| Overview, notifications, weather, lists | 960 × 280          |
+| Chat                                    | 960 × 420          |
+| Confirmation                            | 960 × 200          |
 
 Geometry converts CSS pixels using the target monitor's DPI, centers on that monitor (including negative desktop coordinates), and compensates invisible native borders. Small displays clamp the panel to available dimensions. Size transitions take 200 ms without overshoot; reduced motion applies the target directly. `/v1/helper-debug` reports requested and native window bounds, the DWM visible frame, measured browser chrome, DPI/scale, visibility, caption and sizing-frame flags, toolwindow/appwindow and topmost state, plus selected display/view. Measurements expose caption problems rather than hiding them behind a clipping region.
 

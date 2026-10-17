@@ -278,8 +278,12 @@
     {/each}
   </fieldset>
   {#if helper.mode !== "wallpaper"}
+    <p class="hint">
+      Kies op welk scherm de helper verschijnt. Hij verhuist meteen en onthoudt
+      je keuze. Dit kan ook in de helper zelf, met de knop Scherm.
+    </p>
     <div class="helper-display">
-      <label for="helperDisplay">Helper op</label>
+      <label for="helperDisplay">Scherm voor de helper</label>
       <select
         id="helperDisplay"
         disabled={helperBusy}
@@ -290,13 +294,13 @@
             display: Number(event.currentTarget.value),
           })}
       >
-        <option value={0}>Hoofdscherm</option>
+        <option value={0}>Hoofdscherm (standaard)</option>
         {#if wallpaper?.available}
           {#each wallpaper.displays as screen (screen.index)}
             <option value={screen.index}
-              >Beeldscherm {screen.index}{screen.primary
-                ? " (hoofdscherm)"
-                : ""}</option
+              >Scherm {screen.index} ({screen.width}x{screen.height}{screen.primary
+                ? ", hoofdscherm"
+                : ""})</option
             >
           {/each}
         {/if}

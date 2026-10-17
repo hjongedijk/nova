@@ -381,7 +381,7 @@ import assert from "node:assert/strict";
       await page
         .getByRole("button", { name: "Uitklappen", exact: true })
         .click();
-      assert.deepEqual(await dimensions(), { width: 640, height: 180 });
+      assert.deepEqual(await dimensions(), { width: 960, height: 280 });
       assert.equal(await page.evaluate(() => document.fullscreenElement), null);
       await page
         .getByRole("button", { name: "Volledig scherm", exact: true })
@@ -398,7 +398,7 @@ import assert from "node:assert/strict";
         .getByRole("button", { name: "Volledig scherm verlaten", exact: true })
         .click();
       await page.waitForFunction(() => !document.fullscreenElement);
-      assert.deepEqual(await dimensions(), { width: 640, height: 180 });
+      assert.deepEqual(await dimensions(), { width: 960, height: 280 });
       await page
         .getByRole("button", { name: "Helper verbergen", exact: true })
         .click();
@@ -411,7 +411,7 @@ import assert from "node:assert/strict";
       await page
         .getByRole("button", { name: "Uitklappen", exact: true })
         .click();
-      await page.setViewportSize({ width: 640, height: 180 });
+      await page.setViewportSize({ width: 960, height: 280 });
       await page.getByRole("button", { name: /Timers 0 actief/ }).click();
       await page.getByText("Geen actieve timers.").waitFor();
       await page.getByRole("button", { name: /Timers 0 actief/ }).click();
@@ -419,25 +419,25 @@ import assert from "node:assert/strict";
       await page.getByText(/Tandarts/).waitFor();
       await page.getByRole("button", { name: /^Agenda / }).click();
       assert.equal(
-        await page.locator(".hp-overview-orb canvas").count(),
+        await page.locator(".hp canvas").count(),
         1,
-        "overview must show the orb beside its status cards",
+        "the helper shows exactly one orb",
       );
-      await snap("overview", 640, 180);
+      await snap("overview", 960, 280);
       await page
         .getByRole("button", { name: "Extra weergave toevoegen", exact: true })
         .click();
       await page.getByRole("button", { name: "Weer", exact: true }).click();
-      await snap("weather", 640, 180);
+      await snap("weather", 960, 280);
       await page
         .getByRole("button", { name: "Extra weergave toevoegen", exact: true })
         .click();
       await page.getByRole("button", { name: "Lijsten", exact: true }).click();
-      await snap("lists", 640, 180);
+      await snap("lists", 960, 280);
       await page
         .getByRole("button", { name: "Helperinstellingen", exact: true })
         .click();
-      await snap("preferences", 640, 180);
+      await snap("preferences", 960, 280);
       await page.getByLabel("Waarschuwing").selectOption("helper");
       await page.getByLabel("Kritiek").selectOption("screen");
       const preferencesSaved = page.waitForResponse(
@@ -470,7 +470,7 @@ import assert from "node:assert/strict";
         return html === body && body === panel;
       });
       assert.equal(new Set(await helperBackgrounds()).size, 1);
-      await snap("contrast", 640, 180);
+      await snap("contrast", 960, 280);
       await page
         .getByRole("checkbox", { name: "Hoog contrast", exact: true })
         .uncheck();
@@ -745,7 +745,7 @@ import assert from "node:assert/strict";
         .getByRole("button", { name: "Melding sluiten", exact: true })
         .click();
       assert.equal(await speechWarning.count(), 0);
-      await snap("chat", 640, 340);
+      await snap("chat", 960, 420);
       await assertFullscreen();
       assert.match(
         await page.locator(".hp-ticker").innerText(),
@@ -788,7 +788,7 @@ import assert from "node:assert/strict";
           }),
         ),
       );
-      await snap("notification", 640, 180);
+      await snap("notification", 960, 280);
       await page
         .getByRole("button", { name: "Over 10 min", exact: true })
         .first()
@@ -813,7 +813,7 @@ import assert from "node:assert/strict";
           buffer: Buffer.from("Vergadering om zes uur."),
         },
       ]);
-      await snap("attachment", 640, 340);
+      await snap("attachment", 960, 420);
       fail = true;
       await page
         .getByRole("textbox", { name: "Bericht aan NOVA" })
@@ -850,7 +850,7 @@ import assert from "node:assert/strict";
       await page.waitForSelector('[aria-label="Kies een apparaat"] button', {
         timeout: 5000,
       });
-      await snap("choices", 640, 340);
+      await snap("choices", 960, 420);
       assert.equal(
         await page
           .getByRole("button", { name: "Niet tonen", exact: true })
@@ -885,7 +885,7 @@ import assert from "node:assert/strict";
         .fill("Zet woonkamerlicht aan.");
       await page.getByRole("button", { name: "Verstuur", exact: true }).click();
       await page.waitForSelector(".hc");
-      await snap("confirmation", 640, 170);
+      await snap("confirmation", 960, 200);
       await assertFullscreen();
       assert.equal(
         await page.getByRole("button", { name: "Altijd", exact: true }).count(),

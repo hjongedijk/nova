@@ -94,13 +94,24 @@ async function pollSystem(): Promise<void> {
   }
 }
 
+let overviewRetry: ReturnType<typeof setTimeout> | undefined;
+let overviewFailures = 0;
+
 export async function pollOverview(): Promise<void> {
   if (document.hidden) return;
+  clearTimeout(overviewRetry);
   try {
     dashboard.overview = await getOverview();
     dashboard.overviewFailed = false;
+    overviewFailures = 0;
   } catch {
     dashboard.overviewFailed = true;
+    // Try again soon (2s, 4s, 8s, ... at most 30s) instead of waiting for the next 10 second tick.
+    overviewFailures += 1;
+    overviewRetry = setTimeout(
+      () => void pollOverview(),
+      Math.min(30_000, 1000 * 2 ** overviewFailures),
+    );
   }
 }
 
@@ -206,6 +217,7 @@ export function startDashboard(): () => void {
     stopped = true;
     users -= 1;
     if (users === 0) {
+      clearTimeout(overviewRetry);
       timers.forEach(clearInterval);
       timers = [];
     }

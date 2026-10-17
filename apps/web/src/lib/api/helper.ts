@@ -1,4 +1,5 @@
-import { sendJson } from "./client.ts";
+import type { HelperDisplays } from "@nova/contracts";
+import { getJson, sendJson } from "./client.ts";
 
 export type HelperView =
   | "compact"
@@ -41,4 +42,22 @@ export function requestHelperSize(
   };
   running ??= Promise.resolve().then(drain);
   return running;
+}
+
+/** The displays the helper can appear on (no PIN needed; the page only moves NOVA's own helper window). */
+export const getHelperDisplays = () =>
+  getJson<HelperDisplays>("/settings/helper/displays");
+
+/** Move the helper to a display (0 = main display) and remember it. */
+export const setHelperDisplay = (display: number) =>
+  sendJson<HelperDisplays>("POST", "/settings/helper/display", { display });
+
+/** "Scherm 2 (2560x1440, hoofdscherm)": the label of one display in the menu. */
+export function displayLabel(screen: {
+  index: number;
+  primary: boolean;
+  width: number;
+  height: number;
+}): string {
+  return `Scherm ${screen.index} (${screen.width}x${screen.height}${screen.primary ? ", hoofdscherm" : ""})`;
 }

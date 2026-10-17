@@ -2678,4 +2678,67 @@ describe("the helper overlay choice", () => {
       await app.app.close();
     }
   });
+
+  it("lists the displays and moves the helper to one of them without a PIN, only to a display that exists", async () => {
+    const log: unknown[] = [];
+    const base = port(log, { error: null });
+    const screens = [
+      {
+        index: 1,
+        name: "\\\\.\\DISPLAY1",
+        primary: true,
+        width: 1920,
+        height: 1080,
+        mode: "off" as const,
+      },
+      {
+        index: 2,
+        name: "\\\\.\\DISPLAY2",
+        primary: false,
+        width: 2560,
+        height: 1440,
+        mode: "off" as const,
+      },
+    ];
+    const app = await createApp({
+      env: { NOVA_ADMIN_PIN: "1234" },
+      wallpaper: {
+        ...base,
+        displays: async () => ({
+          ok: true,
+          displays: screens,
+          mode: "helper",
+          helperDisplay: 0,
+        }),
+      },
+    });
+    try {
+      const listed = await app.api.get("/api/settings/helper/displays");
+      expect(listed.status).toBe(200);
+      expect(listed.body.available).toBe(true);
+      expect(listed.body.displays).toEqual([
+        { index: 1, primary: true, width: 1920, height: 1080 },
+        { index: 2, primary: false, width: 2560, height: 1440 },
+      ]);
+      const move = (display: unknown) =>
+        app.api.post("/api/settings/helper/display").send({ display });
+      const moved = await move(2);
+      expect(moved.status).toBe(200);
+      expect(moved.body).toMatchObject({ display: 2, applied: true });
+      expect(log.at(-1)).toEqual({ mode: "wallpaper", display: 2 });
+      for (const bad of [3, -1, 1.5, "2", null])
+        expect((await move(bad)).status).toBe(400);
+      expect((await move(0)).status).toBe(200);
+      // Nothing else about the helper is open.
+      expect(
+        (
+          await app.api
+            .post("/api/settings/helper")
+            .send({ mode: "helper", display: 1 })
+        ).status,
+      ).toBe(401);
+    } finally {
+      await app.app.close();
+    }
+  });
 });

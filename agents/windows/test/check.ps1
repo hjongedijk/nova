@@ -101,7 +101,7 @@ if (-not $failed) {
   $sizesAssignment = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$helperSizes' }, $true) | Select-Object -First 1
   if (-not $sizesAssignment) { throw 'Helper sizes assignment missing' }
   . ([scriptblock]::Create($sizesAssignment.Extent.Text))
-  $expectedSizes = @{ compact = @(360, 44); overview = @(640, 180); notifications = @(640, 180); weather = @(640, 180); lists = @(640, 180); chat = @(640, 340); confirmation = @(640, 170) }
+  $expectedSizes = @{ compact = @(360, 44); overview = @(960, 280); notifications = @(960, 280); weather = @(960, 280); lists = @(960, 280); chat = @(960, 420); confirmation = @(960, 200) }
   foreach ($view in $expectedSizes.Keys) {
     if (-not (& $same $helperSizes[$view] $expectedSizes[$view])) { $failed = $true; Write-Host "Helper sizes: wrong $view CSS dimensions" }
   }
