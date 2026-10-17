@@ -9,6 +9,7 @@
   import Button from "#components/ui/Button.svelte";
   import Field from "#components/ui/Field.svelte";
   import { afterChange, fail, say } from "./state.svelte.ts";
+  import Disclosure from "./ui/Disclosure.svelte";
 
   let files = $state<FileList | null>(null);
   let mode = $state<"merge" | "replace">("merge");
@@ -96,19 +97,26 @@
 </script>
 
 <section>
-  <h3>Exporteren</h3>
+  <h2>Back-up maken en terugzetten</h2>
   <p class="hint">
-    Een bestand met je vaardigheden, aanpassingen aan gereedschappen, eigen
-    regels, snelle opdrachten, helperinstellingen en je boodschappen- en
-    takenlijsten. Ook serviceadressen en veilige opties worden opgenomen.
-    Actieve timers en meldingen worden niet overgezet. Servicegeheimen blijven
-    lokaal op de doelinstallatie en worden nooit geëxporteerd of vervangen.
-    OmniRoute-provideraccounts, API-sleutels en routebeleid zijn geen onderdeel
-    van dit bestand. Node-RED-flowlogica wordt meegenomen als lokale
-    beheertoegang is ingesteld; credentials worden altijd weggelaten.
+    Bewaar je instellingen in één bestand, zodat je ze later of op een andere
+    installatie kunt terugzetten.
   </p>
-  <Button onclick={download}>Back-up downloaden</Button>
-  <h3>Importeren</h3>
+  <h3>Back-up maken</h3>
+  <Disclosure kind="more" title="Meer uitleg" hint="Wat er wel en niet in zit">
+    <p class="hint">
+      Een bestand met je vaardigheden, aanpassingen aan gereedschappen, eigen
+      regels, snelle opdrachten, helperinstellingen en je boodschappen- en
+      takenlijsten. Ook serviceadressen en veilige opties worden opgenomen.
+      Actieve timers en meldingen worden niet overgezet. Servicegeheimen blijven
+      lokaal op de doelinstallatie en worden nooit geëxporteerd of vervangen.
+      OmniRoute-provideraccounts, API-sleutels en routebeleid zijn geen
+      onderdeel van dit bestand. Node-RED-flowlogica wordt meegenomen als lokale
+      beheertoegang is ingesteld; credentials worden altijd weggelaten.
+    </p>
+  </Disclosure>
+  <Button go onclick={download}>Back-up downloaden</Button>
+  <h3>Back-up terugzetten</h3>
   <Field label="Back-upbestand" id="backupFile">
     <input
       disabled={busy || !!pending}
@@ -136,14 +144,20 @@
       <option value="replace">Alles vervangen</option>
     </select>
   </Field>
-  <p>
-    Maximaal 1 MB. NOVA controleert het bestand vóór de import. Serviceadressen
-    veranderen pas na bevestiging en vereisen daarna een herstart. Geheime
-    servicewaarden en permanente toestemmingen zitten niet in de back-up;
-    bestaande servicegeheimen blijven op deze installatie staan. Flowimport
-    vereist Node-RED-beheertoegang; credentials worden nooit meegenomen. Actieve
-    timers en meldingen blijven buiten de back-up.
+  <p class="ds-hint">
+    Kies een back-upbestand (maximaal 1 MB). NOVA laat eerst zien wat er
+    verandert; er wordt pas iets gewijzigd als jij bevestigt.
   </p>
+  <Disclosure kind="more" title="Meer uitleg" hint="Wat wordt er teruggezet?">
+    <p>
+      Maximaal 1 MB. NOVA controleert het bestand vóór de import.
+      Serviceadressen veranderen pas na bevestiging en vereisen daarna een
+      herstart. Geheime servicewaarden en permanente toestemmingen zitten niet
+      in de back-up; bestaande servicegeheimen blijven op deze installatie
+      staan. Flowimport vereist Node-RED-beheertoegang; credentials worden nooit
+      meegenomen. Actieve timers en meldingen blijven buiten de back-up.
+    </p>
+  </Disclosure>
   {#if pending}
     <div
       class="import-review"

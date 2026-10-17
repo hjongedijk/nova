@@ -53,7 +53,8 @@
   import AdminConfirmation from "#components/admin/AdminConfirmation.svelte";
   import { sessionId } from "#components/admin/session.ts";
   import { executeAction } from "#lib/api/admin.ts";
-  let { ids }: { ids?: string[] } = $props();
+  let { ids, showHelp = true }: { ids?: string[]; showHelp?: boolean } =
+    $props();
   let services = $state<ServiceConnection[]>([]);
   let drafts = $state<Record<string, Record<string, string | boolean>>>({});
   let clear = $state<Record<string, Record<string, boolean>>>({});
@@ -682,13 +683,15 @@
 </script>
 
 <section class="connections-section">
-  <Disclosure title="Meer uitleg" kind="more">
-    <p class="hint">
-      Opgeslagen waarden zijn leidend. Een gewijzigd adres of geheim wordt
-      toegepast bij de volgende start van NOVA. Testen gebruikt de ingevulde
-      waarden en slaat niets op.
-    </p>
-  </Disclosure>
+  {#if showHelp}
+    <Disclosure title="Meer uitleg" kind="more">
+      <p class="hint">
+        Wat je hier invult wordt bewaard. Een nieuw adres of een nieuwe sleutel
+        werkt pas nadat NOVA opnieuw is gestart. Met “Testen” controleer je of
+        het werkt, zonder iets te bewaren.
+      </p>
+    </Disclosure>
+  {/if}
   {#if error}<p role="status">{error}</p>
     <button type="button" onclick={load}>Opnieuw proberen</button>{/if}
   {#if ids?.some( (id) => ["proxmox", "termix", "pangolin"].includes(id) ) || shown.some( (service) => ["proxmox", "termix", "pangolin"].includes(service.id) )}
@@ -937,7 +940,7 @@
               ? tests[service.id]!.ok
                 ? "Bereikbaar"
                 : "Controle mislukt"
-              : "Niet getest"}
+              : "Nog niet gecontroleerd"}
         </span>
       </summary>
       {#if service.id === "omniroute"}

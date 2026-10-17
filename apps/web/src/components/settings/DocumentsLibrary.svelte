@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Disclosure from "./ui/Disclosure.svelte";
   import { ApiError } from "#lib/api/client.ts";
   import { onMount } from "svelte";
   import { encodeAttachments } from "#lib/chat/attachments.ts";
@@ -67,18 +68,27 @@
 </script>
 
 <section class="documents" aria-labelledby="documentHeading">
-  <h2 id="documentHeading">Privé documentbibliotheek</h2>
+  <h2 id="documentHeading">Je documenten</h2>
   <p>
-    Upload PDF-, DOCX- of tekstbestanden om er later vragen over te stellen.
-    NOVA stuurt de uitgelezen tekstfragmenten naar de ingestelde,
-    geverifieerd-gratis embeddingroute en bewaart die in een aparte
-    Qdrant-collectie. Het originele bestand wordt niet bewaard.
+    Voeg PDF-, Word- of tekstbestanden toe, dan kun je NOVA er later vragen over
+    stellen. Het originele bestand wordt niet bewaard; NOVA onthoudt alleen de
+    tekst.
   </p>
+  <Disclosure kind="more" title="Meer uitleg" hint="Waar de tekst naartoe gaat">
+    <p>
+      NOVA stuurt de uitgelezen tekstfragmenten naar de ingestelde,
+      geverifieerd-gratis embeddingroute en bewaart die in een aparte
+      Qdrant-collectie.
+    </p>
+  </Disclosure>
 
   {#if !configured}
     <p class="state">
-      Stel eerst een geverifieerd gratis embeddingmodel en Qdrant in bij
-      Modellen en Koppelingen.
+      Documenten werken nog niet: NOVA heeft daarvoor een gratis dienst en een
+      geheugenopslag nodig. Kijk bij <a href="/settings?section=modellen"
+        >Slimme modellen</a
+      >
+      of in <a href="/settings?section=geavanceerd#koppelingen">Geavanceerd</a>.
     </p>
   {:else}
     <label for="documentFiles">Documenten kiezen</label>

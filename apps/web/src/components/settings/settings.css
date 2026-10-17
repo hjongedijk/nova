@@ -597,3 +597,34 @@
   padding: 2px 10px;
   border-radius: 999px;
 }
+
+/* ---- readability floor: nothing a person has to read is below 16px ---- */
+#settingsBody#settingsBody
+  :where(
+    p,
+    li,
+    small,
+    summary,
+    legend,
+    td,
+    th,
+    .hint,
+    .help,
+    .ds-hint,
+    .ds-disclosure-hint,
+    .ds-pill,
+    .badge,
+    .ds-switch-label,
+    .ds-switch-text span,
+    .connection-status,
+    label span
+  ) {
+  font-size: max(16px, 1em);
+}
+#settingsBody#settingsBody .ds-pill-icon {
+  font-size: 12px;
+}
+#settingsBody input[type="range"] {
+  min-height: 44px;
+  accent-color: var(--glow);
+}

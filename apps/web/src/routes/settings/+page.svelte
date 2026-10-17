@@ -269,10 +269,22 @@
             </div>
           {:else if section === "huis"}
             <div id="home-assistant">
+              <h2>Home Assistant</h2>
+              <p class="hint">
+                Met Home Assistant kan NOVA lampen, schakelaars en de
+                thermostaat in je huis bedienen. Open hieronder het blok en vul
+                het adres en de toegangssleutel (token) van Home Assistant in.
+              </p>
               <ConnectionsSection ids={["home-assistant"]} />
             </div>
             <div id="pc">
-              <ConnectionsSection ids={["windows"]} />
+              <h2>Je Windows-pc</h2>
+              <p class="hint">
+                Een klein programma op je pc (de NOVA-agent) laat NOVA je
+                achtergrond, helper en scherm gebruiken. Vul hieronder het adres
+                in waarop die agent draait.
+              </p>
+              <ConnectionsSection ids={["windows"]} showHelp={false} />
               <DevicesSection />
             </div>
             <div id="pc-bedienen"><DesktopSection /></div>
