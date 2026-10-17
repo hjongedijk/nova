@@ -23,7 +23,7 @@ RUN curl -fsSL -o "/tmp/linphone-${LINPHONE_VERSION}-cp312-cp312-linux_x86_64.wh
 # ---- runtime: only the shared libraries the wheel needs, non-root ----
 FROM ubuntu:24.04
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 libpython3.12 libmariadb3 libasound2t64 \
+ && apt-get install -y --no-install-recommends python3 libpython3.12 libmariadb3 libasound2t64 ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin nova-chat \
  && install -d -m 0700 -o nova-chat -g nova-chat /data
