@@ -43,5 +43,3 @@ export const shell = $state({
 /** Where the secure (https) NOVA lives: the microphone needs it. */
 export const secureBase = (): string =>
   shell.publicOrigin || `https://${location.hostname}:8443`;
-export const plainBase = (): string =>
-  shell.publicOrigin || `http://${location.hostname}:8080`;

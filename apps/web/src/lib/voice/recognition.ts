@@ -161,8 +161,6 @@ export function initRecognition(): boolean {
   return true;
 }
 
-export const hasRecognition = (): boolean => recognition !== null;
-
 function startWithSelectedInput(
   rec: Recognizer,
   attempt: number,

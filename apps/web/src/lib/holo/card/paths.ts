@@ -1,4 +1,4 @@
-import type { ArcShape, AreaShape, CardLine } from "./types.ts";
+import type { ArcShape, AreaShape } from "./types.ts";
 
 const f = (n: number) => Math.round(n * 100) / 100;
 
@@ -19,5 +19,3 @@ export function areaPath(shape: AreaShape): string {
   if (!pts.length) return "";
   return `${linePath(pts)}L${f(pts[pts.length - 1]![0])} ${f(baseY)}L${f(pts[0]![0])} ${f(baseY)}Z`;
 }
-
-export const linePathOf = (line: CardLine): string => linePath(line.pts);

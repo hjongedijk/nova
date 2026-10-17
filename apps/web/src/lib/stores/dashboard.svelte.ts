@@ -172,27 +172,6 @@ async function pollAlerts(): Promise<void> {
 
 /* ---------- health, as the header and the Systeem panel read it ---------- */
 
-/** NOVA's overall state for the menu: "Online", "Setup nodig", "Gratis AI niet beschikbaar" or "Offline". */
-export function systemStatus(): { text: string; ok: boolean } | null {
-  if (dashboard.healthFailed) return { text: "Offline", ok: false };
-  const data = dashboard.health;
-  if (!data) return null;
-  const routingDown = data.routing?.ready === false;
-  const text = routingDown
-    ? "Gratis AI niet beschikbaar"
-    : data.omnirouteConfigured
-      ? "Online"
-      : "Setup nodig";
-  return { text, ok: !routingDown && Boolean(data.omnirouteConfigured) };
-}
-
-/** The line under the header when there is no verified free AI route; empty otherwise. */
-export function routingNotice(): string {
-  return !dashboard.healthFailed && dashboard.health?.routing?.ready === false
-    ? "Geen geverifieerde gratis AI-route. Controleer Gratis AI onder Status & geheugen."
-    : "";
-}
-
 /* ---------- start and stop ---------- */
 
 let users = 0;
