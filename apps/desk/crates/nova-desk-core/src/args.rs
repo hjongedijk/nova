@@ -282,4 +282,36 @@ mod tests {
         let huge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("x".repeat(5000));
         assert!(p(&["--notify", &huge]).is_err());
     }
+
+    /// The exact argument lists that agents/windows/nova-agent.ps1 builds (agents/windows/test/check.ps1 asserts the
+    /// same strings), so the two sides cannot drift apart.
+    #[test]
+    fn the_agents_arguments_parse() {
+        let split = |text: &str| text.split(' ').map(str::to_string).collect::<Vec<_>>();
+        let a = parse(split("--url http://nova:8080 --mode both --display 2")).unwrap();
+        assert_eq!((a.mode, a.display), (Some(Mode::Both), Some(2)));
+        let a = parse(split("--url https://nova.example.nl --mode helper")).unwrap();
+        assert_eq!(
+            (a.mode, a.display, a.url.as_deref()),
+            (Some(Mode::Helper), None, Some("https://nova.example.nl"))
+        );
+        let a = parse(split("--wallpaper 1:full --wallpaper 2:off --wallpaper 3:off")).unwrap();
+        assert_eq!(a.wallpapers.len(), 3);
+        let a = parse(split("--wallpaper 1:off --wallpaper 2:sphere --wallpaper 3:off")).unwrap();
+        assert_eq!(a.wallpapers[1].style, Some(WallpaperStyle::Sphere));
+        let a = parse(split("--url http://nova:8080 --mode both --show --view overview")).unwrap();
+        assert!(a.show);
+        assert_eq!(a.view, Some(View::Overview));
+        let a = parse(split("--url http://nova:8080 --mode helper --view chat --hidden")).unwrap();
+        assert!(a.hidden);
+        let a = parse(split(
+            "--url http://nova:8080 --mode helper --show --action pause --paused true",
+        ))
+        .unwrap();
+        assert_eq!((a.action.as_deref(), a.paused), (Some("pause"), Some(true)));
+        for action in ["speak", "mute", "settings"] {
+            assert!(parse(split(&format!("--show --action {action}"))).is_ok());
+        }
+        assert!(parse(split("--quit")).unwrap().quit);
+    }
 }

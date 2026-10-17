@@ -6,6 +6,7 @@ use crate::{app, log, win};
 use nova_desk_core::args::{Args, WallpaperArg};
 use nova_desk_core::geometry::{resolve_display, Anchor};
 use nova_desk_core::mode::{apply_event, Event, Mode, WallpaperStyle};
+use nova_desk_core::view::View;
 use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
@@ -154,6 +155,13 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     anchor_refs.push(&reset);
     let anchor_menu = Submenu::with_items(app, "Positie van de helper", true, &anchor_refs)?;
 
+    let login = MenuItem::with_id(
+        app,
+        "login",
+        "Inloggen (helper groot tonen)",
+        has_url && desired.mode.wants_helper(),
+        None::<&str>,
+    )?;
     let open = MenuItem::with_id(app, "open_nova", "NOVA openen in de browser", has_url, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(
         app,
@@ -176,6 +184,7 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &mode_menu,
             &wall_menu,
             &separator_b,
+            &login,
             &open,
             &autostart,
             &quit,
@@ -199,6 +208,14 @@ fn toggle_helper(app: &AppHandle) {
 fn on_menu(app: &AppHandle, id: &str) {
     match id {
         "helper_toggle" => toggle_helper(app),
+        "login" => app::handle_args(
+            app,
+            Args {
+                view: Some(View::Chat),
+                show: true,
+                ..Args::default()
+            },
+        ),
         "open_nova" => {
             if let Some(url) = app_address(app) {
                 open_external(app, &url);

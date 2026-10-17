@@ -104,7 +104,14 @@ fn init(app: &AppHandle, args: Args) {
         helper_visible: !args.hide,
         wallpapers: config.wallpapers.clone(),
     };
-    let view = config.helper_view;
+    // The very first start has no login yet: the reverse proxy's login page then appears in the helper window, so the
+    // window starts large enough for it (the page chooses its own size once NOVA itself has loaded).
+    let first_run = !dir.join("desk-profile").exists();
+    let view = if first_run {
+        nova_desk_core::view::View::Chat
+    } else {
+        config.helper_view
+    };
     app.manage(Shared {
         inner: Mutex::new(Inner {
             config,
@@ -156,7 +163,8 @@ fn open_setup(app: &AppHandle) {
     if app.get_webview_window("setup").is_some() {
         return;
     }
-    let profile = app.state::<Shared>().lock().profile_dir.clone();
+    // Its own browser profile: it must not share one with the NOVA windows, which start WebView2 with other arguments.
+    let profile = app.state::<Shared>().lock().profile_dir.with_file_name("setup-profile");
     let built = WebviewWindowBuilder::new(app, "setup", WebviewUrl::App("index.html".into()))
         .title("NOVA Desk")
         .inner_size(520.0, 420.0)

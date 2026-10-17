@@ -9,3 +9,4 @@ docs
 coverage
 .env
 .env.*
+apps/desk

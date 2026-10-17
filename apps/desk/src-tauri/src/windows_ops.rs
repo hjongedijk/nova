@@ -8,7 +8,7 @@ use nova_desk_core::geometry::{
     wallpaper_child_rect, window_size, MonitorInfo, Rect,
 };
 use nova_desk_core::mode::WallpaperSpec;
-use nova_desk_core::nav::{app_url, browser_args, classify, helper_url, wallpaper_url, Navigation};
+use nova_desk_core::nav::{app_url, browser_args, classify_allowing, helper_url, wallpaper_url, Navigation};
 use std::time::{Duration, Instant};
 use tauri::ipc::CapabilityBuilder;
 use tauri::webview::NewWindowResponse;
@@ -90,9 +90,9 @@ pub fn grant_origin(app: &AppHandle, origin: &str) {
     }
 }
 
-fn guard(app: &AppHandle, origin: String) -> impl Fn(&url::Url) -> bool + Send + 'static {
+fn guard(app: &AppHandle, origin: String, extra: Vec<String>) -> impl Fn(&url::Url) -> bool + Send + 'static {
     let app = app.clone();
-    move |target| match classify(target, &origin) {
+    move |target| match classify_allowing(target, &origin, &extra) {
         Navigation::Allow => true,
         Navigation::External => {
             open_external(&app, target.as_str());
@@ -108,11 +108,12 @@ fn guard(app: &AppHandle, origin: String) -> impl Fn(&url::Url) -> bool + Send +
 fn new_window_guard(
     app: &AppHandle,
     origin: String,
+    extra: Vec<String>,
 ) -> impl Fn(url::Url, tauri::webview::NewWindowFeatures) -> NewWindowResponse<tauri::Wry> + Send + 'static {
     let app = app.clone();
     move |target, _features| {
         // Links that want their own window (target="_blank") open in the default browser, never inside NOVA Desk.
-        match classify(&target, &origin) {
+        match classify_allowing(&target, &origin, &extra) {
             Navigation::Allow | Navigation::External => open_external(&app, target.as_str()),
             Navigation::Block => log!("blocked a new window for a {} address", target.scheme()),
         }
@@ -128,6 +129,7 @@ fn builder<'a>(
     profile: std::path::PathBuf,
 ) -> Option<WebviewWindowBuilder<'a, tauri::Wry, AppHandle>> {
     let parsed: url::Url = url.parse().ok()?;
+    let extra = app.state::<Shared>().lock().config.allowed_origins.clone();
     Some(
         WebviewWindowBuilder::new(app, label, WebviewUrl::External(parsed))
             .decorations(false)
@@ -140,8 +142,8 @@ fn builder<'a>(
             .additional_browser_args(&browser_args(origin))
             .disable_drag_drop_handler()
             .initialization_script(DESK_SCRIPT)
-            .on_navigation(guard(app, origin.to_string()))
-            .on_new_window(new_window_guard(app, origin.to_string())),
+            .on_navigation(guard(app, origin.to_string(), extra.clone()))
+            .on_new_window(new_window_guard(app, origin.to_string(), extra)),
     )
 }
 
