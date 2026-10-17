@@ -89,6 +89,8 @@ body:has(.hp.contrast) {
   border-bottom: 1px solid var(--hp-line);
   position: relative;
   z-index: 3;
+  /* The header sizes itself by its own width, not the window's: see the @container rules below. */
+  container: hp-bar / inline-size;
 }
 .hp:not(.expanded) .hp-bar {
   height: 42px;
@@ -163,6 +165,7 @@ body:has(.hp.contrast) {
 .hp-tools {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 4px;
   margin-left: auto;
 }
@@ -252,6 +255,11 @@ body:has(.hp.contrast) {
   padding: 8px 14px;
   color: var(--hp-muted);
   font-size: 14px;
+  /* A tab may shrink (and cut its label) instead of running over the toolbar. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .hp-tab:hover {
   color: var(--hp-text);
@@ -262,6 +270,7 @@ body:has(.hp.contrast) {
   box-shadow: inset 0 -2px var(--hp-accent);
 }
 .hp-more {
+  flex: 0 0 auto;
   margin-left: 2px;
   min-width: 32px;
   border: 0;
@@ -730,4 +739,79 @@ body.wallpaper .composer .attachments button {
 }
 .hp-chip i.online[data-service="MQTT"] {
   background: #a9dfb5;
+}
+
+/* Narrow headers (a small display, or Windows scaling at 125/150%): first the toolbar labels go, then the status
+   pill and the spacing, so the tab list and the toolbar never run over each other. Measured on the header itself. */
+@container hp-bar (max-width: 1000px) {
+  .hp-icon-label {
+    display: none;
+  }
+}
+@container hp-bar (max-width: 780px) {
+  .hp-bar {
+    gap: 8px;
+  }
+  .hp-tabs {
+    margin-left: 4px;
+  }
+  .hp-tab {
+    padding: 8px 10px;
+  }
+  .hp-pill {
+    display: none;
+  }
+}
+@container hp-bar (max-width: 560px) {
+  .hp-title strong {
+    display: none;
+  }
+  .hp-tab {
+    padding: 8px 8px;
+    font-size: 13px;
+  }
+}
+
+/* NOVA Desk (and ?desk=1): the window is the panel plus a transparent margin of --desk-pad (the same 12 px as
+   PAD_CSS in nova-desk-core). The panel itself is the rounded shape, with a border and a soft shadow; the page makes
+   no assumption about browser chrome or a rectangular window. */
+html.desk,
+html.desk body,
+html.desk:has(.hp),
+html.desk body:has(.hp),
+html.desk:has(.hp.contrast),
+html.desk body:has(.hp.contrast) {
+  background: transparent !important;
+}
+html.desk .hp {
+  --desk-pad: 12px;
+  inset: var(--desk-pad) !important;
+  width: auto !important;
+  height: auto !important;
+  transform: none;
+  overflow: hidden;
+  border: 1px solid var(--hp-line);
+  border-bottom: 2px solid var(--hp-accent);
+  border-radius: 16px;
+  box-shadow:
+    0 8px 28px #0009,
+    0 1px 4px #000a;
+}
+html.desk .hp.hidden {
+  /* The autohide strip sits on the very top edge of the screen, where it is easy to reach. */
+  inset: 0 var(--desk-pad) auto !important;
+  height: 3px !important;
+  border-radius: 0 0 6px 6px;
+  box-shadow: none;
+}
+html.desk .hp.deskfull {
+  inset: 0 !important;
+  border-radius: 0;
+  box-shadow: none;
+}
+@media (forced-colors: active) {
+  html.desk .hp {
+    border: 1px solid CanvasText;
+    box-shadow: none;
+  }
 }

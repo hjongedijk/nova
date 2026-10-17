@@ -1,5 +1,6 @@
 import type { HelperDisplays } from "@nova/contracts";
 import { getJson, sendJson } from "./client.ts";
+import { deskInvoke, inDesk } from "./desk.ts";
 
 export type HelperView =
   | "compact"
@@ -20,7 +21,18 @@ async function drain(): Promise<void> {
       const next = pending;
       pending = null;
       try {
-        await sendJson<{ ok: boolean }>("POST", "/settings/helper/size", next);
+        // Inside NOVA Desk the window is resized directly; elsewhere the Windows agent does it.
+        if (inDesk())
+          await deskInvoke("desk_set_view", {
+            view: next.view,
+            hidden: next.hidden,
+          });
+        else
+          await sendJson<{ ok: boolean }>(
+            "POST",
+            "/settings/helper/size",
+            next,
+          );
       } catch {
         /* A browser preview has no Windows agent. */
       }

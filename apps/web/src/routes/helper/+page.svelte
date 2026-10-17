@@ -21,6 +21,12 @@
     setHelperDisplay,
   } from "#lib/api/helper.ts";
   import type { HelperDisplays } from "@nova/contracts";
+  import {
+    deskInvoke,
+    deskLook,
+    inDesk,
+    type DeskInfo,
+  } from "#lib/api/desk.ts";
   import { claimAlertSpeech } from "#lib/api/shell.ts";
   import { ApiError } from "#lib/api/client.ts";
   import { friendlyApiError } from "#lib/api/error-copy.ts";
@@ -140,6 +146,8 @@
   let view: View = $state("overview");
   let expanded = $state(false);
   let fullscreen = $state(false);
+  /** The look inside NOVA Desk (or ?desk=1): transparent page, the panel is the rounded shape. */
+  let desk = $state(false);
   let panel = $state<HTMLDivElement>();
   let hidden = $state(false);
   let autohide = $state(true);
@@ -343,7 +351,16 @@
   let screenNote = $state("");
   async function loadScreens(): Promise<void> {
     try {
-      screens = await getHelperDisplays();
+      if (inDesk()) {
+        // NOVA Desk knows the displays itself; no round trip through the server and the agent.
+        const info = await deskInvoke<DeskInfo>("desk_info");
+        screens = {
+          available: info.displays.length > 1,
+          mode: "helper",
+          display: info.display,
+          displays: info.displays,
+        };
+      } else screens = await getHelperDisplays();
     } catch {
       screens = null;
     }
@@ -359,6 +376,14 @@
     screenMenu = false;
     screenNote = "De helper verhuist…";
     try {
+      if (inDesk()) {
+        await deskInvoke("desk_set_display", { index });
+        // Also tell the server (best effort), so the display choice in NOVA's settings stays the same.
+        void setHelperDisplay(index).catch(() => undefined);
+        await loadScreens();
+        screenNote = "";
+        return;
+      }
       const result = await setHelperDisplay(index);
       screens = result;
       screenNote = result.applied
@@ -564,6 +589,8 @@
   });
   onMount(() => {
     document.body.classList.add("helper");
+    desk = deskLook();
+    if (desk) document.documentElement.classList.add("desk");
     savedSnoozes = readHelperSnoozes(storage.get(snoozeStorageKey, "[]"));
     notices = [...savedSnoozes.map((item) => item.event), ...notices].slice(
       0,
@@ -833,6 +860,8 @@
   bind:this={panel}
   data-view={waiting ? "confirmation" : view}
   class:expanded
+  class:desk
+  class:deskfull={desk && fullscreen}
   class:contrast
   class:dragging
   class:hidden
@@ -849,7 +878,7 @@
       select(Array.from(event.dataTransfer?.files ?? []));
   }}
 >
-  <header class="hp-bar">
+  <header class="hp-bar" data-tauri-drag-region>
     <button
       class="hp-core"
       aria-label="Spreek met NOVA"
@@ -867,7 +896,7 @@
       ></button
     >
     {#if expanded && !waiting}
-      <nav class="hp-tabs" aria-label="Helperweergaven">
+      <nav class="hp-tabs" aria-label="Helperweergaven" data-tauri-drag-region>
         {#each tabs as tab (tab.id)}<HelperUi
             variant="tab"
             aria-current={view === tab.id ? "page" : undefined}
@@ -972,6 +1001,13 @@
             : "Volledig scherm"}
           title={fullscreen ? "Volledig scherm verlaten" : "Volledig scherm"}
           onclick={() => {
+            if (inDesk()) {
+              const next = !fullscreen;
+              void deskInvoke("desk_set_fullscreen", { on: next })
+                .then(() => (fullscreen = next))
+                .catch(() => undefined);
+              return;
+            }
             if (document.fullscreenElement) void document.exitFullscreen();
             else void panel?.requestFullscreen().catch(() => undefined);
           }}
@@ -985,6 +1021,11 @@
           title="Verbergen (komt terug bij een melding)"
           disabled={waiting}
           onclick={() => {
+            // In NOVA Desk the window itself goes away (the tray brings it back); elsewhere the panel folds to a strip.
+            if (inDesk()) {
+              void deskInvoke("desk_hide_helper").catch(() => undefined);
+              return;
+            }
             close();
             hidden = true;
           }}
