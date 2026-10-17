@@ -143,3 +143,19 @@ test("autonomy level endpoint validates and stores the level", async () => {
   expect(() => controller.update({ level: "yolo" })).toThrow();
   expect(level).toBe("careful");
 });
+
+test("a read-only run passes readOnlyOnly to every turn", async () => {
+  const calls: Array<{ readOnlyOnly?: boolean }> = [];
+  const { service } = setup([{ reply: "KLAAR: ok" }]);
+  (
+    service as unknown as {
+      orchestrator: { run: (i: never) => Promise<unknown> };
+    }
+  ).orchestrator.run = async (i) => (calls.push(i), { reply: "KLAAR: ok" });
+  const run = service.start("onderzoek de storing alleen lezend", {
+    readOnly: true,
+  });
+  await settle();
+  expect(run.readOnly).toBe(true);
+  expect(calls[0]?.readOnlyOnly).toBe(true);
+});

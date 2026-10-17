@@ -81,6 +81,20 @@ export function memoryAuditProjection(
   };
 }
 
+/** memory_correct carries the new memory text: keep the record id, never the text. */
+export function memoryCorrectAuditProjection(
+  args: Record<string, unknown>,
+  result: ToolResult,
+): { arguments: Record<string, unknown>; result: Record<string, unknown> } {
+  return {
+    arguments: {
+      ...(typeof args.id === "string" ? { id: args.id.slice(0, 64) } : {}),
+      text: "[redacted]",
+    },
+    result: { ok: result.ok, corrected: result.ok },
+  };
+}
+
 /** Even fields the coercer discards must never silently match a standing approval. */
 function hasUnknownArguments(parameters: unknown, value: unknown): boolean {
   if (
@@ -464,7 +478,11 @@ export class ToolsService implements OnModuleInit {
         standingApproval ? { ...result, standingApproval: true } : result,
       );
       const privateMemory =
-        name === "memory_remember" ? memoryAuditProjection(args, clean) : null;
+        name === "memory_remember"
+          ? memoryAuditProjection(args, clean)
+          : name === "memory_correct"
+            ? memoryCorrectAuditProjection(args, clean)
+            : null;
       const privateNote = noteAuditProjection(name, args, clean);
       const privateDocument = documentAuditProjection(name, args, clean);
       const privateRoutine = nodeRedRoutineAuditProjection(name, args, clean);

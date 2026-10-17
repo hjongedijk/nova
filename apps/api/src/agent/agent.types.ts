@@ -15,6 +15,8 @@ export interface AgentRun {
   updatedAt: number;
   turns: number;
   maxTurns: number;
+  /** Only READ_ONLY tools may run (enforced by the tool layer, not by the prompt). */
+  readOnly?: boolean;
   /** Epoch ms after which the run stops by itself. */
   deadline: number;
   log: RunLogEntry[];

@@ -567,6 +567,7 @@ export class ObjectivesService implements OnModuleInit, OnModuleDestroy {
         {
           maxTurns: LIMITS.investigationTurns,
           minutes: LIMITS.investigationMinutes,
+          readOnly: true,
         },
       );
       o.counters.investigations++;

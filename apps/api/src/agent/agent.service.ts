@@ -109,7 +109,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   start(
     goalInput: unknown,
-    options: { maxTurns?: number; minutes?: number } = {},
+    options: { maxTurns?: number; minutes?: number; readOnly?: boolean } = {},
   ): AgentRun {
     const goal = sanitize(
       typeof goalInput === "string" ? goalInput : "",
@@ -151,6 +151,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       updatedAt: this.now(),
       turns: 0,
       maxTurns,
+      ...(options.readOnly ? { readOnly: true } : {}),
       deadline: this.now() + minutes * 60_000,
       log: [],
     };
@@ -259,6 +260,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
             message,
             inputMode: "text",
             responseLanguage: "nl",
+            readOnlyOnly: run.readOnly === true,
             signal: AbortSignal.any([
               controller.signal,
               AbortSignal.timeout(120_000),

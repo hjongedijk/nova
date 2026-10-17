@@ -82,18 +82,6 @@ const ALIASES: Record<string, string[]> = {
   gezond: ["objective", "monitor", "server", "health"],
   blijft: ["objective", "monitor"],
   doelen: ["objective", "monitor"],
-  houd: ["objective", "monitor", "watch"],
-  gaten: ["objective", "monitor", "watch"],
-  monitor: ["objective", "monitor", "watch"],
-  monitoren: ["objective", "monitor", "watch"],
-  bewaak: ["objective", "monitor", "watch"],
-  bewaken: ["objective", "monitor", "watch"],
-  weten: ["objective", "monitor", "notify"],
-  waarschuw: ["objective", "monitor", "notify"],
-  waarschuwen: ["objective", "monitor", "notify"],
-  gezond: ["objective", "monitor", "server", "health"],
-  blijft: ["objective", "monitor"],
-  doelen: ["objective", "monitor"],
 };
 
 function words(value: string): Set<string> {
