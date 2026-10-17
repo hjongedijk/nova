@@ -26,3 +26,6 @@ agents/windows/agent.json
 !.vscode/settings.json
 !.vscode/tasks.json
 .idea/
+
+# NOVA Desk (Rust) build output
+apps/desk/target/

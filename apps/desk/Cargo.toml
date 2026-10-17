@@ -1,0 +1,12 @@
+# NOVA Desk: the native Windows shell (Tauri v2 + WebView2) for NOVA's helper and living wallpaper.
+# nova-desk-core has no GUI dependency and is tested on any OS; src-tauri is the thin Windows glue.
+[workspace]
+resolver = "2"
+members = ["crates/nova-desk-core"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

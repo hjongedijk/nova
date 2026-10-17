@@ -7,3 +7,4 @@ dev-data
 package-lock.json
 LICENSE
 
+apps/desk/target
