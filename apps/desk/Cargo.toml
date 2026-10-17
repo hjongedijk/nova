@@ -2,7 +2,7 @@
 # nova-desk-core has no GUI dependency and is tested on any OS; src-tauri is the thin Windows glue.
 [workspace]
 resolver = "2"
-members = ["crates/nova-desk-core"]
+members = ["crates/nova-desk-core", "src-tauri"]
 
 [profile.release]
 opt-level = "s"

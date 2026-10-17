@@ -2,6 +2,7 @@
 //! is unit-tested on any OS (`cargo test -p nova-desk-core`). The thin Windows glue lives in `src-tauri`.
 
 pub mod args;
+pub mod autostart;
 pub mod config;
 pub mod desktop;
 pub mod geometry;

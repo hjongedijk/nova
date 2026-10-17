@@ -29,3 +29,4 @@ agents/windows/agent.json
 
 # NOVA Desk (Rust) build output
 apps/desk/target/
+apps/desk/src-tauri/gen/

@@ -1,0 +1,6 @@
+{
+  "identifier": "setup",
+  "description": "The local first-run page may store the NOVA address. Nothing else.",
+  "windows": ["setup"],
+  "permissions": ["allow-desk-set-url"]
+}

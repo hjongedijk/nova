@@ -92,6 +92,20 @@ pub fn wallpaper_url(origin: &str, style: WallpaperStyle, quiet: bool, taskbar_p
     format!("{origin}/?wallpaper=1{talk}&taskbarpx={taskbar_px}{panels}")
 }
 
+/// Extra WebView2 (Chromium) arguments. Speech playback may start without a click (NOVA answers "Hey NOVA"), and a
+/// plain-http NOVA on the home network is treated as secure so that the microphone works there, as the PowerShell
+/// agent does for Edge. Windows are not given any other flag (no remote debugging port, no disabled web security).
+pub fn browser_args(origin: &str) -> String {
+    let mut args = String::from(
+        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required",
+    );
+    if origin.starts_with("http://") {
+        args.push_str(" --unsafely-treat-insecure-origin-as-secure=");
+        args.push_str(origin);
+    }
+    args
+}
+
 /// The full NOVA app (tray: "Open NOVA").
 pub fn app_url(origin: &str) -> String {
     format!("{origin}/")
@@ -168,6 +182,16 @@ mod tests {
         ] {
             assert_eq!(nav(t), Navigation::Block, "{t}");
         }
+    }
+
+    #[test]
+    fn browser_args_only_relax_security_for_plain_http() {
+        let https = browser_args("https://nova.example.nl");
+        assert!(https.contains("--autoplay-policy=no-user-gesture-required"));
+        assert!(!https.contains("unsafely"));
+        let http = browser_args("http://192.168.1.10:8080");
+        assert!(http.ends_with("--unsafely-treat-insecure-origin-as-secure=http://192.168.1.10:8080"));
+        assert!(!http.contains("remote-debugging"));
     }
 
     #[test]

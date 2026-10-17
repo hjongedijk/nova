@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desk-set-fullscreen"
+description = "Enables the desk_set_fullscreen command without any pre-configured scope."
+commands.allow = ["desk_set_fullscreen"]
+
+[[permission]]
+identifier = "deny-desk-set-fullscreen"
+description = "Denies the desk_set_fullscreen command without any pre-configured scope."
+commands.deny = ["desk_set_fullscreen"]

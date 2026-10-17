@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desk-info"
+description = "Enables the desk_info command without any pre-configured scope."
+commands.allow = ["desk_info"]
+
+[[permission]]
+identifier = "deny-desk-info"
+description = "Denies the desk_info command without any pre-configured scope."
+commands.deny = ["desk_info"]

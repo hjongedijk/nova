@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desk-set-view"
+description = "Enables the desk_set_view command without any pre-configured scope."
+commands.allow = ["desk_set_view"]
+
+[[permission]]
+identifier = "deny-desk-set-view"
+description = "Denies the desk_set_view command without any pre-configured scope."
+commands.deny = ["desk_set_view"]

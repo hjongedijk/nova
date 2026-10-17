@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desk-hide-helper"
+description = "Enables the desk_hide_helper command without any pre-configured scope."
+commands.allow = ["desk_hide_helper"]
+
+[[permission]]
+identifier = "deny-desk-hide-helper"
+description = "Denies the desk_hide_helper command without any pre-configured scope."
+commands.deny = ["desk_hide_helper"]

@@ -1,0 +1,31 @@
+[package]
+name = "nova-desk"
+version = "0.1.0"
+edition = "2021"
+description = "NOVA Desk: the helper and the living wallpaper of NOVA as native Windows windows (Tauri v2, WebView2)."
+license = "MIT"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+nova-desk-core = { path = "../crates/nova-desk-core" }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+] }
+winreg = "0.55"
+
+[features]
+default = ["custom-protocol"]
+# Embeds the (tiny) local setup page; without it a release build would look for a dev server.
+custom-protocol = ["tauri/custom-protocol"]
