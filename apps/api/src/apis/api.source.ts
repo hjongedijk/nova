@@ -128,10 +128,13 @@ export class ApiSource implements ToolSource {
           {
             base_url: str(
               500,
-              "Base URL of the API, e.g. https://api.example.com/v1",
+              "Base URL of the API exactly as the user gave it. Never invent one.",
             ),
             name: str(60, "Short name; default from the host"),
-            token: str(4000, "API key / token / password if the user gave one"),
+            token: str(
+              4000,
+              "API key / token / password exactly as the user gave it. Never invent one.",
+            ),
             credential_ref: str(
               30,
               "Reference like sec_0123456789 from an earlier message",
@@ -321,6 +324,11 @@ export class ApiSource implements ToolSource {
       } catch {
         return { error: "base_url is not a valid URL" };
       }
+      if (looksLikePlaceholder(url.hostname, args.token))
+        return {
+          error:
+            "Dat zijn voorbeeldgegevens, geen echte. Vraag de gebruiker om het echte adres en de echte sleutel; verzin niets.",
+        };
       const next = { ...args };
       if (typeof args.token === "string" && args.token.trim()) {
         // The raw credential leaves the arguments here, before anything is logged or remembered.
@@ -660,4 +668,15 @@ export class ApiSource implements ToolSource {
       note: "Nothing was executed.",
     };
   }
+}
+
+const PLACEHOLDER_HOST =
+  /(^|\.)(example\.(com|org|net)|example|test|invalid|localhost\.localdomain|yourdomain\.[a-z]+|your-?api\.[a-z]+)$/i;
+const PLACEHOLDER_TOKEN =
+  /^(?:0?1234567890|123456|1234|(.)\1{5,}|\*{3,}|<[^>]*>|\[[^\]]*\]|your[ _-]?(?:api[ _-]?)?(?:key|token|secret)|api[ _-]?key|token|secret|password|changeme|placeholder|xxx+)$/i;
+
+/** A model asked to connect an API sometimes copies the example from the tool text: refuse that before anything is stored. */
+export function looksLikePlaceholder(host: string, token: unknown): boolean {
+  if (PLACEHOLDER_HOST.test(host)) return true;
+  return typeof token === "string" && PLACEHOLDER_TOKEN.test(token.trim());
 }

@@ -1,6 +1,8 @@
+import crypto from "node:crypto";
 import { attachmentMessage } from "./attachments.js";
 import { directAnswer } from "./direct-answer.js";
 import { directCallQuery } from "./direct-call.js";
+import { findLeakedToolCall } from "./leaked-tool-call.js";
 import { directGoalQuery, type DirectGoal } from "./direct-goal.js";
 import {
   directDefinitionQuery,
@@ -598,6 +600,32 @@ export class OrchestratorService {
             });
       if (signal?.aborted) throw new Error("Request cancelled");
       const assistant = last.assistant;
+      // A call written as chat text is turned into a real one when the tool is on offer, and never shown as text.
+      if (
+        !assistant.tool_calls?.length &&
+        typeof assistant.content === "string"
+      ) {
+        const leaked = findLeakedToolCall(assistant.content);
+        if (leaked) {
+          if (modelTools.some((tool) => tool.function.name === leaked.name)) {
+            assistant.tool_calls = [
+              {
+                id: `text_${crypto.randomUUID().slice(0, 12)}`,
+                type: "function",
+                function: {
+                  name: leaked.name,
+                  arguments: JSON.stringify(leaked.args),
+                },
+              },
+            ];
+            assistant.content = leaked.rest || null;
+          } else {
+            assistant.content =
+              leaked.rest ||
+              "Dat kan ik zo niet doen. Zeg het anders, dan probeer ik het opnieuw.";
+          }
+        }
+      }
       // A model that asks for more than eight calls at once gets its first eight run.
       const calls = (assistant.tool_calls ?? []).slice(0, 8);
       if (assistant.tool_calls && assistant.tool_calls.length > calls.length)

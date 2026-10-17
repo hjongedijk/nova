@@ -1,3 +1,4 @@
+import { LeakedCallGuard } from "./leaked-tool-call.js";
 import {
   Injectable,
   Optional,
@@ -398,6 +399,8 @@ export class OmniRouteClient {
     let buffer = "";
     let content = "";
     let pendingMoodText = "";
+    // A tool call written as chat text must never be streamed to the user as words.
+    const guard = new LeakedCallGuard((text) => emit("token", { text }));
     let mood: AssistantMood = "neutral";
     const moodPrefix = "<!--NOVA_MOOD:";
     let moodEmitted = false;
@@ -450,7 +453,7 @@ export class OmniRouteClient {
       const delta = data.choices?.[0]?.delta ?? {};
       if (typeof delta.content === "string") {
         content += delta.content;
-        if (!includeMood) emit("token", { text: delta.content });
+        if (!includeMood) guard.push(delta.content);
         else {
           pendingMoodText += delta.content;
           for (;;) {
@@ -468,8 +471,7 @@ export class OmniRouteClient {
               )
                 suffixLength--;
               const safeLength = pendingMoodText.length - suffixLength;
-              if (safeLength)
-                emit("token", { text: pendingMoodText.slice(0, safeLength) });
+              if (safeLength) guard.push(pendingMoodText.slice(0, safeLength));
               pendingMoodText = pendingMoodText.slice(safeLength);
               break;
             }
@@ -478,7 +480,7 @@ export class OmniRouteClient {
                 .slice(0, content.length - pendingMoodText.length + markerAt)
                 .trim() === "";
             if (markerAt > 0 && !initial)
-              emit("token", { text: pendingMoodText.slice(0, markerAt) });
+              guard.push(pendingMoodText.slice(0, markerAt));
             pendingMoodText = pendingMoodText.slice(markerAt);
             const markerEnd = pendingMoodText.indexOf("-->");
             if (markerEnd < 0) break;
@@ -544,9 +546,10 @@ export class OmniRouteClient {
         mood = parsed.mood;
         if (parsed.matched && !moodEmitted) emit("mood", { mood });
         const pending = stripPrivateMoodMarkers(pendingMoodText);
-        if (pending) emit("token", { text: pending });
+        if (pending) guard.push(pending);
         content = parsed.content;
       }
+      guard.finish();
       this.recordResponse(model, provider, started);
       return {
         assistant: {
