@@ -1,5 +1,6 @@
 <script lang="ts">
   import AdminDialog from "#components/admin/AdminDialog.svelte";
+  import ApiStudioSection from "./ApiStudioSection.svelte";
   import ConnectionHistory from "./ConnectionHistory.svelte";
   import ConnectionsSection from "./ConnectionsSection.svelte";
   import HelperPreferencesHistory from "./HelperPreferencesHistory.svelte";
@@ -91,6 +92,16 @@
   <Disclosure title="Wijzigingsgeschiedenis" kind="history" lazy>
     <HelperPreferencesHistory />
   </Disclosure>
+</Disclosure>
+
+<Disclosure
+  kind="advanced"
+  title="API's koppelen"
+  hint="Laat NOVA een externe API leren, testen en gebruiken"
+  id="api-koppelingen"
+  lazy
+>
+  <ApiStudioSection />
 </Disclosure>
 
 <Disclosure

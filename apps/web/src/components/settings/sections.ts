@@ -233,6 +233,15 @@ export const TOPICS = [
     keywords: "windows agent helper sneltoets hotkey versie debug",
   },
   {
+    id: "apis",
+    page: "geavanceerd",
+    anchor: "api-koppelingen",
+    name: "API's koppelen",
+    detail: "Geef NOVA een adres en token; ze leert de API zelf.",
+    keywords:
+      "api rest graphql soap json-rpc endpoint token sleutel koppelen integreren openapi swagger",
+  },
+  {
     id: "tools",
     page: "geavanceerd",
     anchor: "gereedschappen",
