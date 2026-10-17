@@ -54,4 +54,10 @@ CI (`.github/workflows/ci.yml`) also runs the privacy OCR check on `docs/img`, t
 
 ## Deployment status
 
-Latest release tag: v0.1.66 (see [release notes](release-notes/)). Releases are tags; the Release workflow publishes the images and the Windows agent ([Releasing](releasing.md)). The production install lives outside this repository and is updated by changing `NOVA_VERSION` and running `docker compose pull && up -d`; the running version is reported by `GET /api/nova/health`. Nothing is pushed, tagged or deployed without explicit approval. The legacy `jarvis-agent.ps1` launcher and `JarvisAgent` scheduled task name stay for existing Windows installs.
+Latest release tag: v0.1.67 (see [release notes](release-notes/)). Releases are tags; the Release workflow publishes the images and the Windows agent ([Releasing](releasing.md)). The production install lives outside this repository and is updated by changing `NOVA_VERSION` and running `docker compose pull && up -d`; the running version is reported by `GET /api/nova/health`. Nothing is pushed, tagged or deployed without explicit approval. The legacy `jarvis-agent.ps1` launcher and `JarvisAgent` scheduled task name stay for existing Windows installs.
+
+## Known limits (free models)
+
+- Free providers: Cloudflare, Gemini and Mistral were verified first; Groq, Cohere and HuggingFace were added through the free-policy wizard. SambaNova answered `402 insufficient balance` (no usable free credit), so its account is deactivated and not part of the policy.
+- A deactivated or invalid provider account makes the wizard reject a replacement ("active API-key account" check) and can leave chat blocked; remove it from the selection and confirm again.
+- Daily quotas of Cloudflare (429) and Groq's small free limits still make single requests fail now and then; the model roles list several providers so the next one is tried.
