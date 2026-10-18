@@ -36,10 +36,9 @@ NOVA_VERSION=latest             # or a released version such as 0.1.5 (see the r
 NOVA_PUBLIC_URL=                # https://nova.example.com when behind a reverse proxy, otherwise empty
 TZ=Europe/Amsterdam
 OMNIROUTE_API_KEY=              # filled in at step 5
-OMNIROUTE_MODEL=auto
 ```
 
-Integrations (Proxmox, Home Assistant, Windows agent, Termix, Pangolin) are filled in when you have them. Every variable is explained in [Configuration](configuration.md).
+Configure integrations (Proxmox, Home Assistant, Windows agent, Termix, Pangolin) in NOVA’s Settings after startup. Keep shared container tokens in `.env`; see [Configuration](configuration.md#what-belongs-in-env).
 
 ## 3. Prepare the data folders
 
@@ -80,9 +79,9 @@ The details, including the structure of the policy file and everything NOVA chec
 
 ## 6. Optional integrations
 
-- **Home Assistant**: the stack includes one on port 8123 with host networking. Finish its onboarding at `http://<nova-host>:8123`, create a long-lived access token in your profile, set `HOME_ASSISTANT_TOKEN` (and `HOME_ASSISTANT_URL` if yours runs elsewhere).
-- **Proxmox**: create an API token in Proxmox and set `PROXMOX_URL`, `PROXMOX_TOKEN_ID`, `PROXMOX_TOKEN_SECRET` (and `PROXMOX_VERIFY_TLS=false` for a self-signed certificate).
-- **Windows PC**: install the [Windows agent](windows-agent.md) and set `WINDOWS_AGENT_URL` and `WINDOWS_AGENT_TOKEN`.
+- **Home Assistant**: the stack includes one on port 8123 with host networking. Finish its onboarding at `http://<nova-host>:8123`, create a long-lived access token in your profile, save its address and token under **Instellingen → Koppelingen → Home Assistant**.
+- **Proxmox**: create an API token in Proxmox and save its address, token ID and secret under **Instellingen → Koppelingen → Proxmox**. Adjust certificate verification there when using a self-signed certificate.
+- **Windows PC**: install the [Windows agent](windows-agent.md) and enter its address and pairing code under **Instellingen → Windows-pc**.
 - **Long-term memory**: see [Configuration](configuration.md#memory).
 
 After any `.env` change run `docker compose up -d`. NOVA acts as soon as it is connected: there is no switch to enable actions and nothing asks for confirmation, so connect only what you want it to control.
@@ -121,7 +120,7 @@ If the Windows app changed, run the new NOVA installer or replace the portable `
 ### Logs and health
 
 - `docker compose logs -f nova` for the API; `docker compose ps` for the stack. The `nova` container has a health check on `GET /api/nova/health`.
-- The action log is `nova-data/actions.jsonl` (append-only, secrets masked).
+- The action log lives in `nova-data/nova.db` (secrets masked). Existing `actions.jsonl` files are imported once and renamed `.migrated`.
 - **Instellingen → Koppelingen** shows the fixed Compose stack status and can restart one service. This needs `NOVA_STACK_CONTROL_TOKEN`; only the private `stack-control` broker holds the Docker socket and NOVA sees fixed service ids, state, health and start time.
 - Node-RED's recent container log is available in its settings panel, see [Node-RED](integrations.md#logs).
 
