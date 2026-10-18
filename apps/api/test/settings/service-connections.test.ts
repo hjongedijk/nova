@@ -1196,3 +1196,60 @@ describe("read-only connection probes", () => {
     expect(JSON.stringify(matchingStatus)).not.toContain("mqtt-private");
   });
 });
+
+describe("Windows agent pairing", () => {
+  const code = (value: unknown) =>
+    `nova1.${Buffer.from(JSON.stringify(value)).toString("base64url")}`;
+  it("saves a pair code through the guarded settings flow without exposing its token", async () => {
+    const token = "windows-pairing-secret-1234567890";
+    const paired = await request("post", "/windows/pair", {
+      code: code({ url: "http://192.168.1.20:8765", token }),
+    });
+    expect(paired.status).toBe(200);
+    expect(JSON.stringify(paired.body)).not.toContain(token);
+    expect(persisted().services.windows).toEqual({
+      url: "http://192.168.1.20:8765",
+      token,
+    });
+    expect(sanitize(token)).toBe("[redacted]");
+    const history = await request("get", "/history");
+    expect(JSON.stringify(history.body)).not.toContain(token);
+  });
+  it.each([
+    "nova1.invalid",
+    code({ url: "file:///etc/passwd", token: "abcdefghijklmnopqrstuvwxyz" }),
+    code({
+      url: "http://user:pass@pc:8765",
+      token: "abcdefghijklmnopqrstuvwxyz",
+    }),
+    code({ url: "http://pc:8765/v1", token: "abcdefghijklmnopqrstuvwxyz" }),
+    code({ url: "http://pc:8765", token: "short" }),
+    code({
+      url: "http://pc:8765",
+      token: "abcdefghijklmnopqrstuvwxyz",
+      extra: true,
+    }),
+  ])("rejects invalid codes without saving or echoing them", async (value) => {
+    const response = await request("post", "/windows/pair", { code: value });
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(response.body)).not.toContain(value);
+    expect(fs.existsSync(path.join(directory, "services.json"))).toBe(false);
+  });
+  it("requires settings authorization", async () => {
+    expect(
+      (
+        await request(
+          "post",
+          "/windows/pair",
+          {
+            code: code({
+              url: "http://pc:8765",
+              token: "abcdefghijklmnopqrstuvwxyz",
+            }),
+          },
+          {},
+        )
+      ).status,
+    ).toBe(403);
+  });
+});

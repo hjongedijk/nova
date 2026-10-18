@@ -32,7 +32,7 @@ export class DownloadsController {
   novaAgent(@Res() response: Response): void {
     this.send(
       response,
-      path.join(this.config.agentsDir, "windows", "nova-agent.ps1"),
+      path.join(this.config.agentsDir, "windows-legacy", "nova-agent.ps1"),
       "nova-agent.ps1",
       "application/octet-stream",
     );
@@ -43,7 +43,7 @@ export class DownloadsController {
   legacyAgent(@Res() response: Response): void {
     this.send(
       response,
-      path.join(this.config.agentsDir, "windows", "nova-agent.ps1"),
+      path.join(this.config.agentsDir, "windows-legacy", "nova-agent.ps1"),
       "jarvis-agent.ps1",
       "application/octet-stream",
     );

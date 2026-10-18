@@ -198,7 +198,7 @@
       "no-agent":
         "NOVA heeft nog geen verbinding met je Windows-pc. Installeer de Windows-agent uit de map agents/windows en zet WINDOWS_AGENT_URL en WINDOWS_AGENT_TOKEN in .env.",
       "old-agent":
-        "De Windows-agent op je pc is nog oud. Download nova-agent.ps1, zet hem in de map van de agent op je pc (bijvoorbeeld C:\\NOVAAgent) en start daarna NOVAAgent opnieuw in Taakplanner.",
+        "De Windows-agent op je pc is nog oud. Installeer NOVA voor Windows en koppel de app via Instellingen → Koppelingen.",
       unreachable:
         "NOVA bereikt de Windows-agent niet. Controleer de verbinding en probeer het opnieuw.",
     }[data.reason];
@@ -364,10 +364,8 @@
     {:else if !wallpaper.available}
       <p class="hint">{why(wallpaper)}</p>
       {#if wallpaper.reason === "old-agent"}
-        <Button
-          go
-          href="/windows-agent/nova-agent.ps1"
-          download="nova-agent.ps1">Download de nieuwe agent</Button
+        <Button go href="https://github.com/hjongedijk/nova/releases/latest"
+          >Download de nieuwe agent</Button
         >
       {/if}
     {:else}
@@ -437,7 +435,7 @@
     </section>
   </Disclosure>
   <div class="set-toolbar">
-    <Button href="/windows-agent/nova-agent.ps1" download="nova-agent.ps1"
+    <Button href="https://github.com/hjongedijk/nova/releases/latest"
       >Download de NOVA-agent</Button
     >
   </div>
@@ -447,11 +445,11 @@
     hint="De agent installeren of bijwerken"
   >
     <p class="hint">
-      De NOVA-agent is het kleine programma op je pc waarmee NOVA je achtergrond
-      en helper kan tonen. Nieuwe installatie: gebruik nova-agent.ps1 en
-      install.ps1. Heb je de agent al, dan vervang je het oude bestand met deze
-      download, start je NOVAAgent opnieuw in Taakplanner en voer je install.ps1
-      uit.
+      NOVA voor Windows is één app met een helper, achtergrond en verbinding met
+      NOVA. Download de NOVA-Setup-installer van de releasepagina, start de app
+      en vul je NOVA-adres in. Kopieer de koppelcode naar Instellingen →
+      Koppelingen → Windows-agent. Bij een oude installatie kun je in de app
+      eerst instellingen importeren en de oude agent uitschakelen.
     </p>
   </Disclosure>
 </section>

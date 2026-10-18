@@ -1,5 +1,7 @@
 # Desktop view and control (Windows agent)
 
+> Native Windows rewrite: legacy PowerShell details below describe the preserved fallback. See [Windows agent](windows-agent.md) for the new app and stage-one limitations.
+
 The Windows agent can show NOVA the screen and, in a time-boxed session, move the pointer and type. NOVA's side (tools,
 confirmations, limits) is described in [desktop-control-api.md](desktop-control-api.md). Everything here is off by default.
 
@@ -36,4 +38,4 @@ Refusals: `403` off or protected window, `409` not armed or paused, `429` more t
 
 ## Tests
 
-`pwsh -NoProfile -File agents/windows/test/desktop.ps1` compiles the embedded C# and checks scaling, deny-list, key allow-list, TTL, rate limit, arm/expire/kill and the default-off configuration. SendInput, screenshots, the red bar and the hotkey need a real Windows desktop and are **not** covered; they still need an acceptance run on the PC.
+`pwsh -NoProfile -File agents/windows-legacy/test/desktop.ps1` compiles the embedded C# and checks scaling, deny-list, key allow-list, TTL, rate limit, arm/expire/kill and the default-off configuration. SendInput, screenshots, the red bar and the hotkey need a real Windows desktop and are **not** covered; they still need an acceptance run on the PC.

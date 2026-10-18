@@ -1,0 +1,3 @@
+# Bound compiler concurrency on the shared development server.
+[build]
+jobs = 1

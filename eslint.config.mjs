@@ -11,7 +11,7 @@ export default tseslint.config(
       "**/build/",
       "**/.svelte-kit/",
       "dev-data/",
-      "apps/desk/target/",
+      "apps/windows/target/",
     ],
   },
   js.configs.recommended,

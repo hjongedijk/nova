@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NOVA voor Windows</title>
+    <link rel="stylesheet" href="setup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>NOVA voor Windows</h1>
+      <p>Eén app voor je helper, achtergrond en verbinding met NOVA.</p>
+      <section id="updates" aria-labelledby="updates-title">
+        <h2 id="updates-title">Updates</h2>
+        <p id="update-message" role="status" aria-live="polite">
+          Updatecontrole laden…
+        </p>
+        <p id="update-notes"></p>
+        <progress
+          id="update-progress"
+          hidden
+          aria-label="Update downloaden"
+        ></progress>
+        <button id="check-update" type="button">Controleren op updates</button>
+        <button id="install-update" type="button" hidden>
+          Bijwerken en herstarten
+        </button>
+        <p class="note">
+          NOVA controleert automatisch op nieuwe versies. Jij kiest wanneer de
+          update wordt geïnstalleerd.
+        </p>
+      </section>
+      <form id="form">
+        <label for="url">Adres van NOVA</label>
+        <input
+          id="url"
+          type="url"
+          required
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="https://nova.example.nl"
+        />
+        <button type="submit">Opslaan en openen</button>
+      </form>
+      <form id="network">
+        <label for="source">IP-adres van de NOVA-server</label>
+        <input
+          id="source"
+          required
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="192.168.1.10"
+        />
+        <button type="submit">Verbinding toestaan in Windows</button>
+        <p class="note">
+          Windows vraagt toestemming. Alleen deze server krijgt toegang, op
+          privé- en bedrijfsnetwerken.
+        </p>
+      </form>
+      <form id="pair">
+        <label for="address">Netwerkadres van deze pc</label>
+        <select id="address" required></select>
+        <button type="submit">Koppelcode tonen</button>
+        <input
+          id="code"
+          type="password"
+          readonly
+          aria-label="Koppelcode"
+          autocomplete="off"
+        />
+        <button id="copy" type="button">Code kopiëren</button>
+        <p class="note">
+          Plak deze code in NOVA → Instellingen → Koppelingen → Windows-agent.
+          De code geeft toegang tot deze pc.
+        </p>
+      </form>
+      <details>
+        <summary>Oude agent vervangen</summary>
+        <form id="legacy">
+          <label for="directory">Map van de oude agent</label>
+          <input
+            id="directory"
+            required
+            spellcheck="false"
+            placeholder="C:\NovaAgent"
+          />
+          <p class="note">
+            Importeren herstart NOVA als de poort verandert. Uitschakelen stopt
+            de oude PowerShell-agent in deze map, verwijdert taken NOVAAgent en
+            JarvisAgent en sluit NOVA Desk. Bestanden blijven bewaard.
+          </p>
+          <button id="import" type="button">
+            Oude instellingen importeren
+          </button>
+          <button type="submit">Oude agent uitschakelen</button>
+        </form>
+      </details>
+      <p id="message" role="status" aria-live="polite"></p>
+      <p class="note">
+        Instellingen: %LOCALAPPDATA%\NOVA\config.json. Sluiten laat NOVA actief
+        bij de klok.
+      </p>
+    </main>
+    <script src="setup.js"></script>
+  </body>
+</html>

@@ -17,6 +17,8 @@ import { SemanticMemoryService } from "../../memory/semantic-memory.service.js";
 import { AuditService } from "../../core/audit/audit.service.js";
 import { ServiceConnectionsHistory } from "./service-connections-history.service.js";
 
+import { decodeWindowsPairCode } from "./windows-pairing.js";
+
 type Change = { values?: unknown; clearSecrets?: unknown } | undefined;
 @Controller("settings/services")
 @UseGuards(SettingsGuard)
@@ -132,6 +134,19 @@ export class ServiceConnectionsController {
       // The attempt is already durable; return the actual restoration result.
     }
     return result;
+  }
+  @Post("windows/pair")
+  @HttpCode(200)
+  pairWindows(@Body() body: { code?: unknown } | undefined) {
+    const values = decodeWindowsPairCode(body?.code);
+    const services = this.store.save("windows", values, []);
+    return {
+      ok: true,
+      services,
+      ...(this.store.auditWarning
+        ? { auditWarning: this.store.auditWarning }
+        : {}),
+    };
   }
   @Get(":id/status") status(@Param("id") id: string) {
     return { test: this.adapters.status(id, this.store.effective(id)) };

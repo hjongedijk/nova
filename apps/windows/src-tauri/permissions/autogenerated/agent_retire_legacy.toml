@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-agent-retire-legacy"
+description = "Enables the agent_retire_legacy command without any pre-configured scope."
+commands.allow = ["agent_retire_legacy"]
+
+[[permission]]
+identifier = "deny-agent-retire-legacy"
+description = "Denies the agent_retire_legacy command without any pre-configured scope."
+commands.deny = ["agent_retire_legacy"]

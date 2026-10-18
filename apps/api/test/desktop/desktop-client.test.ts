@@ -7,7 +7,7 @@ import type { NovaConfig } from "../../src/core/config/nova-config.js";
 
 const requests: { method: string; url: string; auth?: string; body: string }[] =
   [];
-let mode: "ok" | "old" | "forbidden" | "json-shot" = "ok";
+let mode: "ok" | "old" | "forbidden" | "json-shot" | "deferred" = "ok";
 let server: http.Server;
 let client: DesktopAgentClient;
 
@@ -22,6 +22,7 @@ beforeAll(async () => {
         auth: req.headers.authorization,
         body,
       });
+      if (mode === "deferred") return void res.writeHead(501).end("{}");
       if (mode === "old") return void res.writeHead(404).end();
       if (mode === "forbidden") return void res.writeHead(403).end("{}");
       const json = (data: unknown) => {
@@ -76,6 +77,15 @@ beforeAll(async () => {
 afterAll(() => void server.close());
 
 describe("desktop agent client", () => {
+  it("explains desktop routes deferred by the native rewrite", async () => {
+    mode = "deferred";
+    expect(await client.status()).toEqual({
+      ok: false,
+      error:
+        "Bureaubladbediening is nog niet beschikbaar in deze versie van NOVA voor Windows.",
+    });
+    mode = "ok";
+  });
   it("uses the agent's bearer token and the documented routes", async () => {
     requests.length = 0;
     mode = "ok";

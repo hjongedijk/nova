@@ -152,7 +152,7 @@ const safePreferences = (value: unknown): Record<string, unknown> => {
 };
 
 /**
- * Talks to the Windows agent in agents/windows. The agent owns the allow-list of
+ * Talks to the native Windows agent in apps/windows. The agent owns the allow-list of
  * programs; NOVA only ever sends an app name or an http(s) URL.
  */
 @Injectable()
@@ -404,7 +404,13 @@ export class WindowsPcService {
       return {
         ok: false,
         error:
-          "De Windows-agent op je pc is nog oud. Werk nova-agent.ps1 bij en start NOVAAgent opnieuw in Taakplanner.",
+          "De Windows-agent op je pc is nog oud. Installeer NOVA voor Windows en koppel de app in Instellingen.",
+      };
+    if (response.status === 501)
+      return {
+        ok: false,
+        error:
+          "Deze functie is nog niet beschikbaar in deze versie van NOVA voor Windows.",
       };
     if (response.status !== 200 || response.data?.ok !== true)
       return {

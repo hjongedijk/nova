@@ -137,5 +137,5 @@ The interface text is Dutch and the speech voice is Dutch; the code, tool descri
 ## Tests
 
 - `apps/api/test`: Vitest, one folder per module, run with `npm test`.
-- `agents/windows/test/check.ps1`: PowerShell syntax and the embedded C#, also run in CI.
+- `agents/windows-legacy/test/check.ps1`: PowerShell syntax and the embedded C#, also run in CI.
 - There is no end-to-end suite for the interface in the repository.

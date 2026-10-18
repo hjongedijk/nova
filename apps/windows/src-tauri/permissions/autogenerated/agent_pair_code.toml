@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-agent-pair-code"
+description = "Enables the agent_pair_code command without any pre-configured scope."
+commands.allow = ["agent_pair_code"]
+
+[[permission]]
+identifier = "deny-agent-pair-code"
+description = "Denies the agent_pair_code command without any pre-configured scope."
+commands.deny = ["agent_pair_code"]

@@ -49,12 +49,12 @@ All runtime data goes to `dev-data/` (ignored by git). If `dev-data/certs/cert.p
 | `npm start`              | Run the built API (it serves `apps/web/build` when present)     |
 | `docker build -t nova .` | The production image                                            |
 
-CI (`.github/workflows/ci.yml`) runs `format:check`, `lint`, `typecheck`, the API and web tests, `build`, the model-evaluation, Node-RED, notification, MCP sandbox and screenshot-privacy checks and the PowerShell checks in `agents/windows/test/`, and builds the image without pushing it, on every push to `main` and every pull request. Run the same before you push.
+CI (`.github/workflows/ci.yml`) runs `format:check`, `lint`, `typecheck`, the API and web tests, `build`, the model-evaluation, Node-RED, notification, MCP sandbox and screenshot-privacy checks and the PowerShell checks in `agents/windows-legacy/test/`, and builds the image without pushing it, on every push to `main` and every pull request. Run the same before you push.
 
 ## Tests
 
 - API tests live in `apps/api/test/<module>/` and run with `npm test`, or `cd apps/api && npx vitest run test/<module>` for one module. They use fakes for Home Assistant, MCP servers and the Windows agent; no external service is needed.
-- The Windows agent has only a syntax and C# compile check (`agents/windows/test/check.ps1`).
+- Native Windows config/authentication/HTTP tests and app compilation run in the `windows` CI job. The archived agent retains its PowerShell/C# checks. Neither proves interactive Windows behavior.
 - Web unit tests run with `npm test -w @nova/web`. The Playwright browser checks in `scripts/check-*.mjs` use mocked APIs against a running dev server and are run by hand; there is no end-to-end suite in CI.
 
 ## Adding a tool

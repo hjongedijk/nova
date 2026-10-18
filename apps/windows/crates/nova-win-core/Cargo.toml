@@ -1,0 +1,19 @@
+[package]
+name = "nova-win-core"
+version = "0.1.0"
+edition = "2021"
+description = "NOVA for Windows: configuration, authentication, migration and desktop geometry."
+license = "MIT"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+base64 = "0.22"
+
+getrandom = "0.3"
+subtle = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

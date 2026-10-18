@@ -1,0 +1,18 @@
+{
+  "identifier": "setup",
+  "description": "The local first-run page may store the NOVA address. Nothing else.",
+  "windows": ["setup"],
+  "permissions": [
+    "allow-desk-set-url",
+    "allow-agent-setup-info",
+    "allow-agent-pair-code",
+    "allow-agent-configure-network",
+    "allow-agent-retire-legacy",
+    "allow-agent-import-legacy",
+    "allow-agent-update-status",
+    "allow-agent-check-update",
+    "allow-agent-install-update",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

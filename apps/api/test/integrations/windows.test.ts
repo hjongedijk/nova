@@ -30,6 +30,17 @@ async function agent(
 }
 
 describe("Windows tools", () => {
+  it("explains an unimplemented native route without exposing upstream details", async () => {
+    const { pc } = await agent("agent-token", (_seen, send) =>
+      send(501, { ok: false, error: "private-native-diagnostic" }),
+    );
+    const outcome = await pc.call("windows_helper_debug", {});
+    expect(outcome).toEqual({
+      ok: false,
+      error:
+        "Deze functie is nog niet beschikbaar in deze versie van NOVA voor Windows.",
+    });
+  });
   it("drops unexpected diagnostic fields from a successful agent reply", async () => {
     const diagnostic = "private-host.local /data/private/windows.json";
     const { tools } = await agent("agent-token", (_seen, send) =>

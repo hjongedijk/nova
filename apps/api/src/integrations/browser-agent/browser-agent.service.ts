@@ -281,7 +281,13 @@ export class BrowserAgentService implements ToolSource {
       return {
         ok: false,
         error:
-          "De Windows-agent op je pc is nog oud en kent de browser niet. Werk nova-agent.ps1 bij en start NOVAAgent opnieuw in Taakplanner.",
+          "De Windows-agent op je pc is nog oud en kent de browser niet. Installeer NOVA voor Windows en koppel de app in Instellingen.",
+      };
+    if (response.status === 501)
+      return {
+        ok: false,
+        error:
+          "Browserbediening is nog niet beschikbaar in deze versie van NOVA voor Windows.",
       };
     const { ok, ...rest } = response.data ?? {};
     if (response.status !== 200 || ok !== true)

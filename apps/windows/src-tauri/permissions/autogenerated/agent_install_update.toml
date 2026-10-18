@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-agent-install-update"
+description = "Enables the agent_install_update command without any pre-configured scope."
+commands.allow = ["agent_install_update"]
+
+[[permission]]
+identifier = "deny-agent-install-update"
+description = "Denies the agent_install_update command without any pre-configured scope."
+commands.deny = ["agent_install_update"]

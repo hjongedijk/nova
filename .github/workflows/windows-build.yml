@@ -1,0 +1,39 @@
+name: Windows application
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/windows
+      - name: Test migration, authentication and HTTP transport
+        working-directory: apps/windows
+        run: cargo test --locked -p nova-win-core -p nova-win-agent
+      - name: Check formatting and lints
+        working-directory: apps/windows
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test update manifest
+        run: node --test scripts/windows-update-manifest.test.mjs
+      - name: Build the app and installer
+        shell: pwsh
+        run: ./.github/scripts/build-windows.ps1
+      - uses: actions/upload-artifact@v5
+        with:
+          name: nova-windows
+          path: |
+            windows-out/NOVA-Setup-*.exe
+            windows-out/nova-windows.zip
+          if-no-files-found: error

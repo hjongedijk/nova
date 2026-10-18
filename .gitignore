@@ -16,7 +16,7 @@ deploy/secrets/
 nova-backups/
 *.pem
 *.key
-agents/windows/agent.json
+agents/windows-legacy/agent.json
 
 # editors and OS
 .DS_Store
@@ -27,6 +27,10 @@ agents/windows/agent.json
 !.vscode/tasks.json
 .idea/
 
-# NOVA Desk (Rust) build output
-apps/desk/target/
-apps/desk/src-tauri/gen/
+# NOVA for Windows (Rust) build output
+apps/windows/target/
+apps/windows/src-tauri/gen/
+
+# Windows CI packaging output
+/windows-out/
+/apps/windows/release-config.json

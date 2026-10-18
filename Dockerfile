@@ -67,7 +67,7 @@ RUN case "$TARGETARCH" in \
 COPY deploy/mcp-servers.json /app/mcp-servers.default.json
 ENV NOVA_MCP_DEFAULT=/app/mcp-servers.default.json
 # The Windows agent is downloaded from NOVA's settings screen.
-COPY agents/windows/nova-agent.ps1 agents/windows/jarvis-agent.ps1 agents/windows/install.ps1 agents/windows/
+COPY agents/windows-legacy/nova-agent.ps1 agents/windows-legacy/jarvis-agent.ps1 agents/windows-legacy/install.ps1 agents/windows-legacy/
 ARG NOVA_VERSION=dev
 ENV NOVA_VERSION=${NOVA_VERSION}
 RUN mkdir -p /data && chown node:node /data

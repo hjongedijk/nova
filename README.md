@@ -93,7 +93,7 @@ Details: [docs/tools-and-safety.md](docs/tools-and-safety.md).
 
 ## Windows agent
 
-`agents/windows/nova-agent.ps1` is the maintained PowerShell agent for a Windows PC. Existing installs can keep `jarvis-agent.ps1` and the `JarvisAgent` task; the compatibility download serves the updated implementation under the old filename. The agent runs in your desktop session, authenticates with a bearer token, only accepts calls from the NOVA host and only starts programs you list in `agent.json`. It can show NOVA as living wallpaper per display, as a small helper overlay, or both, and gives NOVA a visible Edge window to browse in. It is verified in CI only for syntax and compilation, not on real Windows machines. Install and details: [docs/windows-agent.md](docs/windows-agent.md). The helper has overview/chat/notifications tabs, optional weather/lists, file drops, scoped approvals, configurable shortcuts and a tray. Design/screenshots: [docs/helper-design.md](docs/helper-design.md). Kiosk bounds, DPI and device behavior still need a real Windows test. **NOVA Desk** (`apps/desk`, Rust/Tauri) is the native alternative to the Edge windows for the helper and the wallpaper: [docs/nova-desk.md](docs/nova-desk.md) (not yet run on a real PC).
+NOVA for Windows (`apps/windows`, Rust/Tauri) combines the agent, native helper and wallpaper in one `nova.exe`, with one tray icon and `%LOCALAPPDATA%\NOVA\config.json`. The release workflow builds an installer and a portable zip. Pair from the app into NOVA's connection settings; import old settings before retiring the PowerShell agent. Desktop control and browser automation remain deferred in this stage. Installation, migration and Windows acceptance limits: [Windows agent](docs/windows-agent.md).
 
 ## Development
 
@@ -126,7 +126,7 @@ Versions are git tags `vMAJOR.MINOR.PATCH`. The project is in the `v0.1.x` serie
 git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
-The tag starts a GitHub Actions workflow that publishes the multi-architecture image `ghcr.io/hjongedijk/nova:X.Y.Z` (plus `X.Y` and `latest`) and a GitHub release with `nova-windows-agent.zip` and the production `docker-compose.yml`. See [docs/releasing.md](docs/releasing.md).
+The tag starts a GitHub Actions workflow that publishes the multi-architecture image `ghcr.io/hjongedijk/nova:X.Y.Z` (plus `X.Y` and `latest`) and a GitHub release with the Windows installer, `nova-windows.zip` and the production `docker-compose.yml`. See [docs/releasing.md](docs/releasing.md).
 
 ## Documentation
 

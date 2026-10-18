@@ -33,28 +33,11 @@ jobs:
       - run: node --test deploy/omniroute/repair-stream-content.test.mjs
       - run: npm run test:mcp-sandbox
       # The Windows agent cannot run here, but its syntax and embedded C# can be checked.
-      - run: pwsh -NoProfile -File agents/windows/test/check.ps1
-      - run: pwsh -NoProfile -File agents/windows/test/desktop.ps1
+      - run: pwsh -NoProfile -File agents/windows-legacy/test/check.ps1
+      - run: pwsh -NoProfile -File agents/windows-legacy/test/desktop.ps1
 
-  # NOVA Desk (apps/desk): the pure core is tested here; the Windows app is only compiled (for the Windows target),
-  # the real build and run happen on a Windows runner in the release workflow.
-  desk:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-gnu
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desk
-      - run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
-      - name: Test the pure core
-        working-directory: apps/desk
-        run: cargo test -p nova-desk-core
-      - name: Compile the Windows app
-        working-directory: apps/desk
-        run: cargo check --target x86_64-pc-windows-gnu -p nova-desk
+  windows:
+    uses: ./.github/workflows/windows-build.yml
 
   image:
     runs-on: ubuntu-latest

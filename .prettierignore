@@ -7,4 +7,6 @@ dev-data
 package-lock.json
 LICENSE
 
-apps/desk/target
+apps/windows/target
+
+apps/windows/src-tauri/gen

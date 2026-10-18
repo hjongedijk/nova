@@ -37,6 +37,7 @@
     confirmManagedTargetsAccessRollback,
     saveManagedTargetsAccess,
     saveServiceConnection,
+    pairWindowsAgent,
     testServiceConnection,
     getServiceRestartStatus,
     requestServiceRestart,
@@ -61,6 +62,7 @@
   let tests = $state<Record<string, ServiceConnectionTest>>({});
   let busy = $state<string | null>(null);
   let error = $state("");
+  let windowsPairCode = $state("");
   let mqttOverview = $state<MqttOverview | null>(null);
   let mqttError = $state("");
   let qdrantOverview = $state<QdrantOverview | null>(null);
@@ -228,6 +230,26 @@
         return [[field.key, value]];
       }),
     );
+  }
+  async function pairWindows() {
+    busy = "windows";
+    try {
+      const result = await pairWindowsAgent(windowsPairCode);
+      windowsPairCode = "";
+      services = result.services;
+      services.forEach(reset);
+      restartStatus = await getServiceRestartStatus();
+      delete tests.windows;
+      say(
+        result.auditWarning ??
+          "Windows-agent gekoppeld. Herstart NOVA om de verbinding te gebruiken.",
+        result.auditWarning ? "bad" : "ok",
+      );
+    } catch (e) {
+      fail(e);
+    } finally {
+      busy = null;
+    }
   }
   async function apply(service: ServiceConnection, test: boolean) {
     busy = service.id;
@@ -948,6 +970,38 @@
           Een ander gateway-adres vraagt een nieuwe gratis-route-controle. Tot
           die controle klopt, antwoordt NOVA niet via die gateway.
         </p>
+      {/if}
+      {#if service.id === "windows"}
+        <form
+          onsubmit={(event) => {
+            event.preventDefault();
+            void pairWindows();
+          }}
+        >
+          <fieldset disabled={busy !== null}>
+            <legend class="connection-legend">Koppelen met je pc</legend>
+            <div class="connection-field">
+              <label for="windows-pair-code"
+                >Koppelcode uit NOVA voor Windows</label
+              >
+              <input
+                id="windows-pair-code"
+                type="password"
+                bind:value={windowsPairCode}
+                autocomplete="new-password"
+                maxlength="2048"
+                required
+              />
+              <small
+                >Open bij het NOVA-pictogram op je pc ‘Instellen en koppelen’ en
+                kopieer de code.</small
+              >
+            </div>
+            <Button type="submit" disabled={!windowsPairCode.trim()}
+              >Windows-agent koppelen</Button
+            >
+          </fieldset>
+        </form>
       {/if}
       <form
         onsubmit={(event) => {

@@ -75,3 +75,5 @@ Reference pages that are not listed above.
 | [Weekly overview](weekly-overview.md)                                     | `weekly-overview.md`             |
 
 Back to the [README](../README.md).
+
+- [Storage and project cleanup](storage-cleanup.md): JSON inventory, storage boundaries and the proposed history migration.

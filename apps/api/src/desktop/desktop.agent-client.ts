@@ -31,6 +31,8 @@ export class DesktopAgentClient implements DesktopPort {
   }
 
   private statusError(status: number): string {
+    if (status === 501)
+      return "Bureaubladbediening is nog niet beschikbaar in deze versie van NOVA voor Windows.";
     if (status === 404)
       return "De Windows-agent op de pc kent bureaubladbediening nog niet. Werk de agent bij.";
     if (status === 403 || status === 409)

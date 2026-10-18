@@ -216,7 +216,18 @@ describe("BrowserAgentService", () => {
     });
     const out = await browser.execute("browser_read", {}, call());
     expect(out.ok).toBe(false);
-    expect(out.error).toMatch(/nova-agent\.ps1/);
+    expect(out.error).toMatch(/NOVA voor Windows/);
+  });
+
+  it("explains browser actions deferred by the native rewrite", async () => {
+    reply = () => ({
+      status: 501,
+      body: { ok: false, error: "private-native-diagnostic" },
+    });
+    const out = await browser.execute("browser_read", {}, call());
+    expect(out.error).toBe(
+      "Browserbediening is nog niet beschikbaar in deze versie van NOVA voor Windows.",
+    );
   });
 
   it("a timeout is reported as the browser not answering", async () => {

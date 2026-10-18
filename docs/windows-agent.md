@@ -1,182 +1,98 @@
-# Windows agent
+# NOVA for Windows
 
-The Windows agent (`agents/windows/nova-agent.ps1`, agent version `2026-10-18.1`) is a small authenticated HTTP service written in PowerShell with embedded C#. It runs in your own desktop session on a Windows PC and lets NOVA:
+The Windows agent now lives in `apps/windows/`: one Rust/Tauri application, `nova.exe`, with one tray icon. It owns the authenticated HTTP service, native helper and living wallpaper. It does not launch PowerShell or require a separate NOVA Desk executable.
 
-- open (and, with confirmation, close) programs from an allow-list, open `http(s)` URLs and lock the screen,
-- show NOVA as a **living wallpaper** behind the desktop icons, per display,
-- show NOVA as a small always-on-top **helper panel** at the top of a display,
-- drive a **browser of its own** (a separate Microsoft Edge window) for search, reading, clicking and typing.
+This is stage one of the native rewrite. It has been cross-checked for Windows compilation on Linux; installer behavior, window transparency, monitor DPI, firewall elevation and wallpaper parenting still require a Windows acceptance run. No release or production deployment is implied by the source changes.
 
-- optionally start **NOVA Desk** (`nova-desk.exe`, a native Rust/Tauri app) instead of Edge for the helper and the wallpaper, see [NOVA Desk](nova-desk.md).
+## Installation and pairing
 
-It is the only agent; there is no separate browser agent. The (Dutch) texts inside the agent and the NOVA interface are in Dutch.
+The release workflow builds `NOVA-Setup-<version>.exe` and `nova-windows.zip`. The portable zip contains only `nova.exe`. The installer runs for the current user and bundles WebView2 bootstrap installation through Tauri when needed.
 
-> The agent uses only what ships with Windows (PowerShell, Microsoft Edge, Win32 through embedded C#). It needs Windows for real desktop, window-manager, microphone and task-scheduler behavior; Linux CI runs PowerShell parsing and embedded C# checks only. See [What is unverified](#what-is-unverified).
+1. Install NOVA or extract the portable executable into a permanent directory.
+2. Open **Instellen en koppelen** from its tray menu. Enter your NOVA server's HTTP(S) address and save it.
+3. Enter the NOVA server's IP address and choose **Verbinding toestaan in Windows**. Windows asks for elevation to create an inbound TCP rule, restricted to this address and private/domain network profiles. The app itself continues without administrator rights.
+4. Select this PC's network address, then copy its pairing code.
+5. In NOVA, open **Instellingen → Koppelingen → Windows-agent**, paste the code and save. Restart NOVA to apply the connection, as with other saved service connections.
+6. Enable **Starten met Windows** in the tray if desired.
 
-## Install
+The pairing code contains the bearer credential. Treat it as a password. It is available only to the app's local setup page. The remotely hosted helper page cannot read it or modify the firewall.
 
-1. Get the agent files: download `nova-windows-agent.zip` from a GitHub release (it holds `agents/windows` without its tests), or copy the folder `agents/windows` from the repository. Put it somewhere permanent on the PC, for example `C:\NovaAgent`.
-2. Open an **elevated** PowerShell in that folder and run:
+NOVA's existing `WINDOWS_AGENT_URL` and `WINDOWS_AGENT_TOKEN` environment settings also remain supported.
 
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\install.ps1 -NovaHost <nova-host-ip>
-   ```
+## One configuration file
 
-   `<nova-host-ip>` is the IP address of the machine that runs NOVA, as the PC sees it. The old `-JarvisHost` parameter remains an alias for existing install instructions. An optional `-Port` (default `8765`) changes the agent port.
+Settings live in `%LOCALAPPDATA%\NOVA\config.json`, including the server origin, helper view and screen, per-screen wallpaper choices, HTTP port (8765 by default), source-IP allowlist, app allowlist and shortcuts. The log is `%LOCALAPPDATA%\NOVA\nova.log`.
 
-3. The script prints two lines. Put them in the `.env` of your NOVA install and recreate the container (`docker compose up -d nova`):
+The app restricts access to its data directory to the current user, SYSTEM and Administrators. Saves flush a temporary file and replace the previous configuration atomically. An invalid existing config stops startup and remains untouched; it never silently rotates a token.
 
-   ```dotenv
-   WINDOWS_AGENT_URL=http://<pc-ip>:8765
-   WINDOWS_AGENT_TOKEN=<printed token>
-   ```
+The existing `%LOCALAPPDATA%\NOVA\desk-profile` WebView2 profile is reused to preserve sign-in. `setup-profile` remains a separate browser profile, not another configuration file.
 
-What `install.ps1` does:
+## Updates from GitHub
 
-- creates `agent.json` from `agent.example.json` with a random 64-character hex token and `allowedIps` set to the NOVA host (only when `agent.json` does not exist yet), and restricts read access to the file to you and Administrators,
-- registers a URL reservation for the port,
-- creates the firewall rule `NOVA Windows agent` that only allows the NOVA host to reach the port,
-- registers the scheduled task `JarvisAgent` (at logon, current user, limited rights, so it runs in your desktop session) and starts it.
+NOVA checks the stable GitHub release 20 seconds after startup and every six hours. A newly discovered version opens the local settings window once per version and appears in the tray menu. **Controleren op updates** runs a manual check. **Bijwerken en herstarten** downloads the update, verifies it and runs the installer after saving the current settings. Checks never install an update automatically.
 
-The task name `JarvisAgent` is retained for existing installs; the old firewall rule is removed during installation.
+The [Tauri updater](https://v2.tauri.app/plugin/updater/) verifies the installer with the public key embedded in the app. Signed version binding is required, and downgrades are disabled. A failed download, invalid signature or failed settings save leaves the current app installed. Update commands are granted only to the local setup page; neither remote helper pages nor the agent HTTP API can install updates.
 
-The agent refuses to start if the token in `agent.json` is shorter than 24 characters. It restarts itself without a visible window; starting it again ends the older copy, so an update is: replace the implementation in the existing `jarvis-agent.ps1` path using the compatibility download `/windows-agent/jarvis-agent.ps1`, then run the `JarvisAgent` task again. New installs use `nova-agent.ps1`; NOVA also serves it at `/windows-agent/nova-agent.ps1`. The installer updates the existing `JarvisAgent` task to point to the new filename.
+The endpoint is `https://github.com/hjongedijk/nova/releases/latest/download/latest.json`. A signed release publishes the versioned installer, its `.sig` file and that manifest. Missing metadata or a failed Windows build results in a retryable check error, never an unsigned fallback.
 
-## Security
+The installer defaults to a separate **NOVA for Windows** application folder; settings stay in `%LOCALAPPDATA%\NOVA`. The updater supplies the current executable's directory to NSIS, including for a portable app. Updating a portable executable uses the NSIS installer and can create the normal installer/uninstaller registrations.
 
-- Every request needs `Authorization: Bearer <token>` (compared in constant time).
-- If `allowedIps` in `agent.json` is not empty, requests from other addresses get 403. The installer fills it and creates a matching firewall rule.
-- Programs: only the entries in `apps` of `agent.json` can be started. There is no endpoint for arbitrary commands. Closing programs and locking the screen are `CONFIRM` tools in NOVA, see [Tools and safety](tools-and-safety.md).
-- The agent speaks plain HTTP, so keep it on a trusted LAN.
+### One-time signing setup
 
-## `agent.json`
+A signing key was generated outside the repository at `/root/.config/nova/windows-updater.key`, with owner-only permissions. Its public half is embedded in `tauri.conf.json`. The private key is not in source control or release artifacts.
 
-| Key              | Default                  | Meaning                                                                                                                                                                                                              |
-| ---------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `token`          | set by `install.ps1`     | Bearer token, at least 24 characters.                                                                                                                                                                                |
-| `allowedIps`     | set by `install.ps1`     | Source addresses that may call the agent; empty means any.                                                                                                                                                           |
-| `apps`           | see `agent.example.json` | Map of app name to `{ "path": ..., "process": ... }`. `process` is needed for closing the app and for the "running" list. Edit it, then restart the task.                                                            |
-| `mode`           | `wallpaper`              | Default mode: `wallpaper`, `helper` or `both`. NOVA changes it at runtime; the runtime choice is kept in `mode.json` and wins.                                                                                       |
-| `helperDisplay`  | `0`                      | Display for the helper (0 = primary).                                                                                                                                                                                |
-| `novaUrl`        | none                     | `http(s)://host[:port]` of NOVA, only needed when the agent must open the helper before NOVA ever set a mode.                                                                                                        |
-| `novaPort`       | `8080`                   | Port used to build NOVA's address from the caller's IP when no address is passed.                                                                                                                                    |
-| `desk`           | `auto`                   | With `nova-desk.exe` next to the agent: `auto` = helper and wallpaper in NOVA Desk, `helper` = only the helper (wallpaper stays in Edge, with input forwarding), `off` = always Edge. See [NOVA Desk](nova-desk.md). |
-| `wallpaperInput` | forwarded                | Set to `"window"` to open a small NOVA window on click instead of forwarding clicks to the wallpaper.                                                                                                                |
-| `browser`        | see below                | Settings of the browser, with `port` (9322), `defaultEngine` (`google`), `maxActionsPerMinute` (60), `blockedHosts`, `allowedHosts` and `enabled`.                                                                   |
+Before publishing the first update, a repository administrator must put the **contents** of that private-key file in the GitHub Actions repository secret `TAURI_SIGNING_PRIVATE_KEY`. `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is optional and is empty for this generated key. Keep a secure backup of the key; replacing it would prevent existing installations from trusting later updates.
 
-NOVA passes its own address to the agent when you pick a wallpaper or mode: with `NOVA_PUBLIC_URL` set that address is used, otherwise the agent builds `http://<caller ip>:<novaPort>`.
+The release workflow refuses to produce Windows release artifacts without the signing secret. Development/PR builds disable update-artifact signing, so test installers can still be built without access to release credentials. Signing-secret provisioning and an actual update between two Windows releases remain unverified.
 
-## Living wallpaper
+## Transition from the old agent
 
-Microsoft Edge shows the NOVA page in a window that is parented to the desktop, behind the icons, on one display or all of them. The real wallpaper setting is never changed; choosing "Uit" (off) shows it again. Set it in NOVA under **Instellingen, Meer** or say "zet NOVA als achtergrond op scherm 2".
+The old implementation is retained in `agents/windows-legacy/` for rollback and compatibility downloads. New release artifacts exclude it.
 
-- Endpoints: `GET /v1/displays` and `POST /v1/wallpaper` with `{ "display": 0|1|2..., "mode": "full"|"sphere"|"off" }` (0 = all displays).
-- What is set is remembered in `wallpaper.json` and restored when the agent starts.
-- The window is placed by recognising how Windows builds the desktop (a top-level WorkerW, or, on Windows 11 24H2 and later, a WorkerW inside Progman). If the layout is not recognised the agent refuses and closes the window instead of leaving a window on top of the screen. "Uit" always closes the window.
-- Sizes are real pixels per display (a 4K screen at 150% scaling is covered as 3840 x 2160).
-- Input: clicks on the sphere and on the input field area are passed on to the wallpaper page, and typing starts after a click on the input field (Esc ends it). Everywhere else the desktop stays Windows' own: icon selection, drag and drop and the right-click menu are not touched. Which clicks are passed on is decided by the page, which reports where its buttons, fields and open windows are (`window.__novaZones()`).
-- Clicks and keys reach the page through Edge's DevTools channel, bound to `127.0.0.1` on one port per display (9331, 9332, ...). If that channel is unavailable, window messages are used as a fallback. The agent also keeps its own key hook to track Shift, Ctrl, Alt and Caps.
+At first startup, the new app imports `agent.json`, `mode.json` and `wallpaper.json` next to its executable, plus `%LOCALAPPDATA%\NOVA\desk.json`. Windows PowerShell UTF-8 BOMs are accepted. The import retains the token, app/source allowlists, URL, mode, helper display/view/shortcuts and device-named wallpaper choices. Legacy browser/desktop preferences are retained as inactive data for later stages. Source files are never deleted.
 
-## Modes: wallpaper, helper, both
+For an installed app whose old files live elsewhere, expand **Oude agent vervangen** in the setup window, enter that directory and choose **Oude instellingen importeren**. This explicit import keeps the previous unified settings as `config.json.before-import`. If the legacy port differs, NOVA restarts automatically to bind the imported port.
 
-| Mode        | What the PC shows                                                                                        |
-| ----------- | -------------------------------------------------------------------------------------------------------- |
-| `wallpaper` | The living wallpaper (default).                                                                          |
-| `helper`    | No wallpaper (the per-display choices stay remembered), only the rectangular helper panel.               |
-| `both`      | Quiet wallpaper windows (no input or voice) with the helper on top, which does the listening and typing. |
+Then choose **Oude agent uitschakelen**. This ends PowerShell agents whose script path matches that folder, removes the documented `NOVAAgent`/`JarvisAgent` scheduled tasks, removes NOVA Desk's Run entry and asks the old shell to quit. Import before disabling the old installation. If the old process occupied port 8765, the new app retries its listener afterward. Other processes are left alone.
 
-Change it in NOVA under **Instellingen, Meer, "NOVA op je Windows-pc"**; no reinstall is needed. Endpoints: `POST /v1/mode` with `{ "mode": ..., "display": ... }`, `GET /v1/status` and `GET /v1/displays` (both report `mode` and `helperDisplay`), and `POST /v1/helper/size` with `{ "view": "compact|overview|chat|notifications|weather|lists|confirmation" }` (legacy `expanded` remains supported).
+Rollback: quit NOVA, disable its Run entry and restart the old scheduled task after re-registering it with the preserved legacy installer. Use the v0.1.73 artifacts and original JSON files. If you paired with a new token instead of importing the old one, restore the corresponding NOVA connection settings too.
 
-### NOVA Desk instead of Edge
+## Supported contract
 
-When `nova-desk.exe` (from `nova-windows-agent.zip`, if the desk build succeeded) sits next to `nova-agent.ps1`, the agent shows the helper, and with `"desk": "auto"` the wallpaper too, in NOVA Desk's frameless windows instead of Edge windows. The endpoints and their meaning stay the same (`/v1/mode`, `/v1/displays`, `/v1/wallpaper`, `/v1/helper/size`, `/v1/helper/notify`); the agent starts `nova-desk.exe` with `--url`, `--mode`, `--display`, `--wallpaper N:style`, and later starts hand `--view`, `--action` or `--notify` to the running copy (single instance), so no restart and never two helpers. Without the exe, or with `"desk": "off"`, everything below works as before through Edge. Phase 2 and not included: the agent's input forwarding to NOVA Desk's wallpaper (use `"desk": "helper"` to keep Edge for the wallpaper). Unverified on a real PC, see [NOVA Desk](nova-desk.md#wat-is-niet-geverifieerd).
+All HTTP routes require `Authorization: Bearer <token>` and enforce the source allowlist when configured. Tokens are compared using constant-time comparison. JSON request bodies are bounded to 16 KiB. The listener uses ordinary TCP, so no HTTP.sys URL reservation is required.
 
-### Choosing the helper's screen
+- `GET /v1/status`, `GET /v1/displays`: actual mode, helper state, monitor list, available/running allowlisted apps and agent version.
+- `POST /v1/mode`, `POST /v1/wallpaper`: native window changes with saved per-monitor choices. Display 0 selects primary for helper mode and all displays for wallpaper.
+- `POST /v1/helper/size`, `GET/POST /v1/helper/preferences`, `POST /v1/helper/notify`: view/size, global shortcuts and bounded notification queue. Pause suppresses notifications and shortcut actions.
+- `POST /v1/open-app`, `POST /v1/close-app`: only configured applications. Close requests send WM_CLOSE, allowing applications to ask about unsaved work.
+- `POST /v1/open-url`: HTTP(S) URLs only; no embedded credentials.
+- `POST /v1/lock`: native Windows workstation lock.
 
-The helper appears on the display saved in NOVA (`helperDisplay`; 0 = main display). Choose it in the helper itself (toolbar button **Scherm**, which lists the connected displays such as "Scherm 2 (2560x1440)" and marks the current one) or in NOVA under Instellingen, "Scherm voor de helper". Choosing moves the helper at once (the agent restarts the helper window on that display through `POST /v1/mode`) and the choice is kept. The helper page uses `GET /api/settings/helper/displays` and `POST /api/settings/helper/display` (only the display number, which must be a display the PC reports now; no PIN, like the resize route). The helper is always centred on the top edge; a corner position is not offered.
+Default shortcuts: Ctrl+Alt+N opens the helper, Ctrl+Alt+Space speaks, Ctrl+Alt+M mutes, Ctrl+Alt+D shows the desktop. Conflicts appear as helper warnings. Empty shortcuts disable individual actions; invalid or duplicate bindings are rejected before registration changes.
 
-### The rectangular helper
+Only the helper window on the configured NOVA origin receives its window commands. Login origins can be added explicitly through `allowedOrigins`; they never receive helper commands. Release windows have no developer tools. External links open in the normal browser.
 
-The helper uses a dedicated Edge fullscreen kiosk window at `<NOVA>/helper`. NOVA removes the native frame, preserves tool-window/topmost styles, and positions the visible rectangle against the chosen monitor's top edge. There is no `SetWindowRgn`, rounded clipping or region repair timer. Edge kiosk mode is InPrivate; NOVA persists appearance/sound preferences on the server and native view/display/hotkeys in `mode.json`.
+## Deferred functionality and Windows checks
 
-| View                                    | Size in CSS pixels |
-| --------------------------------------- | ------------------ |
-| Compact                                 | 360 × 44           |
-| Overview, notifications, weather, lists | 960 × 280          |
-| Chat                                    | 960 × 420          |
-| Confirmation                            | 960 × 200          |
+Screenshots, mouse/keyboard desktop control and browser automation return 501 for actions in this stage. Their status routes report disabled. Wallpaper mouse/keyboard forwarding is also deferred. Native helper diagnostics are not implemented yet; the server reports that no valid helper measurement is available.
 
-Geometry converts CSS pixels using the target monitor's DPI, centers on that monitor (including negative desktop coordinates), and compensates invisible native borders. Small displays clamp the panel to available dimensions. Size transitions take 200 ms without overshoot; reduced motion applies the target directly. `/v1/helper-debug` reports requested and native window bounds, the DWM visible frame, measured browser chrome, DPI/scale, visibility, caption and sizing-frame flags, toolwindow/appwindow and topmost state, plus selected display/view. Measurements expose caption problems rather than hiding them behind a clipping region.
+The native app must be tried on Windows for transparency, dragging, WebView2 permission prompts, shortcuts, autostart, old-agent retirement, UAC/firewall, multiple monitors and wallpaper placement. Explorer restart recovery remains a known limitation inherited from NOVA Desk; toggle the wallpaper off/on if its host disappears.
 
-On Windows, after opening the helper, capture the measurements without revealing the agent token:
+## Development
 
-```powershell
-$headers = @{ Authorization = "Bearer $env:WINDOWS_AGENT_TOKEN" }
-Invoke-RestMethod "$env:WINDOWS_AGENT_URL/v1/helper-debug" -Headers $headers | ConvertTo-Json -Depth 4
+```sh
+cd apps/windows
+cargo test --locked -p nova-win-core -p nova-win-agent
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets -- -D warnings
 ```
 
-For the kiosk helper, check `visible=True`, `caption=False`, `sizingFrame=False`, `toolWindow=True`, `appWindow=False`, `topmost=True`, and compare `extended` against the selected display and `requested` bounds. Check `dpi`/`scale` on each monitor; repeat at 100%, 150% and 200% where available.
+Build from `apps/windows` so its `.cargo/config.toml` limits compiler concurrency to one job. On the shared server, run checks sequentially and leave full executable/installer builds to the Windows CI runner.
 
-After 12 seconds without typing, files, speech, a pending confirmation or open settings, autohide resizes the window to a 3 CSS-pixel strip at the monitor's top. It never moves into a monitor above it. Entering the strip restores the compact panel; activity/notifications restore content. Disable autohide with the gear. Actual Windows kiosk resizing and minimum strip height still need manual verification.
+On Linux, check the native app with the installed Windows GNU target and MinGW:
 
-Overview shows real integration status, machines and timers. Chat includes recent messages, the model reported by OmniRoute, tool results, file selection/drop and the full-app link. The plus menu adds weather and lists using existing dashboard data. Calendar explicitly says it is not connected until the calendar phase is built. Notifications can be dismissed or snoozed for ten minutes. Confirmations open automatically, remain until answered/expired, and use Y/N outside editable fields. Their result appears in chat/ticker. “Altijd” is available only for `CONFIRM`, with exact argument/schema scope; revoke it under settings → behavior.
+```sh
+cargo check --locked --target x86_64-pc-windows-gnu -p nova
+```
 
-The tray offers Open, Pause/Resume, Settings and Exit, with an original navy icon and active/paused dot. Pause stops the helper microphone/wake word and sounds, suppresses new native notifications, and blocks new helper requests; it cannot undo an action already running. Default global shortcuts:
-
-| Action       | Shortcut       |
-| ------------ | -------------- |
-| Open         | Ctrl+Alt+N     |
-| Speak        | Ctrl+Alt+Space |
-| Mute         | Ctrl+Alt+M     |
-| Show desktop | Ctrl+Alt+D     |
-
-Configure shortcuts in the helper. Empty bindings disable them; duplicate/invalid bindings are rejected, and Windows registration conflicts are shown. Native callbacks enqueue commands onto the agent's main thread. Closing the helper manually is recoverable through a shortcut or a server alert/timer notification in helper/both mode. Wallpaper-only and paused modes suppress notification opening. Recovery may take up to roughly 38 seconds; the server allows 45 seconds.
-
-Agent endpoints (bearer token/source-address checks apply):
-
-- `POST /v1/helper/size`: `{view, hidden, reducedMotion}`; legacy `{expanded}` remains supported.
-- `GET/POST /v1/helper/preferences`: read native preferences or replace the complete `{hotkeys:{open,speak,mute,desktop}}` set.
-- `POST /v1/helper/notify`: bounded `{event:{seq,severity,title,detail,at}}`; queues until the helper document loads.
-- `GET /v1/status`, `/v1/displays`: include helper view/display, paused state and shortcut warnings.
-
-The browser never receives the agent token. Appearance/sound settings use NOVA's guarded settings API; the helper has a masked PIN field. Output-device selection depends on browser sink support. On Chromium 135+, the helper can enumerate input devices after an explicit microphone-permission action and passes the selected live `MediaStreamTrack` to SpeechRecognition for both tap-to-talk and Hey NOVA. The stream stops when recognition ends; a missing or denied selected device does not silently fall back to another microphone. Other browsers continue to use their system/default microphone. The [Chrome 135 release notes](https://developer.chrome.com/release-notes/135#add_mediastreamtrack_support_to_the_web_speech_api) document MediaStreamTrack input to Web Speech. A speaking meter reports NOVA's audio level; output choice persists in this browser, while voice volume remains device-local.
-
-The original particle renderer supplies temporary heart/check/question/box/wave forms, idle dimming, pointer lean, hover and bounded repeated-click reactions. Fifteen synthesized cues have independent volume, per-cue switches, quiet hours and soft/playful/minimal themes. Audio starts only after a browser gesture, never overlaps speech/listening, and thinking phrases stop after 30 seconds. Orb/ring/mist, color themes and optional seasonal/birthday accents are configurable; birthday accents require an explicitly entered date.
-
-Validation: run the PowerShell Docker check and [the browser helper check](helper-design.md). Real Windows acceptance remains: kiosk caption/bounds, stacked monitors at 100/150/200% DPI, actual 3 px strip, tray interaction, shortcut conflicts, microphone/output behavior and closed-window recovery. No real Windows or phone validation has been performed for this phase.
-
-## Browser
-
-NOVA can search the web, read pages and click through them in a visible Edge window of its own (the `browser_*` tools). It uses the same `WINDOWS_AGENT_URL` and `WINDOWS_AGENT_TOKEN`.
-
-- Endpoints: `GET /v1/browser/status` and `POST /v1/browser/{open,search,read,click,type,press,scroll,back,forward,tab}`.
-- The window is separate from the wallpaper and from your normal Edge: its own profile (`browser-profile`), its own DevTools port (`9322` by default, `127.0.0.1` only). It starts on the first browser action and stays open; log in to a site once in that window and NOVA can use it.
-- The agent drives it through Edge's DevTools channel: page navigation, a page script that numbers links, buttons and fields (`read` returns the text plus those numbers), real mouse clicks and key events.
-- Search engines: `google` (default), `duckduckgo`, `bing`, `youtube`, `wikipedia`, `maps`, `amazon`, `bol`. When Google or Bing shows a robot check the search is repeated on DuckDuckGo, and the reply says so.
-- Enforced in the agent, not left to the model: only `http` and `https` pages; no typing into password, PIN, card, IBAN, one-time-code or similar fields; buttons that buy, pay, order, donate, subscribe or delete are refused unless NOVA asks you first (`browser_click_confirmed`, a `CONFIRM` tool); at most `maxActionsPerMinute` actions (60) per minute; `blockedHosts` and `allowedHosts` are applied. Page text is returned as untrusted data.
-- Without an agent configured the `browser_*` tools do not exist (NOVA says so and suggests `windows_search` or `web_search`).
-
-## HTTP API summary
-
-All endpoints need the token and the allowed source address.
-
-| Endpoint                                          | Does                                                                       |
-| ------------------------------------------------- | -------------------------------------------------------------------------- |
-| `GET /v1/status`                                  | host name, user, uptime, features, mode, agent version, apps, running apps |
-| `POST /v1/open-app`, `POST /v1/close-app`         | start / close an allow-listed program (`{ "app": "notepad" }`)             |
-| `POST /v1/open-url`                               | open an `http(s)` URL in the default browser                               |
-| `POST /v1/lock`                                   | lock the workstation                                                       |
-| `GET /v1/displays`, `POST /v1/wallpaper`          | displays and per-display wallpaper                                         |
-| `POST /v1/mode`, `POST /v1/helper/size`           | mode and helper size                                                       |
-| `GET /v1/wallpaper-debug`, `GET /v1/helper-debug` | diagnostics                                                                |
-| `GET /v1/browser/status`, `POST /v1/browser/*`    | the browser                                                                |
-
-## Checks
-
-`agents/windows/test/check.ps1` parses both scripts and compiles the embedded C#. It runs in CI on Linux with PowerShell 7 (`pwsh -NoProfile -File agents/windows/test/check.ps1`).
-
-## What is unverified
-
-- The agent's behaviour on real Windows machines (wallpaper placement on different Windows builds, DPI scaling, multi-monitor layouts, helper clipping, DevTools input) cannot be tested in CI or on Linux. CI only checks syntax and that the C# compiles.
-- Windows 10 versus Windows 11 differences are handled in code but have no automated test.
-- The agent depends on Microsoft Edge being installed (it ships with Windows).
+On Windows, `cargo build --release -p nova` produces the portable executable. The shared `.github/scripts/build-windows.ps1` builds a development installer without signing secrets. Release builds require the signing setup above. CI runs native core/HTTP tests and builds the app and installer on Windows. The standalone **Windows application** workflow can produce downloadable development artifacts without publishing a server release. The independent Windows release job is allowed to fail without blocking server images; a failure publishes no replacement legacy bundle.

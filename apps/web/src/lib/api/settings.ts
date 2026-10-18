@@ -1443,3 +1443,6 @@ export interface NodeRedLogs {
 }
 export const getNodeRedLogs = () =>
   read<NodeRedLogs>("/stack-control/node-red/logs");
+
+export const pairWindowsAgent = (code: string) =>
+  write<ServiceConnectionWrite>("POST", "/services/windows/pair", { code });
