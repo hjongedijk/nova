@@ -637,6 +637,21 @@ try {
     for (const section of sections) {
       await clickSection(page, section);
       await page.locator(".settings-content").waitFor();
+      if (section === "windows") {
+        const download = page.getByRole("link", {
+          name: "Windows-agent downloaden",
+          exact: true,
+        });
+        assert.equal(await download.count(), 1);
+        assert.ok(
+          await download.isVisible(),
+          "Windows download must be visible without opening a section",
+        );
+        assert.equal(
+          await download.getAttribute("href"),
+          "https://github.com/hjongedijk/nova/releases?q=windows-v",
+        );
+      }
       const height = await page
         .locator("#settingsBody")
         .evaluate((node) => node.getBoundingClientRect().height);

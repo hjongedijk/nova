@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { WindowsAgentStatus } from "@nova/contracts";
   import { getWindowsAgentStatus } from "#lib/api/settings.ts";
+  import Button from "#components/ui/Button.svelte";
   import ConnectionsSection from "./ConnectionsSection.svelte";
   import DesktopSection from "./DesktopSection.svelte";
   import DevicesSection from "./DevicesSection.svelte";
@@ -41,9 +42,17 @@
           : "Pc verbonden"
         : "Nog geen verbinding met de pc"}</strong
     >
-    <button type="button" disabled={busy} onclick={refresh}
-      >{busy ? "Controleren…" : "Verbinding controleren"}</button
-    >
+    <div class="pc-actions">
+      <Button
+        go
+        href="https://github.com/hjongedijk/nova/releases?q=windows-v"
+        target="_blank"
+        rel="noopener noreferrer">Windows-agent downloaden</Button
+      >
+      <button type="button" disabled={busy} onclick={refresh}
+        >{busy ? "Controleren…" : "Verbinding controleren"}</button
+      >
+    </div>
   </div>
   {#if error || status?.error}<p class="hint">
       {error || status?.error}
@@ -149,6 +158,11 @@
     flex-wrap: wrap;
     padding: var(--s4) 0;
     border-bottom: 1px solid var(--line);
+  }
+  .pc-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
   }
   .access-list {
     margin: var(--s4) 0;

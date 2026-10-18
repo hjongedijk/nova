@@ -445,11 +445,6 @@
         {/if}
       </section>
     </Disclosure>
-    <div class="set-toolbar">
-      <Button href="https://github.com/hjongedijk/nova/releases?q=windows-v"
-        >Download de NOVA-agent</Button
-      >
-    </div>
     <Disclosure
       kind="more"
       title="Meer uitleg"
