@@ -16,6 +16,8 @@ fn main() {
             "agent_update_status",
             "agent_check_update",
             "agent_install_update",
+            "agent_set_automation",
+            "agent_set_elevation",
         ])),
     )
     .expect("tauri build failed");

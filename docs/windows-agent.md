@@ -2,7 +2,7 @@
 
 The Windows agent now lives in `apps/windows/`: one Rust/Tauri application, `nova.exe`, with one tray icon. It owns the authenticated HTTP service, native helper and living wallpaper. It does not launch PowerShell or require a separate NOVA Desk executable.
 
-This is stage one of the native rewrite. It has been cross-checked for Windows compilation on Linux; installer behavior, window transparency, monitor DPI, firewall elevation and wallpaper parenting still require a Windows acceptance run. No release or production deployment is implied by the source changes.
+The native agent includes screenshots, desktop input and a visible automated browser. A prior version built successfully on GitHub Windows CI; the expanded native features, elevation, installer behavior, monitor DPI and wallpaper parenting still require a Windows acceptance run. No production deployment is implied by source changes.
 
 ## Installation and pairing
 
@@ -43,13 +43,13 @@ A signing key was generated outside the repository at `/root/.config/nova/window
 
 Before publishing the first update, a repository administrator must put the **contents** of that private-key file in the GitHub Actions repository secret `TAURI_SIGNING_PRIVATE_KEY`. `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is optional and is empty for this generated key. Keep a secure backup of the key; replacing it would prevent existing installations from trusting later updates.
 
-The release workflow refuses to produce Windows release artifacts without the signing secret. Development/PR builds disable update-artifact signing, so test installers can still be built without access to release credentials. Signing-secret provisioning and an actual update between two Windows releases remain unverified.
+The release workflow refuses to produce Windows release artifacts without the signing secret. Development/PR builds disable update-artifact signing, so test installers can still be built without access to release credentials. The repository administrator has configured the signing secret. Its value will be verified by the first signed release build; an actual update between two Windows releases remains unverified.
 
 ## Transition from the old agent
 
-The old implementation is retained in `agents/windows-legacy/` for rollback and compatibility downloads. New release artifacts exclude it.
+The PowerShell implementation, its test scripts and its download routes have been removed from this repository. The v0.1.73 GitHub release remains available for rollback. The native importer still reads existing legacy configuration files on a user’s PC.
 
-At first startup, the new app imports `agent.json`, `mode.json` and `wallpaper.json` next to its executable, plus `%LOCALAPPDATA%\NOVA\desk.json`. Windows PowerShell UTF-8 BOMs are accepted. The import retains the token, app/source allowlists, URL, mode, helper display/view/shortcuts and device-named wallpaper choices. Legacy browser/desktop preferences are retained as inactive data for later stages. Source files are never deleted.
+At first startup, the new app imports `agent.json`, `mode.json` and `wallpaper.json` next to its executable, plus `%LOCALAPPDATA%\NOVA\desk.json`. Windows PowerShell UTF-8 BOMs are accepted. The import retains the token, app/source allowlists, URL, mode, helper display/view/shortcuts and device-named wallpaper choices. Legacy browser/desktop preferences are retained as migration data. Browser host and search preferences are reused; enable desktop access explicitly in the local setup window. Source files are never deleted.
 
 For an installed app whose old files live elsewhere, expand **Oude agent vervangen** in the setup window, enter that directory and choose **Oude instellingen importeren**. This explicit import keeps the previous unified settings as `config.json.before-import`. If the legacy port differs, NOVA restarts automatically to bind the imported port.
 
@@ -72,9 +72,27 @@ Default shortcuts: Ctrl+Alt+N opens the helper, Ctrl+Alt+Space speaks, Ctrl+Alt+
 
 Only the helper window on the configured NOVA origin receives its window commands. Login origins can be added explicitly through `allowedOrigins`; they never receive helper commands. Release windows have no developer tools. External links open in the normal browser.
 
-## Deferred functionality and Windows checks
+## Seeing and controlling the PC
 
-Screenshots, mouse/keyboard desktop control and browser automation return 501 for actions in this stage. Their status routes report disabled. Wallpaper mouse/keyboard forwarding is also deferred. Native helper diagnostics are not implemented yet; the server reports that no valid helper measurement is available.
+Open **Instellen en koppelen → Toegang tot deze pc**. Enable screen viewing and, if desired, mouse/keyboard control. Also enable the corresponding switches in NOVA’s **Bureaublad** settings. Desktop access defaults off, including when upgrading an older unified config. NOVA’s existing tools use vision to inspect the display before acting; takeover sessions require confirmation and expire after at most 15 minutes.
+
+Screenshots use native GDI capture and bounded in-memory JPEG encoding. Display numbers are one-based; `0` selects the primary display. Coordinates are scaled from the observed image to physical monitor pixels, including monitors left of or above the primary display. Supported input includes move, click, double-click, right-click, drag, scroll, Unicode typing, key chords and window focus. Windows key shortcuts are supported; Ctrl+Alt+Delete is reserved by Windows. Input and screenshots respect the local pause switch; protected visible windows block screenshots on their monitor.
+
+**Ctrl+Alt+Shift+K** pauses automation and disarms control. The tray also has **Pc-bediening stoppen**. Arming is refused if the emergency shortcut could not be registered. An armed session exists only in memory; restart always disarms it. Agent requests keep the existing bearer-token and source-IP checks. No arbitrary-script HTTP endpoint is exposed.
+
+On NOVA’s home page, **Pc bekijken** opens a compact screen popup. It opens automatically when it detects a new desktop takeover, shows monitor selection, the session goal/recent action and **Stop overname**. Frames refresh about once per second while the popup is expanded and the page is visible. Closing, minimizing or hiding the page cancels capture requests and clears the image. Frames use the guarded settings API and are never stored or sent to the vision model by this viewer; watching does not consume NOVA’s observation budget or keep a takeover alive.
+
+Browser automation uses a separate visible Edge or Chrome window and `%LOCALAPPDATA%\NOVA\browser-profile`, retaining its login independently of the helper. NOVA can search, open/read pages, click, type, press keys, scroll, navigate back and manage tabs. Password/PIN/payment fields remain manual; risky click labels require the existing confirmed browser tool. DOM elements are mapped inside an isolated CDP world. The debug listener binds loopback on an ephemeral port, and a Windows job owns the browser process tree. Disabling browser permission closes that owned browser. Pages remain untrusted data.
+
+### Windows administrator permissions
+
+In the local Windows setup window, enable **NOVA starten als beheerder** and choose **Toepassen**. Windows shows its normal UAC consent prompt; accepting it restarts NOVA with the same account’s elevated token. Cancelling leaves the existing app running. This preference is saved as `agent.runElevated`; Windows asks again on later unelevated starts. Remote pages and agent API clients cannot enable it.
+
+This option supports an administrator account with a filtered token. A standard account requiring another administrator’s credentials is rejected, avoiding a switch to another user’s configuration and browser profiles. Disabling the preference applies after closing NOVA and launching it normally from Windows. Running elevated permits input into elevated applications; it does not permit capturing or driving the secure UAC desktop, Ctrl+Alt+Delete screen or Windows sign-in. Approve those prompts personally.
+
+## Windows acceptance checks
+
+Wallpaper mouse/keyboard forwarding is still deferred. Native helper diagnostics are not implemented yet; the server reports that no valid helper measurement is available.
 
 The native app must be tried on Windows for transparency, dragging, WebView2 permission prompts, shortcuts, autostart, old-agent retirement, UAC/firewall, multiple monitors and wallpaper placement. Explorer restart recovery remains a known limitation inherited from NOVA Desk; toggle the wallpaper off/on if its host disappears.
 
@@ -95,4 +113,4 @@ On Linux, check the native app with the installed Windows GNU target and MinGW:
 cargo check --locked --target x86_64-pc-windows-gnu -p nova
 ```
 
-On Windows, `cargo build --release -p nova` produces the portable executable. The shared `.github/scripts/build-windows.ps1` builds a development installer without signing secrets. Release builds require the signing setup above. CI runs native core/HTTP tests and builds the app and installer on Windows. The standalone **Windows application** workflow can produce downloadable development artifacts without publishing a server release. The independent Windows release job is allowed to fail without blocking server images; a failure publishes no replacement legacy bundle.
+On Windows, `cargo build --release -p nova` produces the portable executable. The shared `.github/scripts/build-windows.ps1` builds a development installer without signing secrets. Release builds require the signing setup above. CI runs native core/HTTP tests and builds the app and installer on Windows. Browser CDP behavior has an opt-in real-Chromium fixture test; run `NOVA_TEST_CHROMIUM_EXECUTABLE=/path/to/chrome cargo test -p nova-win-agent browser::tests::isolated_cdp_browser_contract -- --ignored` from `apps/windows`. The live popup has a synthetic Playwright check, `node scripts/check-live-desktop.mjs`, against a web dev server (`NOVA_LIVE_DESKTOP_TEST_URL`, default `http://127.0.0.1:5189`). Neither fixture connects to a real PC. The standalone **Windows application** workflow can produce downloadable development artifacts without publishing a server release. The independent Windows release job is allowed to fail without blocking server images; a failure publishes no replacement legacy bundle.

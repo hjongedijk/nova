@@ -18,7 +18,7 @@ flowchart LR
     Data[("/data<br/>settings, memory,<br/>action log, policy")]
   end
 
-  Agent["Windows agent<br/>(PowerShell)"]
+  Agent["Windows agent<br/>(Rust/Tauri)"]
   Omni["OmniRoute<br/>(free-model gateway)"]
   Qdrant[("Qdrant")]
   MQTT[("Mosquitto")]
@@ -59,7 +59,7 @@ NOVA's NestJS modules remain the authority for identity, service credentials, to
 | `apps/api`           | NestJS backend (ESM, TypeScript strict). One folder per domain. Serves the web app in production. |
 | `apps/web`           | SvelteKit app built with `adapter-static` (single-page, fallback `index.html`) and Svelte 5.      |
 | `packages/contracts` | Types shared by API and web, types only.                                                          |
-| `agents/windows`     | The PowerShell Windows agent. See [Windows agent](windows-agent.md).                              |
+| `apps/windows`       | The native Rust/Tauri Windows agent. See [Windows agent](windows-agent.md).                       |
 | `deploy`             | Production `docker-compose.yml` and the default `mcp-servers.json`.                               |
 | `docs`               | This documentation.                                                                               |
 
@@ -74,7 +74,7 @@ Rules that keep it clean:
 
 ## API modules
 
-One folder per domain under `apps/api/src/`, wired together in `app.module.ts`. All routes live under `/api` except `/windows-agent/nova-agent.ps1`, its legacy `/windows-agent/jarvis-agent.ps1` download name, and `/nova-ca.crt`.
+One folder per domain under `apps/api/src/`, wired together in `app.module.ts`. All routes live under `/api` except `/nova-ca.crt`. Windows installers are distributed through GitHub Releases.
 
 | Module                          | Does                                                                                                                                                                                                                                            |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -98,7 +98,7 @@ One folder per domain under `apps/api/src/`, wired together in `app.module.ts`. 
 | `visualization`                 | Holographic scenes and inline cards built from real tool results: `/api/visualizations`. See [Holographic engine](holographic-engine.md).                                                                                                       |
 | `desktop`                       | Seeing and controlling the PC through the Windows agent, off by default: `/api/settings/desktop`. See [Desktop control](desktop-control.md).                                                                                                    |
 | `telephony`, `conversation`     | Asterisk/Linphone calls and the spoken conversation engine: `/api/telephony`, `/api/settings/conversation`. See [Telephony](telephony.md).                                                                                                      |
-| `downloads`                     | The Windows agent script and the CA certificate, for devices that need them.                                                                                                                                                                    |
+| `downloads`                     | The CA certificate for devices that need it; Windows installers come from GitHub Releases.                                                                                                                                                      |
 | `bridges`                       | The glue where one module needs something another owns, by an agreed shape.                                                                                                                                                                     |
 
 ### The bridges
@@ -137,5 +137,5 @@ The interface text is Dutch and the speech voice is Dutch; the code, tool descri
 ## Tests
 
 - `apps/api/test`: Vitest, one folder per module, run with `npm test`.
-- `agents/windows-legacy/test/check.ps1`: PowerShell syntax and the embedded C#, also run in CI.
+- `apps/windows`: native core/agent tests, Windows Clippy checks and installer builds in CI.
 - There is no end-to-end suite for the interface in the repository.

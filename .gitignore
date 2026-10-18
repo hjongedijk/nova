@@ -16,7 +16,6 @@ deploy/secrets/
 nova-backups/
 *.pem
 *.key
-agents/windows-legacy/agent.json
 
 # editors and OS
 .DS_Store

@@ -21,7 +21,7 @@ async function bootstrap() {
     new ExpressAdapter(server),
   );
   app.setGlobalPrefix("api", {
-    exclude: ["windows-agent/{*path}", "nova-ca.crt"],
+    exclude: ["nova-ca.crt"],
   });
   const editor = app.get(NodeRedEditorProxy);
   server.use("/api/node-red-editor", editor.middleware);

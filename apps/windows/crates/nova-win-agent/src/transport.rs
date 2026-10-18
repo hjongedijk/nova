@@ -60,7 +60,21 @@ pub fn respond(
             return Err((413, "Bericht te groot".into()));
         }
         let value = if method == Method::Get {
-            json!({})
+            let mut value = json!({});
+            if path == "/v1/desktop/screenshot" {
+                let url = url::Url::parse(&format!("http://localhost{}", request.url()))
+                    .map_err(|_| (400, "Ongeldige schermparameters".into()))?;
+                for (key, raw) in url.query_pairs() {
+                    if !matches!(key.as_ref(), "display" | "maxWidth") || value.get(key.as_ref()).is_some() {
+                        return Err((400, "Onbekende of dubbele schermparameter".into()));
+                    }
+                    let number = raw
+                        .parse::<u32>()
+                        .map_err(|_| (400, "Ongeldige schermparameter".into()))?;
+                    value[key.as_ref()] = json!(number);
+                }
+            }
+            value
         } else {
             if request.body_length().is_none() {
                 return Err((411, "Content-Length vereist".into()));
@@ -200,5 +214,21 @@ mod tests {
         let (response, calls) = request("GET", "/unknown", Some("Bearer abcdefghijklmnopqrstuvwxyz"), "", false);
         assert!(response.starts_with("HTTP/1.1 404"));
         assert_eq!(calls, 0);
+    }
+    #[test]
+    fn screenshot_query_is_validated_and_forwarded() {
+        let token = Some("Bearer abcdefghijklmnopqrstuvwxyz");
+        let (response, calls) = request("GET", "/v1/desktop/screenshot?display=2&maxWidth=960", token, "", false);
+        assert_eq!(calls, 1);
+        assert!(response.contains(r#""body":{"display":2,"maxWidth":960}"#));
+        for path in [
+            "/v1/desktop/screenshot?display=-1",
+            "/v1/desktop/screenshot?display=1&display=2",
+            "/v1/desktop/screenshot?unknown=1",
+        ] {
+            let (response, calls) = request("GET", path, token, "", false);
+            assert!(response.starts_with("HTTP/1.1 400"));
+            assert_eq!(calls, 0);
+        }
     }
 }

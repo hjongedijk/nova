@@ -49,7 +49,7 @@ All runtime data goes to `dev-data/` (ignored by git). If `dev-data/certs/cert.p
 | `npm start`              | Run the built API (it serves `apps/web/build` when present)     |
 | `docker build -t nova .` | The production image                                            |
 
-CI (`.github/workflows/ci.yml`) runs `format:check`, `lint`, `typecheck`, the API and web tests, `build`, the model-evaluation, Node-RED, notification, MCP sandbox and screenshot-privacy checks and the PowerShell checks in `agents/windows-legacy/test/`, and builds the image without pushing it, on every push to `main` and every pull request. Run the same before you push.
+CI (`.github/workflows/ci.yml`) runs `format:check`, `lint`, `typecheck`, the API and web tests, `build`, the model-evaluation, Node-RED, notification, MCP sandbox and screenshot-privacy checks, and builds the image without pushing it, on every push to `main` and every pull request. Run the same before you push.
 
 ## Tests
 

@@ -247,6 +247,47 @@ describe("desktop control", () => {
   describe("looking", () => {
     beforeEach(() => desktop.updateSettings({ viewEnabled: true }));
 
+    it("previews fresh frames without vision calls, caching or session observations", async () => {
+      const first = await desktop.previewFrame(0);
+      expect(first.ok).toBe(true);
+      expect(first).toHaveProperty("screenshot.base64", "iVBORw0KGgo=");
+      expect((await desktop.previewFrame(0)).ok).toBe(true);
+      expect(fake.screenshots).toBe(2);
+      expect(visionLog).toHaveLength(0);
+      expect(desktop.info()).toBeNull();
+      expect(JSON.stringify(audit.read(20))).not.toContain("iVBORw0KGgo=");
+    });
+
+    it("blocks preview when viewing is disabled, window checks fail or a sensitive window is active", async () => {
+      desktop.updateSettings({ viewEnabled: false });
+      expect((await desktop.previewFrame(0)).ok).toBe(false);
+      desktop.updateSettings({ viewEnabled: true });
+      fake.failWindows = true;
+      expect((await desktop.previewFrame(0)).ok).toBe(false);
+      fake.failWindows = false;
+      fake.windows = [{ id: "private", title: "Bitwarden", active: true }];
+      expect((await desktop.previewFrame(0)).ok).toBe(false);
+      expect(fake.screenshots).toBe(0);
+      expect(visionLog).toHaveLength(0);
+    });
+
+    it("human previews neither arm actions nor keep a takeover alive", async () => {
+      const session = sid();
+      await takeover(session);
+      const before = desktop.info();
+      clock += 5000;
+      expect((await desktop.previewFrame(0)).ok).toBe(true);
+      expect(desktop.info()?.observations).toBe(0);
+      expect(desktop.info()?.lastActivityAt).toBe(before?.lastActivityAt);
+      const action = await run(
+        "desktop_act",
+        { action: "move", x: 10, y: 10 },
+        session,
+      );
+      expect(action.ok).toBe(false);
+      expect(fake.inputs).toHaveLength(0);
+    });
+
     it("sends the image to the vision role and marks the answer untrusted, with no image in the log", async () => {
       const sessionId = sid();
       const result = await run(

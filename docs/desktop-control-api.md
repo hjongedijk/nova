@@ -5,7 +5,7 @@ toetsenbord bedienen via de Windows-agent. Alles staat standaard uit, aan beide 
 
 Status: gebouwd en lokaal getest met een nep-agent. Acceptatie op een echte pc is nog open.
 
-## Agent-routes (contract met `agents/windows`)
+## Agent-routes (contract met `apps/windows`)
 
 Zelfde bearer-token als de andere agent-tools (`WINDOWS_AGENT_URL`, `WINDOWS_AGENT_TOKEN`).
 

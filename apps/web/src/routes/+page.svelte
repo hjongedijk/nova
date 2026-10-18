@@ -6,6 +6,7 @@
   import CookingMode from "#components/shell/CookingMode.svelte";
   import HoloPanel from "#components/holo/HoloPanel.svelte";
   import WorkspaceCodePanel from "#components/shell/WorkspaceCodePanel.svelte";
+  import LiveDesktop from "#components/desktop/LiveDesktop.svelte";
   import Entity from "#components/shell/Entity.svelte";
   import Header from "#components/shell/Header.svelte";
   import HistoryDrawer from "#components/shell/HistoryDrawer.svelte";
@@ -121,6 +122,7 @@
   <SettingsDialog />
   <AdminDialog />
   <WorkspaceCodePanel />
+  <LiveDesktop />
   <CookingMode />
   <HoloPanel />
 {/if}

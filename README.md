@@ -16,7 +16,7 @@ NOVA is a self-hosted personal AI assistant for your home and your servers. It i
 - **Memory.** Short-term conversation context, and long-term memory in Qdrant (with free embeddings) or in OmniRoute's native memory. NOVA only remembers what you explicitly ask it to, and never credentials.
 - **Your own skills and panels.** In the settings you can write instruction skills (a routine NOVA follows with its existing tools) and webhook skills (an HTTP call that becomes a tool), with an AI assistant to help draft them, and custom sidebar panels.
 - **Integrations.** Proxmox VE, Home Assistant (lights, climate, scenes, Sonos and media), MQTT, Termix (SSH hosts, confirmed commands), Pangolin, any MCP server, weather, news, web search and more. Node-RED is included in the stack for automations.
-- **Windows agent.** A small PowerShell agent that lets NOVA open allow-listed programs, show NOVA as living wallpaper behind your icons (per display), show a small always-on-top **helper** panel, and use a browser of its own (search, read, click, type) with safety limits.
+- **Windows agent.** A native Rust/Tauri app that lets NOVA open allow-listed programs, show NOVA as living wallpaper behind your icons (per display), show a small always-on-top **helper** panel, and use a browser of its own (search, read, click, type) with safety limits.
 - **PWA.** Installable on a phone or PC from the browser, with its own icon.
 
 | Settings page                                                                                      | Rectangular helper panel on the Windows PC                                                           |
@@ -93,7 +93,7 @@ Details: [docs/tools-and-safety.md](docs/tools-and-safety.md).
 
 ## Windows agent
 
-NOVA for Windows (`apps/windows`, Rust/Tauri) combines the agent, native helper and wallpaper in one `nova.exe`, with one tray icon and `%LOCALAPPDATA%\NOVA\config.json`. The release workflow builds an installer and a portable zip. Pair from the app into NOVA's connection settings; import old settings before retiring the PowerShell agent. Desktop control and browser automation remain deferred in this stage. Installation, migration and Windows acceptance limits: [Windows agent](docs/windows-agent.md).
+NOVA for Windows (`apps/windows`, Rust/Tauri) combines the agent, native helper and wallpaper in one `nova.exe`, with one tray icon and `%LOCALAPPDATA%\NOVA\config.json`. The release workflow builds an installer and a portable zip. Pair from the app into NOVA's connection settings; import old settings before retiring the PowerShell agent. Native screenshots, mouse/keyboard control and visible browser automation use NOVA’s existing confirmation and session limits. A compact live-screen popup lets you follow the PC; local settings control access and optional UAC elevation. Installation, migration and Windows acceptance limits: [Windows agent](docs/windows-agent.md).
 
 ## Development
 

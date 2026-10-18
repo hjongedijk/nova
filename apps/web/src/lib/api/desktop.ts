@@ -36,6 +36,12 @@ export interface DesktopOverview {
     viewAvailable: boolean;
     controlAvailable: boolean;
     armed: boolean;
+    displays?: {
+      index: number;
+      width: number;
+      height: number;
+      primary?: boolean;
+    }[];
   } | null;
   agentError?: string;
   audit: DesktopAuditRow[];
@@ -46,8 +52,26 @@ const headers = (): Record<string, string> => {
   return { "x-nova-admin": "1", ...(pin ? { "x-nova-pin": pin } : {}) };
 };
 
-export const getDesktop = () =>
-  getJson<DesktopOverview>("/settings/desktop", { headers: headers() });
+export const getDesktop = (signal?: AbortSignal) =>
+  getJson<DesktopOverview>("/settings/desktop", { headers: headers(), signal });
+export const getDesktopFrame = (display: number, signal?: AbortSignal) =>
+  getJson<
+    | {
+        ok: true;
+        screenshot: {
+          mimeType: string;
+          base64: string;
+          width: number;
+          height: number;
+          display: number;
+        };
+        capturedAt: string;
+      }
+    | { ok: false; error: string }
+  >(`/settings/desktop/frame?display=${display}`, {
+    headers: headers(),
+    signal,
+  });
 export const saveDesktop = (patch: Partial<DesktopSettings>) =>
   sendJson<{ settings: DesktopSettings }>(
     "PUT",

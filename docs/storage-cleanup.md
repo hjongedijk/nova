@@ -26,7 +26,7 @@ The tracked JSON under `docs/code-evaluation-runs/` and `docs/persona-evaluation
 
 ## Completed project cleanup
 
-The native Windows application is consolidated under `apps/windows`. New packaging contains one executable and an installer; PowerShell is archived under `agents/windows-legacy` for compatibility and rollback. `docs/windows-agent.md` is the installation/migration reference; `docs/nova-desk.md` points there rather than maintaining a conflicting second setup guide. Build paths, downloads and CI now follow those boundaries.
+The native Windows application is consolidated under `apps/windows`. New packaging contains one executable and an installer; The old PowerShell source and downloads have been removed; migration reads existing local files and rollback uses the old GitHub release. `docs/windows-agent.md` is the installation/migration reference; `docs/nova-desk.md` points there rather than maintaining a conflicting second setup guide. Build paths, downloads and CI now follow those boundaries.
 
 ## Next storage migration
 

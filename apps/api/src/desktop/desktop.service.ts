@@ -77,6 +77,7 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
   now: () => number = Date.now;
   private session: Session | null = null;
   private disarmPending = false;
+  private previewPending = false;
   private timer: NodeJS.Timeout | null = null;
   private readonly cache = new Map<
     string,
@@ -331,6 +332,51 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
       this.cache.set(key, { at: this.now(), value });
     }
     return { ok: true, ...value, cached: false };
+  }
+
+  /** Human-only preview: no vision call, cache, observation budget or session keepalive. */
+  async previewFrame(display: number, signal?: AbortSignal) {
+    if (!Number.isSafeInteger(display) || display < 0 || display > 32)
+      return fail("Ongeldig beeldscherm.");
+    if (!this.settings().viewEnabled) return OFF_VIEW;
+    if (!this.port.configured) return NO_AGENT;
+    if (this.previewPending) return fail("Een schermbeeld wordt al opgehaald.");
+    this.previewPending = true;
+    try {
+      const windows = await this.windowList(signal);
+      if (!windows || !viewAllowed(windows))
+        return fail(
+          "Schermbeeld afgeschermd: het actieve venster kan niet veilig worden getoond.",
+        );
+      const result = await this.port.screenshot(
+        { display, maxWidth: 960 },
+        signal,
+      );
+      if (!result.ok) return result;
+      if (!this.settings().viewEnabled) return OFF_VIEW;
+      const shot = result.screenshot;
+      if (
+        !/^image\/(png|jpeg|webp)$/.test(shot.mimeType) ||
+        !Number.isSafeInteger(shot.width) ||
+        shot.width < 1 ||
+        shot.width > 1920 ||
+        !Number.isSafeInteger(shot.height) ||
+        shot.height < 1 ||
+        shot.height > 16384 ||
+        shot.base64.length > (L.maxScreenshotBytes * 4) / 3 ||
+        !/^[A-Za-z0-9+/]+={0,2}$/.test(shot.base64)
+      )
+        return fail("De agent gaf een ongeldig schermbeeld.");
+      return {
+        ok: true as const,
+        screenshot: shot,
+        capturedAt: new Date(this.now()).toISOString(),
+      };
+    } catch {
+      return fail("Het schermbeeld is niet beschikbaar.");
+    } finally {
+      this.previewPending = false;
+    }
   }
 
   /** A failed look or action counts toward the error loop that ends the session. */

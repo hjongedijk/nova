@@ -22,33 +22,40 @@ fn bad(message: &str) -> (u16, String) {
 
 pub fn start(app: &AppHandle) -> Result<(), String> {
     let port = app.state::<Shared>().lock().agent.port;
-    let server = Server::http(("0.0.0.0", port)).map_err(|e| format!("Poort {}: {e}", port))?;
-    let app = app.clone();
-    std::thread::spawn(move || {
-        for request in server.incoming_requests() {
-            nova_win_agent::transport::respond(
-                request,
-                |ip, header| app.state::<Shared>().lock().agent.authorize(ip, header),
-                |path, method, body| {
-                    let (sender, receiver) = mpsc::sync_channel(1);
-                    let handle = app.clone();
-                    let path = path.to_owned();
-                    let method = method.clone();
-                    let deadline = Instant::now() + Duration::from_secs(30);
-                    app.run_on_main_thread(move || {
-                        if Instant::now() > deadline {
-                            return;
+    let server = std::sync::Arc::new(Server::http(("0.0.0.0", port)).map_err(|e| format!("Poort {}: {e}", port))?);
+    // Bounded workers let the stop/status routes run while a CDP call is waiting.
+    for _ in 0..3 {
+        let app = app.clone();
+        let server = server.clone();
+        std::thread::spawn(move || {
+            for request in server.incoming_requests() {
+                nova_win_agent::transport::respond(
+                    request,
+                    |ip, header| app.state::<Shared>().lock().agent.authorize(ip, header),
+                    |path, method, body| {
+                        if path.starts_with("/v1/desktop/") || path.starts_with("/v1/browser/") {
+                            return crate::automation::route(&app, path, body);
                         }
-                        let _ = sender.send(route(&handle, &path, &method, body));
-                    })
-                    .map_err(|_| (503, "NOVA sluit af".into()))?;
-                    receiver
-                        .recv_timeout(Duration::from_secs(30))
-                        .unwrap_or_else(|_| Err((503, "Windows antwoordt niet op tijd".into())))
-                },
-            );
-        }
-    });
+                        let (sender, receiver) = mpsc::sync_channel(1);
+                        let handle = app.clone();
+                        let path = path.to_owned();
+                        let method = method.clone();
+                        let deadline = Instant::now() + Duration::from_secs(30);
+                        app.run_on_main_thread(move || {
+                            if Instant::now() > deadline {
+                                return;
+                            }
+                            let _ = sender.send(route(&handle, &path, &method, body));
+                        })
+                        .map_err(|_| (503, "NOVA sluit af".into()))?;
+                        receiver
+                            .recv_timeout(Duration::from_secs(30))
+                            .unwrap_or_else(|_| Err((503, "Windows antwoordt niet op tijd".into())))
+                    },
+                );
+            }
+        });
+    }
     Ok(())
 }
 
@@ -95,7 +102,7 @@ fn route(app: &AppHandle, path: &str, method: &Method, body: Value) -> Outcome {
             result["hostname"] = json!(std::env::var("COMPUTERNAME").unwrap_or_default());
             result["user"] = json!(std::env::var("USERNAME").unwrap_or_default());
             result["uptimeHours"] = json!(sysinfo::System::uptime() as f64 / 3600.0);
-            result["features"] = json!(["wallpaper", "helper"]);
+            result["features"] = json!(["wallpaper", "helper", "desktop", "browser"]);
             result["agent"] = json!(VERSION);
             result["helperWarnings"] = json!(inner.hotkey_warnings);
             result["agentPaused"] = json!(inner.paused);

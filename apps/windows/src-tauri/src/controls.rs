@@ -22,8 +22,29 @@ fn register(app: &AppHandle, hotkeys: &BTreeMap<String, String>) -> Result<Vec<S
         }
         shortcuts.push((action.clone(), key.clone(), shortcut));
     }
-    app.global_shortcut().unregister_all().map_err(|e| e.to_string())?;
     let mut warnings = Vec::new();
+    let emergency: Shortcut = "Ctrl+Alt+Shift+K".parse().expect("fixed emergency shortcut");
+    if ids.contains(&emergency.id()) {
+        return Err("Ctrl+Alt+Shift+K is gereserveerd om pc-bediening te stoppen".into());
+    }
+    app.state::<Shared>().lock().emergency_ready = false;
+    crate::automation::cancel(app);
+    crate::automation::disarm(app);
+    app.global_shortcut().unregister_all().map_err(|e| e.to_string())?;
+    if app
+        .global_shortcut()
+        .on_shortcut(emergency, |app, _, event| {
+            if event.state == ShortcutState::Pressed {
+                // Disarm immediately; GUI changes can follow on the main thread.
+                stop(app);
+            }
+        })
+        .is_err()
+    {
+        warnings.push("Noodstop Ctrl+Alt+Shift+K kon niet worden geregistreerd".into());
+    } else {
+        app.state::<Shared>().lock().emergency_ready = true;
+    }
     for (action, key, shortcut) in shortcuts {
         let name = action.clone();
         if let Err(_error) = app.global_shortcut().on_shortcut(shortcut, move |app, _, event| {
@@ -102,6 +123,10 @@ pub fn toggle_pause(app: &AppHandle) {
         inner.paused = !inner.paused;
         inner.paused
     };
+    if paused {
+        crate::automation::cancel(app);
+        crate::automation::disarm(app);
+    }
     app::handle_args(
         app,
         Args {
@@ -110,4 +135,22 @@ pub fn toggle_pause(app: &AppHandle) {
             ..Default::default()
         },
     );
+}
+
+pub fn stop(app: &AppHandle) {
+    app.state::<Shared>().lock().paused = true;
+    crate::automation::cancel(app);
+    crate::automation::disarm(app);
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        app::handle_args(
+            &handle,
+            Args {
+                action: Some("pause".into()),
+                paused: Some(true),
+                ..Args::default()
+            },
+        );
+        crate::tray::rebuild(&handle);
+    });
 }

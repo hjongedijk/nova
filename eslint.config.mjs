@@ -45,6 +45,10 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser } },
   },
   {
+    files: ["apps/windows/**/browser.js", "apps/windows/src-tauri/ui/*.js"],
+    languageOptions: { globals: { ...globals.browser } },
+  },
+  {
     files: ["**/*.svelte", "**/*.svelte.ts"],
     languageOptions: { parserOptions: { parser: tseslint.parser } },
   },

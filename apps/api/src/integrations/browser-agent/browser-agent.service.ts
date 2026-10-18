@@ -11,7 +11,7 @@ import {
 
 /*
  * Lets NOVA use the browser on the Windows PC. The browser lives in the Windows agent
- * (agents/windows, /v1/browser/*): a separate Edge window of its own, so there is one agent
+ * (apps/windows, /v1/browser/*): a separate visible browser window, so there is one agent
  * and one URL and token (WINDOWS_AGENT_URL and WINDOWS_AGENT_TOKEN). The agent does the
  * safety checks; this side maps tools to its endpoints and turns failures into something
  * the model can say out loud. The model drives it step by step: search, read, click, read again.

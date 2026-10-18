@@ -8,7 +8,7 @@ use std::net::IpAddr;
 use std::path::Path;
 use subtle::ConstantTimeEq;
 
-pub const VERSION: &str = "2026-10-18.2";
+pub const VERSION: &str = "2026-10-18.3";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppEntry {
@@ -27,6 +27,28 @@ pub struct AgentConfig {
     pub legacy_preferences: BTreeMap<String, Value>,
     #[serde(default = "default_hotkeys")]
     pub hotkeys: BTreeMap<String, String>,
+    #[serde(default)]
+    pub automation: AutomationPermissions,
+    #[serde(default)]
+    pub run_elevated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AutomationPermissions {
+    pub view: bool,
+    pub control: bool,
+    pub browser: bool,
+}
+
+impl Default for AutomationPermissions {
+    fn default() -> Self {
+        Self {
+            view: false,
+            control: false,
+            browser: true,
+        }
+    }
 }
 
 pub fn default_hotkeys() -> BTreeMap<String, String> {
@@ -77,6 +99,8 @@ impl AgentConfig {
             apps,
             legacy_preferences: BTreeMap::new(),
             hotkeys: default_hotkeys(),
+            automation: AutomationPermissions::default(),
+            run_elevated: false,
         })
     }
 
@@ -310,6 +334,25 @@ pub fn atomic_save(path: &Path, text: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn old_unified_config_defaults_to_no_desktop_or_elevation() {
+        let original = AgentConfig::fresh().unwrap();
+        let mut value: Value = serde_json::from_str(&encode(&DeskConfig::default(), &original)).unwrap();
+        value["agent"].as_object_mut().unwrap().remove("automation");
+        value["agent"].as_object_mut().unwrap().remove("runElevated");
+        let (_, loaded) = decode(&value.to_string()).unwrap();
+        assert!(!loaded.automation.view);
+        assert!(!loaded.automation.control);
+        assert!(loaded.automation.browser);
+        assert!(!loaded.run_elevated);
+        assert_eq!(loaded.token, original.token);
+        let mut enabled = loaded;
+        enabled.automation.view = true;
+        enabled.run_elevated = true;
+        let (_, saved) = decode(&encode(&DeskConfig::default(), &enabled)).unwrap();
+        assert_eq!(saved.automation, enabled.automation);
+        assert!(saved.run_elevated);
+    }
     #[test]
     fn authentication_checks_both_source_and_bearer() {
         let mut c = AgentConfig::fresh().unwrap();

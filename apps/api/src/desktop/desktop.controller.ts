@@ -6,6 +6,7 @@ import {
   HttpCode,
   Post,
   Put,
+  Query,
   UseGuards,
 } from "@nestjs/common";
 import { AuditService } from "../core/audit/audit.service.js";
@@ -52,6 +53,21 @@ export class DesktopController {
           ok: (entry.result as { ok?: boolean } | undefined)?.ok,
         })),
     };
+  }
+
+  @Get("frame")
+  @Header("Cache-Control", "no-store, private")
+  frame(@Query("display") display?: string) {
+    if (
+      display !== undefined &&
+      (typeof display !== "string" ||
+        !/^(?:0|[1-9]|[12][0-9]|3[0-2])$/.test(display))
+    )
+      throw new ValidationError(["Ongeldig beeldscherm."]);
+    return this.desktop.previewFrame(
+      Number(display ?? 0),
+      AbortSignal.timeout(8000),
+    );
   }
 
   @Put()

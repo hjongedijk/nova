@@ -179,6 +179,13 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         None::<&str>,
     )?;
     let setup = MenuItem::with_id(app, "setup", "Instellen en koppelen", true, None::<&str>)?;
+    let stop = MenuItem::with_id(
+        app,
+        "stop_control",
+        "Pc-bediening stoppen (Ctrl+Alt+Shift+K)",
+        true,
+        None::<&str>,
+    )?;
     let update = crate::updates::status(app);
     let update_text = match update.phase {
         nova_win_core::update::Phase::Available => format!(
@@ -200,6 +207,7 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         &[
             &helper,
             &pause,
+            &stop,
             &screen_menu,
             &anchor_menu,
             &separator_a,
@@ -252,6 +260,7 @@ fn on_menu(app: &AppHandle, id: &str) {
             rebuild(app);
         }
         "pause" => crate::controls::toggle_pause(app),
+        "stop_control" => crate::controls::stop(app),
         "setup" => app::open_setup(app),
         "updates" => {
             app::open_setup(app);

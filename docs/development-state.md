@@ -40,11 +40,11 @@ npm run build
 npm run test:model-evaluation                      # offline evaluator tests
 ```
 
-CI (`.github/workflows/ci.yml`) also runs the privacy OCR check on `docs/img`, the Node-RED flow checks, the briefing and notification runtime scripts, the MCP sandbox tests and the PowerShell checks for the Windows agent. Playwright browser checks (`scripts/check-helper.mjs`, `check-settings*.mjs`, `check-holo.mjs`, `check-code-workspace.mjs`, `check-conversation-feedback.mjs`) run against a dev server with mocked APIs; they are manual and write the screenshots in `docs/img`. Opt-in Docker runtime scripts are the `test:*:runtime` entries in `package.json`.
+CI (`.github/workflows/ci.yml`) also runs the privacy OCR check on `docs/img`, the Node-RED flow checks, the briefing and notification runtime scripts, the MCP sandbox tests and the native Windows agent tests/build. Playwright browser checks (`scripts/check-helper.mjs`, `check-settings*.mjs`, `check-holo.mjs`, `check-code-workspace.mjs`, `check-conversation-feedback.mjs`) run against a dev server with mocked APIs; they are manual and write the screenshots in `docs/img`. Opt-in Docker runtime scripts are the `test:*:runtime` entries in `package.json`.
 
 ## Known limits
 
-- The Windows agent has only syntax and C# compile checks. Wallpaper, kiosk placement, tray, hotkeys, audio devices and desktop control are not verified on real Windows.
+- The native Windows agent has core/transport tests, Windows compilation/lint checks and GitHub installer builds. Capture, input, browser automation, UAC, tray, hotkeys and wallpaper still need real Windows acceptance testing.
 - Voice quality, hands-free barge-in thresholds and phone calls (Asterisk with Linphone) are not verified with real microphones, speakers or SIP providers.
 - No real model has been proven to choose the visualization tools unprompted; holographic cards and viewer are tested with fake data only.
 - Memory lifecycle (kinds, supersede, ranking, consolidation) exists only for the Qdrant backend, and only against a fake Qdrant in tests.
@@ -56,7 +56,7 @@ CI (`.github/workflows/ci.yml`) also runs the privacy OCR check on `docs/img`, t
 
 ## Deployment status
 
-Latest release tag: v0.1.67 (see [release notes](release-notes/)). Releases are tags; the Release workflow publishes the images and the Windows agent ([Releasing](releasing.md)). The production install lives outside this repository and is updated by changing `NOVA_VERSION` and running `docker compose pull && up -d`; the running version is reported by `GET /api/nova/health`. Nothing is pushed, tagged or deployed without explicit approval. The legacy `jarvis-agent.ps1` launcher and `JarvisAgent` scheduled task name stay for existing Windows installs.
+Latest release tag: v0.1.67 (see [release notes](release-notes/)). Releases are tags; the Release workflow publishes the images and the Windows agent ([Releasing](releasing.md)). The production install lives outside this repository and is updated by changing `NOVA_VERSION` and running `docker compose pull && up -d`; the running version is reported by `GET /api/nova/health`. Nothing is pushed, tagged or deployed without explicit approval. The old PowerShell sources and script-download routes have been removed; the native app still imports old configuration and can retire old scheduled tasks.
 
 ## Known limits (free models)
 

@@ -18,6 +18,7 @@ pub struct Inner {
     pub agent: nova_win_core::agent::AgentConfig,
     pub agent_error: Option<String>,
     pub paused: bool,
+    pub emergency_ready: bool,
     pub hotkey_warnings: Vec<String>,
     pub notifications: std::collections::VecDeque<String>,
     pub helper_ready: bool,

@@ -1,41 +1,23 @@
-# Desktop view and control (Windows agent)
+# Desktop view and control (native Windows agent)
 
-> Native Windows rewrite: legacy PowerShell details below describe the preserved fallback. See [Windows agent](windows-agent.md) for the new app and stage-one limitations.
+The implementation lives in `apps/windows/crates/nova-win-agent/src/desktop/` and `desktop.rs`. Enable local viewing/control in **Instellen en koppelen**, then enable the corresponding NOVA settings. See [Windows agent](windows-agent.md#seeing-and-controlling-the-pc) for setup, emergency stop and administrator permissions, and [desktop control API](desktop-control-api.md) for NOVA’s confirmation and session limits.
 
-The Windows agent can show NOVA the screen and, in a time-boxed session, move the pointer and type. NOVA's side (tools,
-confirmations, limits) is described in [desktop-control-api.md](desktop-control-api.md). Everything here is off by default.
+## Agent contract
 
-## Switches (`agent.json` → `desktop`)
+All routes require the existing bearer token and source-IP policy.
 
-| Key            | Default             | Meaning                                                                          |
-| -------------- | ------------------- | -------------------------------------------------------------------------------- |
-| `enabled`      | `false`             | Allows status, window list and screenshots.                                      |
-| `control`      | `false`             | Also allows arming and input. Requires `enabled`.                                |
-| `killHotkey`   | `Ctrl+Alt+Shift+K`  | Global kill switch. Must not clash with the agent's own shortcuts.               |
-| `maxTypeChars` | `500`               | Longest text per `type` call (hard cap 500).                                     |
-| `denyList`     | see `agent.example` | Case-insensitive substrings matched against the foreground window title/process. |
+- `GET /v1/desktop/status`: `{ ok, view, control, armed, armedUntil, paused, killHotkey, displays }`.
+- `GET /v1/desktop/windows`: visible windows, including minimized windows for focus/restore; IDs, titles, process names, foreground state and physical bounds.
+- `GET /v1/desktop/screenshot?display=N&maxWidth=1280`: JSON `{ ok, image, mimeType, width, height, display }`, where `image` is base64 JPEG. No files are written. Width is bounded to 320–1920 pixels; protected visible windows on the selected monitor block capture. Display numbers are one-based; `0` means primary.
+- `POST /v1/desktop/control`: `{ armed: true, ttlSeconds }` for 1–900 seconds, or `{ armed: false }`. Disarming works even with viewing disabled or the agent paused.
+- `POST /v1/desktop/input`: `{ action, display?, relativeTo?: { width, height }, ... }`. Actions: `move`, `click`, `doubleclick`, `rightclick`, `drag`, `scroll`, `type`, `key`, `focus_window`. Coordinates refer to the screenshot when `relativeTo` is present. Input requires a live lease and is bounded to ten actions per second and 500 UTF-16 units per typed text.
 
-You do not have to edit the file: the tray menu has **Bureaublad: meekijken aan/uit** and **Bureaublad: bedienen aan/uit** (agent 2026-10-16.4 and later). They flip these switches at runtime and save them to `agent.json`. Turning view off also turns control off.
+Viewing and control default off. Control leases are volatile and expire independently of NOVA. The emergency shortcut is **Ctrl+Alt+Shift+K**; registration failure prevents arming. Pause and permission changes cancel queued browser effects and desktop input. Windows secure desktops remain manual even when NOVA runs elevated.
 
-## Endpoints (bearer token, same as the rest of the agent)
+## Live screen popup
 
-- `GET /v1/desktop/status` → `{ ok, view, control, armed, armedUntil (epoch ms | null), paused, killHotkey, version, displays[] }`
-- `GET /v1/desktop/windows` → `{ ok, windows: [{ id, title, process, foreground, x, y, width, height }] }`
-- `GET /v1/desktop/screenshot?display=N&maxWidth=1280[&window=id]` → `image/png`, headers `x-nova-width`, `x-nova-height`, `x-nova-display`. `display` is 1-based, omitted or 0 means the main display. Refused while the foreground window is on the deny-list.
-- `POST /v1/desktop/control` `{ armed: true, ttlSeconds }` (1–900, capped) or `{ armed: false }` (always works).
-- `POST /v1/desktop/input` `{ action, display?, relativeTo?: { width, height }, ... }` with `move | click | doubleclick | rightclick | drag | scroll | type | key | focus_window`. Coordinates are pixels of the screenshot that `relativeTo` describes; without it they are real pixels of the display.
+NOVA’s home page offers **Pc bekijken**, with monitor selection, current session/action and **Stop overname**. `GET /api/settings/desktop/frame?display=N` uses the settings PIN when configured, emits `Cache-Control: no-store, private` and returns a bounded frame. It invokes no vision model, stores no image and grants no input permission. The popup refreshes only while open, expanded and visible. Watching does not extend a takeover or count as an observation for NOVA’s action budget.
 
-Refusals: `403` off or protected window, `409` not armed or paused, `429` more than 10 actions per second, `404` unknown window.
+## Verification
 
-## Safety
-
-- Armed state is held in memory only: a restart is always disarmed, and arming always expires (900 s at most).
-- The kill hotkey disarms on its own thread without waiting for the request loop. The tray item and `{ armed: false }` do the same.
-- A red bar across the top of the main display and a red tray dot show while NOVA may drive.
-- Keys come from an allow-list (named keys, F1–F12, letters, digits, with Ctrl/Alt/Shift). `Win` combos and `Ctrl+Alt+Delete` are refused. Windows' secure desktop (UAC, Ctrl+Alt+Del screen) can neither be captured nor driven.
-- `desktop-actions.log` next to the agent records action, coordinates, text length and the foreground process; never typed text or screen content.
-- Screenshots are not secret-scanned: a visible secret in an allowed window goes to the vision model. Keep sensitive apps on the deny-list.
-
-## Tests
-
-`pwsh -NoProfile -File agents/windows-legacy/test/desktop.ps1` compiles the embedded C# and checks scaling, deny-list, key allow-list, TTL, rate limit, arm/expire/kill and the default-off configuration. SendInput, screenshots, the red bar and the hotkey need a real Windows desktop and are **not** covered; they still need an acceptance run on the PC.
+Run the native core/agent tests and Windows compilation checks described in [Windows agent development](windows-agent.md#development), plus the API desktop tests. Capture, input, browser interaction, elevation and emergency stop still require an acceptance run on a real Windows desktop. The old PowerShell implementation has been removed; v0.1.73 remains available on GitHub for rollback.

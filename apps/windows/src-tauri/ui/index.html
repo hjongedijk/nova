@@ -74,6 +74,41 @@
           De code geeft toegang tot deze pc.
         </p>
       </form>
+      <form id="automation">
+        <h2>Toegang tot deze pc</h2>
+        <label
+          ><input id="allow-view" type="checkbox" /> NOVA mag beeldschermen
+          bekijken</label
+        >
+        <label
+          ><input id="allow-control" type="checkbox" /> NOVA mag muis en
+          toetsenbord bedienen na sessiebevestiging</label
+        >
+        <label
+          ><input id="allow-browser" type="checkbox" /> NOVA mag een eigen
+          zichtbaar browservenster bedienen</label
+        >
+        <button type="submit">Toegang opslaan</button>
+        <p class="note">
+          Ctrl+Alt+Shift+K pauzeert NOVA en stopt pc-bediening direct. Hervat
+          via het systeemvak. Zet meekijken en bedienen ook in NOVA's
+          bureaubladinstellingen aan.
+        </p>
+      </form>
+      <form id="elevation">
+        <h2>Windows-beheerrechten</h2>
+        <label
+          ><input id="run-elevated" type="checkbox" /> NOVA starten als
+          beheerder</label
+        >
+        <p id="elevation-status" role="status"></p>
+        <p class="note">
+          Windows vraagt toestemming bij het starten. Nodig om verhoogde
+          programma's te bedienen. UAC's beveiligde scherm en Windows-aanmelding
+          blijven handmatig. Alleen lokale instellingen kunnen dit inschakelen.
+        </p>
+        <button type="submit">Toepassen</button>
+      </form>
       <details>
         <summary>Oude agent vervangen</summary>
         <form id="legacy">

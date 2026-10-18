@@ -32,9 +32,6 @@ jobs:
       - run: npm run test:compose-notification
       - run: node --test deploy/omniroute/repair-stream-content.test.mjs
       - run: npm run test:mcp-sandbox
-      # The Windows agent cannot run here, but its syntax and embedded C# can be checked.
-      - run: pwsh -NoProfile -File agents/windows-legacy/test/check.ps1
-      - run: pwsh -NoProfile -File agents/windows-legacy/test/desktop.ps1
 
   windows:
     uses: ./.github/workflows/windows-build.yml

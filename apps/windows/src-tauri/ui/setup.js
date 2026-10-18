@@ -1,4 +1,3 @@
-/* global document, window */
 (() => {
   const element = (id) => document.getElementById(id);
   const invoke = (name, args) => window.__TAURI__.core.invoke(name, args);
@@ -40,6 +39,30 @@
     });
     return "Oude agent uitgeschakeld. Bestanden blijven bewaard.";
   });
+  form("automation", async () => {
+    await invoke("agent_set_automation", {
+      permissions: {
+        view: element("allow-view").checked,
+        control: element("allow-control").checked,
+        browser: element("allow-browser").checked,
+      },
+    });
+    return "Pc-toegang opgeslagen.";
+  });
+  element("allow-view").addEventListener("change", () => {
+    if (!element("allow-view").checked)
+      element("allow-control").checked = false;
+    element("allow-control").disabled = !element("allow-view").checked;
+  });
+  form("elevation", async () => {
+    const result = await invoke("agent_set_elevation", {
+      enabled: element("run-elevated").checked,
+    });
+    await refresh();
+    return result.restartRequired
+      ? "Opgeslagen. Sluit NOVA af en start opnieuw vanuit Windows om zonder beheerrechten te werken."
+      : "Opgeslagen. NOVA wordt zo nodig met Windows-toestemming herstart.";
+  });
   element("import").addEventListener("click", async () => {
     try {
       await invoke("agent_import_legacy", {
@@ -68,6 +91,14 @@
     const info = await invoke("agent_setup_info");
     element("url").value = info.url || "";
     element("source").value = info.source || "";
+    element("allow-view").checked = info.automation.view;
+    element("allow-control").checked = info.automation.control;
+    element("allow-control").disabled = !info.automation.view;
+    element("allow-browser").checked = info.automation.browser;
+    element("run-elevated").checked = info.runElevated;
+    element("elevation-status").textContent = info.elevated
+      ? "NOVA draait nu met beheerrechten."
+      : "NOVA draait nu zonder beheerrechten.";
     element("address").replaceChildren();
     for (const address of info.addresses) {
       const option = document.createElement("option");

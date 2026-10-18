@@ -14,7 +14,7 @@ describe("NOVA as a whole", () => {
     }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix("api", {
-      exclude: ["windows-agent/{*path}", "nova-ca.crt"],
+      exclude: ["nova-ca.crt"],
     });
     await app.init();
   });
@@ -79,23 +79,14 @@ describe("NOVA as a whole", () => {
     expect(response.status).toBe(409);
   });
 
-  it("serves the Windows agent for updates, and nothing else from the agents folder", async () => {
-    const agent = await request(app.getHttpServer())
-      .get("/windows-agent/jarvis-agent.ps1")
-      .expect(200);
-    expect(agent.headers["content-disposition"]).toContain("jarvis-agent.ps1");
-    expect(agent.body.toString("utf8")).toContain(
-      "$agentVersion = '2026-10-18.1'",
-    );
-    const novaAgent = await request(app.getHttpServer())
-      .get("/windows-agent/nova-agent.ps1")
-      .expect(200);
-    expect(novaAgent.headers["content-disposition"]).toContain(
-      "nova-agent.ps1",
-    );
-    await request(app.getHttpServer())
-      .get("/windows-agent/agent.example.json")
-      .expect(404);
+  it("does not serve retired PowerShell agents or their configuration", async () => {
+    for (const prefix of ["/windows-agent", "/api/windows-agent"])
+      for (const file of [
+        "nova-agent.ps1",
+        "jarvis-agent.ps1",
+        "agent.example.json",
+      ])
+        await request(app.getHttpServer()).get(`${prefix}/${file}`).expect(404);
   });
 
   it("wallpaper, language-model and alias bridges are in place", async () => {

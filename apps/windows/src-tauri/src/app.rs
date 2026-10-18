@@ -16,7 +16,11 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 pub fn run() {
-    let first = match args::parse(std::env::args().skip(1)) {
+    let mut startup: Vec<String> = std::env::args().skip(1).collect();
+    if startup.first().is_some_and(|v| v == "--wait-for-pid") {
+        startup.drain(..2.min(startup.len()));
+    }
+    let first = match args::parse(startup) {
         Ok(parsed) => parsed,
         Err(error) => {
             crate::platform::show_error(&format!("NOVA kon niet starten: {error}"));
@@ -53,6 +57,8 @@ pub fn run() {
             commands::agent_update_status,
             commands::agent_check_update,
             commands::agent_install_update,
+            commands::agent_set_automation,
+            commands::agent_set_elevation,
         ])
         .setup(move |app| {
             init(app.handle(), first);
@@ -61,6 +67,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("NOVA could not start");
     app.run(|_app, event| {
+        if let RunEvent::Exit = event {
+            crate::automation::shutdown(_app);
+        }
         // A tray app: with every window hidden or closed it keeps running until "Afsluiten".
         if let RunEvent::ExitRequested { code, api, .. } = event {
             if code.is_none() {
@@ -138,6 +147,7 @@ fn init(app: &AppHandle, args: Args) {
             agent,
             agent_error: None,
             paused: false,
+            emergency_ready: false,
             hotkey_warnings: Vec::new(),
             notifications: std::collections::VecDeque::new(),
             helper_ready: false,
@@ -156,6 +166,7 @@ fn init(app: &AppHandle, args: Args) {
         }),
     });
     app.state::<Shared>().lock().save();
+    crate::automation::init(app, &dir);
     crate::updates::init(app);
     if let Err(error) = crate::controls::restore(app) {
         log!("hotkeys: {error}");
@@ -205,7 +216,7 @@ pub fn open_setup(app: &AppHandle) {
     let built = WebviewWindowBuilder::new(app, "setup", WebviewUrl::App("index.html".into()))
         .title("NOVA")
         .inner_size(560.0, 680.0)
-        .resizable(false)
+        .resizable(true)
         .data_directory(profile)
         .on_navigation(|url| url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost"))
         .build();

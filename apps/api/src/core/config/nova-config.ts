@@ -65,13 +65,6 @@ export class NovaConfig {
       path.join(import.meta.dirname, "../../../../web/build"),
     ),
   );
-  /** Where the agents (Windows, browser) live: in the repo while developing, in the image in production. */
-  readonly agentsDir = path.resolve(
-    text(
-      "NOVA_AGENTS_DIR",
-      path.join(import.meta.dirname, "../../../../../agents"),
-    ),
-  );
   readonly publicUrl = text("NOVA_PUBLIC_URL");
   readonly adminPin = text("NOVA_ADMIN_PIN");
   /** Optional app-wide token; users exchange it for a short-lived HTTP-only session. */

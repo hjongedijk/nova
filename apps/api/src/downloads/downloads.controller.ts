@@ -5,11 +5,8 @@ import path from "node:path";
 import { NovaConfig } from "../core/config/nova-config.js";
 
 /**
- * The few files people download from NOVA itself, outside /api:
- *  - the Windows agent, so an existing install can be updated from the settings screen;
- *  - the certificate authority NOVA's HTTPS certificate was signed by (public part only), for devices
- *    that should trust it.
- * Nothing else is ever served from these folders.
+ * Downloads NOVA's certificate authority (public part only), outside /api,
+ * for devices that should trust its HTTPS certificate. No other files are served.
  */
 @Controller()
 export class DownloadsController {
@@ -26,27 +23,6 @@ export class DownloadsController {
     response.setHeader("Content-Disposition", `attachment; filename="${name}"`);
     response.setHeader("Cache-Control", "no-cache");
     fs.createReadStream(file).pipe(response);
-  }
-
-  @Get("windows-agent/nova-agent.ps1")
-  novaAgent(@Res() response: Response): void {
-    this.send(
-      response,
-      path.join(this.config.agentsDir, "windows-legacy", "nova-agent.ps1"),
-      "nova-agent.ps1",
-      "application/octet-stream",
-    );
-  }
-
-  /** Existing installations keep their scheduled-task path; deliver the new implementation under it. */
-  @Get("windows-agent/jarvis-agent.ps1")
-  legacyAgent(@Res() response: Response): void {
-    this.send(
-      response,
-      path.join(this.config.agentsDir, "windows-legacy", "nova-agent.ps1"),
-      "jarvis-agent.ps1",
-      "application/octet-stream",
-    );
   }
 
   @Get("nova-ca.crt")

@@ -347,3 +347,113 @@ pub fn show_desktop() {
 }
 #[cfg(not(windows))]
 pub fn show_desktop() {}
+
+/// The filtered administrator token is false until the user approves a UAC elevation.
+#[cfg(windows)]
+pub fn is_elevated() -> bool {
+    unsafe { windows::Win32::UI::Shell::IsUserAnAdmin().as_bool() }
+}
+#[cfg(not(windows))]
+pub fn is_elevated() -> bool {
+    false
+}
+
+/// The elevated successor waits for this process to release Tauri's single-instance lock.
+#[cfg(windows)]
+pub fn request_elevation(parent: u32) -> Result<(), String> {
+    use windows::{
+        core::{w, PCWSTR},
+        Win32::{
+            Foundation::CloseHandle,
+            UI::{
+                Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW},
+                WindowsAndMessaging::SW_SHOWNORMAL,
+            },
+        },
+    };
+    if !can_elevate_same_user() {
+        return Err("Gebruik voor deze instelling een Windows-account met beheerdersrechten. Een ander beheerdersaccount heeft een eigen NOVA-configuratie.".into());
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let file: Vec<u16> = exe
+        .as_os_str()
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let args: Vec<u16> = format!("--wait-for-pid {parent}")
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS,
+        lpVerb: w!("runas"),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: PCWSTR(args.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+    unsafe {
+        ShellExecuteExW(&mut info)
+            .map_err(|_| "Beheerrechten niet verleend. NOVA blijft zonder beheerrechten actief.".to_string())?;
+        if !info.hProcess.is_invalid() {
+            let _ = CloseHandle(info.hProcess);
+        }
+    }
+    Ok(())
+}
+#[cfg(windows)]
+fn can_elevate_same_user() -> bool {
+    use windows::Win32::{
+        Foundation::{CloseHandle, HANDLE},
+        Security::{
+            GetTokenInformation, TokenElevationType, TokenElevationTypeLimited, TOKEN_ELEVATION_TYPE, TOKEN_QUERY,
+        },
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+    if is_elevated() {
+        return true;
+    }
+    let mut token = HANDLE::default();
+    unsafe {
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+            return false;
+        }
+        let mut kind = TOKEN_ELEVATION_TYPE::default();
+        let mut length = 0;
+        let result = GetTokenInformation(
+            token,
+            TokenElevationType,
+            Some((&mut kind as *mut TOKEN_ELEVATION_TYPE).cast()),
+            std::mem::size_of::<TOKEN_ELEVATION_TYPE>() as u32,
+            &mut length,
+        );
+        let _ = CloseHandle(token);
+        result.is_ok() && kind == TokenElevationTypeLimited
+    }
+}
+#[cfg(not(windows))]
+pub fn request_elevation(_: u32) -> Result<(), String> {
+    Err("Alleen beschikbaar op Windows".into())
+}
+#[cfg(windows)]
+pub fn wait_for_parent(pid: u32) -> Result<(), String> {
+    use windows::Win32::{
+        Foundation::{CloseHandle, WAIT_TIMEOUT},
+        System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE},
+    };
+    if pid == 0 || pid == std::process::id() {
+        return Err("Ongeldig vorig proces".into());
+    }
+    if let Ok(handle) = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) } {
+        let result = unsafe { WaitForSingleObject(handle, 15_000) };
+        unsafe {
+            let _ = CloseHandle(handle);
+        }
+        if result == WAIT_TIMEOUT {
+            return Err("De vorige NOVA-app sluit niet op tijd af".into());
+        }
+    }
+    Ok(())
+}
