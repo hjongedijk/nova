@@ -34,6 +34,7 @@ describe("settings write receipts", () => {
     ["POST", "/services/qdrant/maintenance", "Geheugenindex"],
     ["PUT", "/managed-targets/access", "Apparaattoegang"],
     ["PUT", "/services/private", "Serviceverbindingen"],
+    ["POST", "/services/windows/pair", "Serviceverbindingen"],
     ["POST", "/import", "Instellingen herstellen"],
     [
       "POST",
@@ -271,6 +272,21 @@ describe("settings write receipts", () => {
     expect(new Set([central?.id, legacy.id]).size).toBe(2);
   });
 
+  it("records Windows pairing without exposing its code or claiming a connection check", () => {
+    const receipt = card(
+      "POST",
+      "/services/windows/pair",
+      { ok: true, services: [] },
+      { code: "nova1.private-pairing-code" },
+    );
+    expect(receipt?.requested).toBe("Serviceverbindingen aanpassen");
+    expect(receipt?.verification).toBe(
+      "Het effect is niet apart gecontroleerd.",
+    );
+    expect(JSON.stringify(receipt)).not.toContain("private-pairing-code");
+    expect(card("POST", "/services/windows/pair", { ok: false })).toBeNull();
+  });
+
   it("classifies every current settings write explicitly while future routes stay closed", () => {
     const source = ts.createSourceFile(
       "settings.ts",
@@ -305,7 +321,7 @@ describe("settings write receipts", () => {
       ts.forEachChild(node, visit);
     };
     visit(source);
-    expect(routes).toHaveLength(129);
+    expect(routes).toHaveLength(130);
     for (const route of routes)
       expect(
         classifySettingsWrite(route.method, route.path),

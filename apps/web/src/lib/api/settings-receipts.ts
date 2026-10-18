@@ -179,6 +179,7 @@ add(
   true,
 );
 add("PUT", ["/services/:id"], "Serviceverbindingen");
+add("POST", ["/services/windows/pair"], "Serviceverbindingen");
 add(
   "POST",
   ["/services/history/confirm-rollback"],
