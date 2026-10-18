@@ -308,12 +308,18 @@ mod tests {
     #[test]
     fn nothing_needs_arming_or_permissions() {
         let mut d = Desktop;
-        // Input is routed straight to the OS layer without any arm/lease step (non-Windows hosts answer 503).
+        // Reach the native layer without arming or a lease, then cancel before
+        // sending input. This tests both hosts without typing into the CI desktop.
         for _ in 0..50 {
+            let checks = std::cell::Cell::new(0);
             let err = d
-                .route("/v1/desktop/input", &json!({"action":"key","key":"A"}), false)
+                .route_guarded("/v1/desktop/input", &json!({"action":"key","key":"A"}), false, &|| {
+                    checks.set(checks.get() + 1);
+                    checks.get() > 1
+                })
                 .unwrap_err();
-            assert_eq!(err.0, 503, "{err:?}");
+            assert_eq!(checks.get(), 2, "input must reach the native cancellation check");
+            assert_eq!(err.0, 409, "{err:?}");
         }
         assert_eq!(
             d.route("/v1/desktop/input", &json!({"action":"nope"}), false)
