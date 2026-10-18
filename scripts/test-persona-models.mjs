@@ -8,10 +8,7 @@ import {
 } from "./evaluate-persona-models.mjs";
 import { parsePersonaCases, toolsFor } from "./persona-fixtures.mjs";
 const cases = parsePersonaCases(
-  fs.readFileSync(
-    new URL("../docs/persona-evaluation.md", import.meta.url),
-    "utf8",
-  ),
+  fs.readFileSync(new URL("../docs/evaluation.md", import.meta.url), "utf8"),
 );
 const answer = (
   model,

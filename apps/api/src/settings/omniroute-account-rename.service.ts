@@ -3,13 +3,10 @@ import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type {
   OmniRouteAccountRenameHistoryEntry,
-  OmniRouteAccountRenamePrepared,
   OmniRouteAccountRenameResult,
 } from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { claimConfirmation } from "./confirmation-step.js";
 import { HistoryFile, revertedFromField } from "./history-file.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
@@ -31,8 +28,15 @@ const validName = (value: unknown): value is string =>
   value.trim().length <= 200;
 const unavailable =
   "Account hernoemen is niet beschikbaar. Controleer de OmniRoute-koppeling.";
-const renameInputError =
-  "Kies een accountnaam van 1–200 tekens en bevestig dat de wijziging alle OmniRoute-clients en mogelijk OmniRoute Cloud raakt.";
+const renameInputError = "Kies een accountnaam van 1–200 tekens.";
+const userErrors = [
+  "De nieuwe naam is gelijk aan de huidige naam.",
+  "Er bestaat al een account met deze providernaam.",
+  "De provideraccountlijst is onvolledig; naamcontrole is afgebroken.",
+  "Accountnaam is gewijzigd sinds de geschiedenis.",
+  "Dit account is later gewijzigd. Herstel alleen de nieuwste wijziging.",
+  "Deze accountwijziging bestaat niet meer.",
+];
 const MAX_HISTORY = 100;
 type RenameRevision = OmniRouteAccountRenameHistoryEntry;
 
@@ -45,7 +49,6 @@ export class OmniRouteAccountRename {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
   ) {
     this.history = new HistoryFile<RenameRevision>(
@@ -107,39 +110,24 @@ export class OmniRouteAccountRename {
     return selected;
   }
 
-  async prepareRollback(
+  async rollback(
     rawId: unknown,
     rawRevisionId: unknown,
-    acknowledgeEffects: unknown,
-  ): Promise<OmniRouteAccountRenamePrepared> {
+  ): Promise<OmniRouteAccountRenameResult> {
     const id = typeof rawId === "string" ? rawId.trim() : "";
     const revisionId =
       typeof rawRevisionId === "string" ? rawRevisionId.trim() : "";
-    if (!validId(id) || !/^[0-9a-f-]{36}$/i.test(revisionId))
+    if (!validId(id) || !REVISION_ID.test(revisionId))
       return { ok: false, error: "Ongeldige accountwijziging." };
     try {
       const revision = this.rollbackRevision(id, revisionId);
-      return await this.prepare(
-        id,
-        revision.beforeName,
-        acknowledgeEffects,
-        revision.id,
-      );
+      return await this.rename(id, revision.beforeName, revision.id);
     } catch (error) {
-      if (
-        error instanceof ValidationError &&
-        error.details.length === 1 &&
-        error.details[0] === renameInputError
-      )
-        throw error;
+      if (error instanceof ValidationError) throw error;
       return {
         ok: false,
         error:
-          error instanceof Error &&
-          [
-            "Deze accountwijziging bestaat niet meer.",
-            "Dit account is later gewijzigd. Herstel alleen de nieuwste wijziging.",
-          ].includes(error.message)
+          error instanceof Error && userErrors.includes(error.message)
             ? error.message
             : "Herstel niet beschikbaar.",
       };
@@ -253,165 +241,43 @@ export class OmniRouteAccountRename {
       throw new Error("Er bestaat al een account met deze providernaam.");
   }
 
-  async prepare(
+  async rename(
     rawId: unknown,
     rawName: unknown,
-    acknowledgeEffects: unknown,
     rollbackRevisionId?: string,
-  ): Promise<OmniRouteAccountRenamePrepared> {
-    const id = typeof rawId === "string" ? rawId.trim() : "";
-    const name = typeof rawName === "string" ? rawName.trim() : "";
-    if (!validId(id) || !validName(name) || acknowledgeEffects !== true)
-      throw new ValidationError([renameInputError]);
-    try {
-      this.assertGateway();
-      const account = await this.readAccount(id);
-      if (rollbackRevisionId) {
-        const revision = this.rollbackRevision(id, rollbackRevisionId);
-        if (account.name !== revision.afterName || name !== revision.beforeName)
-          throw new Error("Accountnaam is gewijzigd sinds de geschiedenis.");
-      }
-      if (account.name === name)
-        throw new Error("De nieuwe naam is gelijk aan de huidige naam.");
-      await this.assertUnique(account.provider, name, id, account.name);
-      const action = this.confirmations.create(
-        `settings-account-rename:${crypto.randomUUID()}`,
-        "omniroute_account_rename",
-        {
-          id,
-          provider: account.provider,
-          oldName: account.name,
-          newName: name,
-          ...(rollbackRevisionId ? { rollbackRevisionId } : {}),
-        },
-        "DANGEROUS",
-        undefined,
-        false,
-      );
-      try {
-        this.audit.record({
-          sessionId: "settings",
-          tool: action.tool,
-          risk: "DANGEROUS",
-          confirmation: "pending_admin_ui",
-          arguments: {
-            id,
-            provider: account.provider,
-            oldName: account.name,
-            newName: name,
-            affectsAllClients: true,
-            cloudSyncMayRun: true,
-          },
-        });
-      } catch {
-        this.confirmations.cancel(action.sessionId, "rejected_admin_ui");
-        return {
-          ok: false,
-          error: "Actielog niet beschikbaar; niets gewijzigd.",
-        };
-      }
-      return {
-        ok: true,
-        id,
-        provider: String(sanitize(account.provider)).slice(0, 100),
-        oldName: String(sanitize(account.name)).slice(0, 200),
-        newName: String(sanitize(name)).slice(0, 200),
-        action,
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        error:
-          error instanceof Error &&
-          [
-            "De nieuwe naam is gelijk aan de huidige naam.",
-            "Er bestaat al een account met deze providernaam.",
-            "De provideraccountlijst is onvolledig; naamcontrole is afgebroken.",
-            "Accountnaam is gewijzigd sinds de geschiedenis.",
-            "Dit account is later gewijzigd. Herstel alleen de nieuwste wijziging.",
-            "Deze accountwijziging bestaat niet meer.",
-          ].includes(error.message)
-            ? error.message
-            : unavailable,
-      };
-    }
-  }
-
-  async confirm(
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
   ): Promise<OmniRouteAccountRenameResult> {
-    if (
-      !/^settings-account-rename:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige accountbevestiging."]);
-    const claimed = claimConfirmation(
-      this.confirmations,
-      sessionId,
-      confirmationId,
-      approve,
-      {
-        tool: "omniroute_account_rename",
-        stale: "Bevestiging verlopen. Kies opnieuw.",
-        expired: "Bevestiging verlopen. Kies opnieuw.",
-      },
-    );
-    if ("reply" in claimed) return claimed.reply;
-    const action = claimed.action;
-    const { id, provider, oldName, newName } = action.args;
-    const rollbackRevisionId = action.args.rollbackRevisionId;
-    if (
-      !validId(id) ||
-      typeof provider !== "string" ||
-      typeof oldName !== "string" ||
-      !validName(newName) ||
-      (rollbackRevisionId !== undefined &&
-        (typeof rollbackRevisionId !== "string" ||
-          !/^[0-9a-f-]{36}$/i.test(rollbackRevisionId)))
-    )
-      return { ok: false, error: unavailable };
+    const id = typeof rawId === "string" ? rawId.trim() : "";
+    const newName = typeof rawName === "string" ? rawName.trim() : "";
+    if (!validId(id) || !validName(newName))
+      throw new ValidationError([renameInputError]);
+    const tool = "omniroute_account_rename";
     if (this.inFlight.has(id))
       return { ok: false, error: "Dit account wordt al gewijzigd." };
     this.inFlight.add(id);
     try {
       this.assertGateway();
       const before = await this.readAccount(id);
-      if (before.provider !== provider || before.name !== oldName)
-        return {
-          ok: false,
-          error:
-            "Account gewijzigd sinds voorbereiding. Controleer de actuele naam.",
-        };
-      if (typeof rollbackRevisionId === "string") {
+      const { provider, name: oldName } = before;
+      if (rollbackRevisionId) {
         const revision = this.rollbackRevision(id, rollbackRevisionId);
-        if (
-          revision.provider !== provider ||
-          revision.afterName !== oldName ||
-          revision.beforeName !== newName
-        )
-          return {
-            ok: false,
-            error:
-              "Geschiedenis is gewijzigd. Laad de accountgeschiedenis opnieuw.",
-          };
+        if (oldName !== revision.afterName || newName !== revision.beforeName)
+          throw new Error("Accountnaam is gewijzigd sinds de geschiedenis.");
       }
+      if (oldName === newName)
+        throw new Error("De nieuwe naam is gelijk aan de huidige naam.");
       await this.assertUnique(provider, newName, id, oldName);
       this.audit.record({
         sessionId: "settings",
-        tool: action.tool,
+        tool,
         risk: "DANGEROUS",
-        confirmation: "confirmed_admin_ui",
+        confirmation: "direct",
         phase: "before_execute",
         arguments: {
           id,
           provider,
           oldName,
           newName,
-          ...(typeof rollbackRevisionId === "string"
-            ? { rollbackRevisionId }
-            : {}),
+          ...(rollbackRevisionId ? { rollbackRevisionId } : {}),
           affectsAllClients: true,
           cloudSyncMayRun: true,
         },
@@ -436,16 +302,14 @@ export class OmniRouteAccountRename {
           provider,
           beforeName: oldName,
           afterName: newName,
-          ...(typeof rollbackRevisionId === "string"
-            ? { revertedFrom: rollbackRevisionId }
-            : {}),
+          ...(rollbackRevisionId ? { revertedFrom: rollbackRevisionId } : {}),
         });
         try {
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool,
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "after_execute",
             arguments: { id, provider, oldName, newName },
             result: { ok: true },
@@ -460,9 +324,9 @@ export class OmniRouteAccountRename {
         try {
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool,
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "after_execute",
             arguments: { id, provider, oldName, newName },
             result: { ok: false },
@@ -478,8 +342,14 @@ export class OmniRouteAccountRename {
             "Uitkomst niet gecontroleerd. Controleer de accountnaam in OmniRoute.",
         };
       }
-    } catch {
-      return { ok: false, error: unavailable };
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error && userErrors.includes(error.message)
+            ? error.message
+            : unavailable,
+      };
     } finally {
       this.inFlight.delete(id);
     }

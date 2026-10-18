@@ -1,5 +1,4 @@
-import { writePrivateJson } from "../settings/history-file.js";
-import fs from "node:fs";
+import { readJsonState, writeJsonState } from "../core/db/json-state.js";
 import type { FeedEvent } from "@nova/contracts";
 
 const MAX_TIMER_NOTICES = 200;
@@ -16,15 +15,15 @@ export class TimerFeedJournal {
     if (this.loaded) return this.entries;
     let entries: unknown = [];
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.file, "utf8")) as {
-        version?: unknown;
-        entries?: unknown;
-      };
-      if (parsed.version !== 1) throw new Error("Invalid timer feed history");
-      entries = parsed.entries;
+      const parsed = readJsonState(this.file) as
+        { version?: unknown; entries?: unknown } | undefined;
+      if (parsed !== undefined) {
+        if (!parsed || typeof parsed !== "object" || parsed.version !== 1)
+          throw new Error("Invalid timer feed history");
+        entries = parsed.entries;
+      }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-        throw new Error("Timer feed history unavailable", { cause: error });
+      throw new Error("Timer feed history unavailable", { cause: error });
     }
     if (
       !Array.isArray(entries) ||
@@ -66,7 +65,7 @@ export class TimerFeedJournal {
       -MAX_TIMER_NOTICES,
     );
     try {
-      writePrivateJson(this.file, { version: 1, entries: next }, "dir");
+      writeJsonState(this.file, { version: 1, entries: next }, "dir");
       this.entries = next;
     } catch {
       throw new Error("Timer feed history unavailable");

@@ -1,8 +1,8 @@
-//! Native desktop contract and in-memory control lease. Images are never written to disk.
+//! Native desktop contract: screenshots, windows and input. Images are never written to disk.
 use crate::transport::Outcome;
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 mod windows;
 
@@ -16,102 +16,55 @@ pub struct Display {
     pub primary: bool,
 }
 
+/// Stateless router. There is no permission, lease or rate limit: the only thing that stops NOVA is the owner's
+/// pause / emergency stop (`paused`, or a cancelled epoch), which NOVA itself cannot lift.
 #[derive(Default)]
-pub struct Desktop {
-    lease: Option<(Instant, u64)>,
-    actions: Vec<Instant>,
-}
+pub struct Desktop;
 impl Desktop {
-    pub fn disarm(&mut self) {
-        self.lease = None;
+    pub fn route(&mut self, path: &str, body: &Value, paused: bool) -> Outcome {
+        self.route_guarded(path, body, paused, &|| false)
     }
-    pub fn armed(&self) -> bool {
-        self.lease.is_some_and(|(until, _)| Instant::now() < until)
-    }
-    pub fn until(&self) -> Option<u64> {
-        self.lease
-            .filter(|(until, _)| Instant::now() < *until)
-            .map(|(_, ms)| ms)
-    }
-    pub fn route(&mut self, path: &str, body: &Value, view: bool, control: bool, paused: bool) -> Outcome {
-        self.route_guarded(path, body, view, control, paused, &|| false)
-    }
-    pub fn route_guarded(
-        &mut self,
-        path: &str,
-        body: &Value,
-        view: bool,
-        control: bool,
-        paused: bool,
-        cancelled: &dyn Fn() -> bool,
-    ) -> Outcome {
-        if cancelled() && !(path == "/v1/desktop/control" && body["armed"] == false) {
-            self.disarm();
+    pub fn route_guarded(&mut self, path: &str, body: &Value, paused: bool, cancelled: &dyn Fn() -> bool) -> Outcome {
+        if path == "/v1/desktop/status" {
+            return Ok(json!({"ok":true,"view":!paused,"control":!paused,
+                "armed":!paused,"armedUntil":null,"paused":paused,
+                "killHotkey":"Ctrl+Alt+Shift+K","displays":displays()?}));
+        }
+        if cancelled() {
             return Err((409, "Pc-bediening is gestopt".into()));
         }
-        if !view || !control || paused {
-            self.disarm();
-        }
-        if path == "/v1/desktop/status" {
-            return Ok(
-                json!({"ok":true,"view":view && !paused,"control":view && control && !paused,
-                "armed":self.armed(),"armedUntil":self.until(),"paused":paused,
-                "killHotkey":"Ctrl+Alt+Shift+K","displays":displays()?}),
-            );
-        }
-        // Disarming remains possible even after permissions are disabled.
-        if path == "/v1/desktop/control" && body["armed"] == false {
-            self.disarm();
-            return Ok(json!({"ok":true,"armed":false}));
-        }
-        if !view {
-            return Err((403, "Meekijken staat uit in NOVA op deze pc".into()));
-        }
         if paused {
-            return Err((409, "Agent is gepauzeerd".into()));
+            return Err((
+                409,
+                "Agent is gepauzeerd door de eigenaar (systeemvak of Ctrl+Alt+Shift+K)".into(),
+            ));
         }
         match path {
             "/v1/desktop/windows" => native_windows(),
             "/v1/desktop/screenshot" => {
-                protected_foreground()?;
                 let display = integer(body, "display", 0, 0, 32)? as u32;
                 let width = integer(body, "maxWidth", 1280, 320, 1920)? as u32;
                 capture(display, width)
             }
+            // Kept for NOVA's API contract. Input needs no arming: this only acknowledges the request.
             "/v1/desktop/control" => {
-                if !control {
-                    return Err((403, "Bedienen staat uit in NOVA op deze pc".into()));
+                let armed = body["armed"]
+                    .as_bool()
+                    .ok_or_else(|| (400, "armed moet true of false zijn".to_string()))?;
+                if armed {
+                    let ttl = integer(body, "ttlSeconds", 900, 0, i64::MAX / 2000)? as u64;
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_err(|_| (500, "Ongeldige systeemklok".into()))?
+                        .as_millis() as u64;
+                    Ok(json!({"ok":true,"armed":true,"armedUntil":now + ttl * 1000}))
+                } else {
+                    Ok(json!({"ok":true,"armed":false}))
                 }
-                if body["armed"] != true {
-                    return Err((400, "armed moet true of false zijn".into()));
-                }
-                let ttl = integer(body, "ttlSeconds", 0, 1, 900)? as u64;
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(|_| (500, "Ongeldige systeemklok".into()))?
-                    .as_millis() as u64;
-                self.lease = Some((Instant::now() + Duration::from_secs(ttl), now + ttl * 1000));
-                self.actions.clear();
-                Ok(json!({"ok":true,"armed":true,"armedUntil":self.until()}))
             }
             "/v1/desktop/input" => {
-                if !control || !self.armed() {
-                    return Err((409, "Pc-bediening is niet actief".into()));
-                }
                 let action = Input::parse(body)?;
-                protected_foreground()?;
-                let now = Instant::now();
-                self.actions
-                    .retain(|at| now.duration_since(*at) < Duration::from_secs(1));
-                if self.actions.len() >= 10 {
-                    return Err((429, "Te veel invoeracties".into()));
-                }
-                self.actions.push(now);
-                if cancelled() || !self.armed() {
-                    return Err((409, "Pc-bediening is gestopt".into()));
-                }
-                let deadline = self.lease.map(|(until, _)| until).unwrap();
-                native_input(&action, body, &|| cancelled() || Instant::now() >= deadline)?;
+                native_input(&action, body, cancelled)?;
                 Ok(json!({"ok":true,"action":body["action"]}))
             }
             _ => Err((404, "Onbekende bureaubladroute".into())),
@@ -183,8 +136,8 @@ impl Input {
             "type" => Self::Type(
                 body["text"]
                     .as_str()
-                    .filter(|s| !s.is_empty() && s.encode_utf16().count() <= 500 && !s.contains('\0'))
-                    .ok_or_else(|| (400, "Tekst moet 1 tot 500 tekens bevatten".into()))?
+                    .filter(|s| !s.is_empty() && s.encode_utf16().count() <= 4000 && !s.contains('\0'))
+                    .ok_or_else(|| (400, "Tekst moet 1 tot 4000 tekens bevatten".into()))?
                     .into(),
             ),
             "key" => Self::Key(parse_key(body["key"].as_str().unwrap_or(""))?),
@@ -248,9 +201,6 @@ fn parse_key(raw: &str) -> Result<Vec<u16>, (u16, String)> {
             .ok_or_else(fail)?,
         _ => return Err(fail()),
     };
-    if code == 0x2e && keys.contains(&0x11) && keys.contains(&0x12) {
-        return Err(fail());
-    }
     keys.push(code);
     Ok(keys)
 }
@@ -269,7 +219,7 @@ fn scale_point(screen: &Display, body: &Value, x: f64, y: f64) -> Result<(i32, i
     ))
 }
 #[cfg(windows)]
-use windows::{capture, displays, native_input, native_windows, protected_foreground};
+use windows::{capture, displays, native_input, native_windows};
 #[cfg(not(windows))]
 fn unsupported<T>() -> Result<T, (u16, String)> {
     Err((503, "Alleen beschikbaar op Windows".into()))
@@ -281,10 +231,6 @@ fn displays() -> Result<Vec<Display>, (u16, String)> {
 #[cfg(not(windows))]
 fn native_windows() -> Outcome {
     unsupported()
-}
-#[cfg(not(windows))]
-fn protected_foreground() -> Result<(), (u16, String)> {
-    Ok(())
 }
 #[cfg(not(windows))]
 fn capture(_: u32, _: u32) -> Outcome {
@@ -347,66 +293,66 @@ mod tests {
         assert!(scale_point(&d, &json!({"relativeTo":{"width":0,"height":1}}), 0.0, 0.0).is_err());
     }
     #[test]
-    fn input_rejects_invalid_chords_and_unbounded_text() {
-        for key in ["Ctrl+Alt+Delete", "Ctrl+Ctrl+A", "F13", "", "Alt+"] {
+    fn input_rejects_malformed_chords_and_text() {
+        for key in ["Ctrl+Ctrl+A", "F13", "", "Alt+"] {
             assert!(parse_key(key).is_err(), "{key}");
         }
         assert_eq!(parse_key("Win+R").unwrap(), vec![0x5b, 0x52]);
         assert_eq!(parse_key("Ctrl+Shift+Tab").unwrap(), vec![0x11, 0x10, 9]);
-        assert!(Input::parse(&json!({"action":"type","text":"a".repeat(501)})).is_err());
+        assert_eq!(parse_key("Ctrl+Alt+Delete").unwrap(), vec![0x11, 0x12, 0x2e]);
+        assert!(Input::parse(&json!({"action":"type","text":"a".repeat(4001)})).is_err());
+        assert!(Input::parse(&json!({"action":"type","text":"a".repeat(2000)})).is_ok());
         assert!(Input::parse(&json!({"action":"click","x":-1,"y":0})).is_err());
         assert!(Input::parse(&json!({"action":"scroll","dy":51})).is_err());
     }
     #[test]
-    fn lease_is_volatile_bounded_and_disarm_always_works() {
-        let mut d = Desktop::default();
-        assert!(!d.armed());
-        assert!(d
-            .route(
-                "/v1/desktop/input",
-                &json!({"action":"key","key":"A"}),
-                true,
-                true,
-                false
-            )
-            .is_err());
-        assert!(d
-            .route(
-                "/v1/desktop/control",
-                &json!({"armed":true,"ttlSeconds":901}),
-                true,
-                true,
-                false
-            )
-            .is_err());
-        d.route(
-            "/v1/desktop/control",
-            &json!({"armed":true,"ttlSeconds":30}),
-            true,
-            true,
-            false,
-        )
-        .unwrap();
-        assert!(d.armed());
-        assert!(d.until().is_some());
-        let cancelled = d.route_guarded(
-            "/v1/desktop/input",
-            &json!({"action":"key","key":"A"}),
-            true,
-            true,
-            false,
-            &|| true,
-        );
-        assert_eq!(cancelled.unwrap_err().0, 409);
+    fn nothing_needs_arming_or_permissions() {
+        let mut d = Desktop;
+        // Input is routed straight to the OS layer without any arm/lease step (non-Windows hosts answer 503).
+        for _ in 0..50 {
+            let err = d
+                .route("/v1/desktop/input", &json!({"action":"key","key":"A"}), false)
+                .unwrap_err();
+            assert_eq!(err.0, 503, "{err:?}");
+        }
         assert_eq!(
-            d.route("/v1/desktop/windows", &json!({}), true, true, true)
+            d.route("/v1/desktop/input", &json!({"action":"nope"}), false)
+                .unwrap_err()
+                .0,
+            400
+        );
+        // The arming route stays valid for NOVA's contract, with any ttl, and is only an acknowledgement.
+        let armed = d
+            .route("/v1/desktop/control", &json!({"armed":true,"ttlSeconds":100000}), false)
+            .unwrap();
+        assert_eq!(armed["armed"], true);
+        assert!(armed["armedUntil"].as_u64().is_some());
+        assert_eq!(
+            d.route("/v1/desktop/control", &json!({"armed":false}), false).unwrap()["armed"],
+            false
+        );
+        assert_eq!(d.route("/v1/desktop/control", &json!({}), false).unwrap_err().0, 400);
+        let status = d.route("/v1/desktop/status", &json!({}), false).unwrap();
+        assert_eq!(status["view"], true);
+        assert_eq!(status["control"], true);
+        assert_eq!(status["armed"], true);
+        assert_eq!(status["killHotkey"], "Ctrl+Alt+Shift+K");
+    }
+    #[test]
+    fn only_the_owner_pause_or_emergency_stop_refuses() {
+        let mut d = Desktop;
+        assert_eq!(d.route("/v1/desktop/windows", &json!({}), true).unwrap_err().0, 409);
+        assert_eq!(
+            d.route("/v1/desktop/input", &json!({"action":"key","key":"A"}), true)
                 .unwrap_err()
                 .0,
             409
         );
-        assert!(!d.armed());
-        d.route("/v1/desktop/control", &json!({"armed":false}), false, false, true)
-            .unwrap();
-        assert!(!Desktop::default().armed());
+        let paused = d.route("/v1/desktop/status", &json!({}), true).unwrap();
+        assert_eq!(paused["paused"], true);
+        assert_eq!(paused["control"], false);
+        let cancelled = d.route_guarded("/v1/desktop/input", &json!({"action":"key","key":"A"}), false, &|| true);
+        assert_eq!(cancelled.unwrap_err().0, 409);
+        assert_eq!(d.route("/v1/desktop/other", &json!({}), false).unwrap_err().0, 404);
     }
 }

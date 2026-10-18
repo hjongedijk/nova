@@ -57,8 +57,6 @@ pub fn run() {
             commands::agent_update_status,
             commands::agent_check_update,
             commands::agent_install_update,
-            commands::agent_set_automation,
-            commands::agent_set_elevation,
         ])
         .setup(move |app| {
             init(app.handle(), first);

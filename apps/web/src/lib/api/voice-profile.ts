@@ -1,5 +1,4 @@
-import { sendJson } from "./client.ts";
-import { getPin } from "./pin-session.ts";
+import { ApiError, getJson, sendJson } from "./client.ts";
 
 export interface VoiceProfilePayload {
   voice?: string;
@@ -14,13 +13,44 @@ export interface VoiceProfilePayload {
 export async function pushVoiceProfile(
   profile: VoiceProfilePayload,
 ): Promise<void> {
-  const pin = getPin();
   try {
-    await sendJson("PUT", "/settings/voice-profile", profile, {
-      "x-nova-admin": "1",
-      ...(pin ? { "x-nova-pin": pin } : {}),
-    });
+    await sendJson("PUT", "/settings/voice-profile", profile);
   } catch {
     /* the next change tries again */
+  }
+}
+
+export type VoiceProfileSync =
+  | { status: "unchanged" | "synced" }
+  | { status: "failed"; message: string; auth?: boolean };
+
+const sameProfile = (a: VoiceProfilePayload, b: VoiceProfilePayload) =>
+  (a.voice ?? null) === (b.voice ?? null) &&
+  a.rate === b.rate &&
+  a.pitch === b.pitch;
+
+/**
+ * Makes the server (phone calls) match the profile this browser stored: reads the server copy and only writes when it
+ * differs, so running it on every start is harmless. Unlike pushVoiceProfile the outcome is reported, never swallowed.
+ */
+export async function reconcileVoiceProfile(
+  local: VoiceProfilePayload,
+): Promise<VoiceProfileSync> {
+  try {
+    const remote = await getJson<VoiceProfilePayload>(
+      "/settings/voice-profile",
+    );
+    if (sameProfile(local, remote)) return { status: "unchanged" };
+    await sendJson("PUT", "/settings/voice-profile", local);
+    return { status: "synced" };
+  } catch (error) {
+    return {
+      status: "failed",
+      message: error instanceof Error ? error.message : String(error),
+      // Rejected for auth: reported quietly by the caller; this never leads to an unlock prompt.
+      auth:
+        error instanceof ApiError &&
+        (error.status === 401 || error.status === 403),
+    };
   }
 }

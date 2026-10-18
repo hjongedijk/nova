@@ -43,13 +43,6 @@ export interface FreePolicyPlan {
   providers: [];
 }
 
-const acknowledgements = [
-  "acknowledgeBillingDisabled",
-  "acknowledgeHardStop",
-  "acknowledgeTerms",
-  "acknowledgeAllClients",
-  "acknowledgeQuotaRefresh",
-] as const;
 const modelIdPattern = /^[a-zA-Z0-9_.:/@-]{1,200}$/;
 const providerPattern = /^[a-zA-Z0-9_.-]{1,100}$/;
 const uuidPattern =
@@ -116,11 +109,7 @@ export function buildFreePolicyPlan(
   knownProviders: string[],
 ): FreePolicyPlan {
   const data = record(input);
-  exactFields(data, ["selection", ...acknowledgements]);
-  if (acknowledgements.some((field) => data[field] !== true))
-    fail(
-      "Bevestig facturering, harde gratis limieten, voorwaarden en de gevolgen voor alle clients en quota.",
-    );
+  exactFields(data, ["selection"]);
   if (
     !Array.isArray(data.selection) ||
     !data.selection.length ||

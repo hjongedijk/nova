@@ -1,16 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  OmniRouteComboRemovalPrepared,
-  OmniRouteComboRemovalResult,
-} from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
+import type { OmniRouteComboRemovalResult } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { claimConfirmation } from "./confirmation-step.js";
 import { ValidationError } from "../core/errors/validation.error.js";
-import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
 import { RoutingService } from "../routing/routing.service.js";
@@ -18,8 +11,6 @@ import { object } from "./request-input.js";
 
 type Row = { id: string; name: string; data: string; sort_order: number };
 const validId = (id: string) => /^[a-zA-Z0-9_.-]{1,100}$/.test(id);
-const hash = (row: Row) =>
-  crypto.createHash("sha256").update(JSON.stringify(row)).digest("hex");
 const unavailable =
   "Combo verwijderen is niet beschikbaar. Controleer de OmniRoute-koppeling.";
 
@@ -28,7 +19,6 @@ export class OmniRouteComboRemoval {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
@@ -63,87 +53,22 @@ export class OmniRouteComboRemoval {
       throw new Error(unavailable);
     return { row, name: row.name };
   }
-  async prepare(
-    id: string,
-    acknowledgeEffects: unknown,
-  ): Promise<OmniRouteComboRemovalPrepared> {
-    if (!validId(id) || acknowledgeEffects !== true)
-      throw new ValidationError([
-        "Bevestig dat het verwijderen deze OmniRoute-route voor alle clients kan raken.",
-      ]);
-    try {
-      const route = this.routing.verifyForManagement();
-      if (!route.ready || !route.policyVerified || !route.freeOnly)
-        throw new Error(unavailable);
-      const { row, name } = await this.current(id);
-      const revision = hash(row);
-      const args = { id, revision };
-      this.audit.record({
-        sessionId: "settings",
-        tool: "omniroute_combo_remove",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: args,
-      });
-      return {
-        ok: true,
-        name: String(sanitize(name)).slice(0, 160),
-        action: this.confirmations.create(
-          `settings-combo-remove:${crypto.randomUUID()}`,
-          "omniroute_combo_remove",
-          args,
-          "DANGEROUS",
-          revision,
-          false,
-        ),
-      };
-    } catch {
-      return { ok: false, error: unavailable };
-    }
-  }
-  async confirm(
-    id: string,
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
-  ): Promise<OmniRouteComboRemovalResult> {
-    if (
-      !validId(id) ||
-      !/^settings-combo-remove:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const claimed = claimConfirmation(
-      this.confirmations,
-      sessionId,
-      confirmationId,
-      approve,
-      {
-        tool: "omniroute_combo_remove",
-        arg: { name: "id", value: id },
-        stale: "Deze bevestiging staat niet meer open. Kies de combo opnieuw.",
-        expired: "Bevestiging verlopen. Kies de combo opnieuw.",
-      },
-    );
-    if ("reply" in claimed) return claimed.reply;
-    const action = claimed.action;
+  async remove(id: string): Promise<OmniRouteComboRemovalResult> {
+    if (!validId(id)) throw new ValidationError(["Ongeldige combo."]);
     try {
       return await this.barrier.run(async (operation) => {
-        let before: { row: Row; name: string };
         try {
-          before = await this.current(id);
-          if (hash(before.row) !== action.args.revision)
-            return {
-              ok: false,
-              error: "De combo is ondertussen gewijzigd. Kies haar opnieuw.",
-            };
+          const route = this.routing.verifyForManagement();
+          if (!route.ready || !route.policyVerified || !route.freeOnly)
+            throw new Error(unavailable);
+          await this.current(id);
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool: "omniroute_combo_remove",
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "before_execute",
-            arguments: { id, revision: action.args.revision },
+            arguments: { id },
           });
           operation.block("policy_change");
         } catch {
@@ -159,9 +84,9 @@ export class OmniRouteComboRemoval {
           try {
             this.audit.record({
               sessionId: "settings",
-              tool: action.tool,
+              tool: "omniroute_combo_remove",
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
               arguments: { id },
               result: { ok: false },
@@ -194,9 +119,9 @@ export class OmniRouteComboRemoval {
         try {
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool: "omniroute_combo_remove",
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "after_execute",
             arguments: { id },
             result: { ok: true },

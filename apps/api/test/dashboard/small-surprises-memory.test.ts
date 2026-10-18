@@ -4,6 +4,7 @@ import path from "node:path";
 import type { MemoryListResponse, MemoryRecord } from "@nova/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SmallSurprisesService } from "../../src/dashboard/small-surprises.service.js";
+import { dbStat, stateDoc, stateText } from "../helpers/nova-db.js";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -114,11 +115,11 @@ describe("explicit remembered own birthdays", () => {
         },
       });
       const progress = path.join(test.dir, "small-surprises-progress.json");
-      expect(JSON.parse(fs.readFileSync(progress, "utf8"))).toEqual({
+      expect(stateDoc(progress)).toEqual({
         completedDay: "2026-10-13",
       });
-      expect(fs.statSync(progress).mode & 0o777).toBe(0o600);
-      expect(fs.readFileSync(progress, "utf8")).not.toContain(text);
+      expect(dbStat(progress).mode & 0o777).toBe(0o600);
+      expect(stateText(progress)).not.toContain(text);
       await test.service.checkSchedule(now);
       expect(test.list).toHaveBeenCalledOnce();
       expect(test.record).toHaveBeenCalledOnce();

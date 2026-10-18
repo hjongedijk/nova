@@ -1,6 +1,4 @@
-import { writePrivateJson } from "../settings/history-file.js";
-import fs from "node:fs";
-import path from "node:path";
+import { readJsonState, writeJsonState } from "../core/db/json-state.js";
 import type { FeedEvent } from "@nova/contracts";
 
 const MAX_WORKFLOW_NOTICES = 200;
@@ -17,19 +15,15 @@ export class WorkflowFeedJournal {
     if (this.loaded) return this.entries;
     let entries: unknown = [];
     try {
-      const stats = fs.statSync(this.file);
-      if (!stats.isFile() || stats.size > 1024 * 1024)
-        throw new Error("Invalid workflow feed history");
-      const parsed = JSON.parse(fs.readFileSync(this.file, "utf8")) as {
-        version?: unknown;
-        entries?: unknown;
-      };
-      if (parsed.version !== 1)
-        throw new Error("Invalid workflow feed history");
-      entries = parsed.entries;
+      const parsed = readJsonState(this.file) as
+        { version?: unknown; entries?: unknown } | undefined;
+      if (parsed !== undefined) {
+        if (!parsed || typeof parsed !== "object" || parsed.version !== 1)
+          throw new Error("Invalid workflow feed history");
+        entries = parsed.entries;
+      }
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-        throw new Error("Workflow feed history unavailable", { cause: error });
+      throw new Error("Workflow feed history unavailable", { cause: error });
     }
     if (
       !Array.isArray(entries) ||
@@ -66,21 +60,6 @@ export class WorkflowFeedJournal {
       new Set(entries.map((row) => row.event.seq)).size !== entries.length
     )
       throw new Error("Workflow feed history unavailable");
-    // Also settle an earlier rename whose directory sync failed before acknowledgement.
-    if (fs.existsSync(this.file)) {
-      const descriptor = fs.openSync(this.file, "r");
-      try {
-        fs.fsyncSync(descriptor);
-      } finally {
-        fs.closeSync(descriptor);
-      }
-      const directory = fs.openSync(path.dirname(this.file), "r");
-      try {
-        fs.fsyncSync(directory);
-      } finally {
-        fs.closeSync(directory);
-      }
-    }
     this.entries = entries as WorkflowNotice[];
     this.loaded = true;
     return this.entries;
@@ -110,7 +89,7 @@ export class WorkflowFeedJournal {
       next.splice(oldest, 1);
     }
     try {
-      writePrivateJson(this.file, { version: 1, entries: next }, "dir");
+      writeJsonState(this.file, { version: 1, entries: next }, "dir");
       this.entries = next;
     } catch {
       this.loaded = false;

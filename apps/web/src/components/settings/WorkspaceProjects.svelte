@@ -1,17 +1,15 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onMount } from "svelte";
   import type {
     WorkspaceProjectsReport,
     WorkspaceProjectSelectionHistory,
-    WorkspaceProjectSelectionPrepared,
   } from "@nova/contracts";
   import {
     createWorkspaceProject,
     getWorkspaceProjects,
     selectWorkspaceProject,
     getWorkspaceProjectSelectionHistory,
-    prepareWorkspaceProjectSelectionRollback,
-    confirmWorkspaceProjectSelectionRollback,
+    rollbackWorkspaceProjectSelection,
   } from "#lib/api/settings.ts";
   import { fail, say } from "./state.svelte.ts";
 
@@ -20,10 +18,6 @@
   let busy = $state(false);
   let history = $state<WorkspaceProjectSelectionHistory | null>(null);
   let showHistory = $state(false);
-  let pending = $state<WorkspaceProjectSelectionPrepared | null>(null);
-  let expired = $state(false);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  onDestroy(() => clearTimeout(timer));
 
   async function load() {
     busy = true;
@@ -84,63 +78,29 @@
     }
   }
 
-  async function prepareRollback(id: string) {
+  async function rollback(id: string) {
     busy = true;
     try {
-      const result = await prepareWorkspaceProjectSelectionRollback(id);
-      if (!result.ok || !result.action) {
-        fail(
-          new Error(
-            result.error || "Projectherstel kon niet worden voorbereid.",
-          ),
-        );
-        return;
-      }
-      pending = result;
-      expired = false;
-      clearTimeout(timer);
-      timer = setTimeout(
-        () => (expired = true),
-        Math.max(0, result.action.expiresAt - Date.now()),
-      );
-    } catch (error) {
-      fail(error);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function confirmRollback(approve: boolean) {
-    const action = pending?.action;
-    if (!action) return;
-    busy = true;
-    try {
-      const result = await confirmWorkspaceProjectSelectionRollback(
-        action.sessionId,
-        action.confirmationId,
-        approve,
-      );
-      if (!result.ok || (approve && result.verified !== true)) {
+      const result = await rollbackWorkspaceProjectSelection(id);
+      if (!result.ok || result.verified !== true) {
         fail(
           new Error(
             result.error || "Projectherstel kon niet worden gecontroleerd.",
           ),
         );
-      } else if (approve) {
-        report = await getWorkspaceProjects();
-        history = await getWorkspaceProjectSelectionHistory();
-        say(
-          result.historyWarning ||
-            result.auditWarning ||
-            "Projectkeuze hersteld en gecontroleerd.",
-          result.historyWarning || result.auditWarning ? "bad" : "ok",
-        );
-      } else say("Projectherstel geannuleerd.", "ok");
+        return;
+      }
+      report = await getWorkspaceProjects();
+      history = await getWorkspaceProjectSelectionHistory();
+      say(
+        result.historyWarning ||
+          result.auditWarning ||
+          "Projectkeuze hersteld en gecontroleerd.",
+        result.historyWarning || result.auditWarning ? "bad" : "ok",
+      );
     } catch (error) {
       fail(error);
     } finally {
-      pending = null;
-      clearTimeout(timer);
       busy = false;
     }
   }
@@ -152,8 +112,7 @@
   <h2 id="workspaceProjectsHeading">Codeprojecten</h2>
   <p>
     Projectmappen staan lokaal in nova-data/workspace. De codeweergave toont de
-    bestanden en testuitvoer; NOVA kan wijzigingen alleen na jouw bevestiging
-    toepassen.
+    bestanden en testuitvoer.
   </p>
   <form
     onsubmit={(event) => {
@@ -173,47 +132,9 @@
     <button type="submit" disabled={busy || !name.trim()}>Aanmaken</button>
   </form>
   <button type="button" onclick={load} disabled={busy}>Vernieuwen</button>
-  <button type="button" onclick={toggleHistory} disabled={busy || !!pending}
+  <button type="button" onclick={toggleHistory} disabled={busy}
     >{showHistory ? "Geschiedenis verbergen" : "Projectgeschiedenis"}</button
   >
-  {#if pending?.action}
-    <div role="group" aria-label="Projectkeuze terugzetten bevestigen">
-      <h3>
-        {pending.toName === "Project verwijderen"
-          ? "Nieuw project verwijderen?"
-          : "Open project terugzetten?"}
-      </h3>
-      <p>
-        {#if pending.toName === "Project verwijderen"}
-          Dit verwijdert alleen het nieuw aangemaakte project als de map nog
-          leeg is. Projectbestanden blijven behouden.
-        {:else}
-          Dit verandert het project voor volgende code-opdrachten: {pending.fromName}
-          → {pending.toName}.
-        {/if}
-      </p>
-      <p>
-        Vereist DANGEROUS-bevestiging. Deze toestemming geldt één keer binnen 60
-        seconden.
-      </p>
-      {#if expired}<p role="status">
-          Bevestiging verlopen. Start herstel opnieuw.
-        </p>{/if}
-      <button
-        type="button"
-        onclick={() => confirmRollback(true)}
-        disabled={busy || expired}
-        >{pending.toName === "Project verwijderen"
-          ? "Leeg project verwijderen"
-          : "Projectkeuze terugzetten"}</button
-      >
-      <button
-        type="button"
-        onclick={() => confirmRollback(false)}
-        disabled={busy}>Annuleren</button
-      >
-    </div>
-  {/if}
   {#if showHistory}
     {#if history === null}<p>Projectgeschiedenis laden…</p>
     {:else if history.revisions.length === 0}<p>
@@ -238,8 +159,8 @@
             {#if index === 0 && report?.activeId === revision.afterId}
               <button
                 type="button"
-                onclick={() => void prepareRollback(revision.id)}
-                disabled={busy || !!pending}>Zet terug</button
+                onclick={() => void rollback(revision.id)}
+                disabled={busy}>Zet terug</button
               >
             {/if}
           </li>

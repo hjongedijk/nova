@@ -13,6 +13,7 @@ import { NovaConfig } from "../core/config/nova-config.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingService } from "../routing/routing.service.js";
 import type {
+  CorrectionOptions,
   MemoryWriteOutcome,
   SemanticBackend,
 } from "./semantic/backend.js";
@@ -186,14 +187,18 @@ export class SemanticMemoryService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Replace one record's text (the old text stays as history). */
-  async correct(id: string, text: unknown): Promise<MemoryWriteOutcome> {
+  async correct(
+    id: string,
+    text: unknown,
+    options?: CorrectionOptions,
+  ): Promise<MemoryWriteOutcome> {
     const backend = this.backend;
     if (!backend.correct)
       return {
         ok: false,
         error: "Long-term memory is not configured",
       };
-    return backend.correct(id, text);
+    return backend.correct(id, text, options);
   }
 
   /**

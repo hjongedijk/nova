@@ -60,11 +60,6 @@ describe("model ids with an @ prefix", () => {
               "https://developers.cloudflare.com/workers-ai/platform/pricing/",
           },
         ],
-        acknowledgeBillingDisabled: true,
-        acknowledgeHardStop: true,
-        acknowledgeTerms: true,
-        acknowledgeAllClients: true,
-        acknowledgeQuotaRefresh: true,
       },
       [account],
       [

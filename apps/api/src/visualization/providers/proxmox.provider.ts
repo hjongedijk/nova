@@ -188,7 +188,7 @@ export function proxmoxTopology(snapshot: ProxmoxSnapshot): ProviderScene {
     notes: [
       "Bron: de Proxmox-API; alleen nodes, gasten en opslag die NOVA mag zien.",
       "Kleur toont de status; in de warmtemodus de CPU-belasting. Gestopte gasten hebben geen waarde.",
-      "Starten of stoppen gaat via NOVA en vraagt altijd bevestiging.",
+      "Starten of stoppen gaat via NOVA.",
     ],
     actions: stopped.slice(0, 6).map((g) => ({
       id: `start-${g.vmid}`,

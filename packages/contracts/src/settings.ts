@@ -1,4 +1,4 @@
-import type { CommunicationPreference, PendingConfirmation } from "./chat.js";
+import type { CommunicationPreference } from "./chat.js";
 import type { Risk, ToolInfo } from "./tools.js";
 import type { ModelRolePreferences } from "./model-roles.js";
 
@@ -380,7 +380,6 @@ export interface SettingsOverview {
   maxPages: MaxPages;
   abilities: Ability[];
   tools: ToolInfo[];
-  pinRequired: boolean;
 }
 
 /** User-editable identity cues for the conversation role only. */
@@ -584,14 +583,8 @@ export interface SettingsImportSummary {
   removedWidgets: number;
   missingSecrets: MissingSecret[];
 }
-export interface SettingsImportPrepared {
-  ok: true;
-  summary: SettingsImportSummary;
-  action: PendingConfirmation;
-}
 export type SettingsImportResult =
-  | (ImportResult & { cancelled?: true; auditWarning?: string })
-  | { ok: false; error: string };
+  (ImportResult & { auditWarning?: string }) | { ok: false; error: string };
 
 /* ---------- wallpaper on the Windows PC ---------- */
 
@@ -665,6 +658,9 @@ export interface WindowsAgentStatus {
   paused: boolean | null;
   mode: HelperMode | null;
   display: number | null;
+  permissions?: { view: boolean; control: boolean; browser: boolean };
+  elevated?: boolean;
+  runElevated?: boolean;
   error?: string;
 }
 
@@ -870,14 +866,6 @@ export interface WorkspaceProjectSelectionHistory {
   truncated: boolean;
 }
 
-export interface WorkspaceProjectSelectionPrepared {
-  ok: boolean;
-  error?: string;
-  fromName?: string;
-  toName?: string;
-  action?: PendingConfirmation;
-}
-
 export interface WorkspaceProjectSelectionResult {
   ok: boolean;
   verified?: boolean;
@@ -960,13 +948,6 @@ export interface StackControlStatus {
   available: boolean;
   reason?: string;
   services: StackServiceStatus[];
-}
-export interface StackRestartPrepared {
-  ok: boolean;
-  service?: StackServiceId;
-  label?: string;
-  action?: PendingConfirmation;
-  error?: string;
 }
 export interface StackRestartResult {
   ok: boolean;
@@ -1159,4 +1140,23 @@ export interface ToolUsageReport {
       unknown: number;
     };
   }[];
+}
+
+/** Operator preferences saved in Settings; the environment variable stays the fallback default. */
+export interface RuntimeSettingField {
+  key: string;
+  label: string;
+  kind: "text" | "url" | "secret" | "boolean" | "number" | "choice";
+  choices?: string[];
+  hint?: string;
+  /** "settings" when saved here, "environment" when the .env default applies, "default" otherwise. */
+  source: "settings" | "environment" | "default";
+  /** Never set for secrets. */
+  value?: string | boolean;
+  configured: boolean;
+}
+export interface RuntimeSettingGroup {
+  id: string;
+  label: string;
+  fields: RuntimeSettingField[];
 }

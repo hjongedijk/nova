@@ -39,12 +39,6 @@
   }
 
   async function rollback(revision: ToolSwitchRevision) {
-    if (
-      !window.confirm(
-        "Herstel deze aan/uit-wijziging? Andere latere toolinstellingen blijven behouden.",
-      )
-    )
-      return;
     busy = true;
     message = "";
     try {

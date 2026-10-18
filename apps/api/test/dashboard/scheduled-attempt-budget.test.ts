@@ -2,6 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  dbStat,
+  failStateWrites,
+  seedState,
+  stateDoc,
+  stateExists,
+} from "../helpers/nova-db.js";
 import { ScheduledAttemptBudget } from "../../src/dashboard/scheduled-attempt-budget.js";
 
 const directories: string[] = [];
@@ -19,27 +26,27 @@ function fixture() {
   const file = path.join(dir, "attempts.json");
   return { dir, file, budget: new ScheduledAttemptBudget(file) };
 }
-const unavailable = () =>
-  new Error("private raw storage diagnostic /secret/path");
 
 describe("durable scheduled attempt budget", () => {
   it("reserves privately before work and enforces backoff across new instances", () => {
     const { file, budget, dir } = fixture();
     expect(budget.reserve(day, now)).toBe(true);
-    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({
+    expect(stateDoc(file)).toEqual({
       version: 1,
       period: day,
       attempts: 1,
       lastAttemptAt: now,
     });
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    expect(dbStat(file).mode & 0o777).toBe(0o600);
     expect(new ScheduledAttemptBudget(file).reserve(day, now + retry - 1)).toBe(
       false,
     );
     expect(new ScheduledAttemptBudget(file).reserve(day, now + retry)).toBe(
       true,
     );
-    expect(fs.readdirSync(dir)).toEqual(["attempts.json"]);
+    expect(
+      fs.readdirSync(dir).filter((name) => name === "attempts.json"),
+    ).toEqual([]);
   });
 
   it("caps failures at three across restarts and resets only for a newer period", () => {
@@ -57,7 +64,7 @@ describe("durable scheduled attempt budget", () => {
         now + 24 * 60 * 60_000,
       ),
     ).toBe(true);
-    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toMatchObject({
+    expect(stateDoc(file)).toMatchObject({
       period: "2026-10-15",
       attempts: 1,
     });
@@ -66,11 +73,11 @@ describe("durable scheduled attempt budget", () => {
   it("cannot reset the budget with an older period or a backwards clock", () => {
     const { budget, file } = fixture();
     expect(budget.reserve(day, now)).toBe(true);
-    const saved = fs.readFileSync(file, "utf8");
+    const saved = stateDoc(file);
     expect(budget.reserve("2026-10-13", now + retry)).toBe(false);
     expect(budget.reserve("2026-10-15", now - 1)).toBe(false);
     expect(budget.reserve(day, now - 1)).toBe(false);
-    expect(fs.readFileSync(file, "utf8")).toBe(saved);
+    expect(stateDoc(file)).toEqual(saved);
   });
 
   it.each([
@@ -87,166 +94,77 @@ describe("durable scheduled attempt budget", () => {
     expect(() => budget.reserve(period as string, timestamp as number)).toThrow(
       "Invalid scheduled attempt reservation",
     );
-    expect(fs.existsSync(file)).toBe(false);
+    expect(stateExists(file)).toBe(false);
   });
 
   it.each([
     "{broken",
-    "null",
-    "[]",
-    "{}",
-    "x".repeat(2049),
-    JSON.stringify({
+    null,
+    [],
+    {},
+    {
       version: 1,
       period: "2026-02-30",
       attempts: 1,
       lastAttemptAt: now,
-    }),
-    JSON.stringify({
-      version: 1,
-      period: day,
-      attempts: 4,
-      lastAttemptAt: now,
-    }),
-    JSON.stringify({
-      version: 1,
-      period: day,
-      attempts: 0,
-      lastAttemptAt: now,
-    }),
-    JSON.stringify({ version: 1, period: day, attempts: 1, lastAttemptAt: -1 }),
-    JSON.stringify({
-      version: 2,
-      period: day,
-      attempts: 1,
-      lastAttemptAt: now,
-    }),
-    JSON.stringify({
+    },
+    { version: 1, period: day, attempts: 4, lastAttemptAt: now },
+    { version: 1, period: day, attempts: 0, lastAttemptAt: now },
+    { version: 1, period: day, attempts: 1, lastAttemptAt: -1 },
+    { version: 2, period: day, attempts: 1, lastAttemptAt: now },
+    {
       version: 1,
       period: day,
       attempts: 1,
       lastAttemptAt: now,
       content: "private",
-    }),
-  ])("fails closed on malformed or oversized state case %#", (content) => {
+    },
+  ])("fails closed on malformed stored state case %#", (content) => {
     const { budget, file } = fixture();
-    fs.writeFileSync(file, content);
+    seedState(file, content);
     expect(() => budget.reserve(day, now)).toThrow(
       /^Scheduled attempt budget unavailable$/,
     );
-    expect(fs.readFileSync(file, "utf8")).toBe(content);
+    expect(stateDoc(file)).toEqual(content);
   });
 
-  it.each(["directory", "symlink"])(
-    "rejects a %s instead of treating it as missing",
-    (kind) => {
-      const { budget, file, dir } = fixture();
-      if (kind === "directory") fs.mkdirSync(file);
-      else {
-        const target = path.join(dir, "missing-target");
-        fs.symlinkSync(target, file);
-      }
-      expect(() => budget.reserve(day, now)).toThrow(
-        /^Scheduled attempt budget unavailable$/,
-      );
-    },
-  );
-
-  it("fails closed on unreadable persisted state without exposing diagnostics", () => {
+  it("does not authorize work when the reservation cannot be stored, then recovers", () => {
     const { budget, file } = fixture();
-    budget.reserve(day, now);
-    vi.spyOn(fs, "readSync").mockImplementation(() => {
-      throw unavailable();
-    });
-    expect(() =>
-      new ScheduledAttemptBudget(file).reserve(day, now + retry),
-    ).toThrow(/^Scheduled attempt budget unavailable$/);
+    const failure = failStateWrites(
+      file,
+      "private raw diagnostic /secret/path",
+    );
+    expect(() => budget.reserve(day, now)).toThrow(
+      /^Scheduled attempt budget unavailable$/,
+    );
+    failure.mockRestore();
+    expect(stateExists(file)).toBe(false);
+    expect(budget.reserve(day, now)).toBe(true);
   });
 
-  it.each(["open", "write", "file-sync", "rename"])(
-    "does not authorize work after %s failure and removes temporary files",
-    (failure) => {
-      const { budget, file, dir } = fixture();
-      if (failure === "open")
-        vi.spyOn(fs, "openSync").mockImplementation(() => {
-          throw unavailable();
-        });
-      if (failure === "write")
-        vi.spyOn(fs, "writeFileSync").mockImplementation(() => {
-          throw unavailable();
-        });
-      if (failure === "file-sync")
-        vi.spyOn(fs, "fsyncSync").mockImplementation(() => {
-          throw unavailable();
-        });
-      if (failure === "rename")
-        vi.spyOn(fs, "renameSync").mockImplementation(() => {
-          throw unavailable();
-        });
-      expect(() => budget.reserve(day, now)).toThrow(
-        /^Scheduled attempt budget unavailable$/,
-      );
-      vi.restoreAllMocks();
-      expect(fs.existsSync(file)).toBe(false);
-      expect(fs.readdirSync(dir)).toEqual([]);
-      expect(budget.reserve(day, now)).toBe(true);
-    },
-  );
-
-  it("settles uncertain directory-sync acknowledgement before allowing another attempt", () => {
+  it("imports a legacy attempts file once and keeps its budget", () => {
     const { budget, file, dir } = fixture();
-    const sync = fs.fsyncSync.bind(fs);
-    let calls = 0;
-    vi.spyOn(fs, "fsyncSync").mockImplementation((descriptor) => {
-      if (++calls === 2) throw unavailable();
-      sync(descriptor);
-    });
-    expect(() => budget.reserve(day, now)).toThrow(
-      /^Scheduled attempt budget unavailable$/,
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        period: day,
+        attempts: 2,
+        lastAttemptAt: now,
+      }),
     );
-    vi.restoreAllMocks();
-    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toMatchObject({
-      attempts: 1,
-    });
-    expect(budget.reserve(day, now)).toBe(false);
-    expect(new ScheduledAttemptBudget(file).reserve(day, now + retry)).toBe(
-      true,
-    );
-    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toMatchObject({
-      attempts: 2,
-    });
-    expect(fs.readdirSync(dir)).toEqual(["attempts.json"]);
-  });
-
-  it("rereads a rename that succeeded before throwing instead of replaying its slot", () => {
-    const { budget, file } = fixture();
-    const rename = fs.renameSync.bind(fs);
-    vi.spyOn(fs, "renameSync").mockImplementation((source, destination) => {
-      rename(source, destination);
-      throw unavailable();
-    });
-    expect(() => budget.reserve(day, now)).toThrow(
-      /^Scheduled attempt budget unavailable$/,
-    );
-    vi.restoreAllMocks();
     expect(budget.reserve(day, now + retry - 1)).toBe(false);
     expect(budget.reserve(day, now + retry)).toBe(true);
-    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toMatchObject({
-      attempts: 2,
-    });
+    expect(stateDoc(file)).toMatchObject({ attempts: 3 });
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.existsSync(`${file}.migrated`)).toBe(true);
+    expect(fs.readdirSync(dir)).toContain("nova.db");
   });
 
-  it("does not authorize work while synchronization of existing state fails", () => {
+  it("sets a corrupt legacy attempts file aside instead of crashing", () => {
     const { budget, file } = fixture();
-    budget.reserve(day, now);
-    const saved = fs.readFileSync(file, "utf8");
-    vi.spyOn(fs, "fsyncSync").mockImplementation(() => {
-      throw unavailable();
-    });
-    expect(() => budget.reserve(day, now + retry)).toThrow(
-      /^Scheduled attempt budget unavailable$/,
-    );
-    vi.restoreAllMocks();
-    expect(fs.readFileSync(file, "utf8")).toBe(saved);
+    fs.writeFileSync(file, "{broken");
+    expect(budget.reserve(day, now)).toBe(true);
+    expect(fs.readFileSync(`${file}.corrupt`, "utf8")).toBe("{broken");
   });
 });

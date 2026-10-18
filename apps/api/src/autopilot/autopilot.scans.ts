@@ -3,6 +3,7 @@ import type { AgentRun } from "../agent/agent.types.js";
 import type { Objective } from "../objectives/objectives.types.js";
 import { calendarEventStartInstant } from "../planning/calendar-day.js";
 import { localDay, localMinutes } from "../objectives/objectives.time.js";
+import { proposalText, type Candidate } from "../apis/lan-discovery.js";
 import { T } from "./autopilot.templates.js";
 import type {
   AutopilotSettings,
@@ -45,6 +46,11 @@ export interface ScanPorts {
     configured: boolean;
     health(): { stale: boolean; online: boolean };
     sync(force?: boolean): Promise<unknown>;
+  };
+  /** Read-only LAN discovery: scans at most daily and lists what is worth proposing. */
+  discovery?: {
+    refresh(): Promise<void>;
+    proposals(): Candidate[];
   };
   agent?: { list(): AgentRun[] };
   objectives?: { list(): Objective[] };
@@ -386,6 +392,25 @@ export async function scanToday(ctx: ScanContext): Promise<Finding[]> {
   ];
 }
 
+/** One-line proposals for services found on the LAN ("Ik vond Home Assistant op ... - verbinden?"). */
+async function scanDiscovery(ctx: ScanContext): Promise<Finding[]> {
+  const discovery = ctx.ports.discovery;
+  if (!discovery) return [];
+  await discovery.refresh();
+  return discovery
+    .proposals()
+    .slice(0, 3)
+    .map((c) =>
+      finding(
+        "discovery",
+        "info",
+        `discovery:${c.id}`,
+        7 * 24 * 60,
+        proposalText(c),
+      ),
+    );
+}
+
 export async function runScan(
   name: ScanName,
   ctx: ScanContext,
@@ -401,5 +426,7 @@ export async function runScan(
       return scanNudges(ctx);
     case "today":
       return scanToday(ctx);
+    case "discovery":
+      return scanDiscovery(ctx);
   }
 }

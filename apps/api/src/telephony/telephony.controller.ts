@@ -12,11 +12,8 @@ import {
   Put,
   Req,
   Res,
-  UseGuards,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { AppAccessPublic } from "../access/access-public.js";
-import { SettingsGuard } from "../settings/settings.guard.js";
 import { TelephonyService } from "./telephony.service.js";
 import { TelephonyError } from "./telephony.types.js";
 
@@ -43,7 +40,6 @@ export class TelephonyController {
   constructor(private readonly telephony: TelephonyService) {}
 
   @Get("status")
-  @UseGuards(SettingsGuard)
   async status() {
     return {
       ...(await this.telephony.status()),
@@ -52,7 +48,6 @@ export class TelephonyController {
   }
 
   @Put("enabled")
-  @UseGuards(SettingsGuard)
   async enabled(@Body() body: unknown) {
     const { enabled } = obj(body);
     if (typeof enabled !== "boolean")
@@ -62,7 +57,6 @@ export class TelephonyController {
   }
 
   @Put("settings")
-  @UseGuards(SettingsGuard)
   async settings(@Body() body: unknown) {
     const input = obj(body);
     guard(() => {
@@ -81,7 +75,6 @@ export class TelephonyController {
   }
 
   @Put("trunk")
-  @UseGuards(SettingsGuard)
   async trunk(@Body() body: unknown) {
     const input = obj(body);
     guard(() =>
@@ -100,7 +93,6 @@ export class TelephonyController {
   }
 
   @Put("contacts")
-  @UseGuards(SettingsGuard)
   async contacts(@Body() body: unknown) {
     const input = obj(body);
     guard(() => this.telephony.setContacts(input.contacts));
@@ -108,7 +100,6 @@ export class TelephonyController {
   }
 
   @Delete("trunk")
-  @UseGuards(SettingsGuard)
   async removeTrunk() {
     guard(() => this.telephony.setTrunk(null));
     return this.status();
@@ -116,7 +107,6 @@ export class TelephonyController {
 
   @Post("extensions")
   @HttpCode(201)
-  @UseGuards(SettingsGuard)
   addExtension(@Body() body: unknown) {
     const input = obj(body);
     const kind = input.kind === "doorbell" ? "doorbell" : "phone";
@@ -129,7 +119,6 @@ export class TelephonyController {
   }
 
   @Delete("extensions/:id")
-  @UseGuards(SettingsGuard)
   removeExtension(@Param("id") id: string) {
     if (!guard(() => this.telephony.removeExtension(id)))
       throw new NotFoundException("Onbekend toestel.");
@@ -138,7 +127,6 @@ export class TelephonyController {
 
   /** The file itself contains the SIP password: PIN-protected, never cached. */
   @Get("extensions/:id/linphone.xml")
-  @UseGuards(SettingsGuard)
   @Header("Content-Type", "application/xml; charset=utf-8")
   @Header("Cache-Control", "no-store")
   linphone(@Param("id") id: string) {
@@ -147,7 +135,6 @@ export class TelephonyController {
 
   @Post("extensions/:id/provisioning-link")
   @HttpCode(200)
-  @UseGuards(SettingsGuard)
   link(@Param("id") id: string, @Req() request: Request) {
     const { token, expiresAt } = guard(() =>
       this.telephony.createProvisioningLink(id),
@@ -161,7 +148,6 @@ export class TelephonyController {
 
   /** Called by the Linphone app. The unguessable one-time token is the credential. */
   @Get("provisioning/:token")
-  @AppAccessPublic()
   provisioning(@Param("token") token: string, @Res() response: Response) {
     const now = Date.now();
     if (now - this.windowStart > 60_000) {

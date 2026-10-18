@@ -12,7 +12,7 @@ import { OmniRouteStt, STT_PORT } from "./stt.js";
 /**
  * Real spoken conversations: speech-to-text through OmniRoute, NOVA's chat pipeline, text-to-speech,
  * barge-in and turn-taking, carried over the phone by Asterisk AudioSocket. Off by default.
- * See docs/conversations.md.
+ * See docs/integrations.md#telephony-and-conversations.
  */
 @Module({
   imports: [

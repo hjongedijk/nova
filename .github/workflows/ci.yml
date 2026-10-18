@@ -17,6 +17,7 @@ jobs:
       - run: npm ci
       - run: npm run format:check
       - run: npm run lint
+      - run: npm run test:version
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:model-evaluation

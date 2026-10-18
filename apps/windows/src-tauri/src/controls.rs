@@ -25,17 +25,15 @@ fn register(app: &AppHandle, hotkeys: &BTreeMap<String, String>) -> Result<Vec<S
     let mut warnings = Vec::new();
     let emergency: Shortcut = "Ctrl+Alt+Shift+K".parse().expect("fixed emergency shortcut");
     if ids.contains(&emergency.id()) {
-        return Err("Ctrl+Alt+Shift+K is gereserveerd om pc-bediening te stoppen".into());
+        return Err("Ctrl+Alt+Shift+K is gereserveerd voor de noodstop".into());
     }
     app.state::<Shared>().lock().emergency_ready = false;
-    crate::automation::cancel(app);
-    crate::automation::disarm(app);
     app.global_shortcut().unregister_all().map_err(|e| e.to_string())?;
     if app
         .global_shortcut()
         .on_shortcut(emergency, |app, _, event| {
             if event.state == ShortcutState::Pressed {
-                // Disarm immediately; GUI changes can follow on the main thread.
+                // Stop immediately; GUI changes can follow on the main thread.
                 stop(app);
             }
         })
@@ -125,7 +123,6 @@ pub fn toggle_pause(app: &AppHandle) {
     };
     if paused {
         crate::automation::cancel(app);
-        crate::automation::disarm(app);
     }
     app::handle_args(
         app,
@@ -140,7 +137,6 @@ pub fn toggle_pause(app: &AppHandle) {
 pub fn stop(app: &AppHandle) {
     app.state::<Shared>().lock().paused = true;
     crate::automation::cancel(app);
-    crate::automation::disarm(app);
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
         app::handle_args(

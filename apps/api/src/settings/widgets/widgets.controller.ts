@@ -1,9 +1,7 @@
 import {
   Body,
   Controller,
-  ForbiddenException,
   Get,
-  Headers,
   HttpCode,
   NotFoundException,
   Param,
@@ -52,9 +50,7 @@ export class WidgetsController {
   async press(
     @Param("id") id: string,
     @Body() body: { index?: unknown } | undefined,
-    @Headers("x-nova-admin") admin: string | undefined,
   ): Promise<ButtonPress> {
-    if (admin !== "1") throw new ForbiddenException("Alleen via het scherm.");
     const settings = this.settings.get();
     const widget = (settings.widgets as unknown as Widget[]).find(
       (item) => item.id === id && item.enabled,

@@ -6,12 +6,9 @@
     cancelAutonomyTask,
     cancelAgentRun,
     getAgentRuns,
-    getAutonomyLevel,
     getAutonomyTasks,
     respondAgentRun,
-    setAutonomyLevel,
     type AgentRunView,
-    type AutonomyLevel,
     type AutonomyTask,
   } from "#lib/api/autonomy.ts";
   import { fail, say } from "./state.svelte.ts";
@@ -19,32 +16,13 @@
   let tasks = $state<AutonomyTask[]>([]);
   let loaded = $state(false);
   let busy = $state(false);
-  let level = $state<AutonomyLevel>("balanced");
   let runs = $state<AgentRunView[]>([]);
   let answer = $state<Record<string, string>>({});
-
-  const LEVELS: { id: AutonomyLevel; name: string; text: string }[] = [
-    {
-      id: "careful",
-      name: "Voorzichtig",
-      text: "NOVA vraagt bij elke actie die iets verandert.",
-    },
-    {
-      id: "balanced",
-      name: "Gebalanceerd",
-      text: "Gewone handelingen (licht, muziek, agenda, bellen naar je contacten) doet NOVA zelf.",
-    },
-    {
-      id: "independent",
-      name: "Zelfstandig",
-      text: "Ook scripts, agenda verplaatsen en lijsten legen zonder te vragen. Gevaarlijke acties blijven altijd om toestemming vragen.",
-    },
-  ];
 
   const STATUS: Record<string, string> = {
     scheduled: "gepland",
     running: "bezig",
-    waiting_approval: "wacht op goedkeuring",
+    waiting_approval: "onderbroken taak uit eerdere versie",
     completed: "klaar",
     failed: "mislukt",
     cancelled: "geannuleerd",
@@ -56,7 +34,6 @@
     try {
       tasks = (await getAutonomyTasks()).tasks ?? [];
       runs = (await getAgentRuns()).runs ?? [];
-      level = (await getAutonomyLevel()).level;
       loaded = true;
     } catch (cause) {
       fail(cause);
@@ -83,29 +60,9 @@
 </script>
 
 <section class="autonomy" aria-label="Zelfstandigheid">
-  <h2>Hoe zelfstandig is NOVA?</h2>
-  <div class="levels" role="radiogroup" aria-label="Zelfstandigheid">
-    {#each LEVELS as option (option.id)}
-      <label class:on={level === option.id}>
-        <input
-          type="radio"
-          name="autonomy-level"
-          value={option.id}
-          checked={level === option.id}
-          disabled={busy}
-          onchange={() =>
-            act(async () => {
-              level = (await setAutonomyLevel(option.id)).level;
-            }, "Zelfstandigheid opgeslagen.")}
-        />
-        <strong>{option.name}</strong>
-        <small>{option.text}</small>
-      </label>
-    {/each}
-  </div>
   <p class="hint">
-    Tekst van websites, mail of documenten zet NOVA drie minuten lang op
-    voorzichtig, ongeacht deze keuze.
+    NOVA draait volledig zelfstandig: acties worden direct uitgevoerd en
+    achteraf gemeld. Zeg het als iets niet klopt, dan leert NOVA ervan.
   </p>
 
   <h2>Opdrachten op de achtergrond</h2>
@@ -126,7 +83,7 @@
                   act(
                     () => respondAgentRun(run.id, { approve: true }),
                     "Goedgekeurd.",
-                  )}>Goedkeuren</Button
+                  )}>Hervatten</Button
               >
               <Button
                 type="button"
@@ -168,11 +125,8 @@
 
   <h2>Zelfstandige taken</h2>
   <p class="hint">
-    Taken die NOVA zelf uitvoert, ook zonder nieuw bericht: eenmalig, herhalend
-    of als er iets gebeurt. Risicovolle stappen wachten hier op jouw
-    goedkeuring; gevaarlijke acties doet NOVA nooit zelf. Vraag NOVA in het
-    gesprek om een taak te maken, bijvoorbeeld “herinner me elke maandag aan de
-    vuilnisbakken”.
+    NOVA voert taken zelfstandig uit: eenmalig, herhalend of na een gebeurtenis.
+    Vraag bijvoorbeeld: “herinner me elke maandag aan de vuilnisbakken”.
   </p>
   {#if tasks.length}
     <ul class="tasks">
@@ -193,14 +147,14 @@
             >{/if}
           {#if task.waitingForApproval.length}
             <p role="alert">
-              Wacht op goedkeuring voor: {task.waitingForApproval.join(", ")}
+              Oude onderbroken stappen: {task.waitingForApproval.join(", ")}
             </p>
             <Button
               type="button"
               disabled={busy}
               onclick={() =>
-                act(() => approveAutonomyTask(task.id), "Stap goedgekeurd.")}
-              >Goedkeuren</Button
+                act(() => approveAutonomyTask(task.id), "Taak hervat.")}
+              >Hervatten</Button
             >
           {/if}
           <Button
@@ -220,22 +174,6 @@
 <style>
   .autonomy {
     margin: 1.5rem 0;
-  }
-  .levels {
-    display: grid;
-    gap: 0.6rem;
-    margin: 0.6rem 0;
-  }
-  .levels label {
-    display: grid;
-    gap: 0.15rem;
-    border: 1px solid var(--line, #8883);
-    border-radius: 8px;
-    padding: 0.7rem 0.9rem;
-    cursor: pointer;
-  }
-  .levels label.on {
-    border-color: var(--accent, #4aa3ff);
   }
   .tasks {
     list-style: none;

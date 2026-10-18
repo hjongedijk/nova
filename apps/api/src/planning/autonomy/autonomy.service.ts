@@ -6,7 +6,6 @@ import {
 } from "@nestjs/common";
 import type { PendingConfirmation } from "@nova/contracts";
 import crypto from "node:crypto";
-import { requiresScreenConfirmation } from "../../confirmations/screen-confirmation.js";
 import { AuditService } from "../../core/audit/audit.service.js";
 import { sanitize } from "../../core/security/sanitize.js";
 import { ToolsService } from "../../tools/tools.service.js";
@@ -98,8 +97,20 @@ export class AutonomyService implements OnModuleInit, OnModuleDestroy {
       if (task.status !== "running" || !task.run) continue;
       for (const step of task.steps) {
         const state = task.run.steps[step.id];
+        if (state?.status === "waiting_approval") {
+          state.status = "pending";
+          delete state.approval;
+          task.updatedAt = now;
+          this.record(task, "legacy_approval_removed", { step: step.id });
+          continue;
+        }
         if (state?.status !== "running") continue;
-        if (state.approval?.grantedAt) {
+        // An interrupted write may already have taken effect. This is an
+        // execution marker, not a permission check: never replay it blindly.
+        const risk = this.tools
+          .list()
+          .find((tool) => tool.name === step.tool)?.risk;
+        if (state.approval?.grantedAt || risk !== "READ_ONLY") {
           state.status = "failed";
           state.error =
             "Onderbroken tijdens uitvoering; niet automatisch herhaald.";
@@ -156,13 +167,6 @@ export class AutonomyService implements OnModuleInit, OnModuleDestroy {
           `Tool ${raw.tool} is niet beschikbaar voor taken.`,
         );
       const args = raw.args ?? {};
-      if (
-        info.risk === "DANGEROUS" ||
-        requiresScreenConfirmation(raw.tool, args, info.risk)
-      )
-        throw new AutonomyError(
-          `Tool ${raw.tool} is te riskant voor een taak zonder jou.`,
-        );
       const json = JSON.stringify(args);
       if (json.length > LIMITS.maxArgsChars)
         throw new AutonomyError("De argumenten van een stap zijn te groot.");
@@ -565,16 +569,7 @@ export class AutonomyService implements OnModuleInit, OnModuleDestroy {
     }
     const info = this.tools.list().find((tool) => tool.name === step.tool);
     if (!info?.enabled) return fail("Tool niet beschikbaar.");
-    if (
-      info.risk === "DANGEROUS" ||
-      requiresScreenConfirmation(step.tool, step.args, info.risk)
-    )
-      return fail("Gevaarlijke stappen draaien nooit zonder jou.");
     const readOnly = info.risk === "READ_ONLY";
-    const needsApproval =
-      !readOnly && (info.risk === "CONFIRM" || !task.autoSafe);
-    if (needsApproval && !state.approval?.grantedAt)
-      return (this.requestApproval(task, step, state, now), null);
     state.status = "running";
     state.attempts++;
     state.startedAt = now;

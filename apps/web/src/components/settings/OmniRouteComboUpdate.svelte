@@ -1,17 +1,14 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import type {
     OmniRouteAccountsReport,
     OmniRouteComboUpdateHistoryEntry,
-    OmniRouteComboUpdatePrepared,
     OmniRouteComboUpdateResult,
   } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
   import {
-    prepareOmniRouteComboUpdate,
-    confirmOmniRouteComboUpdate,
+    updateOmniRouteCombo,
     getOmniRouteComboUpdateHistory,
-    prepareOmniRouteComboUpdateRollback,
+    rollbackOmniRouteComboUpdate,
   } from "#lib/api/settings.ts";
 
   let {
@@ -30,20 +27,13 @@
   let editing = $state(false);
   let name = $state("");
   let selected = $state<string[]>([]);
-  let acknowledged = $state(false);
   let busy = $state(false);
   let error = $state("");
-  let pending = $state<OmniRouteComboUpdatePrepared | null>(null);
-  let expired = $state(false);
   let history = $state<OmniRouteComboUpdateHistoryEntry[]>([]);
   let historyLoaded = $state(false);
-  let isRollback = $state(false);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  onDestroy(() => clearTimeout(timer));
   function beginEditing() {
     name = initialName;
     selected = [...initialModels];
-    acknowledged = false;
     editing = true;
   }
   function toggle(model: string, checked: boolean) {
@@ -63,71 +53,16 @@
       busy = false;
     }
   }
-  async function prepare() {
+  async function run(
+    action: () => Promise<OmniRouteComboUpdateResult>,
+    failure: string,
+  ) {
     busy = true;
     error = "";
     try {
-      const result = await prepareOmniRouteComboUpdate(id, name, selected);
-      if (!result.ok || !result.action) {
-        error = result.error || "Wijziging kon niet worden voorbereid.";
-        return;
-      }
-      pending = result;
-      isRollback = false;
-      expired = false;
-      acknowledged = false;
-      timer = setTimeout(
-        () => (expired = true),
-        Math.max(0, result.action.expiresAt - Date.now()),
-      );
-    } catch {
-      error = "Wijziging kon niet worden voorbereid. Controleer je PIN.";
-    } finally {
-      busy = false;
-    }
-  }
-  async function prepareRollback(revisionId: string) {
-    busy = true;
-    error = "";
-    try {
-      const result = await prepareOmniRouteComboUpdateRollback(id, revisionId);
-      if (!result.ok || !result.action) {
-        error = result.error || "Herstel kon niet worden voorbereid.";
-        return;
-      }
-      pending = result;
-      isRollback = true;
-      editing = true;
-      expired = false;
-      acknowledged = false;
-      timer = setTimeout(
-        () => (expired = true),
-        Math.max(0, result.action.expiresAt - Date.now()),
-      );
-    } catch {
-      error = "Herstel kon niet worden voorbereid. Controleer je PIN.";
-    } finally {
-      busy = false;
-    }
-  }
-  async function confirm(approve: boolean) {
-    const action = pending?.action;
-    if (!action) return;
-    busy = true;
-    error = "";
-    try {
-      const result = await confirmOmniRouteComboUpdate(
-        id,
-        action.sessionId,
-        action.confirmationId,
-        approve,
-      );
-      if (!result.ok)
-        error = result.error || "Wijziging is niet gecontroleerd.";
-      else if (!approve) {
-        editing = false;
-        done();
-      } else if (result.verified === true) {
+      const result = await action();
+      if (!result.ok) error = result.error || failure;
+      else if (result.verified === true) {
         editing = false;
         if (historyLoaded) await loadHistory();
         done(result);
@@ -138,11 +73,19 @@
       error =
         "Uitkomst onbekend. Controleer OmniRoute; NOVA houdt AI geblokkeerd.";
     } finally {
-      pending = null;
-      clearTimeout(timer);
       busy = false;
     }
   }
+  const save = () =>
+    run(
+      () => updateOmniRouteCombo(id, name, selected),
+      "Wijziging is niet gecontroleerd.",
+    );
+  const rollback = (revisionId: string) =>
+    run(
+      () => rollbackOmniRouteComboUpdate(id, revisionId),
+      "Herstel is niet gecontroleerd.",
+    );
 </script>
 
 {#if !editing}
@@ -166,8 +109,8 @@
               )}
             </p>
             {#if index === 0}<Button
-                onclick={() => prepareRollback(revision.id)}
-                disabled={busy}>Nieuwste wijziging herstellen</Button
+                onclick={() => rollback(revision.id)}
+                disabled={busy}>Herstel deze versie</Button
               >{/if}
           </li>
         {/each}
@@ -179,60 +122,34 @@
     <h4>Combo bewerken</h4>
     <p>
       Alle OmniRoute-clients kunnen deze wijziging merken. Alleen naam en
-      modellen veranderen. {isRollback
-        ? "Dit zet de nieuwste opgeslagen wijziging terug."
-        : ""}
+      modellen veranderen.
     </p>
     {#if error}<p role="status">{error}</p>{/if}
-    {#if pending}
-      <p>Nieuwe route: <strong>{pending.name}</strong></p>
-      <ul>
-        {#each pending.models ?? [] as model (model)}<li>{model}</li>{/each}
-      </ul>
-      <label
-        ><input type="checkbox" bind:checked={acknowledged} /> Ik begrijp dat deze
-        wijziging alle clients kan raken.</label
-      >
-      {#if expired}<p role="status">
-          Bevestiging verlopen. Start opnieuw.
-        </p>{/if}
-      <Button
-        onclick={() => confirm(true)}
-        disabled={busy || expired || !acknowledged}
-        >{isRollback ? "Herstel bevestigen" : "Wijziging bevestigen"}</Button
-      >
-      <Button onclick={() => confirm(false)} disabled={busy}>Annuleren</Button>
-    {:else}
-      <label
-        >Naam <input
-          bind:value={name}
-          maxlength="80"
-          autocomplete="off"
-        /></label
-      >
-      <fieldset>
-        <legend>Actieve catalogusmodellen ({selected.length}/8)</legend>
-        {#each models.filter((model) => model.freeType.length > 0) as model (`${model.provider}/${model.modelId}`)}
-          {@const value = `${model.provider}/${model.modelId}`}
-          <label
-            ><input
-              type="checkbox"
-              checked={selected.includes(value)}
-              disabled={!selected.includes(value) && selected.length >= 8}
-              onchange={(event) => toggle(value, event.currentTarget.checked)}
-            />{value} · {model.freeType}</label
-          >
-        {/each}
-      </fieldset>
-      <Button
-        onclick={prepare}
-        disabled={busy ||
-          !name.trim() ||
-          selected.length < 1 ||
-          selected.length > 8}>Controleren</Button
-      >
-      <Button onclick={() => (editing = false)} disabled={busy}>Terug</Button>
-    {/if}
+    <label
+      >Naam <input bind:value={name} maxlength="80" autocomplete="off" /></label
+    >
+    <fieldset>
+      <legend>Actieve catalogusmodellen ({selected.length}/8)</legend>
+      {#each models.filter((model) => model.freeType.length > 0) as model (`${model.provider}/${model.modelId}`)}
+        {@const value = `${model.provider}/${model.modelId}`}
+        <label
+          ><input
+            type="checkbox"
+            checked={selected.includes(value)}
+            disabled={!selected.includes(value) && selected.length >= 8}
+            onchange={(event) => toggle(value, event.currentTarget.checked)}
+          />{value} · {model.freeType}</label
+        >
+      {/each}
+    </fieldset>
+    <Button
+      onclick={save}
+      disabled={busy ||
+        !name.trim() ||
+        selected.length < 1 ||
+        selected.length > 8}>Combo opslaan</Button
+    >
+    <Button onclick={() => (editing = false)} disabled={busy}>Terug</Button>
   </section>
 {/if}
 

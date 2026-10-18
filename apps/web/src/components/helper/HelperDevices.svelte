@@ -1,11 +1,7 @@
 <script lang="ts">
   import { ApiError } from "#lib/api/client.ts";
   import { onMount } from "svelte";
-  import {
-    getHelperHotkeys,
-    saveHelperHotkeys,
-    setPin,
-  } from "#lib/api/settings.ts";
+  import { getHelperHotkeys, saveHelperHotkeys } from "#lib/api/settings.ts";
   import { message } from "#components/settings/state.svelte.ts";
   import DevicesSection from "#components/settings/DevicesSection.svelte";
   import SoundSection from "#components/settings/SoundSection.svelte";
@@ -141,15 +137,6 @@
   });
 </script>
 
-<label
-  >Beheer-PIN <input
-    class="hp-input"
-    type="password"
-    aria-label="Beheer-PIN"
-    autocomplete="off"
-    oninput={(event) => setPin(event.currentTarget.value)}
-  /></label
->
 <details><summary>Windows, modus en scherm</summary><DevicesSection /></details>
 <details>
   <summary>Sneltoetsen</summary>

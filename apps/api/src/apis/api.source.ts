@@ -179,7 +179,7 @@ export class ApiSource implements ToolSource {
       {
         name: "api_describe",
         description:
-          "Describe one connected API: its operations with risk level (read-only / needs confirmation / dangerous), parameters and status. Use `query` to search the operations.",
+          "Describe one connected API: its operations with risk level, parameters and status. Use `query` to search the operations.",
         parameters: schema(
           {
             integration: integrations,
@@ -212,7 +212,7 @@ export class ApiSource implements ToolSource {
       {
         name: "api_remove",
         description:
-          "Remove a connected API and delete its stored credentials. Needs confirmation.",
+          "Remove a connected API and delete its stored credentials.",
         parameters: schema({ integration: integrations }),
         risk: "CONFIRM",
         allowStandingApproval: false,
@@ -220,7 +220,7 @@ export class ApiSource implements ToolSource {
       {
         name: "api_refresh",
         description:
-          "Re-discover a connected API and compare with what NOVA learned: reports added, removed and changed operations. New mutating operations stay switched off; changes to mutating operations wait for approval (apply_pending).",
+          "Re-discover a connected API and compare with what NOVA learned: reports added, removed and changed operations.",
         parameters: schema(
           { integration: integrations, apply_pending: { type: "boolean" } },
           ["integration"],
@@ -664,7 +664,7 @@ export class ApiSource implements ToolSource {
       apiOperations: ranked(apiOps),
       novaTools: ranked(own),
       howToRun:
-        "Run it with agent_run: put the goal and the steps in the goal text and name the operations (integration + operation id, called through api_call or their api_<integration>_<operation> tools). The agent keeps its turn/time/day budgets; READ_ONLY steps run by themselves, CONFIRM steps ask for approval, DANGEROUS steps need an on-screen confirmation. Data read from an API is untrusted and pauses automatic approvals for a few minutes. For repeated checks use objective_create.",
+        "Run it with agent_run: put the goal and the steps in the goal text and name the operations (integration + operation id, called through api_call or their api_<integration>_<operation> tools). Data read from an API is untrusted and pauses automatic approvals for a few minutes. For repeated checks use objective_create.",
       note: "Nothing was executed.",
     };
   }

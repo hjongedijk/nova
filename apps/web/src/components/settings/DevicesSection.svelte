@@ -29,6 +29,8 @@
   import Button from "#components/ui/Button.svelte";
   import { fail, say } from "./state.svelte.ts";
 
+  let { part = "all" }: { part?: "all" | "app" | "windows" } = $props();
+
   const MODES: [WallpaperMode, string][] = [
     ["off", "Uit"],
     ["full", "NOVA met panelen"],
@@ -36,7 +38,11 @@
   ];
 
   let install = $state(installState());
-  $effect(() => onInstallStateChange(() => (install = installState())));
+  $effect(() => {
+    if (part === "windows") return;
+    install = installState();
+    return onInstallStateChange(() => (install = installState()));
+  });
 
   let wallpaper = $state<WallpaperState | null>(null);
   // The picker being applied (its screen number), so only that one is locked.
@@ -45,6 +51,7 @@
   let wallpaperHistoryBusy = $state(false);
 
   $effect(() => {
+    if (part === "app") return;
     getWallpaper().then(
       (data) => (wallpaper = data),
       () =>
@@ -77,6 +84,7 @@
   let helperHistoryBusy = $state(false);
 
   $effect(() => {
+    if (part === "app") return;
     getHelper().then(
       (data) => (helper = data.settings),
       () => {},
@@ -124,7 +132,6 @@
   }
 
   async function rollbackHelperHistory(id: string): Promise<void> {
-    if (!window.confirm("Deze helperkeuze terugzetten?")) return;
     helperBusy = true;
     try {
       const result = await rollbackHelperModeRevision(id);
@@ -177,7 +184,6 @@
   }
 
   async function restoreWallpaper(id: string): Promise<void> {
-    if (!window.confirm("Deze achtergrondkeuze terugzetten?")) return;
     wallpaperHistoryBusy = true;
     try {
       wallpaper = await rollbackWallpaper(id);
@@ -196,9 +202,9 @@
   function why(data: Extract<WallpaperState, { available: false }>): string {
     return {
       "no-agent":
-        "NOVA heeft nog geen verbinding met je Windows-pc. Installeer de Windows-agent uit de map agents/windows en zet WINDOWS_AGENT_URL en WINDOWS_AGENT_TOKEN in .env.",
+        "NOVA heeft nog geen verbinding met je Windows-pc. Installeer NOVA voor Windows en koppel de app via Instellingen → Windows-pc.",
       "old-agent":
-        "De Windows-agent op je pc is nog oud. Installeer NOVA voor Windows en koppel de app via Instellingen → Koppelingen.",
+        "De Windows-agent op je pc is nog oud. Installeer NOVA voor Windows en koppel de app via Instellingen → Windows-pc.",
       unreachable:
         "NOVA bereikt de Windows-agent niet. Controleer de verbinding en probeer het opnieuw.",
     }[data.reason];
@@ -229,229 +235,235 @@
 {/snippet}
 
 <section>
-  <h2>NOVA als app</h2>
-  <p class="hint">
-    Een app opent in een eigen venster of op je beginscherm, zonder adresbalk.
-    Dit werkt op Windows, Mac, Android en iPhone.
-  </p>
-  {#if install === "installed"}
-    <p class="hint">NOVA draait al als app op dit apparaat.</p>
-  {:else}
-    <div>
-      {#if install === "available"}
-        <Button go onclick={() => promptInstall()}
-          >Installeer NOVA als app</Button
-        >
-      {:else}
-        <p class="hint">{how}</p>
-      {/if}
-      {#if !window.isSecureContext}
-        <p class="hint">
-          Je gebruikt nu een onbeveiligde verbinding. Open NOVA via {secureBase()}
-          om de app te kunnen installeren.
-        </p>
-      {/if}
-    </div>
-  {/if}
-
-  <h2>NOVA op je Windows-pc</h2>
-  <p class="hint">
-    Kies wat je pc laat zien: NOVA als levende achtergrond, een kleine helper
-    bovenaan je scherm (de bol, een invoerveld en de microfoon; hij klapt open
-    voor een antwoord of een vraag om te bevestigen en sluit zichzelf weer), of
-    allebei.
-  </p>
-  <fieldset class="helper-choice" disabled={helperBusy}>
-    <legend class="sr-only">Wat toont je pc?</legend>
-    {#each CHOICES as [value, text, detail] (value)}
-      <label class:picked={helper.mode === value}>
-        <input
-          type="radio"
-          name="helperMode"
-          {value}
-          checked={helper.mode === value}
-          onchange={() => applyHelper({ ...helper, mode: value })}
-        />
-        <strong>{text}</strong>
-        <small>{detail}</small>
-      </label>
-    {/each}
-  </fieldset>
-  {#if helper.mode !== "wallpaper"}
+  {#if part !== "windows"}
+    <h2>NOVA als app</h2>
     <p class="hint">
-      Kies op welk scherm de helper verschijnt. Hij verhuist meteen en onthoudt
-      je keuze. Dit kan ook in de helper zelf, met de knop Scherm.
+      Een app opent in een eigen venster of op je beginscherm, zonder adresbalk.
+      Dit werkt op Windows, Mac, Android en iPhone.
     </p>
-    <div class="helper-display">
-      <label for="helperDisplay">Scherm voor de helper</label>
-      <select
-        id="helperDisplay"
-        disabled={helperBusy}
-        value={helper.display}
-        onchange={(event) =>
-          applyHelper({
-            ...helper,
-            display: Number(event.currentTarget.value),
-          })}
-      >
-        <option value={0}>Hoofdscherm (standaard)</option>
-        {#if wallpaper?.available}
-          {#each wallpaper.displays as screen (screen.index)}
-            <option value={screen.index}
-              >Scherm {screen.index} ({screen.width}x{screen.height}{screen.primary
-                ? ", hoofdscherm"
-                : ""})</option
-            >
-          {/each}
-        {/if}
-      </select>
-    </div>
-  {/if}
-  <Disclosure
-    kind="history"
-    title="Wijzigingsgeschiedenis"
-    hint="Eerdere keuzes terugzetten"
-  >
-    <section class="helper-history" aria-label="Helpergeschiedenis">
-      <Button disabled={helperHistoryBusy} onclick={loadHelperHistory}
-        >{helperHistoryBusy
-          ? "Geschiedenis laden…"
-          : "Geschiedenis laden"}</Button
-      >
-      {#if helperHistory}
-        {#if helperHistory.revisions.length}
-          <ol>
-            {#each helperHistory.revisions as revision (revision.id)}
-              <li>
-                <span>
-                  {new Date(revision.at).toLocaleString("nl-NL")}: {revision
-                    .before.mode}, scherm {revision.before.display}
-                  → {revision.after.mode}, scherm {revision.after.display}
-                </span>
-                <Button
-                  disabled={helperBusy}
-                  onclick={() => rollbackHelperHistory(revision.id)}
-                  >Terugzetten</Button
-                >
-              </li>
-            {/each}
-          </ol>
-        {:else}<p>Geen wijzigingen opgeslagen.</p>{/if}
-        {#if helperHistory.truncated}<small
-            >Alleen de nieuwste 50 wijzigingen getoond.</small
-          >{/if}
-      {/if}
-    </section>
-  </Disclosure>
-
-  <h3>Bureaublad-achtergrond</h3>
-  <p class="hint">
-    Je Windows-pc laat NOVA bewegen achter je bureaubladiconen, per beeldscherm.
-    Je eigen achtergrond blijft ongemoeid: zet je het uit, dan zie je die weer.
-    Het gebruikt de Windows-agent die NOVA al heeft. Je kunt er gewoon mee
-    praten (klik op de bol of zeg “Hey NOVA”) en typen (klik op het invoerveld
-    onderaan).
-  </p>
-  {#if helper.mode === "helper"}
-    <p class="hint">
-      De achtergrond staat uit zolang je alleen de helper kiest. Je keuzes
-      hieronder blijven bewaard.
-    </p>
-  {/if}
-  <div>
-    {#if !wallpaper}
-      <p class="hint">Beeldschermen opzoeken…</p>
-    {:else if !wallpaper.available}
-      <p class="hint">{why(wallpaper)}</p>
-      {#if wallpaper.reason === "old-agent"}
-        <Button go href="https://github.com/hjongedijk/nova/releases/latest"
-          >Download de nieuwe agent</Button
-        >
-      {/if}
+    {#if install === "installed"}
+      <p class="hint">NOVA draait al als app op dit apparaat.</p>
     {:else}
-      <ul class="set-list">
-        {#each wallpaper.displays as screen (screen.index)}
-          <li class="set-row" class:off={screen.mode === "off"}>
-            <span></span>
-            <div class="what">
-              <strong>Beeldscherm {screen.index}</strong>
-              {#if screen.primary}<Badge text="hoofdscherm" />{/if}
-              <p>{screen.width} × {screen.height}</p>
-            </div>
-            <div class="acts">
-              {@render picker(
-                `beeldscherm ${screen.index}`,
-                screen.index,
-                screen.mode,
-              )}
-            </div>
-          </li>
-        {/each}
-        {#if wallpaper.displays.length > 1}
-          <li class="set-row">
-            <span></span>
-            <div class="what"><strong>Alle beeldschermen</strong></div>
-            <div class="acts">
-              {@render picker("alle beeldschermen", 0, "")}
-            </div>
-          </li>
+      <div>
+        {#if install === "available"}
+          <Button go onclick={() => promptInstall()}
+            >Installeer NOVA als app</Button
+          >
+        {:else}
+          <p class="hint">{how}</p>
         {/if}
-      </ul>
+        {#if !window.isSecureContext}
+          <p class="hint">
+            Je gebruikt nu een onbeveiligde verbinding. Open NOVA via {secureBase()}
+            om de app te kunnen installeren.
+          </p>
+        {/if}
+      </div>
     {/if}
-  </div>
-  <Disclosure
-    kind="history"
-    title="Wijzigingsgeschiedenis"
-    hint="Eerdere keuzes terugzetten"
-  >
-    <section class="helper-history" aria-label="Achtergrondgeschiedenis">
-      <Button disabled={wallpaperHistoryBusy} onclick={loadWallpaperHistory}
-        >{wallpaperHistoryBusy
-          ? "Geschiedenis laden…"
-          : "Geschiedenis laden"}</Button
-      >
-      {#if wallpaperHistory}
-        {#if wallpaperHistory.revisions.length}
-          <ol>
-            {#each wallpaperHistory.revisions as revision (revision.id)}
-              <li>
-                <span
-                  >{new Date(revision.at).toLocaleString("nl-NL")}: beeldscherm {revision.display},
-                  {revision.before} → {revision.after}</span
-                >
-                <Button
-                  disabled={wallpaperHistoryBusy}
-                  onclick={() => restoreWallpaper(revision.id)}
-                  >Terugzetten</Button
-                >
-              </li>
-            {/each}
-          </ol>
-        {:else}<p>Geen wijzigingen opgeslagen.</p>{/if}
-        {#if wallpaperHistory.truncated}<small
-            >Alleen de nieuwste 50 wijzigingen getoond.</small
-          >{/if}
-      {/if}
-    </section>
-  </Disclosure>
-  <div class="set-toolbar">
-    <Button href="https://github.com/hjongedijk/nova/releases/latest"
-      >Download de NOVA-agent</Button
-    >
-  </div>
-  <Disclosure
-    kind="more"
-    title="Meer uitleg"
-    hint="De agent installeren of bijwerken"
-  >
+  {/if}
+
+  {#if part !== "app"}
+    <h2>Helper en achtergrond</h2>
     <p class="hint">
-      NOVA voor Windows is één app met een helper, achtergrond en verbinding met
-      NOVA. Download de NOVA-Setup-installer van de releasepagina, start de app
-      en vul je NOVA-adres in. Kopieer de koppelcode naar Instellingen →
-      Koppelingen → Windows-agent. Bij een oude installatie kun je in de app
-      eerst instellingen importeren en de oude agent uitschakelen.
+      Kies wat je pc laat zien: NOVA als levende achtergrond, een kleine helper
+      bovenaan je scherm (de bol, een invoerveld en de microfoon; hij klapt open
+      voor een antwoord en sluit zichzelf weer), of allebei.
     </p>
-  </Disclosure>
+    <fieldset class="helper-choice" disabled={helperBusy}>
+      <legend class="sr-only">Wat toont je pc?</legend>
+      {#each CHOICES as [value, text, detail] (value)}
+        <label class:picked={helper.mode === value}>
+          <input
+            type="radio"
+            name="helperMode"
+            {value}
+            checked={helper.mode === value}
+            onchange={() => applyHelper({ ...helper, mode: value })}
+          />
+          <strong>{text}</strong>
+          <small>{detail}</small>
+        </label>
+      {/each}
+    </fieldset>
+    {#if helper.mode !== "wallpaper"}
+      <p class="hint">
+        Kies op welk scherm de helper verschijnt. Hij verhuist meteen en
+        onthoudt je keuze. Dit kan ook in de helper zelf, met de knop Scherm.
+      </p>
+      <div class="helper-display">
+        <label for="helperDisplay">Scherm voor de helper</label>
+        <select
+          id="helperDisplay"
+          disabled={helperBusy}
+          value={helper.display}
+          onchange={(event) =>
+            applyHelper({
+              ...helper,
+              display: Number(event.currentTarget.value),
+            })}
+        >
+          <option value={0}>Hoofdscherm (standaard)</option>
+          {#if wallpaper?.available}
+            {#each wallpaper.displays as screen (screen.index)}
+              <option value={screen.index}
+                >Scherm {screen.index} ({screen.width}x{screen.height}{screen.primary
+                  ? ", hoofdscherm"
+                  : ""})</option
+              >
+            {/each}
+          {/if}
+        </select>
+      </div>
+    {/if}
+    <Disclosure
+      kind="history"
+      title="Wijzigingsgeschiedenis"
+      hint="Eerdere keuzes terugzetten"
+    >
+      <section class="helper-history" aria-label="Helpergeschiedenis">
+        <Button disabled={helperHistoryBusy} onclick={loadHelperHistory}
+          >{helperHistoryBusy
+            ? "Geschiedenis laden…"
+            : "Geschiedenis laden"}</Button
+        >
+        {#if helperHistory}
+          {#if helperHistory.revisions.length}
+            <ol>
+              {#each helperHistory.revisions as revision (revision.id)}
+                <li>
+                  <span>
+                    {new Date(revision.at).toLocaleString("nl-NL")}: {revision
+                      .before.mode}, scherm {revision.before.display}
+                    → {revision.after.mode}, scherm {revision.after.display}
+                  </span>
+                  <Button
+                    disabled={helperBusy}
+                    onclick={() => rollbackHelperHistory(revision.id)}
+                    >Terugzetten</Button
+                  >
+                </li>
+              {/each}
+            </ol>
+          {:else}<p>Geen wijzigingen opgeslagen.</p>{/if}
+          {#if helperHistory.truncated}<small
+              >Alleen de nieuwste 50 wijzigingen getoond.</small
+            >{/if}
+        {/if}
+      </section>
+    </Disclosure>
+
+    <h3>Bureaublad-achtergrond</h3>
+    <p class="hint">
+      Je Windows-pc laat NOVA bewegen achter je bureaubladiconen, per
+      beeldscherm. Je eigen achtergrond blijft ongemoeid: zet je het uit, dan
+      zie je die weer. Het gebruikt de Windows-agent die NOVA al heeft. Je kunt
+      er gewoon mee praten (klik op de bol of zeg “Hey NOVA”) en typen (klik op
+      het invoerveld onderaan).
+    </p>
+    {#if helper.mode === "helper"}
+      <p class="hint">
+        De achtergrond staat uit zolang je alleen de helper kiest. Je keuzes
+        hieronder blijven bewaard.
+      </p>
+    {/if}
+    <div>
+      {#if !wallpaper}
+        <p class="hint">Beeldschermen opzoeken…</p>
+      {:else if !wallpaper.available}
+        <p class="hint">{why(wallpaper)}</p>
+        {#if wallpaper.reason === "old-agent"}
+          <Button
+            go
+            href="https://github.com/hjongedijk/nova/releases?q=windows-v"
+            >Download de nieuwe agent</Button
+          >
+        {/if}
+      {:else}
+        <ul class="set-list">
+          {#each wallpaper.displays as screen (screen.index)}
+            <li class="set-row" class:off={screen.mode === "off"}>
+              <span></span>
+              <div class="what">
+                <strong>Beeldscherm {screen.index}</strong>
+                {#if screen.primary}<Badge text="hoofdscherm" />{/if}
+                <p>{screen.width} × {screen.height}</p>
+              </div>
+              <div class="acts">
+                {@render picker(
+                  `beeldscherm ${screen.index}`,
+                  screen.index,
+                  screen.mode,
+                )}
+              </div>
+            </li>
+          {/each}
+          {#if wallpaper.displays.length > 1}
+            <li class="set-row">
+              <span></span>
+              <div class="what"><strong>Alle beeldschermen</strong></div>
+              <div class="acts">
+                {@render picker("alle beeldschermen", 0, "")}
+              </div>
+            </li>
+          {/if}
+        </ul>
+      {/if}
+    </div>
+    <Disclosure
+      kind="history"
+      title="Wijzigingsgeschiedenis"
+      hint="Eerdere keuzes terugzetten"
+    >
+      <section class="helper-history" aria-label="Achtergrondgeschiedenis">
+        <Button disabled={wallpaperHistoryBusy} onclick={loadWallpaperHistory}
+          >{wallpaperHistoryBusy
+            ? "Geschiedenis laden…"
+            : "Geschiedenis laden"}</Button
+        >
+        {#if wallpaperHistory}
+          {#if wallpaperHistory.revisions.length}
+            <ol>
+              {#each wallpaperHistory.revisions as revision (revision.id)}
+                <li>
+                  <span
+                    >{new Date(revision.at).toLocaleString("nl-NL")}:
+                    beeldscherm {revision.display},
+                    {revision.before} → {revision.after}</span
+                  >
+                  <Button
+                    disabled={wallpaperHistoryBusy}
+                    onclick={() => restoreWallpaper(revision.id)}
+                    >Terugzetten</Button
+                  >
+                </li>
+              {/each}
+            </ol>
+          {:else}<p>Geen wijzigingen opgeslagen.</p>{/if}
+          {#if wallpaperHistory.truncated}<small
+              >Alleen de nieuwste 50 wijzigingen getoond.</small
+            >{/if}
+        {/if}
+      </section>
+    </Disclosure>
+    <div class="set-toolbar">
+      <Button href="https://github.com/hjongedijk/nova/releases?q=windows-v"
+        >Download de NOVA-agent</Button
+      >
+    </div>
+    <Disclosure
+      kind="more"
+      title="Meer uitleg"
+      hint="De agent installeren of bijwerken"
+    >
+      <p class="hint">
+        NOVA voor Windows is één app met een helper, achtergrond en verbinding
+        met NOVA. Download de NOVA-Setup-installer van de releasepagina, start
+        de app en vul je NOVA-adres in. Kopieer de koppelcode naar Instellingen
+        → Windows-pc. Bij een oude installatie kun je in de app eerst
+        instellingen importeren en de oude agent uitschakelen.
+      </p>
+    </Disclosure>
+  {/if}
 </section>
 
 <style>

@@ -25,7 +25,6 @@
   import { chat } from "#lib/stores/chat.svelte.ts";
   import { chrome } from "#lib/stores/chrome.svelte.ts";
   import { shell } from "#lib/stores/shell.svelte.ts";
-  import { appAccess, checkAppAccess } from "#lib/stores/access.svelte.ts";
   import { storage } from "#lib/util/storage.ts";
   import {
     initRecognition,
@@ -44,8 +43,6 @@
       !event.ctrlKey &&
       !event.metaKey
     ) {
-      if (appAccess.checking || (appAccess.required && !appAccess.unlocked))
-        return;
       const target = event.target;
       if (
         target instanceof Element &&
@@ -86,8 +83,8 @@
     shell.panels = storage.get("novaPanels", "on") !== "off";
     let stopped = false;
     let stops: (() => void)[] = [];
-    void checkAppAccess().then(() => {
-      if (stopped || (appAccess.required && !appAccess.unlocked)) return;
+    void Promise.resolve().then(() => {
+      if (stopped) return;
       initRecognition();
       stops = [
         applyWallpaperMode(),
@@ -108,21 +105,19 @@
 
 <svelte:window onkeydown={handleKeyDown} onkeyup={handleKeyUp} />
 
-{#if !appAccess.checking && (!appAccess.required || appAccess.unlocked)}
-  <Entity />
-  <Column side="left" />
-  <Column side="right" />
-  <div class="shell">
-    <Header />
-    <Stage />
-    <Composer />
-  </div>
-  <Toasts />
-  <HistoryDrawer />
-  <SettingsDialog />
-  <AdminDialog />
-  <WorkspaceCodePanel />
-  <LiveDesktop />
-  <CookingMode />
-  <HoloPanel />
-{/if}
+<Entity />
+<Column side="left" />
+<Column side="right" />
+<div class="shell">
+  <Header />
+  <Stage />
+  <Composer />
+</div>
+<Toasts />
+<HistoryDrawer />
+<SettingsDialog />
+<AdminDialog />
+<WorkspaceCodePanel />
+<LiveDesktop />
+<CookingMode />
+<HoloPanel />

@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -16,7 +15,6 @@ describe("workspace projects", () => {
   let oldData: string | undefined;
   let service: WorkspaceProjects;
   let audit: AuditService;
-  let confirmations: ConfirmationsService;
   let record: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -29,9 +27,7 @@ describe("workspace projects", () => {
       timestamp: "now",
     }));
     audit = { record } as unknown as AuditService;
-    confirmations = new ConfirmationsService(audit);
-    confirmations.now = () => 1000;
-    service = new WorkspaceProjects(new NovaConfig(), confirmations, audit);
+    service = new WorkspaceProjects(new NovaConfig(), audit);
   });
 
   afterEach(() => {
@@ -53,12 +49,12 @@ describe("workspace projects", () => {
     expect(service.select({ id: "mijn-eerste-project" }).activeId).toBe(
       "mijn-eerste-project",
     );
-    expect(
-      new WorkspaceProjects(new NovaConfig(), confirmations, audit).list(),
-    ).toMatchObject({
-      activeId: "mijn-eerste-project",
-      projects: [{ id: "mijn-eerste-project" }],
-    });
+    expect(new WorkspaceProjects(new NovaConfig(), audit).list()).toMatchObject(
+      {
+        activeId: "mijn-eerste-project",
+        projects: [{ id: "mijn-eerste-project" }],
+      },
+    );
   });
 
   it("rejects path-like names, extra fields, duplicate slugs and unknown projects", () => {
@@ -85,11 +81,11 @@ describe("workspace projects", () => {
     expect(() => service.list()).toThrow("regular file");
   });
 
-  it("records project selection and restores only the latest selection with confirmation", () => {
+  it("records project selection and restores only the latest selection in one call", () => {
     const first = service.create({ name: "first" });
     service.create({ name: "second" });
     service.select({ id: "first" });
-    const second = service.select({ id: "second" });
+    service.select({ id: "second" });
     const historyPath = path.join(
       dataDir,
       "workspace",
@@ -98,18 +94,7 @@ describe("workspace projects", () => {
     expect(fs.statSync(historyPath).mode & 0o777).toBe(0o600);
     expect(service.history().revisions).toHaveLength(4);
     const revision = service.history().revisions[0]!;
-    const prepared = service.prepareRollback(revision.id);
-    expect(prepared).toMatchObject({
-      ok: true,
-      fromName: "second",
-      toName: "first",
-    });
-    expect(prepared.action?.risk).toBe("DANGEROUS");
-    expect(service.list().activeId).toBe(second.activeId);
-    const action = prepared.action!;
-    expect(
-      service.confirmRollback(action.sessionId, action.confirmationId, true),
-    ).toMatchObject({
+    expect(service.rollback(revision.id)).toMatchObject({
       ok: true,
       verified: true,
     });
@@ -118,6 +103,7 @@ describe("workspace projects", () => {
     expect(record.mock.calls.map(([entry]) => entry.tool)).toContain(
       "workspace_project_selection_rollback",
     );
+    expect(() => service.rollback("not-a-revision")).toThrow();
   });
 
   it("undoes creation of a still-empty project and restores the prior project", () => {
@@ -126,19 +112,10 @@ describe("workspace projects", () => {
     const secondDir = path.join(dataDir, "workspace", "second");
     const revision = service.history().revisions[0]!;
     expect(revision).toMatchObject({ kind: "created", projectId: "second" });
-    const prepared = service.prepareRollback(revision.id);
-    expect(prepared).toMatchObject({
+    expect(service.rollback(revision.id)).toMatchObject({
       ok: true,
-      fromName: "second",
-      toName: "Project verwijderen",
+      verified: true,
     });
-    expect(prepared.action?.risk).toBe("DANGEROUS");
-    const result = service.confirmRollback(
-      prepared.action!.sessionId,
-      prepared.action!.confirmationId,
-      true,
-    );
-    expect(result).toMatchObject({ ok: true, verified: true });
     expect(fs.existsSync(secondDir)).toBe(false);
     expect(service.list()).toMatchObject({
       activeId: "first",
@@ -147,104 +124,39 @@ describe("workspace projects", () => {
     expect(second.activeId).toBe("second");
   });
 
-  it("refuses to undo project creation when files exist before or after preparation", () => {
+  it("refuses to undo project creation when the project directory holds files", () => {
     service.create({ name: "first" });
     const second = service.create({ name: "second" });
     const secondDir = path.join(dataDir, "workspace", second.activeId!);
     const revision = service.history().revisions[0]!;
     fs.writeFileSync(path.join(secondDir, "keep.txt"), "keep me");
-    expect(service.prepareRollback(revision.id)).toMatchObject({
+    expect(service.rollback(revision.id)).toMatchObject({
       ok: false,
       error: expect.stringContaining("bevat bestanden"),
     });
-    fs.unlinkSync(path.join(secondDir, "keep.txt"));
-    const prepared = service.prepareRollback(revision.id);
-    expect(prepared.action).toBeDefined();
-    fs.writeFileSync(path.join(secondDir, "late.txt"), "keep me too");
-    const result = service.confirmRollback(
-      prepared.action!.sessionId,
-      prepared.action!.confirmationId,
-      true,
-    );
-    expect(result).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("bevat bestanden"),
-    });
-    expect(fs.readFileSync(path.join(secondDir, "late.txt"), "utf8")).toBe(
-      "keep me too",
+    expect(fs.readFileSync(path.join(secondDir, "keep.txt"), "utf8")).toBe(
+      "keep me",
     );
     expect(service.list().activeId).toBe("second");
   });
 
-  it("refuses an older creation revision and leaves a cancelled creation untouched", () => {
+  it("refuses an older revision", () => {
     service.create({ name: "first" });
     const oldRevision = service.history().revisions[0]!;
     service.create({ name: "second" });
-    expect(service.prepareRollback(oldRevision.id)).toMatchObject({
+    expect(service.rollback(oldRevision.id)).toMatchObject({
       ok: false,
       error: expect.stringContaining("nieuwste"),
     });
-
-    const latest = service.history().revisions[0]!;
-    const prepared = service.prepareRollback(latest.id);
-    expect(prepared.action).toBeDefined();
-    expect(
-      service.confirmRollback(
-        prepared.action!.sessionId,
-        prepared.action!.confirmationId,
-        false,
-      ),
-    ).toMatchObject({ ok: true });
-    expect(
-      fs.statSync(path.join(dataDir, "workspace", "second")).isDirectory(),
-    ).toBe(true);
     expect(service.list().activeId).toBe("second");
   });
 
-  it("rejects confirmation after the project catalog changes", () => {
-    service.create({ name: "first" });
-    const created = service.create({ name: "second" });
-    const prepared = service.prepareRollback(
-      service.history().revisions[0]!.id,
-    );
-    expect(prepared.action).toBeDefined();
-    service.select({ id: "first" });
-    expect(
-      service.confirmRollback(
-        prepared.action!.sessionId,
-        prepared.action!.confirmationId,
-        true,
-      ),
-    ).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("intussen gewijzigd"),
-    });
-    expect(
-      fs
-        .statSync(path.join(dataDir, "workspace", created.activeId!))
-        .isDirectory(),
-    ).toBe(true);
-    expect(service.list().activeId).toBe("first");
-  });
-
-  it("rejects an old project-selection rollback after active project changes", () => {
+  it("refuses a rollback after the project catalog changed", () => {
     service.create({ name: "first" });
     service.create({ name: "second" });
-    const prepared = service.prepareRollback(
-      service.history().revisions[0]!.id,
-    );
-    if (!prepared.action) throw new Error("Missing confirmation");
+    const revisionId = service.history().revisions[0]!.id;
     service.select({ id: "first" });
-    expect(
-      service.confirmRollback(
-        prepared.action.sessionId,
-        prepared.action.confirmationId,
-        true,
-      ),
-    ).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("intussen gewijzigd"),
-    });
+    expect(service.rollback(revisionId)).toMatchObject({ ok: false });
     expect(service.list().activeId).toBe("first");
   });
 
@@ -254,34 +166,12 @@ describe("workspace projects", () => {
     service.select({ id: "first" });
     service.select({ id: "second" });
     const firstDir = path.join(dataDir, "workspace", "first");
-    const prepared = service.prepareRollback(
-      service.history().revisions[0]!.id,
-    );
-    if (!prepared.action) throw new Error("Missing confirmation");
     fs.rmSync(firstDir, { recursive: true });
     fs.symlinkSync(os.tmpdir(), firstDir, "dir");
-
-    expect(
-      service.confirmRollback(
-        prepared.action.sessionId,
-        prepared.action.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: false, error: "De vorige projectmap is ongeldig." });
-    expect(service.list().activeId).toBe("second");
-  });
-
-  it("does not prepare rollback to a missing project directory", () => {
-    service.create({ name: "first" });
-    service.create({ name: "second" });
-    service.select({ id: "first" });
-    service.select({ id: "second" });
-    fs.rmSync(path.join(dataDir, "workspace", "first"), {
-      recursive: true,
+    expect(service.rollback(service.history().revisions[0]!.id)).toMatchObject({
+      ok: false,
+      error: "De vorige projectmap is ongeldig.",
     });
-
-    expect(
-      service.prepareRollback(service.history().revisions[0]!.id),
-    ).toMatchObject({ ok: false, error: "De vorige projectmap is ongeldig." });
+    expect(service.list().activeId).toBe("second");
   });
 });

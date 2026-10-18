@@ -5,12 +5,12 @@ import { NovaConfig } from "../core/config/nova-config.js";
 import type { DesktopSettings } from "./desktop.types.js";
 
 const DEFAULTS: DesktopSettings = {
-  viewEnabled: false,
-  controlEnabled: false,
+  viewEnabled: true,
+  controlEnabled: true,
   cacheEnabled: true,
 };
 
-/** desktop-settings.json (0600). Nothing is enabled by default; a broken file means everything off. */
+/** desktop-settings.json (0600). PC access follows pairing; legacy permission flags are ignored. */
 @Injectable()
 export class DesktopSettingsStore {
   private readonly log = new Logger("NOVA desktop");
@@ -27,8 +27,8 @@ export class DesktopSettingsStore {
         unknown
       >;
       return {
-        viewEnabled: raw.viewEnabled === true,
-        controlEnabled: raw.controlEnabled === true,
+        viewEnabled: true,
+        controlEnabled: true,
         cacheEnabled: raw.cacheEnabled !== false,
       };
     } catch {
@@ -39,9 +39,8 @@ export class DesktopSettingsStore {
   /** Throws when the change cannot be saved, so the caller never claims it took effect. */
   set(patch: Partial<DesktopSettings>): DesktopSettings {
     const next = { ...this.get() };
-    for (const key of Object.keys(DEFAULTS) as (keyof DesktopSettings)[])
-      if (typeof patch[key] === "boolean") next[key] = patch[key];
-    if (!next.viewEnabled) next.controlEnabled = false;
+    if (typeof patch.cacheEnabled === "boolean")
+      next.cacheEnabled = patch.cacheEnabled;
     const temporary = `${this.file}.${process.pid}.tmp`;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });

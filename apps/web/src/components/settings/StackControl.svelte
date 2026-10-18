@@ -1,21 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Button from "#components/ui/Button.svelte";
-  import type {
-    StackControlStatus,
-    StackRestartPrepared,
-    StackServiceId,
-  } from "@nova/contracts";
+  import type { StackControlStatus, StackServiceId } from "@nova/contracts";
   import { ApiError } from "#lib/api/client.ts";
   import {
-    confirmStackServiceRestart,
     getStackControlStatus,
-    prepareStackServiceRestart,
+    restartStackService,
   } from "#lib/api/settings.ts";
   import { fail, say } from "./state.svelte.ts";
 
   let status = $state<StackControlStatus | null>(null);
-  let pending = $state<StackRestartPrepared | null>(null);
   let busy = $state("");
   let error = $state("");
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -47,49 +41,21 @@
     }
   }
 
-  async function prepare(service: StackServiceId) {
+  async function restart(service: StackServiceId, label: string) {
     busy = service;
     error = "";
     try {
-      const result = await prepareStackServiceRestart(service);
-      if (!result.ok || !result.action)
-        throw new Error(result.error ?? "Herstart niet voorbereid.");
-      pending = result;
-    } catch (cause) {
-      fail(cause);
-    } finally {
-      busy = "";
-    }
-  }
-
-  async function confirm(approve: boolean) {
-    const action = pending?.action;
-    const service = pending?.service;
-    const label = pending?.label;
-    if (!action || !service) return;
-    busy = service;
-    try {
-      const result = await confirmStackServiceRestart(
-        action.sessionId,
-        action.confirmationId,
-        approve,
-      );
-      pending = null;
+      const result = await restartStackService(service);
       if (!result.ok) {
-        if (approve) {
-          fail(new Error(result.error ?? "Herstart mislukt."));
-          return;
-        }
-        say("Herstart geannuleerd.", "ok");
+        fail(new Error(result.error ?? "Herstart mislukt."));
         return;
       }
       say(
-        `${label ?? "Service"} herstart aangevraagd. NOVA kan kort niet bereikbaar zijn.`,
+        `${label} herstart aangevraagd. NOVA kan kort niet bereikbaar zijn.`,
         "ok",
       );
       refreshTimer = setTimeout(() => void load(), 10_000);
     } catch (cause) {
-      pending = null;
       // Restarting NOVA may close this request before its response reaches the browser.
       const outcomeUnknown = !(cause instanceof ApiError);
       if (service === "nova" && outcomeUnknown) {
@@ -114,8 +80,8 @@
   <h3>Containers</h3>
   <p class="hint">
     Alleen-lezen status van de NOVA Compose-stack. Een service herstarten kan
-    die service en afhankelijke functies tijdelijk onbereikbaar maken. Elke
-    herstart vraagt een verse DANGEROUS-bevestiging.
+    die service en afhankelijke functies tijdelijk onbereikbaar maken. Een
+    herstart gaat direct in.
   </p>
   <Button type="button" onclick={load} disabled={busy !== ""}>
     {busy === "load" ? "Status laden…" : "Containerstatus vernieuwen"}
@@ -136,7 +102,7 @@
               disabled={!status.available ||
                 service.state !== "running" ||
                 busy !== ""}
-              onclick={() => prepare(service.id)}
+              onclick={() => restart(service.id, service.label)}
               >{busy === service.id
                 ? "Bezig…"
                 : `${service.label} herstarten`}</Button
@@ -144,28 +110,5 @@
         </li>
       {/each}
     </ul>
-  {/if}
-  {#if pending?.action && pending.label}
-    <div class="connection-pending" role="alert">
-      <p>
-        Herstart <strong>{pending.label}</strong>? Deze service en gekoppelde
-        functies kunnen kort uitvallen. NOVA controleerde de actuele status; de
-        aanvraag verloopt na 60 seconden.
-      </p>
-      <Button
-        type="button"
-        disabled={busy !== ""}
-        onclick={() => confirm(true)}
-      >
-        Bevestig herstart
-      </Button>
-      <Button
-        type="button"
-        disabled={busy !== ""}
-        onclick={() => confirm(false)}
-      >
-        Annuleren
-      </Button>
-    </div>
   {/if}
 </section>

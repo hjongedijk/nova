@@ -91,7 +91,9 @@ import {
       inject: [SemanticMemoryService],
       useFactory: (semantic: SemanticMemoryService): HomeAliasLookup => ({
         async relatedEntity(reference) {
-          const needle = reference.toLowerCase();
+          const needle = reference
+            .toLowerCase()
+            .replace(/^(?:de|het|een|die|dat|the)\s+/, "");
           const found = (await semantic.search(reference)).find(
             (memory) =>
               memory.type === "LEARNED_ALIAS" &&

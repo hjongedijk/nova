@@ -33,11 +33,15 @@ try {
       page.setDefaultTimeout(15_000);
       const errors = [];
       const unexpectedWrites = [];
+      page.on("dialog", async (dialog) => {
+        errors.push(`Unexpected confirmation dialog: ${dialog.type()}`);
+        await dialog.dismiss();
+      });
       let abilityWrites = 0;
       let serviceWrites = 0;
-      let preparations = 0;
-      let cancellations = 0;
-      let confirmations = 0;
+      let paletteAttempts = 0;
+      let paletteChanges = 0;
+      let failPaletteChange = true;
       let toolWrites = 0;
       let toolReadbacks = 0;
       let pendingToolReadback = false;
@@ -106,7 +110,6 @@ try {
             edited: false,
           },
         ],
-        pinRequired: false,
         standingApprovals: [],
       };
       const services = [
@@ -147,8 +150,16 @@ try {
         const request = route.request();
         const pathname = new URL(request.url()).pathname;
         const method = request.method();
+        assert.equal(
+          request.headers()["x-nova-pin"],
+          undefined,
+          "Settings requests must not require a PIN",
+        );
         const json = (body, status = 200) =>
           route.fulfill({ status, json: body });
+        // Playback preferences are mirrored on mount, independently of settings receipts.
+        if (method === "PUT" && pathname === "/api/settings/voice-profile")
+          return json({ ok: true });
         if (method !== "GET") {
           if (
             pathname === "/api/settings/abilities/private-fixture-ability" &&
@@ -251,32 +262,19 @@ try {
             return json({ ok: true, services });
           }
           if (
-            pathname === "/api/settings/node-red/palette/prepare" &&
+            pathname === "/api/settings/node-red/palette/change" &&
             method === "POST"
           ) {
-            preparations++;
-            return json({
-              warning: "Synthetic upgrade requires a separate confirmation.",
-              action: {
-                sessionId:
-                  "settings-node-red-palette:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-                confirmationId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-                tool: "settings_node_red_palette",
-                args: {},
-                risk: "DANGEROUS",
-                expiresAt: Date.now() + 120_000,
-              },
+            paletteAttempts++;
+            assert.deepEqual(request.postDataJSON(), {
+              module: moduleName,
+              install: true,
             });
-          }
-          if (
-            pathname === "/api/settings/node-red/palette/confirm" &&
-            method === "POST"
-          ) {
-            if (!request.postDataJSON().approve) {
-              cancellations++;
-              return json({ ok: true, cancelled: true });
+            if (failPaletteChange) {
+              failPaletteChange = false;
+              return json({ error: "Synthetic palette update failure." }, 503);
             }
-            confirmations++;
+            paletteChanges++;
             palette = {
               ...palette,
               revision: "b".repeat(64),
@@ -309,7 +307,7 @@ try {
         }
         if (pathname === "/api/settings/quick-actions/history") {
           quickHistoryReads++;
-          assert.equal(request.headers()["x-nova-admin"], "1");
+          assert.equal(request.headers()["x-nova-admin"], undefined);
           if (failQuickHistory)
             return json({ error: "Synthetic private history diagnostic" }, 503);
           return json({ revisions: quickHistory, truncated: false });
@@ -457,7 +455,12 @@ try {
         page.locator("details.connection-editor").filter({
           has: page.locator("summary strong", { hasText: "Node-RED" }),
         });
-      await service().locator("summary").click();
+      async function openService() {
+        if (!(await service().evaluate((node) => node.open)))
+          await service().locator(":scope > summary").click();
+      }
+
+      await openService();
       await page.locator("#node-red-adminToken").fill(privateToken);
       await service()
         .getByRole("button", { name: "Opslaan", exact: true })
@@ -471,7 +474,7 @@ try {
       await inspectReceipts(2);
 
       await settingsSection("automation");
-      await service().locator("summary").click();
+      await openService();
       const paletteRegion = page.getByRole("region", {
         name: "Node-RED-palette",
         exact: true,
@@ -482,41 +485,26 @@ try {
       await paletteRegion
         .getByRole("button", { name: "Versie 2.0.0 installeren", exact: true })
         .click();
-      await page
-        .getByRole("group", {
-          name: "Palettewijziging bevestigen",
-          exact: true,
-        })
-        .waitFor();
-      // Preparing an operation must not create a success card.
+      await paletteRegion.getByRole("status").waitFor();
+      assert.equal(
+        await page
+          .getByRole("group", {
+            name: "Palettewijziging bevestigen",
+            exact: true,
+          })
+          .count(),
+        0,
+      );
+      // A failed direct operation must not create a success card.
       await inspectReceipts(2);
 
       await settingsSection("automation");
-      await service().locator("summary").click();
+      await openService();
       await paletteRegion
         .getByRole("button", { name: "Palette laden", exact: true })
         .click();
       await paletteRegion
         .getByRole("button", { name: "Versie 2.0.0 installeren", exact: true })
-        .click();
-      await paletteRegion
-        .getByRole("button", { name: "Annuleren", exact: true })
-        .click();
-      await paletteRegion
-        .getByText("Palettewijziging geannuleerd.", { exact: true })
-        .waitFor();
-      await inspectReceipts(2);
-
-      await settingsSection("automation");
-      await service().locator("summary").click();
-      await paletteRegion
-        .getByRole("button", { name: "Palette laden", exact: true })
-        .click();
-      await paletteRegion
-        .getByRole("button", { name: "Versie 2.0.0 installeren", exact: true })
-        .click();
-      await paletteRegion
-        .getByRole("button", { name: "Ja, doorgaan", exact: true })
         .click();
       await paletteRegion
         .getByText(/versie klaargezet\. Herstart Node-RED via Services/)
@@ -535,6 +523,11 @@ try {
         return page
           .locator("li.set-row")
           .filter({ has: page.getByText(privateTool, { exact: true }) });
+      }
+      async function revealToolDescription(toolRow) {
+        const details = toolRow.locator("details.tool-description");
+        if (!(await details.evaluate((node) => node.open)))
+          await details.locator(":scope > summary").click();
       }
       const overviewRead = () =>
         page.waitForResponse(
@@ -555,6 +548,7 @@ try {
       let refreshed = overviewRead();
       await tool.getByRole("button", { name: "Opslaan", exact: true }).click();
       await refreshed;
+      await revealToolDescription(tool);
       await tool.getByText(changedToolDescription, { exact: true }).waitFor();
       cards = await inspectReceipts(4);
       assert.match(
@@ -576,6 +570,7 @@ try {
         .getByRole("button", { name: "Standaard herstellen", exact: true })
         .click();
       await refreshed;
+      await revealToolDescription(tool);
       await tool.getByText(defaultToolDescription, { exact: true }).waitFor();
       assert.equal(
         await tool.getByText("aangepast", { exact: true }).count(),
@@ -753,23 +748,9 @@ try {
       assert.match(await row.innerText(), /Na/);
       assert.match(await row.innerText(), /Nieuwe keuze: Noem een natuurfeit/);
       assert.equal(quickRollbackAttempts, 0);
-      const cancelledCards = await cards.allTextContents();
-      page.once("dialog", async (dialog) => {
-        assert.match(dialog.message(), /Dit voert ze niet uit/);
-        await dialog.dismiss();
-      });
-      await row
-        .getByRole("button", { name: "Herstel deze versie", exact: true })
-        .click();
-      assert.equal(quickRollbackAttempts, 0);
-      assert.deepEqual(await cards.allTextContents(), cancelledCards);
+      // Inspecting a version sends no mutation; restoring it takes one click.
       assert.deepEqual(overview.quickActions, savedQuickItems);
-
       expectedRollbackId = quickSaveId;
-      page.once("dialog", async (dialog) => {
-        assert.match(dialog.message(), /Dit voert ze niet uit/);
-        await dialog.accept();
-      });
       let readback = overviewRead();
       historyResponse = page.waitForResponse(
         (response) =>
@@ -833,7 +814,6 @@ try {
         /Eerdere keuze: Vertel een rustig feit/,
       );
       expectedRollbackId = olderQuickId;
-      page.once("dialog", (dialog) => dialog.accept());
       readback = overviewRead();
       historyResponse = page.waitForResponse(
         (response) =>
@@ -895,7 +875,6 @@ try {
       const beforeConflictCards = await cards
         .locator(":scope > p:first-of-type")
         .allTextContents();
-      page.once("dialog", (dialog) => dialog.accept());
       await row
         .getByRole("button", { name: "Herstel deze versie", exact: true })
         .click();
@@ -1018,7 +997,7 @@ try {
       );
       // Rejected fetches and local export failures must never display diagnostics.
       await settingsSection("automation");
-      await service().locator("summary").click();
+      await openService();
       const privateDiagnostic =
         "private-host.invalid /srv/private token=fixture-secret";
       await page.evaluate((diagnostic) => {
@@ -1117,13 +1096,12 @@ try {
       assert.equal(quickRollbackEffects, 2);
       assert.equal(quickHistoryReads, 7);
       assert.equal(serviceWrites, 1);
-      assert.equal(preparations, 3);
-      assert.equal(cancellations, 1);
-      assert.equal(confirmations, 1);
+      assert.equal(paletteAttempts, 2);
+      assert.equal(paletteChanges, 1);
       assert.deepEqual(unexpectedWrites, []);
       assert.deepEqual(errors, []);
       console.log(
-        `${width}px: settings receipts pass; failure/preparation/cancellation excluded, credentials hidden, staged restart honest, tool descriptions read back, toggle single-card, local voice storage success/failure honest; rejected transport/local export diagnostics hidden and translated conflicts preserved; direct quick-action recovery is fresh, explicit, cancellable and conflict-safe; range drag emits one card; all API calls mocked.`,
+        `${width}px: settings receipts pass; failed direct writes excluded; palette succeeds in one request without confirmation, credentials hidden, staged restart honest, tool descriptions read back, toggle single-card, local voice storage success/failure honest; rejected transport/local export diagnostics hidden and translated conflicts preserved; direct quick-action recovery is fresh, direct, single-click and conflict-safe; range drag emits one card; all API calls mocked.`,
       );
     } finally {
       await context.close();

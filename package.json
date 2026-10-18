@@ -19,6 +19,7 @@
     "build": "npm run build -w @nova/web && npm run build -w @nova/api",
     "start": "npm run start -w @nova/api",
     "test": "npm run test -w @nova/api",
+    "test:version": "node --test scripts/test-version.mjs",
     "test:dev-readiness": "node scripts/test-dev-readiness.mjs",
     "test:autonomy:runtime": "node scripts/test-autonomy-runtime.mjs",
     "test:nodered-seed": "node scripts/test-nodered-seed.mjs",

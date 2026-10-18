@@ -43,12 +43,6 @@
   }
 
   async function rollbackDefinitions(id: string) {
-    if (
-      !window.confirm(
-        "Zet de gezinsprofielen terug naar de vorige inhoud? De actieve keuze blijft behouden als dat profiel nog bestaat.",
-      )
-    )
-      return;
     busy = true;
     definitionMessage = "";
     try {
@@ -79,12 +73,6 @@
   }
 
   async function rollback(id: string) {
-    if (
-      !window.confirm(
-        "Zet NOVA terug naar het vorige actieve gezinsprofiel? Alleen de profielkeuze wordt hersteld.",
-      )
-    )
-      return;
     busy = true;
     message = "";
     try {

@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Global,
-  Module,
-  Post,
-  type INestApplication,
-} from "@nestjs/common";
+import { Global, Module, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import http from "node:http";
 import os from "node:os";
@@ -12,7 +6,6 @@ import request from "supertest";
 import { vi } from "vitest";
 import { AuditService } from "../../src/core/audit/audit.service.js";
 import type { AuditRecord } from "../../src/core/audit/audit.service.js";
-import { AppAccessModule } from "../../src/access/access.module.js";
 import { CoreModule } from "../../src/core/core.module.js";
 import { HealthModule } from "../../src/health/health.module.js";
 import { LLM_CLIENT, type LlmClient } from "../../src/settings/llm-client.js";
@@ -53,14 +46,6 @@ class EchoSource implements ToolSource {
 @Module({ providers: [EchoSource] })
 class EchoModule {}
 
-@Controller("test-access")
-class AppAccessProbeController {
-  @Post("write")
-  write() {
-    return { ok: true };
-  }
-}
-
 export interface TestApp {
   app: INestApplication;
   api: ReturnType<typeof agent>;
@@ -98,7 +83,6 @@ export async function createApp(
   // The optional ports are provided globally, as the chat and Windows modules will do.
   @Global()
   @Module({
-    controllers: [AppAccessProbeController],
     providers,
     exports: providers.map((p) => p.provide),
   })
@@ -107,7 +91,6 @@ export async function createApp(
   try {
     const moduleRef = await Test.createTestingModule({
       imports: [
-        AppAccessModule,
         CoreModule,
         HealthModule,
         ToolsModule,

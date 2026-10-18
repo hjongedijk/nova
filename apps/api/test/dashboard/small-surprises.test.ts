@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SmallSurprisesService } from "../../src/dashboard/small-surprises.service.js";
+import { dbStat, seedState, stateDoc } from "../helpers/nova-db.js";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -68,10 +69,10 @@ describe("opt-in small surprises", () => {
       detail: "Maak er een mooie dag van.",
     });
     const progress = path.join(dir, "small-surprises-progress.json");
-    expect(JSON.parse(fs.readFileSync(progress, "utf8"))).toEqual({
+    expect(stateDoc(progress)).toEqual({
       completedDay: "2026-10-13",
     });
-    expect(fs.statSync(progress).mode & 0o777).toBe(0o600);
+    expect(dbStat(progress).mode & 0o777).toBe(0o600);
   });
 
   it("stays quiet without opt-in, during focus, quiet hours or absence", () => {
@@ -95,10 +96,7 @@ describe("opt-in small surprises", () => {
 
   it("pauses on damaged progress instead of repeating an occasion", () => {
     const { service, record, dir } = fixture();
-    fs.writeFileSync(
-      path.join(dir, "small-surprises-progress.json"),
-      "{broken",
-    );
+    seedState(path.join(dir, "small-surprises-progress.json"), "{broken");
     service.checkSchedule(birthday);
     expect(record).not.toHaveBeenCalled();
   });

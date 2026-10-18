@@ -1,11 +1,14 @@
 import {
+  readJsonStateOrEnoent,
+  writeJsonState,
+} from "../core/db/json-state.js";
+import {
   Injectable,
   Logger,
   Optional,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
-import fs from "node:fs";
 import crypto from "node:crypto";
 import type { MemoryRecord } from "@nova/contracts";
 import { SemanticMemoryService } from "../memory/semantic-memory.service.js";
@@ -286,9 +289,7 @@ export class SmallSurprisesService implements OnModuleInit, OnModuleDestroy {
 
   private completedDay(): string | null {
     try {
-      const value: unknown = JSON.parse(
-        fs.readFileSync(this.progressFile, "utf8"),
-      );
+      const value: unknown = readJsonStateOrEnoent(this.progressFile);
       if (
         !value ||
         typeof value !== "object" ||
@@ -310,12 +311,7 @@ export class SmallSurprisesService implements OnModuleInit, OnModuleDestroy {
 
   private saveCompletedDay(day: string): boolean {
     try {
-      const temporary = `${this.progressFile}.tmp`;
-      fs.writeFileSync(temporary, JSON.stringify({ completedDay: day }), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      fs.renameSync(temporary, this.progressFile);
+      writeJsonState(this.progressFile, { completedDay: day });
       return true;
     } catch {
       this.paused = true;

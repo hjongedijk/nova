@@ -11,20 +11,27 @@ import path from "node:path";
 import { AgentService } from "../agent/agent.service.js";
 import { AgentError } from "../agent/agent.types.js";
 import { type DirectGoal, DELEGATION_REPLY } from "../chat/direct-goal.js";
+import { CorrectionLearner } from "../chat/correction-learner.service.js";
 import { OrchestratorService } from "../chat/orchestrator.service.js";
+import {
+  AUTOPILOT_INTERVAL_MS,
+  LanDiscoveryService,
+} from "../apis/lan-discovery.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { HomeAssistantService } from "../home/home-assistant.service.js";
 import { McpHub } from "../integrations/mcp/mcp.hub.js";
 import { ObjectivesService } from "../objectives/objectives.service.js";
-import { inQuietHours, localDay } from "../objectives/objectives.time.js";
+import {
+  inQuietHours,
+  localDay,
+  localMinutes,
+} from "../objectives/objectives.time.js";
 import { ObjectiveError } from "../objectives/objectives.types.js";
 import { JarvisStateStore } from "../planning/jarvis-state.store.js";
 import { ModelMetricsService } from "../routing/model-metrics.service.js";
 import { RoutingService } from "../routing/routing.service.js";
 import { TelephonyService } from "../telephony/telephony.service.js";
-import { allowsAutoApproval } from "../tools/autonomy-policy.js";
-import { AutonomyLevelStore } from "../tools/autonomy-level.store.js";
 import { ToolsService } from "../tools/tools.service.js";
 import { applySettings, AutopilotStore } from "./autopilot.store.js";
 import {
@@ -33,6 +40,7 @@ import {
   type ScanContext,
 } from "./autopilot.scans.js";
 import { T } from "./autopilot.templates.js";
+import { ceilingOf, tune } from "./autopilot.tuning.js";
 import {
   LIMITS,
   SCAN_NAMES,
@@ -40,6 +48,8 @@ import {
   type AutopilotFile,
   type AutopilotSettings,
   type Finding,
+  type Reaction,
+  type ScanName,
   type Urgency,
 } from "./autopilot.types.js";
 
@@ -50,13 +60,18 @@ const SEVERITY = { info: "info", warn: "warning", urgent: "critical" } as const;
 const KEY_SERVICES = /omni|mqtt|qdrant|speech|stt|tts|home/i;
 const AGENT_SESSION = "autopilot";
 
-export type Outcome = "gemeld" | "cooldown" | "stil" | "budget" | "limiet";
+export type Outcome =
+  "gemeld" | "cooldown" | "stil" | "budget" | "limiet" | "gedempt";
+
+const IGNORED_AFTER_MS = 24 * HOUR;
+const STOP_WINDOW_MS = 6 * HOUR;
+const MUTE_MS = 30 * 24 * HOUR;
 
 /**
  * The always-on autopilot: every few minutes it runs deterministic read-only scans (no model call), turns what it finds into
  * short Dutch messages from templates and delivers them as initiative: the alert feed, a Linphone text to saved contacts and,
  * only when allowed, a phone call for something urgent. Quiet hours, a daily budget, an hourly limit and per-finding cooldowns
- * keep it from nagging. See docs/autopilot.md.
+ * keep it from nagging. See docs/features.md#autopilot-nova-takes-initiative.
  */
 @Injectable()
 export class AutopilotService implements OnModuleInit, OnModuleDestroy {
@@ -79,7 +94,6 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
     private readonly events: JarvisStateStore,
     private readonly objectives: ObjectivesService,
     private readonly agent: AgentService,
-    private readonly autonomy: AutonomyLevelStore,
     private readonly audit: AuditService,
     private readonly config: NovaConfig,
     @Optional() private readonly telephony?: TelephonyService,
@@ -88,6 +102,8 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly mcp?: McpHub,
     @Optional() private readonly home?: HomeAssistantService,
     @Optional() private readonly orchestrator?: OrchestratorService,
+    @Optional() private readonly learner?: CorrectionLearner,
+    @Optional() private readonly discovery?: LanDiscoveryService,
   ) {}
 
   onModuleInit(): void {
@@ -95,6 +111,10 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
     this.orchestrator?.setGoalDelegator((goal, context) =>
       this.delegate(goal, context),
     );
+    // "Doe dat niet meer" right after a nudge teaches the autopilot to stop that nudge.
+    this.learner?.onCorrection(({ signal }) => {
+      if (signal.stop) this.react({}, "stopped");
+    });
     this.timer = setInterval(() => void this.tick(), this.tickMs);
     this.timer.unref?.();
   }
@@ -129,6 +149,8 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
     const file = this.file;
     const before = file.settings.enabled;
     file.settings = applySettings(file.settings, patch);
+    // What the owner sets is the new ceiling for self-tuning.
+    file.tuning.ceiling = null;
     if (file.settings.enabled && !before)
       file.nextDueAt = Math.min(
         file.nextDueAt,
@@ -176,6 +198,12 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
         at: new Date(f.at).toISOString(),
       })),
       activity: file.activity.slice(-30).map(describeActivity),
+      tuning: {
+        cooldownFactor: { ...file.tuning.cooldownFactor },
+        mutedNudges: Object.keys(file.tuning.mutedKeys).length,
+        awaitingReaction: file.tuning.pending.length,
+        selfAdjusted: file.tuning.ceiling !== null,
+      },
     };
   }
 
@@ -203,6 +231,7 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
       const now = this.now();
       this.rollDay(now);
       this.prune(now);
+      this.expirePending(now);
       // Set before the work: a crash in the middle must not turn into a scan storm after restart.
       file.nextDueAt = now + file.settings.intervalMinutes * MIN;
       file.lastScanAt = now;
@@ -268,6 +297,27 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
         home: this.home,
         agent: this.agent,
         objectives: this.objectives,
+        discovery: this.discovery
+          ? {
+              refresh: async () => {
+                try {
+                  const result = await this.discovery!.scan(
+                    AUTOPILOT_INTERVAL_MS,
+                    AbortSignal.timeout(40_000),
+                  );
+                  if (result.scanned)
+                    this.record({
+                      kind: "scan",
+                      scan: "discovery",
+                      outcome: `${result.candidates.length} diensten op het netwerk`,
+                    });
+                } catch {
+                  /* a failed LAN scan is just no proposals */
+                }
+              },
+              proposals: () => this.discovery!.proposals(),
+            }
+          : undefined,
         system: {
           diskFreePercent: () => this.diskFree(),
           memoryFreePercent: () => this.memoryFree(),
@@ -294,7 +344,6 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
             null,
             false,
             {
-              readOnlyOnly: true,
               signal: AbortSignal.timeout(20_000),
             },
           );
@@ -333,8 +382,14 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
     const s = file.settings;
     const now = this.now();
     this.rollDay(now);
+    const mutedUntil = file.tuning.mutedKeys[f.key];
+    if (mutedUntil !== undefined) {
+      if (mutedUntil > now) return "gedempt";
+      delete file.tuning.mutedKeys[f.key];
+    }
     const last = file.sent[f.key];
-    if (last !== undefined && now - last < f.cooldownMinutes * MIN)
+    const factor = file.tuning.cooldownFactor[f.scan] ?? 1;
+    if (last !== undefined && now - last < f.cooldownMinutes * factor * MIN)
       return "cooldown";
     const urgent = f.urgency === "urgent";
     const cap = (n: number) => (urgent ? n * 2 : n);
@@ -348,6 +403,12 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
     file.usage.count++;
     file.recentSends = [...file.recentSends.filter((t) => t > now - HOUR), now];
     file.sent[f.key] = now;
+    file.tuning.pending = [
+      ...file.tuning.pending.filter((p) => p.key !== f.key),
+      { id: f.id, key: f.key, scan: f.scan, at: now },
+    ].slice(-LIMITS.pending);
+    if (f.scan === "discovery")
+      this.discovery?.markProposed(f.key.replace(/^discovery:/, ""));
     this.noted.delete(f.key);
     this.emitAlert(f, now);
     this.record({
@@ -423,23 +484,10 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** A call needs three yeses: the setting, an autonomy level that lets NOVA call by herself, and a working phone system. */
+  /** NOVA calls by herself when the setting is on and the phone system works. */
   private async maybeCall(f: Finding): Promise<void> {
     const s = this.settings;
     if (!s.allowCalls || !this.telephony?.enabled) return;
-    const allowed = allowsAutoApproval("phone_call", {
-      level: this.autonomy.get(),
-      routine: true,
-      tainted: false,
-    });
-    if (!allowed) {
-      this.record({
-        kind: "call",
-        findingId: f.id,
-        outcome: "autonomieniveau staat het niet toe",
-      });
-      return;
-    }
     const [contact] = this.telephony.conversationContacts();
     if (!contact) return;
     try {
@@ -527,8 +575,6 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
   ): Promise<string | null> {
     try {
       if (goal.kind === "agent") {
-        // At the careful level every step is ask-first; the model flow keeps that conversation natural.
-        if (this.autonomy.get() === "careful") return null;
         this.agent.start(goal.goal);
         this.record({ kind: "delegated", outcome: "taak gestart" });
         return DELEGATION_REPLY;
@@ -549,6 +595,89 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
       if (error instanceof AgentError || error instanceof ObjectiveError)
         return error.message;
       return null;
+    }
+  }
+
+  // ---- self-tuning ----------------------------------------------------------------------------
+
+  /**
+   * The owner's reaction to a nudge: dismissed it, left it unanswered, acted on it, or said "doe dat niet meer"
+   * (which, without an id, means the latest nudge of the last few hours). Reactions steer budgets, intervals,
+   * cooldowns and quiet hours, always towards quieter and never beyond what the owner set.
+   */
+  react(
+    target: { id?: string; key?: string },
+    reaction: Reaction,
+  ): { recorded: boolean } {
+    const tuning = this.file.tuning;
+    const now = this.now();
+    const pending = [...tuning.pending]
+      .reverse()
+      .find((p) =>
+        target.id || target.key
+          ? p.id === target.id || p.key === target.key
+          : reaction === "stopped" && now - p.at < STOP_WINDOW_MS,
+      );
+    if (!pending) return { recorded: false };
+    tuning.pending = tuning.pending.filter((p) => p !== pending);
+    this.addReaction(pending.scan, reaction, pending.at);
+    if (reaction === "stopped") {
+      tuning.mutedKeys[pending.key] = now + MUTE_MS;
+      this.record({
+        kind: "tuning",
+        scan: pending.scan,
+        outcome: "melding gedempt op verzoek (doe dat niet meer)",
+      });
+    }
+    this.applyTuning();
+    this.trySave();
+    return { recorded: true };
+  }
+
+  private addReaction(scan: ScanName, reaction: Reaction, at: number): void {
+    const tuning = this.file.tuning;
+    tuning.reactions = [
+      ...tuning.reactions,
+      {
+        at: this.now(),
+        scan,
+        reaction,
+        minute: localMinutes(at, this.file.settings.quiet.timezone),
+      },
+    ].slice(-LIMITS.reactions);
+  }
+
+  /** Nudges nobody answered within a day count as ignored. */
+  private expirePending(now: number): void {
+    const tuning = this.file.tuning;
+    const expired = tuning.pending.filter(
+      (p) => now - p.at >= IGNORED_AFTER_MS,
+    );
+    if (!expired.length) return;
+    tuning.pending = tuning.pending.filter(
+      (p) => now - p.at < IGNORED_AFTER_MS,
+    );
+    for (const p of expired) this.addReaction(p.scan, "ignored", p.at);
+    this.applyTuning();
+  }
+
+  private applyTuning(): void {
+    const file = this.file;
+    const changes = tune(file.tuning, file.settings, this.now());
+    for (const change of changes) {
+      if (Object.keys(change.patch).length) {
+        try {
+          const ceiling = file.tuning.ceiling ?? ceilingOf(file.settings);
+          file.settings = applySettings(file.settings, change.patch);
+          file.tuning.ceiling = ceiling;
+        } catch {
+          continue;
+        }
+      }
+      this.record({
+        kind: "tuning",
+        outcome: `zelf aangepast: ${change.note}`,
+      });
     }
   }
 

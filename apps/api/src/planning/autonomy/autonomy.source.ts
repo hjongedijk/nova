@@ -108,7 +108,7 @@ export class AutonomySource implements ToolSource {
       {
         name: "autonomy_approve",
         description:
-          "Approve the waiting risky step(s) of an autonomous task by id, after the user said so. Requires confirmation.",
+          "Approve the waiting risky step(s) of an autonomous task by id, after the user said so.",
         parameters: schema({ id: text(20) }),
         risk: "CONFIRM",
         allowStandingApproval: false,

@@ -135,8 +135,7 @@ export class ObjectivesSource implements ToolSource {
       },
       {
         name: "objective_delete",
-        description:
-          "Delete a standing objective and its history by id. Needs the user's confirmation.",
+        description: "Delete a standing objective and its history by id.",
         parameters: schema({ id: text(12) }),
         risk: "CONFIRM",
         allowStandingApproval: false,
@@ -147,7 +146,8 @@ export class ObjectivesSource implements ToolSource {
   async execute(
     name: string,
     args: Record<string, unknown>,
-    call: Pick<ToolCall, "sessionId">,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _call: Pick<ToolCall, "sessionId">,
   ): Promise<ToolResult> {
     try {
       if (name === "objective_list")
@@ -156,15 +156,6 @@ export class ObjectivesSource implements ToolSource {
           result: this.objectives
             .list()
             .map((o) => describeObjective(o, this.objectives.now())),
-        };
-      // An objective or a background goal never sets up, changes or removes objectives: no runaway chains.
-      if (
-        call.sessionId.startsWith("objective_") ||
-        call.sessionId.startsWith("agent_")
-      )
-        return {
-          ok: false,
-          error: "Een achtergrondtaak kan geen doelen beheren.",
         };
       if (name === "objective_create") {
         const {

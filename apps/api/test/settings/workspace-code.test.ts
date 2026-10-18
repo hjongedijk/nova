@@ -2,16 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Test } from "@nestjs/testing";
-import { CoreModule } from "../../src/core/core.module.js";
 import { AuditService } from "../../src/core/audit/audit.service.js";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { WorkspaceCodeService } from "../../src/settings/workspace-code.service.js";
 import { WorkspaceProjects } from "../../src/settings/workspace-projects.service.js";
 import { WorkspaceCodeSource } from "../../src/settings/workspace-code.source.js";
-import { ToolsModule } from "../../src/tools/tools.module.js";
-import { ToolsService } from "../../src/tools/tools.service.js";
 
 describe("workspace code tools", () => {
   let dataDir: string;
@@ -25,11 +20,7 @@ describe("workspace code tools", () => {
     oldData = process.env.NOVA_DATA_DIR;
     process.env.NOVA_DATA_DIR = dataDir;
     const audit = { record: vi.fn() } as unknown as AuditService;
-    projects = new WorkspaceProjects(
-      new NovaConfig(),
-      new ConfirmationsService(audit),
-      audit,
-    );
+    projects = new WorkspaceProjects(new NovaConfig(), audit);
     projects.create({ name: "Test project" });
     root = projects.projectDirectory("test-project");
     code = new WorkspaceCodeService(projects);
@@ -278,113 +269,5 @@ describe("workspace code tools", () => {
       result: { output: expect.stringContaining("clean") },
     });
     expect(git.call).toHaveBeenCalledWith("test-project", "git_status", {});
-  });
-
-  it("enforces the chat confirmation gate and keeps source contents out of audit records", async () => {
-    const oldActions = process.env.JARVIS_ENABLE_ACTIONS;
-    process.env.JARVIS_ENABLE_ACTIONS = "true";
-    const moduleRef = await Test.createTestingModule({
-      imports: [CoreModule, ToolsModule],
-    }).compile();
-    try {
-      await moduleRef.init();
-      const tools = moduleRef.get(ToolsService);
-      const stack = {
-        runCode: vi.fn().mockResolvedValue({
-          ok: true,
-          exitCode: 0,
-          durationMs: 4,
-          output: "syntax ok",
-        }),
-      };
-      tools.addSource(
-        new WorkspaceCodeSource(
-          code,
-          stack as never,
-          { call: vi.fn() } as never,
-        ),
-      );
-      const sessionId = "code-confirmation-session";
-      const proposal = await tools.execute(
-        "code_file_write",
-        { path: "confirmed.ts", content: "private implementation marker" },
-        sessionId,
-      );
-      expect(proposal.requiresConfirmation).toBe(true);
-      expect(fs.existsSync(path.join(root, "confirmed.ts"))).toBe(false);
-      expect(proposal.action?.args.diffPreview).toContain(
-        "private implementation marker",
-      );
-      const approval = moduleRef
-        .get(ConfirmationsService)
-        .take(sessionId, proposal.action!.confirmationId)!;
-      expect(approval.allowAlways).toBe(false);
-      const applied = await tools.execute(
-        "code_file_write",
-        approval.args,
-        sessionId,
-        approval,
-      );
-      expect(applied).toMatchObject({ ok: true, verified: true });
-      const selfProposal = await tools.execute(
-        "code_self_test",
-        {
-          path: "self-created.mjs",
-          content: "console.log('secret source marker');",
-          testCommand: ["node", "--check", "{{draft}}"],
-        },
-        sessionId,
-      );
-      expect(selfProposal.requiresConfirmation).toBe(true);
-      expect(selfProposal.action?.risk).toBe("DANGEROUS");
-      const testApproval = moduleRef
-        .get(ConfirmationsService)
-        .take(sessionId, selfProposal.action!.confirmationId)!;
-      expect(testApproval.allowAlways).toBe(false);
-      const testResult = await tools.execute(
-        "code_self_test",
-        testApproval.args,
-        sessionId,
-        testApproval,
-      );
-      expect(testResult).toMatchObject({ ok: true, result: { passed: true } });
-      expect(fs.existsSync(path.join(root, "self-created.mjs"))).toBe(false);
-      const saveProposal = await tools.execute(
-        "code_self_save",
-        { draftId: (testResult.result as { saveDraftId: string }).saveDraftId },
-        sessionId,
-      );
-      expect(saveProposal.requiresConfirmation).toBe(true);
-      expect(saveProposal.action?.risk).toBe("CONFIRM");
-      const saveApproval = moduleRef
-        .get(ConfirmationsService)
-        .take(sessionId, saveProposal.action!.confirmationId)!;
-      const saveResult = await tools.execute(
-        "code_self_save",
-        saveApproval.args,
-        sessionId,
-        saveApproval,
-      );
-      expect(saveResult).toMatchObject({ ok: true, verified: true });
-      expect(
-        fs.readFileSync(path.join(root, "self-created.mjs"), "utf8"),
-      ).toContain("secret source marker");
-      const audit = moduleRef.get(AuditService).read(20, sessionId);
-      expect(JSON.stringify(audit)).not.toContain(
-        "private implementation marker",
-      );
-      expect(JSON.stringify(audit)).not.toContain("secret source marker");
-      expect(
-        audit.some(
-          (entry) =>
-            (entry.arguments as Record<string, unknown> | undefined)?.path ===
-            "confirmed.ts",
-        ),
-      ).toBe(true);
-    } finally {
-      await moduleRef.close();
-      if (oldActions === undefined) delete process.env.JARVIS_ENABLE_ACTIONS;
-      else process.env.JARVIS_ENABLE_ACTIONS = oldActions;
-    }
   });
 });

@@ -8,7 +8,7 @@ import type {
 } from "@nova/contracts";
 import { ApiError } from "#lib/api/client.ts";
 import { friendlyApiError, uiErrorLanguage } from "#lib/api/error-copy.ts";
-import { getSettings, setPin } from "#lib/api/settings.ts";
+import { getSettings } from "#lib/api/settings.ts";
 import { loadSidebar } from "#lib/stores/sidebar.svelte.ts";
 import { chat } from "#lib/stores/chat.svelte.ts";
 import { shell } from "#lib/stores/shell.svelte.ts";
@@ -38,8 +38,6 @@ export const settings = $state({
   editing: null as SkillEditing | null,
   editingWidget: null as WidgetEditing | null,
   toolsOpen: false,
-  /** The API wants a PIN that is missing or wrong. */
-  needPin: false,
 });
 
 /** The status line. `n` counts every message, so tests (and timers) can tell old from new. */
@@ -83,23 +81,14 @@ export function fail(error: unknown): void {
   }
 }
 
-/** Load the overview. A 401 with pinRequired switches the dialog to the PIN prompt. */
+/** Load the overview. */
 export async function reload(): Promise<void> {
   try {
     settings.data = await getSettings();
-    settings.needPin = false;
     say("");
   } catch (error) {
-    if (error instanceof ApiError && error.pinRequired) {
-      settings.needPin = true;
-      say("");
-    } else fail(error);
+    fail(error);
   }
-}
-
-export function unlock(pin: string): Promise<void> {
-  setPin(pin);
-  return reload();
 }
 
 /** After every change: fetch the overview again, say what happened, refresh the sidebar on the home screen. */

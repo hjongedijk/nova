@@ -1,5 +1,4 @@
 import { getJson, sendJson } from "./client.ts";
-import { getPin } from "./pin-session.ts";
 
 export interface AutonomyTask {
   id: string;
@@ -24,24 +23,6 @@ export const cancelAutonomyTask = (id: string) =>
   sendJson<{ cancelled: boolean }>(
     "DELETE",
     `/autonomy/tasks/${encodeURIComponent(id)}`,
-  );
-
-export type AutonomyLevel = "careful" | "balanced" | "independent";
-// The settings API wants the admin header on writes (and the PIN when one is set).
-const adminHeaders = (): Record<string, string> => {
-  const pin = getPin();
-  return { "x-nova-admin": "1", ...(pin ? { "x-nova-pin": pin } : {}) };
-};
-export const getAutonomyLevel = () =>
-  getJson<{ level: AutonomyLevel }>("/settings/autonomy-level", {
-    headers: adminHeaders(),
-  });
-export const setAutonomyLevel = (level: AutonomyLevel) =>
-  sendJson<{ level: AutonomyLevel }>(
-    "PUT",
-    "/settings/autonomy-level",
-    { level },
-    adminHeaders(),
   );
 
 export interface AgentRunView {

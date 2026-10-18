@@ -55,7 +55,6 @@ import {
 } from "./telephony.types.js";
 
 const MAX_EVENTS = 50;
-const MAX_CALLS_PER_HOUR = 5;
 const MAX_CONCURRENT_CALLS = 2;
 const MESSAGE_MAX = 500;
 const TEXT_MAX = 900;
@@ -691,10 +690,6 @@ export class TelephonyService implements OnModuleInit, OnModuleDestroy {
     const cutoff = this.now() - 3_600_000;
     while (this.started.length && this.started[0]! < cutoff)
       this.started.shift();
-    if (this.started.length >= MAX_CALLS_PER_HOUR)
-      throw new TelephonyError(
-        "Te veel uitgaande gesprekken in het afgelopen uur.",
-      );
   }
 
   private async prepareAnnouncement(

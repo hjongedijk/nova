@@ -54,8 +54,12 @@ const RESULT_FIELDS: Record<string, readonly string[]> = {
     "agentPaused",
     "helperOpen",
     "agent",
+    "appVersion",
     "apps",
     "running",
+    "permissions",
+    "elevated",
+    "runElevated",
   ],
   windows_helper_debug: ["agent", "helper", "view", "display"],
   windows_open_app: [],
@@ -200,13 +204,36 @@ export class WindowsPcService {
             "De Windows-agent is niet bereikbaar of weigert de verbinding.",
         };
       const result = outcome.result;
+      const permissions = result.permissions as
+        Record<string, unknown> | undefined;
       return {
         available: true,
+        ...(permissions &&
+        typeof permissions.view === "boolean" &&
+        typeof permissions.control === "boolean" &&
+        typeof permissions.browser === "boolean"
+          ? {
+              permissions: {
+                view: permissions.view,
+                control: permissions.control,
+                browser: permissions.browser,
+              },
+            }
+          : {}),
+        ...(typeof result.elevated === "boolean"
+          ? { elevated: result.elevated }
+          : {}),
+        ...(typeof result.runElevated === "boolean"
+          ? { runElevated: result.runElevated }
+          : {}),
         version:
-          typeof result.agent === "string" &&
-          /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(result.agent)
-            ? result.agent
-            : null,
+          typeof result.appVersion === "string" &&
+          /^\d+\.\d+\.\d+$/.test(result.appVersion)
+            ? result.appVersion
+            : typeof result.agent === "string" &&
+                /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(result.agent)
+              ? result.agent
+              : null,
         helperOpen:
           typeof result.helperOpen === "boolean" ? result.helperOpen : null,
         paused:
@@ -420,6 +447,34 @@ export class WindowsPcService {
       };
     const result: Record<string, unknown> = { ok: true };
     for (const key of RESULT_FIELDS[name] ?? []) {
+      if (
+        key === "appVersion" &&
+        (typeof response.data[key] !== "string" ||
+          !/^\d+\.\d+\.\d+$/.test(response.data[key]))
+      )
+        continue;
+      if (key === "permissions") {
+        const p = response.data[key];
+        if (p && typeof p === "object" && !Array.isArray(p)) {
+          const values = p as Record<string, unknown>;
+          if (
+            ["view", "control", "browser"].every(
+              (name) => typeof values[name] === "boolean",
+            )
+          )
+            result[key] = {
+              view: values.view,
+              control: values.control,
+              browser: values.browser,
+            };
+        }
+        continue;
+      }
+      if (
+        (key === "elevated" || key === "runElevated") &&
+        typeof response.data[key] !== "boolean"
+      )
+        continue;
       if (response.data[key] !== undefined) result[key] = response.data[key];
     }
     if (name === "windows_status")

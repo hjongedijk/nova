@@ -4,7 +4,6 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -71,8 +70,6 @@ function fixture(withLimit = false) {
     timestamp: "now",
   }));
   const audit = { record: auditRecord } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
-  confirmations.now = () => 1000;
   let writes = 0;
   const request = vi.fn(
     async (
@@ -163,7 +160,6 @@ function fixture(withLimit = false) {
   const service = new OmniRouteTokenLimits(
     config as NovaConfig,
     management,
-    confirmations,
     audit,
   );
   return { service, db, request, auditRecord, writes: () => writes };
@@ -196,31 +192,12 @@ describe("OmniRoute token limits", () => {
     expect((await f.service.report("unknown")).available).toBe(false);
   });
 
-  it("adds a global cap only after fresh client-wide DANGEROUS confirmation and verifies SQLite/API", async () => {
+  it("adds a global cap in one call and verifies SQLite/API", async () => {
     const f = fixture();
-    const prepared = await f.service.prepare("key-1", 5000, "weekly", true);
-    expect(prepared).toMatchObject({
+    expect(await f.service.apply("key-1", 5000, "weekly")).toMatchObject({
       ok: true,
-      oldLimit: null,
-      tokenLimit: 5000,
-      action: { risk: "DANGEROUS" },
+      verified: true,
     });
-    expect(f.writes()).toBe(0);
-    expect(JSON.stringify(f.auditRecord.mock.calls)).not.toContain(
-      "nova-secret",
-    );
-    expect(JSON.stringify(prepared.action?.args)).not.toContain(
-      "secret-key-value",
-    );
-    const action = prepared.action!;
-    expect(
-      await f.service.confirm(
-        "key-1",
-        action.sessionId,
-        action.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: true, verified: true });
     expect(
       f.db
         .prepare(
@@ -229,36 +206,38 @@ describe("OmniRoute token limits", () => {
         .get("key-1"),
     ).toEqual({ token_limit: 5000, reset_interval: "weekly", enabled: 1 });
     expect(f.writes()).toBe(1);
+    const audit = JSON.stringify(f.auditRecord.mock.calls);
+    expect(audit).not.toMatch(/nova-secret|secret-key-value/);
+    expect(audit).not.toMatch(/pending_admin_ui|confirmed_admin_ui/);
+  });
+
+  it("rejects invalid limits and NOVA's own key without writing", async () => {
+    const f = fixture();
+    await expect(f.service.apply("key-1", -5, "weekly")).rejects.toThrow(
+      "tokenlimiet",
+    );
+    await expect(f.service.apply("key-1", 5000, "yearly")).rejects.toThrow(
+      "tokenlimiet",
+    );
+    expect(await f.service.apply("nova-key-id", 5000, "weekly")).toMatchObject({
+      ok: false,
+    });
+    expect(f.writes()).toBe(0);
   });
 
   it("allows only lowering or enabling an existing cap without changing its interval", async () => {
     const f = fixture(true);
-    expect(
-      await f.service.prepare("key-1", 1001, "monthly", true),
-    ).toMatchObject({ ok: false });
-    expect(await f.service.prepare("key-1", 900, "daily", true)).toMatchObject({
+    expect(await f.service.apply("key-1", 1001, "monthly")).toMatchObject({
       ok: false,
     });
-    const prepared = await f.service.prepare("key-1", 900, "monthly", true);
-    expect(prepared).toMatchObject({ ok: true, oldLimit: 1000 });
+    expect(await f.service.apply("key-1", 900, "daily")).toMatchObject({
+      ok: false,
+    });
     expect(f.writes()).toBe(0);
-  });
-
-  it("rejects a concurrent upstream change rather than overwriting it", async () => {
-    const f = fixture(true);
-    const prepared = await f.service.prepare("key-1", 800, "monthly", true);
-    const action = prepared.action!;
-    f.db
-      .prepare("UPDATE api_key_token_limits SET token_limit=? WHERE id=?")
-      .run(700, "11111111-1111-4111-8111-111111111111");
-    expect(
-      await f.service.confirm(
-        "key-1",
-        action.sessionId,
-        action.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: false });
-    expect(f.writes()).toBe(0);
+    expect(await f.service.apply("key-1", 900, "monthly")).toMatchObject({
+      ok: true,
+      verified: true,
+    });
+    expect(f.writes()).toBe(1);
   });
 });

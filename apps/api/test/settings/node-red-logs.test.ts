@@ -31,7 +31,6 @@ describe("Node-RED log projection", () => {
         stackControlUrl: "http://broker:8090",
         stackControlToken: "a".repeat(64),
       } as NovaConfig,
-      { create: vi.fn() } as never,
       audit as never,
     );
     vi.stubGlobal(

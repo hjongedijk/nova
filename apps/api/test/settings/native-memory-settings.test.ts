@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -40,58 +39,40 @@ function fixture() {
     timestamp: "fixture",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
   const service = new NativeMemorySettingsService(
     { dataFile: (name: string) => path.join(dir, name) } as NovaConfig,
     { request } as unknown as OmniRouteManagement,
-    confirmations,
     audit,
   );
-  const prepare = async (enabled: boolean) => {
-    const result = await service.prepare({ enabled, acknowledgeGlobal: true });
-    if (!result.action) throw new Error("Missing confirmation");
-    return result;
-  };
-  const confirm = (
-    prepared: Awaited<ReturnType<typeof prepare>>,
-    approve = true,
-  ) =>
-    service.confirm(
-      prepared.action!.sessionId,
-      prepared.action!.confirmationId,
-      approve,
-    );
   return {
     service,
     request,
     record,
-    confirmations,
-    prepare,
-    confirm,
     get: () => settings,
     historyFile,
   };
 }
 
-describe("NOVA-owned OmniRoute memory switch", () => {
-  it("projects settings without secrets and requires a client-wide acknowledgement", async () => {
+describe("NOVA-owned OmniRoute memory switch (single step)", () => {
+  it("projects settings without secrets and rejects malformed input", async () => {
     const f = fixture();
     expect(await f.service.status()).toEqual({
       enabled: false,
       backend: "sqlite",
       maxTokens: 1200,
     });
-    await expect(f.service.prepare({ enabled: true })).rejects.toThrow();
+    await expect(f.service.apply({})).rejects.toThrow();
+    await expect(
+      f.service.apply({ enabled: true, acknowledgeGlobal: true }),
+    ).rejects.toThrow();
     expect(JSON.stringify(f.record.mock.calls)).not.toContain(
       "never-return-this",
     );
   });
 
-  it("updates only the global enabled flag after fresh DANGEROUS consent", async () => {
+  it("updates only the global enabled flag in one call", async () => {
     const f = fixture();
-    const prepared = await f.prepare(true);
-    expect(prepared.action!.risk).toBe("DANGEROUS");
-    expect(await f.confirm(prepared)).toMatchObject({
+    expect(await f.service.apply({ enabled: true })).toMatchObject({
       ok: true,
       verified: true,
       enabled: true,
@@ -108,40 +89,34 @@ describe("NOVA-owned OmniRoute memory switch", () => {
       { before: false, after: true },
     ]);
     expect(fs.statSync(f.historyFile).mode & 0o777).toBe(0o600);
+    expect(f.record).toHaveBeenCalled();
     expect(JSON.stringify(f.record.mock.calls)).not.toContain(
       "never-return-this",
     );
   });
 
-  it("refuses a stale settings snapshot and supports cancellation", async () => {
+  it("reports an unchanged switch without writing", async () => {
     const f = fixture();
-    const stale = await f.prepare(true);
-    f.get().primaryBackend = "qdrant";
-    expect(await f.confirm(stale)).toMatchObject({ ok: false });
-    expect(f.request).toHaveBeenCalledTimes(2);
-    const cancelled = await f.prepare(true);
-    expect(await f.confirm(cancelled, false)).toEqual({ ok: true });
+    expect(await f.service.apply({ enabled: false })).toMatchObject({
+      ok: false,
+    });
+    expect(f.request).toHaveBeenCalledTimes(1);
   });
 
-  it("restores a prior global switch only from its current history revision", async () => {
+  it("restores a prior global switch in one call from its history revision", async () => {
     const f = fixture();
-    const first = await f.prepare(true);
-    await f.confirm(first);
+    await f.service.apply({ enabled: true });
     const revision = f.service.history().revisions[0]!;
-    const prepared = await f.service.prepareRollback(revision.id, true);
-    expect(prepared).toMatchObject({ ok: true, enabled: false });
-    expect(prepared.action!.risk).toBe("DANGEROUS");
-    expect(
-      await f.service.confirm(
-        prepared.action!.sessionId,
-        prepared.action!.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: true, enabled: false, verified: true });
+    expect(await f.service.rollback(revision.id)).toMatchObject({
+      ok: true,
+      enabled: false,
+      verified: true,
+    });
     expect(f.service.history().revisions[0]).toMatchObject({
       before: true,
       after: false,
       revertedFrom: revision.id,
     });
+    await expect(f.service.rollback("nope")).rejects.toThrow();
   });
 });

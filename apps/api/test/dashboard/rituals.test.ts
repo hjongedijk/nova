@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RitualsService } from "../../src/dashboard/rituals.service.js";
+import { dbStat, stateExists } from "../helpers/nova-db.js";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -71,9 +72,7 @@ describe("opt-in assistant rituals", () => {
     });
     await f.service.checkSchedule(new Date("2026-10-12T06:00:00.000Z"));
     expect(f.record).not.toHaveBeenCalled();
-    expect(fs.existsSync(path.join(f.dir, "rituals-progress.json"))).toBe(
-      false,
-    );
+    expect(stateExists(path.join(f.dir, "rituals-progress.json"))).toBe(false);
   });
 
   it("delivers an enabled greeting once and stores private progress", async () => {
@@ -87,9 +86,9 @@ describe("opt-in assistant rituals", () => {
     await f.service.checkSchedule(now);
     expect(f.record).toHaveBeenCalledTimes(1);
     expect(f.record.mock.calls[0]?.[0].payload.title).toBe("Goedemorgen");
-    expect(
-      fs.statSync(path.join(f.dir, "rituals-progress.json")).mode & 0o777,
-    ).toBe(0o600);
+    expect(dbStat(path.join(f.dir, "rituals-progress.json")).mode & 0o777).toBe(
+      0o600,
+    );
   });
 
   it("does not issue a silence check-in before the threshold", async () => {
@@ -145,9 +144,9 @@ describe("opt-in assistant rituals", () => {
       detail: "Volgens je thermostaat is het nu 19 °C.",
       key: "welcome-home",
     });
-    expect(
-      fs.statSync(path.join(f.dir, "rituals-progress.json")).mode & 0o777,
-    ).toBe(0o600);
+    expect(dbStat(path.join(f.dir, "rituals-progress.json")).mode & 0o777).toBe(
+      0o600,
+    );
   });
 
   it("does not greet without opt-in or during focus or quiet hours", () => {

@@ -18,7 +18,6 @@ import {
   projectNodeRedFlowRuns,
 } from "./node-red-management.service.js";
 import { NodeRedFlowRevisions } from "./node-red-flow-revisions.service.js";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { SettingsMutationsService } from "./settings-mutations.service.js";
 import {
   Body,
@@ -33,7 +32,6 @@ import {
   Param,
   Post,
   Put,
-  UseGuards,
 } from "@nestjs/common";
 import type {
   PublicConfig,
@@ -65,7 +63,6 @@ import { groupTools } from "./abilities.js";
 import { SkillAssistantService } from "./ai/skill-assistant.service.js";
 import { PlaybooksService } from "./playbooks.service.js";
 import { PublicConfigService } from "./public-config.service.js";
-import { PublicRoute, SettingsGuard } from "./settings.guard.js";
 import {
   BUILTIN_PANELS,
   MAX_PAGES,
@@ -114,7 +111,6 @@ const widgetsOf = (settings: { widgets: unknown[] }) =>
  * as an import, is written to the action log, and takes effect immediately.
  */
 @Controller("settings")
-@UseGuards(SettingsGuard)
 export class SettingsController {
   constructor(
     private readonly settings: SettingsStore,
@@ -141,7 +137,6 @@ export class SettingsController {
     private readonly wallpaperHistory: WallpaperHistory,
     private readonly nodeRedManagement: NodeRedManagement,
     private readonly nodeRedFlowRevisions: NodeRedFlowRevisions,
-    private readonly confirmations: ConfirmationsService,
     private readonly homeAssistant: HomeAssistantService,
     private readonly proxmox: ProxmoxService,
     private readonly termix: TermixService,
@@ -168,7 +163,6 @@ export class SettingsController {
 
   /** The home screen needs the quick actions and example phrases without any PIN. */
   @Get("public")
-  @PublicRoute()
   getPublic(): PublicConfig {
     return this.publicConfig.get();
   }
@@ -251,47 +245,14 @@ export class SettingsController {
     return this.homeAccessHistory.list();
   }
 
-  @Post("home-assistant/access/history/:id/prepare-rollback")
+  @Post("home-assistant/access/history/:id/rollback")
   @HttpCode(200)
-  prepareHomeAssistantAccessRollback(@Param("id") id: string) {
+  rollbackHomeAssistantAccess(@Param("id") id: string) {
     if (!/^[0-9a-f-]{36}$/i.test(id))
       throw new ValidationError(["Ongeldige wijziging."]);
-    return this.homeAccessHistory.prepareRollback(id);
+    return this.homeAccessHistory.rollback(id);
   }
 
-  @Post("home-assistant/access/history/confirm-rollback")
-  @HttpCode(200)
-  confirmHomeAssistantAccessRollback(@Body() body: unknown) {
-    if (
-      !body ||
-      typeof body !== "object" ||
-      Array.isArray(body) ||
-      Object.keys(body).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      )
-    )
-      throw new ValidationError([
-        "Controleer de wijziging en bevestig opnieuw.",
-      ]);
-    const value = body as Record<string, unknown>;
-    if (
-      typeof value.sessionId !== "string" ||
-      !/^settings-ha-access-history:[0-9a-f-]{36}$/i.test(value.sessionId) ||
-      typeof value.confirmationId !== "string" ||
-      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
-      typeof value.approve !== "boolean"
-    )
-      throw new ValidationError([
-        "Controleer de wijziging en bevestig opnieuw.",
-      ]);
-    return this.homeAccessHistory.confirm(
-      value.sessionId,
-      value.confirmationId,
-      value.approve,
-    );
-  }
-
-  /** PIN-protected on-demand target names; informational only, not an access allowlist. */
   @Get("managed-targets/inventory")
   async managedTargetInventory() {
     const genericError = { error: "Overzicht niet beschikbaar." };
@@ -397,34 +358,12 @@ export class SettingsController {
     return this.managedTargetsHistory.list();
   }
 
-  @Post("managed-targets/access/history/:id/prepare-rollback")
+  @Post("managed-targets/access/history/:id/rollback")
   @HttpCode(200)
-  prepareManagedTargetsAccessRollback(@Param("id") id: string) {
+  rollbackManagedTargetsAccess(@Param("id") id: string) {
     if (!/^[0-9a-f-]{36}$/i.test(id))
       throw new ValidationError(["Ongeldige wijziging."]);
-    return this.managedTargetsHistory.prepareRollback(id);
-  }
-
-  @Post("managed-targets/access/history/confirm-rollback")
-  @HttpCode(200)
-  confirmManagedTargetsAccessRollback(@Body() body: unknown) {
-    if (!body || typeof body !== "object" || Array.isArray(body))
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const input = body as Record<string, unknown>;
-    if (
-      Object.keys(input).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      ) ||
-      typeof input.sessionId !== "string" ||
-      typeof input.confirmationId !== "string" ||
-      typeof input.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    return this.managedTargetsHistory.confirm(
-      input.sessionId,
-      input.confirmationId,
-      input.approve,
-    );
+    return this.managedTargetsHistory.rollback(id);
   }
 
   @Put("managed-targets/access")
@@ -504,7 +443,6 @@ export class SettingsController {
       maxPages: MAX_PAGES,
       abilities: groupTools(tools),
       tools,
-      pinRequired: Boolean(this.config.adminPin),
     };
   }
 
@@ -1330,147 +1268,55 @@ export class SettingsController {
     return this.nodeRedManagement.paletteState();
   }
 
-  @Post("node-red/palette/prepare")
+  @Post("node-red/palette/change")
   @HttpCode(200)
-  async prepareNodeRedPalette(@Body() body: unknown) {
+  async changeNodeRedPalette(@Body() body: unknown) {
     if (
       !body ||
       typeof body !== "object" ||
       Array.isArray(body) ||
-      Object.keys(body).some(
-        (key) => !["module", "install", "revision"].includes(key),
-      )
+      Object.keys(body).some((key) => !["module", "install"].includes(key))
     )
       throw new ValidationError(["Ongeldige palette-aanvraag."]);
     const value = body as Record<string, unknown>;
-    if (
-      typeof value.module !== "string" ||
-      typeof value.install !== "boolean" ||
-      typeof value.revision !== "string" ||
-      !/^[0-9a-f]{64}$/.test(value.revision)
-    )
+    if (typeof value.module !== "string" || typeof value.install !== "boolean")
       throw new ValidationError(["Ongeldige palette-aanvraag."]);
-    const state = await this.nodeRedManagement.paletteState();
-    const selected = state.modules.find((row) => row.name === value.module);
+    const module = value.module;
+    const install = value.install;
+    const before = await this.nodeRedManagement.paletteState();
+    const selected = before.modules.find((row) => row.name === module);
     if (!selected)
       throw new ValidationError(["Deze Node-RED-module is niet toegestaan."]);
     if (
-      state.revision !== value.revision ||
-      (value.install
+      install
         ? selected.restartRequired ||
           (selected.installed &&
             (!selected.targetVersion ||
               selected.version === selected.targetVersion))
-        : !selected.installed)
+        : !selected.installed
     )
       throw new ValidationError([
-        "Node-RED-palette is gewijzigd. Laad opnieuw.",
+        install
+          ? "Deze module staat al op de gekozen versie of wacht op een herstart."
+          : "Deze module is niet geïnstalleerd.",
       ]);
+    const targetVersion = install ? (selected.targetVersion ?? null) : null;
     const sessionId = `settings-node-red-palette:${crypto.randomUUID()}`;
-    const action = this.confirmations.create(
-      sessionId,
-      "node_red_palette",
-      {
-        module: value.module,
-        install: value.install,
-        revision: state.revision,
-        targetVersion: value.install ? (selected.targetVersion ?? null) : null,
-      },
-      "DANGEROUS",
-      state.revision,
-      false,
-    );
-    this.audit.record({
-      sessionId,
-      tool: "node_red_palette",
-      risk: "DANGEROUS",
-      confirmation: "pending_admin_ui",
-      arguments: {
-        module: value.module,
-        install: value.install,
-        targetVersion: value.install ? (selected.targetVersion ?? null) : null,
-      },
-    });
-    return {
-      ok: true as const,
-      action,
-      warning: value.install
-        ? selected.targetVersion
-          ? `Installeren zet ${selected.name}@${selected.targetVersion} klaar in Node-RED.${selected.installed ? ` Vervangt de geïnstalleerde versie ${selected.version ?? "onbekend"}; een herstart kan nodig zijn.` : ""} De pakketcode draait met de rechten van Node-RED.`
-          : "Installeren voert de actuele npm-versie van deze module uit in Node-RED, zonder vaste versie."
-        : "Verwijderen kan flows die deze module gebruiken onderbreken.",
-    };
-  }
-
-  @Post("node-red/palette/confirm")
-  @HttpCode(200)
-  async confirmNodeRedPalette(@Body() body: unknown) {
-    if (
-      !body ||
-      typeof body !== "object" ||
-      Array.isArray(body) ||
-      Object.keys(body).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      )
-    )
-      throw new ValidationError(["Ongeldige palettebevestiging."]);
-    const value = body as Record<string, unknown>;
-    if (
-      typeof value.sessionId !== "string" ||
-      !/^settings-node-red-palette:[0-9a-f-]{36}$/i.test(value.sessionId) ||
-      typeof value.confirmationId !== "string" ||
-      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
-      typeof value.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige palettebevestiging."]);
-    const pending = this.confirmations.peek(value.sessionId);
-    if (
-      pending?.confirmationId !== value.confirmationId ||
-      pending.expiresAt <= Date.now() ||
-      pending.tool !== "node_red_palette" ||
-      pending.risk !== "DANGEROUS" ||
-      typeof pending.args.module !== "string" ||
-      typeof pending.args.install !== "boolean" ||
-      typeof pending.args.revision !== "string"
-    )
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
-    if (!value.approve) {
-      this.confirmations.cancel(value.sessionId, "rejected_admin_ui");
-      return { ok: true as const, cancelled: true as const };
-    }
-    const action = this.confirmations.take(
-      value.sessionId,
-      value.confirmationId,
-    );
-    if (!action)
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
-    const module = String(action.args.module);
-    const install = action.args.install === true;
-    const targetVersion =
-      install && typeof action.args.targetVersion === "string"
-        ? action.args.targetVersion
-        : null;
     try {
       const state = await this.nodeRedManagement.changePalette(
         module,
         install,
-        String(action.args.revision),
+        before.revision,
       );
       const pendingRestart =
         install &&
         state.modules.find((row) => row.name === module)?.restartRequired ===
           true;
       this.audit.record({
-        sessionId: value.sessionId,
+        sessionId,
         tool: "node_red_palette",
         risk: "DANGEROUS",
-        confirmation: "approved_admin_ui",
+        confirmation: "direct",
         arguments: { module, install, targetVersion },
         result: {
           ok: true,
@@ -1486,10 +1332,10 @@ export class SettingsController {
       };
     } catch (error) {
       this.audit.record({
-        sessionId: value.sessionId,
+        sessionId,
         tool: "node_red_palette",
         risk: "DANGEROUS",
-        confirmation: "approved_admin_ui",
+        confirmation: "direct",
         arguments: { module, install, targetVersion },
         result: { ok: false },
       });
@@ -1506,9 +1352,9 @@ export class SettingsController {
     return revision;
   }
 
-  @Post("node-red/flow-revisions/:id/prepare-restore")
+  @Post("node-red/flow-revisions/:id/restore")
   @HttpCode(200)
-  async prepareNodeRedFlowRestore(
+  async restoreNodeRedFlowRevision(
     @Param("id") id: string,
     @Body() body: unknown,
   ) {
@@ -1524,106 +1370,27 @@ export class SettingsController {
       throw new ValidationError([
         "Stel NODE_RED_ADMIN_TOKEN met flows.write in.",
       ]);
-    const live = await this.nodeRedManagement.flowSnapshot();
-    const fingerprint = this.nodeRedFlowRevisions.prepareRestore(id, live);
     const sessionId = `settings-node-red-flow-restore:${crypto.randomUUID()}`;
-    const action = this.confirmations.create(
-      sessionId,
-      "node_red_flow_restore",
-      { id, fingerprint },
-      "DANGEROUS",
-      fingerprint,
-      false,
-    );
-    this.audit.record({
-      sessionId,
-      tool: "node_red_flow_restore",
-      risk: "DANGEROUS",
-      confirmation: "pending_admin_ui",
-      arguments: { revision: id },
-    });
-    return {
-      ok: true as const,
-      warning:
-        "Herstellen vervangt de huidige Node-RED-flows. Actieve automatiseringen kunnen veranderen.",
-      action,
-    };
-  }
-
-  @Post("node-red/flow-revisions/:id/confirm-restore")
-  @HttpCode(200)
-  async confirmNodeRedFlowRestore(
-    @Param("id") id: string,
-    @Body() body: unknown,
-  ) {
-    if (
-      !/^[0-9a-f-]{36}$/i.test(id) ||
-      !body ||
-      typeof body !== "object" ||
-      Array.isArray(body) ||
-      Object.keys(body).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      )
-    )
-      throw new ValidationError(["Ongeldige flowbevestiging."]);
-    const value = body as Record<string, unknown>;
-    if (
-      typeof value.sessionId !== "string" ||
-      !/^settings-node-red-flow-restore:[0-9a-f-]{36}$/i.test(
-        value.sessionId,
-      ) ||
-      typeof value.confirmationId !== "string" ||
-      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
-      typeof value.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige flowbevestiging."]);
-    const pending = this.confirmations.peek(value.sessionId);
-    if (
-      pending?.confirmationId !== value.confirmationId ||
-      pending.expiresAt <= Date.now() ||
-      pending.tool !== "node_red_flow_restore" ||
-      pending.risk !== "DANGEROUS" ||
-      pending.args.id !== id ||
-      typeof pending.args.fingerprint !== "string"
-    )
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
-    if (!value.approve) {
-      this.confirmations.cancel(value.sessionId, "rejected_admin_ui");
-      return { ok: true as const, cancelled: true as const };
-    }
-    const action = this.confirmations.take(
-      value.sessionId,
-      value.confirmationId,
-    );
-    if (!action)
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
     try {
       const revision = await this.nodeRedFlowRevisions.restore(
         id,
-        String(action.args.fingerprint),
         this.nodeRedManagement,
       );
       this.audit.record({
-        sessionId: value.sessionId,
+        sessionId,
         tool: "node_red_flow_restore",
         risk: "DANGEROUS",
-        confirmation: "approved_admin_ui",
+        confirmation: "direct",
         arguments: { revision: id },
         result: { ok: true },
       });
       return { ok: true as const, revision };
     } catch (error) {
       this.audit.record({
-        sessionId: value.sessionId,
+        sessionId,
         tool: "node_red_flow_restore",
         risk: "DANGEROUS",
-        confirmation: "approved_admin_ui",
+        confirmation: "direct",
         arguments: { revision: id },
         result: { ok: false },
       });
@@ -1722,7 +1489,6 @@ export class SettingsController {
    * PIN) and read-only; device names are left out, only number, size and which one is the main display.
    */
   @Get("helper/displays")
-  @PublicRoute()
   async helperDisplays(): Promise<HelperDisplays> {
     const saved = this.settings.get().helper;
     if (!this.wallpaper?.configured)
@@ -1748,7 +1514,6 @@ export class SettingsController {
    * must be a display the PC reports right now (0 = main display), and the agent restarts the helper window there.
    */
   @Post("helper/display")
-  @PublicRoute()
   @HttpCode(200)
   async setHelperDisplay(@Body() body: Body_): Promise<HelperDisplays> {
     const display = body?.display;
@@ -1794,7 +1559,6 @@ export class SettingsController {
    * Open like the public list: the page has no PIN, and all this can do is resize NOVA's own helper window.
    */
   @Post("helper/size")
-  @PublicRoute()
   @HttpCode(200)
   async helperSize(@Body() body: Body_): Promise<{ ok: boolean }> {
     const views = [
@@ -1832,7 +1596,6 @@ export class SettingsController {
   }
 
   @Get("helper/preferences")
-  @PublicRoute()
   getHelperPreferences(): HelperPreferences {
     return normalizeHelperPreferences({
       ...this.settings.get().helperPreferences,
@@ -1883,7 +1646,6 @@ export class SettingsController {
   }
 
   @Get("helper/hotkeys")
-  @PublicRoute()
   async helperHotkeys() {
     return this.wallpaper?.helperPreferences
       ? this.wallpaper.helperPreferences()
@@ -2012,28 +1774,9 @@ export class SettingsController {
     return backup;
   }
 
-  @Post("import/prepare")
-  @HttpCode(200)
-  async prepareImport(@Body() body: unknown) {
-    if (
-      body &&
-      typeof body === "object" &&
-      !Array.isArray(body) &&
-      "data" in body &&
-      body.data &&
-      typeof body.data === "object" &&
-      !Array.isArray(body.data) &&
-      "nodeRedFlows" in body.data
-    ) {
-      const snapshot = await this.nodeRedManagement.flowSnapshot();
-      return this.backups.prepareWithNodeRed(body, snapshot);
-    }
-    return this.backups.prepare(body);
-  }
-
   @Post("import")
   @HttpCode(200)
   async importSettings(@Body() body: unknown) {
-    return this.backups.confirmWithNodeRed(body);
+    return this.backups.importBackup(body);
   }
 }

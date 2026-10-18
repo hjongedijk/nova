@@ -11,6 +11,7 @@ import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { NovaConfig } from "../core/config/nova-config.js";
+import { DB_LIVE_FILES, snapshotDatabase } from "../core/db/snapshot.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
 
 const CHECK_EVERY_MS = 30_000;
@@ -21,6 +22,7 @@ const WEEKLY_RETENTION = 8;
 const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 5 * 1024 * 1024 * 1024;
 
+const SNAPSHOT_NAME = "nova.snapshot";
 type Slot = { kind: "daily" | "weekly"; key: string; name: string };
 type SlotAttempt = { attempts: number; nextAttemptAt: number };
 
@@ -178,8 +180,13 @@ export class DataBackupService implements OnModuleInit, OnModuleDestroy {
       fs.rmSync(destination, { force: true });
     }
     const temporary = `${destination}.${process.pid}.tmp`;
+    // nova.db is never archived live (a tar of a WAL database can be torn):
+    // a VACUUM INTO snapshot is taken first and stored as ./nova.db.
+    const snapshotDir = fs.mkdtempSync(path.join(this.backupDir, ".snapshot-"));
     try {
-      await this.runTar(temporary);
+      const snapshot = path.join(snapshotDir, SNAPSHOT_NAME);
+      const hasSnapshot = snapshotDatabase(this.config.dataDir, snapshot);
+      await this.runTar(temporary, hasSnapshot ? snapshot : undefined);
       const stat = fs.statSync(temporary);
       if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_ARCHIVE_BYTES)
         throw new Error("Backup archive size is invalid");
@@ -191,10 +198,11 @@ export class DataBackupService implements OnModuleInit, OnModuleDestroy {
       return { name: slot.name, bytes: stat.size };
     } finally {
       fs.rmSync(temporary, { force: true });
+      fs.rmSync(snapshotDir, { recursive: true, force: true });
     }
   }
 
-  private runTar(file: string): Promise<void> {
+  private runTar(file: string, snapshot?: string): Promise<void> {
     return new Promise((resolve, reject) => {
       let written = 0;
       const child = spawn(
@@ -203,11 +211,20 @@ export class DataBackupService implements OnModuleInit, OnModuleDestroy {
           "--create",
           "--gzip",
           "--file=-",
-          "--directory",
-          this.config.dataDir,
           "--exclude=./*.tmp",
           "--exclude=./*.tmp.*",
+          ...DB_LIVE_FILES.map((name) => `--exclude=./${name}`),
+          ...(snapshot
+            ? [
+                `--transform=s,^\\./${SNAPSHOT_NAME.replaceAll(".", "\\.")}$,./nova.db,`,
+              ]
+            : []),
+          "--directory",
+          this.config.dataDir,
           ".",
+          ...(snapshot
+            ? ["--directory", path.dirname(snapshot), `./${SNAPSHOT_NAME}`]
+            : []),
         ],
         { stdio: ["ignore", "pipe", "ignore"] },
       );

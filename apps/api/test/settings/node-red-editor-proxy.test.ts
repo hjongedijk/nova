@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import express, { type Request, type Response } from "express";
 import http from "node:http";
 import { once } from "node:events";
-import { AppAccessService } from "../../src/access/access.service.js";
 import { NodeRedEditorAccess } from "../../src/settings/node-red-editor-access.service.js";
 import { NodeRedEditorProxy } from "../../src/settings/node-red-editor-proxy.service.js";
 import { NodeRedManagement } from "../../src/settings/node-red-management.service.js";
@@ -68,12 +67,10 @@ async function fixture() {
   });
   const upstreamUrl = await listen(upstream);
   const config = {
-    appToken: "",
-    reverseProxyAuth: true,
     nodeRedUrl: upstreamUrl,
     nodeRedAdminToken: "private-node-red-token",
   } as NovaConfig;
-  const access = new NodeRedEditorAccess(new AppAccessService(config));
+  const access = new NodeRedEditorAccess();
   const proxy = new NodeRedEditorProxy(
     config,
     new NodeRedManagement(config),

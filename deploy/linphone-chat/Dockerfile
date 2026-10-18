@@ -1,4 +1,4 @@
-# Linphone encrypted-chat bridge (see docs/linphone-encrypted-chat.md). BUILT LOCALLY on the host, never pushed to a registry:
+# Linphone encrypted-chat bridge (see docs/integrations.md#encrypted-linphone-chat-bridge). BUILT LOCALLY on the host, never pushed to a registry:
 # the Belledonne wheel is GPLv3 (verified in linphone-5.5.32.dist-info/METADATA). Not part of the published NOVA image.
 # Verified 2026-10-17: the pinned wheel installs on ubuntu:24.04 (Python 3.12), `import linphone` works headless.
 # NOT verified: login, LIME enrolment and chat rooms with a real account.

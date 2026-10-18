@@ -28,7 +28,7 @@
   /**
    * The universal holographic viewer. Give it a VizScene (graph, 3D model(s) or chart); it loads
    * three.js on demand, renders only when something changes and releases all GPU memory when it
-   * is removed. See docs/holographic-engine.md for the full API.
+   * is removed. See docs/architecture.md#holographic-visualization for the full API.
    */
   let {
     scene,

@@ -205,7 +205,6 @@ export class ConversationService implements OnModuleInit, OnModuleDestroy {
       stream: true,
       emit: input.emit,
       signal: input.signal,
-      readOnlyOnly: true,
     });
     // The next turn of this call must remember this one, exactly like typed chat does.
     if (!result.unavailable) {

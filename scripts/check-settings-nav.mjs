@@ -1,14 +1,14 @@
-/* Shared helpers for the settings browser checks (six task pages plus Geavanceerd). */
+/* Shared helpers for the settings browser checks (service/task pages plus Geavanceerd). */
 /* global document, location, MutationObserver */
-/** Where each older section id lives now: a page of the six-item navigation or "geavanceerd". */
+/** Where each older section id lives now: its service/task page or "geavanceerd". */
 export const PAGE_OF = {
   general: "gesprek",
   voice: "gesprek",
   conversation: "gesprek",
   personality: "gesprek",
   connections: "huis",
-  devices: "huis",
-  desktop: "huis",
+  devices: "windows",
+  desktop: "windows",
   telephony: "telefoon",
   models: "modellen",
   autonomy: "zelf",
@@ -20,16 +20,18 @@ export const PAGE_OF = {
   setup: "geavanceerd",
   skills: "geavanceerd",
   code: "geavanceerd",
-  automation: "geavanceerd",
-  services: "geavanceerd",
+  automation: "huis",
+  services: "huis",
   system: "geavanceerd",
   backup: "geheugen",
   tools: "geavanceerd",
-  windowsagent: "geavanceerd",
+  windowsagent: "windows",
   sidebar: "geavanceerd",
+  runtime: "geavanceerd",
   // the page ids themselves
   gesprek: "gesprek",
   huis: "huis",
+  windows: "windows",
   telefoon: "telefoon",
   modellen: "modellen",
   zelf: "zelf",
@@ -42,22 +44,30 @@ export const GROUP_ANCHOR = {
   setup: "installatie",
   skills: "vaardigheden",
   code: "codeprojecten",
-  automation: "koppelingen",
+  automation: "connection-node-red",
   services: "services",
   system: "updates",
   tools: "gereedschappen",
   windowsagent: "windows-agent",
   sidebar: "zijbalk",
+  runtime: "voorkeuren",
 };
 
 /** Client-side navigation to the page that holds `id` (an old section id or a page id). */
 export async function clickSection(page, id) {
   const wanted = PAGE_OF[id];
+  if (!wanted) throw new Error(`Unknown settings section: ${id}`);
   const current = new URL(page.url()).searchParams.get("section");
   if (current !== wanted) {
     await page.locator(`.settings-groups a[data-group="${wanted}"]`).click();
     await page.waitForURL(new RegExp(`section=${wanted}`));
   }
+  // URL can update before Svelte has replaced the previous page content.
+  // A selected link belongs to the mounted settings shell, so error pages
+  // cannot accidentally pass a screenshot/layout assertion.
+  await page
+    .locator(`.settings-groups a[data-group="${wanted}"][aria-current="page"]`)
+    .waitFor();
   const anchor = GROUP_ANCHOR[id];
   if (anchor) {
     await page.evaluate((hash) => {
@@ -80,7 +90,12 @@ export const OPEN_ALL_DISCLOSURES = () => {
       .querySelectorAll(
         "details.ds-disclosure:not([open]):not(.advanced[data-lazy])",
       )
-      .forEach((node) => node.setAttribute("open", ""));
+      .forEach((node) => {
+        // This editor fixture intentionally expands all sections. The default
+        // UI keeps one named section open; compact-layout checks cover that.
+        node.removeAttribute("name");
+        node.setAttribute("open", "");
+      });
   new MutationObserver(open).observe(document, {
     childList: true,
     subtree: true,

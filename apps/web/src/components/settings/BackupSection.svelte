@@ -1,11 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
-  import type { SettingsImportPrepared } from "@nova/contracts";
-  import {
-    exportSettings,
-    prepareSettingsImport,
-    importSettings,
-  } from "#lib/api/settings.ts";
+  import { exportSettings, importSettings } from "#lib/api/settings.ts";
   import Button from "#components/ui/Button.svelte";
   import Field from "#components/ui/Field.svelte";
   import { afterChange, fail, say } from "./state.svelte.ts";
@@ -14,11 +8,6 @@
   let files = $state<FileList | null>(null);
   let mode = $state<"merge" | "replace">("merge");
   let busy = $state(false);
-  let acknowledged = $state(false);
-  let pending = $state<SettingsImportPrepared | null>(null);
-  let expired = $state(false);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  onDestroy(() => clearTimeout(timer));
 
   async function download(): Promise<void> {
     try {
@@ -49,32 +38,8 @@
       } catch {
         return say("Dit bestand is geen geldige JSON.", "bad");
       }
-      pending = await prepareSettingsImport(data, mode);
-      expired = false;
-      timer = setTimeout(
-        () => {
-          expired = true;
-        },
-        Math.max(0, pending.action.expiresAt - Date.now()),
-      );
-    } catch (error) {
-      fail(error);
-    } finally {
-      busy = false;
-    }
-  }
-  async function confirm(approve: boolean): Promise<void> {
-    const action = pending?.action;
-    if (!action) return;
-    busy = true;
-    try {
-      const result = await importSettings(
-        action.sessionId,
-        action.confirmationId,
-        approve,
-      );
+      const result = await importSettings(data, mode);
       if (!result.ok) return say(result.error, "bad");
-      if (!approve) return say("Import geannuleerd.", "ok");
       const connectionMessage =
         result.changedConnections === 1
           ? "1 servicekoppeling gewijzigd."
@@ -82,15 +47,9 @@
       await afterChange(
         `${result.imported} vaardigheden, ${result.importedLists ?? 0} lijsten en ${result.importedFlows ?? 0} Node-RED-flows geïmporteerd; ${connectionMessage}${result.missingSecrets.length ? ` Geheime headers van vaardigheden die niet overeenkomen moet je opnieuw invullen bij: ${result.missingSecrets.map((item) => item.skill).join(", ")}.` : ""}${result.changedConnections ? " Herstart de betrokken services voordat je ze gebruikt." : ""}${result.auditWarning ? ` ${result.auditWarning}` : ""}`,
       );
-    } catch {
-      say(
-        "Uitkomst onbekend. Controleer je instellingen voordat je opnieuw importeert.",
-        "bad",
-      );
+    } catch (error) {
+      fail(error);
     } finally {
-      clearTimeout(timer);
-      pending = null;
-      acknowledged = false;
       busy = false;
     }
   }
@@ -119,10 +78,7 @@
   <h3>Back-up terugzetten</h3>
   <Field label="Back-upbestand" id="backupFile">
     <input
-      disabled={busy || !!pending}
-      onchange={() => {
-        acknowledged = false;
-      }}
+      disabled={busy}
       id="backupFile"
       type="file"
       accept="application/json,.json"
@@ -135,189 +91,24 @@
       id="backupMode"
       aria-label="Hoe importeren"
       bind:value={mode}
-      disabled={busy || !!pending}
-      onchange={() => {
-        acknowledged = false;
-      }}
+      disabled={busy}
     >
       <option value="merge">Toevoegen aan wat er al is</option>
       <option value="replace">Alles vervangen</option>
     </select>
   </Field>
   <p class="ds-hint">
-    Kies een back-upbestand (maximaal 1 MB). NOVA laat eerst zien wat er
-    verandert; er wordt pas iets gewijzigd als jij bevestigt.
+    Kies een back-upbestand (maximaal 1 MB). De import wordt meteen toegepast.
   </p>
   <Disclosure kind="more" title="Meer uitleg" hint="Wat wordt er teruggezet?">
     <p>
       Maximaal 1 MB. NOVA controleert het bestand vóór de import.
-      Serviceadressen veranderen pas na bevestiging en vereisen daarna een
-      herstart. Geheime servicewaarden en permanente toestemmingen zitten niet
-      in de back-up; bestaande servicegeheimen blijven op deze installatie
-      staan. Flowimport vereist Node-RED-beheertoegang; credentials worden nooit
-      meegenomen. Actieve timers en meldingen blijven buiten de back-up.
+      Serviceadressen veranderen meteen en vereisen daarna een herstart. Geheime
+      servicewaarden en permanente toestemmingen zitten niet in de back-up;
+      bestaande servicegeheimen blijven op deze installatie staan. Flowimport
+      vereist Node-RED-beheertoegang; credentials worden nooit meegenomen.
+      Actieve timers en meldingen blijven buiten de back-up.
     </p>
   </Disclosure>
-  {#if pending}
-    <div
-      class="import-review"
-      role="group"
-      aria-label="Back-upimport controleren"
-    >
-      <h3>Controle vóór import</h3>
-      <p>
-        {pending.summary.mode === "replace" ? "Vervangen" : "Samenvoegen"}: {pending
-          .summary.incomingSkills} inkomende vaardigheden, {pending.summary
-          .incomingWidgets} inkomende panelen.
-      </p>
-      <p>
-        Na import: {pending.summary.totalSkills} vaardigheden en {pending
-          .summary.totalWidgets} panelen en {pending.summary.totalLists} lijsten.
-        {pending.summary.replacedSkills} vaardigheden worden vervangen; {pending
-          .summary.removedSkills} vaardigheden en {pending.summary
-          .removedWidgets} panelen en {pending.summary.removedLists} lijsten worden
-        verwijderd.
-      </p>
-      <ul>
-        <li>
-          Eigen regels: {pending.summary.personaChanged
-            ? "wijzigen"
-            : "blijven gelijk"}
-        </li>
-        <li>
-          Gespreksstijl: {pending.summary.personaStyleChanged
-            ? "wijzigen"
-            : "blijft gelijk"}
-        </li>
-        <li>
-          NOVA-profiel: {pending.summary.personaProfileChanged
-            ? "wijzigen"
-            : "blijft gelijk"}
-        </li>
-        <li>
-          Gezinsprofielen: {pending.summary.householdProfilesChanged
-            ? "wijzigen"
-            : "blijven gelijk"}
-        </li>
-        <li>
-          Snelle opdrachten: {pending.summary.quickActionsChanged
-            ? "wijzigen"
-            : "blijven gelijk"}
-        </li>
-        <li>
-          Lijsten: {pending.summary.listsChanged
-            ? "wijzigen"
-            : "blijven gelijk"}
-          ({pending.summary.incomingLists} inkomend)
-        </li>
-        <li>
-          Gereedschapsinstellingen: {pending.summary.toolOverridesChanged
-            ? "wijzigen"
-            : "blijven gelijk"}
-        </li>
-        <li>
-          Zijbalkindeling: {pending.summary.sidebarChanged
-            ? "wijzigt"
-            : "blijft gelijk"}
-        </li>
-        <li>
-          Gewenste schermmodus: {pending.summary.helperChanged
-            ? "wijzigt"
-            : "blijft gelijk"}
-        </li>
-        <li>
-          Helperinstellingen: {pending.summary.helperPreferencesChanged
-            ? "wijzigen"
-            : "blijven gelijk"}
-        </li>
-        <li>
-          Modelrollen: {pending.summary.modelRolesChanged
-            ? "wijzigen"
-            : "blijven gelijk"}
-        </li>
-        <li>
-          Node-RED-flows: {pending.summary.nodeRedFlowsChanged
-            ? `${pending.summary.incomingFlows} inkomend; ${pending.summary.totalFlows} na import; ${pending.summary.removedFlows} verwijderd`
-            : "blijven gelijk"}
-        </li>
-        <li>
-          Servicekoppelingen: {pending.summary.changedConnections
-            ? `${pending.summary.changedConnections} wijzigen`
-            : "blijven gelijk"}
-        </li>
-      </ul>
-      {#if pending.summary.connectionChanges.length}
-        <h4>Controleer adressen en opties</h4>
-        {#each pending.summary.connectionChanges as change (change.service)}
-          <details>
-            <summary>{change.service}</summary>
-            <p>Huidig: {JSON.stringify(change.before)}</p>
-            <p>Na import: {JSON.stringify(change.after)}</p>
-          </details>
-        {/each}
-        <p>
-          Bestaande geheimen blijven op deze server staan. Als je een adres
-          wijzigt, kunnen dezelfde credentials na herstart naar die bestemming
-          worden gestuurd.
-        </p>
-      {/if}
-      <p>
-        Geïmporteerde webhooks kunnen actief worden volgens dit bestand.
-        Controleer zelf hun doelen en acties.
-      </p>
-      {#if pending.summary.helperChanged}<p>
-          De schermmodus wordt alleen bewaard. Pas die op de pc toe via
-          Apparaten.
-        </p>{/if}
-      {#if pending.summary.missingSecrets.length}
-        <p>Geheime headers moet je opnieuw invullen:</p>
-        <ul>
-          {#each pending.summary.missingSecrets as item, index (index)}<li>
-              {item.skill}: {item.headers.join(", ")}
-            </li>{/each}
-        </ul>
-      {/if}
-      <p>
-        Risicovolle wijziging. Deze toestemming is 60 seconden geldig en één
-        keer bruikbaar. Instellingen die intussen wijzigen maken deze import
-        ongeldig.
-      </p>
-      {#if expired}<p role="status">
-          Toestemming verlopen. Annuleer en controleer het bestand opnieuw.
-        </p>{/if}
-      <Button go onclick={() => confirm(true)} disabled={busy || expired}
-        >Bevestig back-upimport</Button
-      >
-      <Button onclick={() => confirm(false)} disabled={busy}
-        >Annuleer back-upimport</Button
-      >
-    </div>
-  {:else}
-    <label class="import-ack"
-      ><input type="checkbox" bind:checked={acknowledged} disabled={busy} />Ik
-      wil deze instellingen en vaardigheden importeren en controleer eerst de
-      wijzigingen.</label
-    >
-    <Button go onclick={upload} disabled={busy || !acknowledged}
-      >Back-up controleren</Button
-    >
-  {/if}
+  <Button go onclick={upload} disabled={busy}>Back-up terugzetten</Button>
 </section>
-
-<style>
-  .import-review {
-    margin-block: 1rem;
-    padding: 1rem;
-    border: 1px solid #ff8a33;
-    overflow-wrap: anywhere;
-  }
-  .import-ack {
-    display: flex;
-    gap: 0.5rem;
-    margin-block: 1rem;
-  }
-  :global(.import-review button) {
-    min-height: 44px;
-    margin: 0.25rem 0.5rem 0.25rem 0;
-  }
-</style>

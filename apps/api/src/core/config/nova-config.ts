@@ -1,12 +1,19 @@
 import { Injectable, Logger } from "@nestjs/common";
 import fs from "node:fs";
 import path from "node:path";
-import { applyConnectionOverrides } from "./service-connections.js";
+import {
+  applyConnectionOverrides,
+  readConnections,
+} from "./service-connections.js";
+import { applyRuntimeOverrides, readRuntime } from "./runtime-settings.js";
+import { auditEnvironment } from "./env-audit.js";
 
 const text = (name: string, fallback = "") =>
   process.env[name]?.trim() || fallback;
+export const DEFAULT_QDRANT_COLLECTION = "jarvis_memory";
 const logger = new Logger("NovaConfig");
 const warnedLegacyNames = new Set<string>();
+const warnedAudit = new Set<string>();
 const setting = (name: string, oldName: string, fallback = "") => {
   const current = text(name);
   if (current) return current;
@@ -66,11 +73,6 @@ export class NovaConfig {
     ),
   );
   readonly publicUrl = text("NOVA_PUBLIC_URL");
-  readonly adminPin = text("NOVA_ADMIN_PIN");
-  /** Optional app-wide token; users exchange it for a short-lived HTTP-only session. */
-  readonly appToken = text("NOVA_APP_TOKEN");
-  /** Explicit operator assertion that an authenticated reverse proxy protects every app route. */
-  readonly reverseProxyAuth = flag("NOVA_REVERSE_PROXY_AUTH", false);
   /** Permit a graceful process restart only when an external supervisor restarts this process. */
   readonly restartEnabled = flag("NOVA_RESTART_ENABLED", false);
   readonly stackControlUrl = url(
@@ -83,7 +85,7 @@ export class NovaConfig {
   /** "transcriptions" (/audio/transcriptions, e.g. a Whisper model) or "chat-audio" (an audio-capable chat model). */
   readonly sttMode = text("NOVA_STT_MODE", "transcriptions");
   readonly sttFreeVerified = flag("NOVA_STT_FREE_VERIFIED", false);
-  /** A separate OmniRoute key restricted to exactly the STT model and one connection (see docs/conversations.md). */
+  /** A separate OmniRoute key restricted to exactly the STT model and one connection (see docs/integrations.md#telephony-and-conversations). */
   readonly sttKey = text("NOVA_STT_KEY");
   readonly defaultLanguage = setting(
     "NOVA_DEFAULT_LANGUAGE",
@@ -123,10 +125,8 @@ export class NovaConfig {
     1000,
     60000,
   );
-  readonly actionsEnabled = flagValue(
-    setting("NOVA_ENABLE_ACTIONS", "JARVIS_ENABLE_ACTIONS"),
-    false,
-  );
+  /** Kept for existing health consumers; legacy action flags no longer gate execution. */
+  readonly actionsEnabled = true;
   readonly autoExecuteSafe = flagValue(
     setting(
       "NOVA_AUTO_EXECUTE_SAFE_ACTIONS",
@@ -183,7 +183,11 @@ export class NovaConfig {
     "qdrant",
   );
   readonly qdrantUrl = url("QDRANT_URL", "http://qdrant:6333");
-  readonly qdrantCollection = text("QDRANT_COLLECTION", "jarvis_memory");
+  /** One default everywhere; existing installs keep their data under it. */
+  readonly qdrantCollection = text(
+    "QDRANT_COLLECTION",
+    DEFAULT_QDRANT_COLLECTION,
+  );
   readonly qdrantApiKey = text("QDRANT_API_KEY");
   readonly embeddingKey = text("EMBEDDING_GATEWAY_API_KEY");
   readonly embeddingModel = text("EMBEDDING_MODEL");
@@ -235,7 +239,26 @@ export class NovaConfig {
 
   constructor() {
     applyConnectionOverrides(this);
+    applyRuntimeOverrides(this);
     fs.mkdirSync(this.dataDir, { recursive: true });
+    this.auditEnvironment();
+  }
+
+  /** Warn once per variable that Settings now owns, or that disagrees with a saved Settings value. */
+  private auditEnvironment(): void {
+    try {
+      for (const message of auditEnvironment(
+        process.env,
+        readConnections(this.dataDir).services,
+        readRuntime(this.dataDir).groups,
+      )) {
+        if (warnedAudit.has(message)) continue;
+        warnedAudit.add(message);
+        logger.warn(message);
+      }
+    } catch {
+      /* an unreadable settings file is reported where it is used */
+    }
   }
 
   /** A file in NOVA's data folder. */

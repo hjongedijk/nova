@@ -32,12 +32,6 @@
   }
 
   async function rollback(revision: SidebarRevision) {
-    if (
-      !window.confirm(
-        "Herstel deze zijbalkindeling? Latere wijzigingen worden beschermd tegen overschrijven.",
-      )
-    )
-      return;
     busy = true;
     message = "";
     try {

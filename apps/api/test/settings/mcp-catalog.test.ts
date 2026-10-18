@@ -2,7 +2,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -37,24 +36,10 @@ function fixture() {
     timestamp: "now",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
-  confirmations.now = () => Date.now();
   const reconfigure = vi.fn(async () => {});
   const hub = { reconfigure } as unknown as McpHub;
-  const service = new McpManagement(config, hub, confirmations, audit);
+  const service = new McpManagement(config, hub, audit);
   return { root, file, service, record, reconfigure };
-}
-
-async function confirm(
-  f: ReturnType<typeof fixture>,
-  prepared: ReturnType<typeof f.service.prepareCatalog>,
-) {
-  if (!prepared.ok) throw new Error(prepared.error);
-  return f.service.confirmCatalog(
-    prepared.action.sessionId,
-    prepared.action.confirmationId,
-    true,
-  );
 }
 
 describe("reviewed MCP catalog management", () => {
@@ -129,7 +114,7 @@ describe("reviewed MCP catalog management", () => {
     expect(spec?.env?.IMAP_PASSWORD).toBe("${IMAP_PASSWORD}");
   });
 
-  it("adds only a fixed reviewed server disabled, then removes it after confirmation", async () => {
+  it("adds only a fixed reviewed server disabled, then removes it in one step", async () => {
     const f = fixture();
     const before = f.service.catalog();
     expect(before.installed).toEqual([]);
@@ -138,11 +123,9 @@ describe("reviewed MCP catalog management", () => {
       /"command"|"args"|"env"|context7-mcp/,
     );
 
-    const add = f.service.prepareCatalog("context7", "add");
-    expect(add).toMatchObject({ ok: true });
-    expect(JSON.stringify(add)).not.toMatch(/"command"|"env"|context7-mcp/);
-    const added = await confirm(f, add);
+    const added = await f.service.changeCatalog("context7", "add");
     if (!added.ok) throw new Error(added.error);
+    expect(JSON.stringify(added)).not.toMatch(/"command"|"env"|context7-mcp/);
     expect(added).toMatchObject({
       ok: true,
       verified: true,
@@ -161,8 +144,7 @@ describe("reviewed MCP catalog management", () => {
     expect(fs.statSync(f.file).mode & 0o777).toBe(0o600);
     expect(f.service.catalog().installed).toEqual(["context7"]);
 
-    const remove = f.service.prepareCatalog("context7", "remove");
-    expect(await confirm(f, remove)).toMatchObject({
+    expect(await f.service.changeCatalog("context7", "remove")).toMatchObject({
       ok: true,
       verified: true,
       server: "context7",
@@ -180,7 +162,7 @@ describe("reviewed MCP catalog management", () => {
 
   it("undoes only the latest unchanged NOVA catalog addition", async () => {
     const f = fixture();
-    const added = await confirm(f, f.service.prepareCatalog("context7", "add"));
+    const added = await f.service.changeCatalog("context7", "add");
     if (!added.ok) throw new Error(added.error);
     const history = f.service.history("context7");
     expect(history.revisions).toHaveLength(1);
@@ -190,12 +172,7 @@ describe("reviewed MCP catalog management", () => {
       /command|context7-mcp|env|Fingerprint/i,
     );
 
-    const prepared = f.service.prepareRollback("context7", revision.id);
-    expect(prepared).toMatchObject({
-      ok: true,
-      warning: expect.stringContaining("uitgeschakeld"),
-    });
-    const undone = await confirm(f, prepared);
+    const undone = await f.service.rollback("context7", revision.id);
     expect(undone).toMatchObject({
       ok: true,
       verified: true,
@@ -210,68 +187,36 @@ describe("reviewed MCP catalog management", () => {
     expect(f.reconfigure).toHaveBeenCalledTimes(2);
   });
 
-  it("refuses catalog-add undo after enablement, configuration changes, or a stale confirm", async () => {
+  it("refuses catalog-add undo after enablement or configuration changes", async () => {
     const enabled = fixture();
-    await confirm(enabled, enabled.service.prepareCatalog("context7", "add"));
+    await enabled.service.changeCatalog("context7", "add");
     const enabledConfig = JSON.parse(fs.readFileSync(enabled.file, "utf8"));
     enabledConfig.servers.context7.enabled = true;
     fs.writeFileSync(enabled.file, JSON.stringify(enabledConfig), {
       mode: 0o600,
     });
     const enabledRevision = enabled.service.history("context7").revisions[0]!;
-    expect(() =>
-      enabled.service.prepareRollback("context7", enabledRevision.id),
-    ).toThrow("uitgeschakelde NOVA-toevoeging");
+    await expect(
+      enabled.service.rollback("context7", enabledRevision.id),
+    ).rejects.toThrow("uitgeschakelde NOVA-toevoeging");
 
     const changed = fixture();
-    await confirm(changed, changed.service.prepareCatalog("context7", "add"));
+    await changed.service.changeCatalog("context7", "add");
     const changedConfig = JSON.parse(fs.readFileSync(changed.file, "utf8"));
     changedConfig.servers.context7.description = "custom";
     fs.writeFileSync(changed.file, JSON.stringify(changedConfig), {
       mode: 0o600,
     });
     const changedRevision = changed.service.history("context7").revisions[0]!;
-    expect(() =>
-      changed.service.prepareRollback("context7", changedRevision.id),
-    ).toThrow("uitgeschakelde NOVA-toevoeging");
-
-    const stale = fixture();
-    await confirm(stale, stale.service.prepareCatalog("context7", "add"));
-    const staleRevision = stale.service.history("context7").revisions[0]!;
-    const prepared = stale.service.prepareRollback(
-      "context7",
-      staleRevision.id,
-    );
-    if (!prepared.ok) throw new Error(prepared.error);
-    const staleConfig = JSON.parse(fs.readFileSync(stale.file, "utf8"));
-    staleConfig.servers.context7.enabled = true;
-    fs.writeFileSync(stale.file, JSON.stringify(staleConfig), { mode: 0o600 });
-    await expect(confirm(stale, prepared)).resolves.toMatchObject({
-      ok: false,
-      error: expect.stringContaining("intussen gewijzigd"),
-    });
-  });
-
-  it("cancels catalog-add undo without changing the installed server", async () => {
-    const f = fixture();
-    await confirm(f, f.service.prepareCatalog("context7", "add"));
-    const revision = f.service.history("context7").revisions[0]!;
-    const prepared = f.service.prepareRollback("context7", revision.id);
-    if (!prepared.ok) throw new Error(prepared.error);
     await expect(
-      f.service.confirmCatalog(
-        prepared.action.sessionId,
-        prepared.action.confirmationId,
-        false,
-      ),
-    ).resolves.toMatchObject({ ok: true, cancelled: true });
-    expect(f.service.catalog().installed).toEqual(["context7"]);
-    expect(f.reconfigure).toHaveBeenCalledTimes(1);
+      changed.service.rollback("context7", changedRevision.id),
+    ).rejects.toThrow("uitgeschakelde NOVA-toevoeging");
+    expect(changed.service.catalog().installed).toEqual(["context7"]);
   });
 
-  it("rejects custom IDs and removal of an unreviewed server", () => {
+  it("rejects custom IDs and removal of an unreviewed server", async () => {
     const f = fixture();
-    expect(() => f.service.prepareCatalog("arbitrary", "add")).toThrow(
+    await expect(f.service.changeCatalog("arbitrary", "add")).rejects.toThrow(
       "beoordeelde catalogus",
     );
     fs.writeFileSync(
@@ -288,20 +233,21 @@ describe("reviewed MCP catalog management", () => {
       }),
       { mode: 0o600 },
     );
-    expect(() => f.service.prepareCatalog("filesystem", "remove")).toThrow(
-      "beoordeelde MCP-server",
-    );
+    await expect(
+      f.service.changeCatalog("filesystem", "remove"),
+    ).rejects.toThrow("beoordeelde MCP-server");
   });
 
   it("keeps a verified write successful if the final audit append fails", async () => {
     const f = fixture();
-    const prepared = f.service.prepareCatalog("context7", "add");
     f.record.mockImplementation((entry) => {
       if (entry.phase === "verified") throw new Error("audit unavailable");
       return { ...entry, id: "audit", timestamp: "now" };
     });
 
-    await expect(confirm(f, prepared)).resolves.toMatchObject({
+    await expect(
+      f.service.changeCatalog("context7", "add"),
+    ).resolves.toMatchObject({
       ok: true,
       verified: true,
       operation: "add",
@@ -312,7 +258,7 @@ describe("reviewed MCP catalog management", () => {
   });
 });
 
-it("reads the image catalog without granting write access outside the data directory", () => {
+it("reads the image catalog without granting write access outside the data directory", async () => {
   const f = fixture();
   fs.writeFileSync(
     path.join(f.root, "mcp-servers.json"),
@@ -326,7 +272,6 @@ it("reads the image catalog without granting write access outside the data direc
       mcpConfig: path.join(f.root, "mcp-servers.json"),
     } as NovaConfig,
     {} as McpHub,
-    {} as ConfirmationsService,
     {} as AuditService,
   );
   expect(service.catalog()).toEqual({
@@ -334,5 +279,5 @@ it("reads the image catalog without granting write access outside the data direc
     editable: false,
     available: [],
   });
-  expect(() => service.prepareCatalog("context7", "remove")).toThrow();
+  await expect(service.changeCatalog("context7", "remove")).rejects.toThrow();
 });

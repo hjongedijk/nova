@@ -1,4 +1,5 @@
-//! The commands a page can call. Each one is its own permission (see build.rs and the capabilities), the helper
+//! The commands a page can call. Each one is its own Tauri command permission (see build.rs and the capabilities; that
+//! only separates the local setup window from the remote helper page), the helper
 //! commands check that they come from the helper window, and none of them takes a path, a command line or a script.
 
 use crate::state::Shared;
@@ -162,7 +163,7 @@ pub async fn agent_setup_info(window: WebviewWindow, app: AppHandle) -> Result<s
         .map(|ip| format!("http://{ip}:{}", inner.agent.port))
         .collect();
     Ok(
-        serde_json::json!({"url":inner.config.url,"addresses":addresses,"source":inner.agent.allowed_ips.first(),"error":inner.agent_error,"version":nova_win_core::agent::VERSION,"automation":inner.agent.automation,"runElevated":inner.agent.run_elevated,"elevated":crate::platform::is_elevated()}),
+        serde_json::json!({"url":inner.config.url,"addresses":addresses,"error":inner.agent_error,"version":nova_win_core::agent::VERSION,"elevated":crate::platform::is_elevated()}),
     )
 }
 
@@ -199,21 +200,14 @@ pub async fn agent_pair_code(window: WebviewWindow, app: AppHandle, address: Str
     inner.agent.pair_code(&address)
 }
 
+/// Opens the Windows firewall for the agent's port (any address, any network profile). Windows asks for approval.
 #[tauri::command]
-pub async fn agent_configure_network(window: WebviewWindow, app: AppHandle, source: String) -> Result<(), String> {
+pub async fn agent_configure_network(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
     only(&window, "setup")?;
-    let ip: std::net::IpAddr = source.parse().map_err(|_| "Vul het IP-adres van de NOVA-server in")?;
     let port = app.state::<Shared>().lock().agent.port;
-    let address = ip.to_string();
-    tauri::async_runtime::spawn_blocking(move || crate::platform::request_network(port, &address))
+    tauri::async_runtime::spawn_blocking(move || crate::platform::request_network(port))
         .await
-        .map_err(|e| e.to_string())??;
-    let shared = app.state::<Shared>();
-    let mut inner = shared.lock();
-    inner.agent.allowed_ips = vec![ip];
-    inner.try_save()?;
-    // Transport reads current source restrictions on every request.
-    Ok(())
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -300,73 +294,4 @@ pub async fn agent_check_update(window: WebviewWindow, app: AppHandle) -> Result
 pub async fn agent_install_update(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
     only(&window, "setup")?;
     crate::updates::install(&app).await
-}
-
-#[tauri::command]
-pub async fn agent_set_automation(
-    window: WebviewWindow,
-    app: AppHandle,
-    permissions: nova_win_core::agent::AutomationPermissions,
-) -> Result<(), String> {
-    only(&window, "setup")?;
-    if permissions.control && !permissions.view {
-        return Err("Zet meekijken aan voordat je bedienen toestaat".into());
-    }
-    {
-        let shared = app.state::<Shared>();
-        let mut inner = shared.lock();
-        let previous = inner.agent.automation.clone();
-        inner.agent.automation = permissions.clone();
-        if let Err(error) = inner.try_save() {
-            inner.agent.automation = previous;
-            return Err(error);
-        }
-        crate::automation::cancel(&app);
-    }
-    if !permissions.control || !permissions.view {
-        crate::automation::disarm(&app);
-    }
-    if !permissions.browser {
-        let handle = app.clone();
-        tauri::async_runtime::spawn_blocking(move || crate::automation::shutdown_browser(&handle))
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-#[tauri::command]
-pub async fn agent_set_elevation(
-    window: WebviewWindow,
-    app: AppHandle,
-    enabled: bool,
-) -> Result<serde_json::Value, String> {
-    only(&window, "setup")?;
-    let previous = {
-        let shared = app.state::<Shared>();
-        let mut inner = shared.lock();
-        let old = inner.agent.run_elevated;
-        inner.agent.run_elevated = enabled;
-        if let Err(error) = inner.try_save() {
-            inner.agent.run_elevated = old;
-            return Err(error);
-        }
-        old
-    };
-    if enabled && !crate::platform::is_elevated() {
-        let result = tauri::async_runtime::spawn_blocking(|| crate::platform::request_elevation(std::process::id()))
-            .await
-            .map_err(|e| e.to_string())?;
-        if let Err(error) = result {
-            let shared = app.state::<Shared>();
-            let mut inner = shared.lock();
-            inner.agent.run_elevated = previous;
-            inner.try_save()?;
-            return Err(error);
-        }
-        crate::automation::disarm(&app);
-        app.exit(0);
-    }
-    Ok(
-        serde_json::json!({"elevated":crate::platform::is_elevated(),"restartRequired":!enabled&&crate::platform::is_elevated()}),
-    )
 }

@@ -1,5 +1,4 @@
 import { sendJson } from "./client.ts";
-import { getPin } from "./pin-session.ts";
 
 export type NodeRedEditorGrant = {
   url: "/api/node-red-editor/";
@@ -7,8 +6,7 @@ export type NodeRedEditorGrant = {
 };
 
 function headers(): Record<string, string> {
-  const pin = getPin();
-  return { "x-nova-admin": "1", ...(pin ? { "x-nova-pin": pin } : {}) };
+  return {};
 }
 
 function validateGrant(value: NodeRedEditorGrant): NodeRedEditorGrant {

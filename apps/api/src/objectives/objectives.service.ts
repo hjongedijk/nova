@@ -380,7 +380,6 @@ export class ObjectivesService implements OnModuleInit, OnModuleDestroy {
         null,
         false,
         {
-          readOnlyOnly: true,
           signal: AbortSignal.timeout(30_000),
         },
       );

@@ -9,6 +9,12 @@ import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import type { MqttService } from "../../src/core/mqtt/mqtt.service.js";
 import type { WindowsPcService } from "../../src/integrations/windows/windows-pc.service.js";
 import type { SpeechPresenceService } from "../../src/dashboard/speech-presence.service.js";
+import {
+  dbStat,
+  failStateWrites,
+  seedState,
+  stateExists,
+} from "../helpers/nova-db.js";
 
 let dir: string;
 const running: Array<{ planning: PlanningService; feed: AlertsFeed }> = [];
@@ -94,42 +100,33 @@ describe("durable timer feed delivery", () => {
   it("does not acknowledge or notify before acceptance journal commit", async () => {
     const { store, planning, feed } = boot();
     planning.setTimer({ seconds: 2, label: "persist the notice" });
-    const rename = fs.renameSync;
-    let fail = true;
-    vi.spyOn(fs, "renameSync").mockImplementation((source, destination) => {
-      if (String(destination).endsWith("timer-feed.json") && fail)
-        throw new Error("ENOSPC private-journal-path");
-      return rename(source, destination);
-    });
+    const failure = failStateWrites(
+      path.join(dir, "timer-feed.json"),
+      "ENOSPC private-journal-path",
+    );
     planning.onModuleInit();
     await vi.advanceTimersByTimeAsync(2000);
     expect(store.data.timerOutbox).toHaveLength(1);
     expect(feed.recent().events).toEqual([]);
     expect(notifyHelper).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
-    fail = false;
+    failure.mockRestore();
     await vi.advanceTimersByTimeAsync(1000);
     expect(store.data.timerOutbox).toEqual([]);
     expect(feed.recent().events).toHaveLength(1);
-    expect(fs.statSync(path.join(dir, "timer-feed.json")).mode & 0o777).toBe(
-      0o600,
-    );
+    expect(dbStat(path.join(dir, "timer-feed.json")).mode & 0o777).toBe(0o600);
   });
   it("does not spend speech budget when timer acceptance cannot be saved", async () => {
     const { store, planning, feed } = boot(true, true);
     planning.setTimer({ seconds: 2, label: "recover speech budget" });
-    const rename = fs.renameSync;
-    const failure = vi
-      .spyOn(fs, "renameSync")
-      .mockImplementation((source, destination) => {
-        if (String(destination).endsWith("timer-feed.json"))
-          throw new Error("ENOSPC");
-        return rename(source, destination);
-      });
+    const failure = failStateWrites(
+      path.join(dir, "timer-feed.json"),
+      "ENOSPC",
+    );
     planning.onModuleInit();
     await vi.advanceTimersByTimeAsync(2000);
     expect(store.data.timerOutbox).toHaveLength(1);
-    expect(fs.existsSync(path.join(dir, "spoken-alert-progress.json"))).toBe(
+    expect(stateExists(path.join(dir, "spoken-alert-progress.json"))).toBe(
       false,
     );
     expect(notifyHelper).not.toHaveBeenCalled();
@@ -196,7 +193,7 @@ describe("durable timer feed delivery", () => {
     expect(notifyHelper).toHaveBeenCalledOnce();
   });
   it("keeps pending timers on corrupt history and accepts after repair", async () => {
-    fs.writeFileSync(
+    seedState(
       path.join(dir, "timer-feed.json"),
       "invalid JSON private fixture",
     );
@@ -206,10 +203,7 @@ describe("durable timer feed delivery", () => {
     await vi.advanceTimersByTimeAsync(2000);
     expect(store.data.timerOutbox).toHaveLength(1);
     expect(feed.recent().events).toEqual([]);
-    fs.writeFileSync(
-      path.join(dir, "timer-feed.json"),
-      JSON.stringify({ version: 1, entries: [] }),
-    );
+    seedState(path.join(dir, "timer-feed.json"), { version: 1, entries: [] });
     await vi.advanceTimersByTimeAsync(1000);
     expect(store.data.timerOutbox).toEqual([]);
     expect(feed.recent().events).toHaveLength(1);

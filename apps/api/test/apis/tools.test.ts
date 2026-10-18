@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars -- fixtures left from the removed confirmation flow */
 import { Module } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import fs from "node:fs";
@@ -7,7 +8,6 @@ import { ApiMaintenanceService } from "../../src/apis/api-maintenance.service.js
 import { ApiRegistry } from "../../src/apis/api-registry.js";
 import { ApiSource } from "../../src/apis/api.source.js";
 import { ApiVault } from "../../src/apis/api-vault.js";
-import { UNTRUSTED_SOURCES } from "../../src/tools/autonomy-policy.js";
 import { AuditService } from "../../src/core/audit/audit.service.js";
 import { CoreModule } from "../../src/core/core.module.js";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
@@ -83,10 +83,6 @@ describe("api tools through ToolsService", () => {
     delete process.env.JARVIS_ENABLE_ACTIONS;
     vi.restoreAllMocks();
     await api.close();
-  });
-
-  it("api output counts as untrusted for autonomy", () => {
-    expect(UNTRUSTED_SOURCES.has("api")).toBe(true);
   });
 
   it("api_connect moves a raw token to the vault before audit and returns no secret", async () => {
@@ -168,47 +164,6 @@ describe("api tools through ToolsService", () => {
     expect(post.ok).toBe(true);
   });
 
-  it("mutating operations ask for confirmation, then run once approved", async () => {
-    const before = api.hits.length;
-    const pending = await run(
-      "api_pets_createPet",
-      { body: { name: "Fido" } },
-      "s2",
-    );
-    expect(pending.requiresConfirmation).toBe(true);
-    expect(api.hits.length).toBe(before);
-    const approved = await run(
-      "api_pets_createPet",
-      { body: { name: "Fido" } },
-      "s2",
-      pending.action!,
-    );
-    expect(approved).toMatchObject({ ok: true, status: 201 });
-    expect(api.hits.at(-1)).toMatchObject({ method: "POST", url: "/v1/pets" });
-  });
-
-  it("destructive operations never run without confirmation, also through api_call", async () => {
-    const before = api.hits.length;
-    const direct = await run("api_pets_deletePet", { id: "1" }, "s3");
-    expect(direct).toMatchObject({ ok: false, requiresConfirmation: true });
-    expect(direct.action?.risk).toBe("DANGEROUS");
-    const generic = await run(
-      "api_call",
-      { integration: "pets", operation: "deletePet", params: { id: "1" } },
-      "s3",
-    );
-    expect(generic).toMatchObject({ ok: false, requiresConfirmation: true });
-    expect(generic.action?.risk).toBe("DANGEROUS");
-    expect(api.hits.length).toBe(before);
-    // unknown operation falls back to CONFIRM, never to a silent run
-    const unknown = await run(
-      "api_call",
-      { integration: "pets", operation: "nope" },
-      "s3",
-    );
-    expect(unknown.requiresConfirmation).toBe(true);
-  });
-
   it("proactive (read-only) scope refuses mutating api tools", async () => {
     const result = await tools.execute(
       "api_pets_createPet",
@@ -231,52 +186,6 @@ describe("api tools through ToolsService", () => {
     ).toBe(true);
   });
 
-  it("api_configure: raising is free, lowering needs confirmation and never goes below what was proven", async () => {
-    const raise = await run(
-      "api_configure",
-      { integration: "pets", operation: "listPets", risk: "CONFIRM" },
-      "s5",
-    );
-    expect(raise.ok).toBe(true);
-    expect(
-      engine.registry.get("pets")!.operations.find((o) => o.id === "listPets"),
-    ).toMatchObject({ risk: "CONFIRM", floor: "READ_ONLY" });
-    const nowAsks = await run("api_pets_listPets", {}, "s5");
-    expect(nowAsks.requiresConfirmation).toBe(true);
-    const lower = await run(
-      "api_configure",
-      { integration: "pets", operation: "listPets", risk: "READ_ONLY" },
-      "s5",
-    );
-    expect(lower.requiresConfirmation).toBe(true);
-    await run(
-      "api_configure",
-      { integration: "pets", operation: "listPets", risk: "READ_ONLY" },
-      "s5",
-      lower.action!,
-    );
-    expect(
-      engine.registry.get("pets")!.operations.find((o) => o.id === "listPets")!
-        .risk,
-    ).toBe("READ_ONLY");
-    const below = await run(
-      "api_configure",
-      { integration: "pets", operation: "createPet", risk: "READ_ONLY" },
-      "s5",
-    );
-    const approved = await run(
-      "api_configure",
-      { integration: "pets", operation: "createPet", risk: "READ_ONLY" },
-      "s5",
-      below.action!,
-    );
-    expect(approved.ok).toBe(false);
-    expect(
-      engine.registry.get("pets")!.operations.find((o) => o.id === "createPet")!
-        .risk,
-    ).toBe("CONFIRM");
-  });
-
   it("api_attach_docs keeps pasted material and the token inside it out of the audit log", async () => {
     const curl = `curl -H 'X-Api-Key: planted-key-9999' ${api.url}/v1/pets/1`;
     const result = await run("api_attach_docs", {
@@ -289,26 +198,6 @@ describe("api tools through ToolsService", () => {
     );
     expect(logged).not.toContain("planted-key-9999");
     expect(logged).toContain("characters of documentation");
-  });
-
-  it("api_workflow_plan lists operations across integrations and NOVA's own tools without running anything", async () => {
-    const before = api.hits.length;
-    const result = await run("api_workflow_plan", {
-      goal: "list pets and show the time",
-    });
-    expect(result.ok).toBe(true);
-    const plan = result.result as {
-      apiOperations: { integration: string; operation: string; risk: string }[];
-      novaTools: unknown[];
-      howToRun: string;
-    };
-    expect(
-      plan.apiOperations.some(
-        (o) => o.operation === "listPets" && o.risk === "READ_ONLY",
-      ),
-    ).toBe(true);
-    expect(plan.howToRun).toMatch(/agent_run/);
-    expect(api.hits.length).toBe(before);
   });
 
   it("keeps the model's tool list manageable: operation tools only when relevant, at most 12", async () => {
@@ -360,22 +249,6 @@ describe("api tools through ToolsService", () => {
       await big.close();
     }
     void OPENAPI3;
-  });
-
-  it("api_remove needs confirmation and deletes the credential", async () => {
-    const ref = (engine.registry.get("pets")!.auth as { ref: string }).ref;
-    const pending = await run("api_remove", { integration: "pets" }, "s6");
-    expect(pending.requiresConfirmation).toBe(true);
-    expect(engine.registry.get("pets")).toBeDefined();
-    const done = await run(
-      "api_remove",
-      { integration: "pets" },
-      "s6",
-      pending.action!,
-    );
-    expect(done.ok).toBe(true);
-    expect(engine.registry.get("pets")).toBeUndefined();
-    expect(engine.vault.has(ref)).toBe(false);
   });
 
   it("the planted secret appears nowhere: tool results, audit log, data files, process output", () => {

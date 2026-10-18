@@ -128,10 +128,7 @@
       {busy ? "Opslaan…" : "Opslaan"}
     </Button>
     <Button
-      onclick={() => {
-        if (window.confirm("Alle lokale waarden van deze koppeling wissen?"))
-          void save(true);
-      }}
+      onclick={() => void save(true)}
       disabled={busy || !status?.fields.some((field) => field.configured)}
       >Waarden wissen</Button
     >

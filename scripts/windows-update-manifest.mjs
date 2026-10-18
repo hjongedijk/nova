@@ -27,7 +27,7 @@ export function windowsUpdateManifest(version, signature, date = new Date()) {
     platforms: {
       "windows-x86_64": {
         signature: signed,
-        url: `https://github.com/hjongedijk/nova/releases/download/v${version}/NOVA-Setup-${version}.exe`,
+        url: `https://github.com/hjongedijk/nova/releases/download/windows-v${version}/NOVA-Setup-${version}.exe`,
       },
     },
   };

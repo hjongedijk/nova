@@ -34,11 +34,12 @@ fn main() {
                 .map(std::path::PathBuf::from)
                 .and_then(|dir| std::fs::read_to_string(dir.join("NOVA/config.json")).ok())
                 .and_then(|text| nova_win_core::agent::decode(&text).ok())
-                .is_some_and(|(_, agent)| agent.run_elevated);
+                // No config yet (first start) counts as "elevated by default".
+                .is_none_or(|(_, agent)| agent.run_elevated);
             if configured {
-                match platform::request_elevation(std::process::id()) {
-                    Ok(()) => return,
-                    Err(error) => platform::show_error(&error),
+                // Refused or impossible elevation is not an error: NOVA simply keeps running unelevated.
+                if platform::request_elevation(std::process::id()).is_ok() {
+                    return;
                 }
             }
         }
@@ -47,9 +48,8 @@ fn main() {
                 .get(2)
                 .and_then(|s| s.parse::<u16>().ok())
                 .filter(|p| *p > 0)
-                .zip(args.get(3))
                 .ok_or_else(|| "Ongeldige netwerkopties".to_string())
-                .and_then(|(port, source)| platform::configure_network(port, source));
+                .and_then(platform::configure_network);
             if let Err(error) = result {
                 platform::show_error(&error);
                 std::process::exit(1);

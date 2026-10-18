@@ -5,6 +5,15 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InfrastructureEvent } from "@nova/contracts";
 import { DailyHighlightService } from "../../src/dashboard/daily-highlight.service.js";
+import {
+  failStateWrites,
+  dbStat,
+  dropState,
+  seedState,
+  stateDoc,
+  stateExists,
+  stateText,
+} from "../helpers/nova-db.js";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -111,10 +120,10 @@ describe("opt-in daily highlight", () => {
       JSON.stringify(enabled.auditRecord.mock.calls[0]?.[0]),
     ).not.toContain("project");
     const progress = path.join(enabled.dir, "daily-highlight-progress.json");
-    expect(JSON.parse(fs.readFileSync(progress, "utf8"))).toEqual({
+    expect(stateDoc(progress)).toEqual({
       completedDay: "2026-10-13",
     });
-    expect(fs.statSync(progress).mode & 0o777).toBe(0o600);
+    expect(dbStat(progress).mode & 0o777).toBe(0o600);
   });
 
   it("stays quiet without explicit positive evidence", async () => {
@@ -149,12 +158,12 @@ describe("opt-in daily highlight", () => {
   it("pauses before the first delivery when saved progress is corrupt", async () => {
     const instance = fixture(true, ["Ik heb mijn project afgerond."]);
     const progress = path.join(instance.dir, "daily-highlight-progress.json");
-    fs.writeFileSync(progress, "{broken");
+    seedState(progress, "{broken");
     await instance.service.checkSchedule(due);
     await instance.service.checkSchedule(new Date(due.getTime() + 6 * 60_000));
     expect(instance.record).not.toHaveBeenCalled();
     expect(instance.auditRecord).not.toHaveBeenCalled();
-    expect(fs.readFileSync(progress, "utf8")).toBe("{broken");
+    expect(stateText(progress)).toBe("{broken");
   });
 
   it("does not repeat an accepted highlight after audit failure or restart", async () => {
@@ -173,9 +182,7 @@ describe("opt-in daily highlight", () => {
     expect(instance.record.mock.calls[0]?.[2]).toBe(expectedId);
     expect(instance.accepted.has(expectedId)).toBe(true);
     // Lose only the completion marker: durable acceptance must remain authoritative.
-    fs.rmSync(path.join(instance.dir, "daily-highlight-progress.json"), {
-      force: true,
-    });
+    dropState(path.join(instance.dir, "daily-highlight-progress.json"));
     const restarted = fixture(
       true,
       ["Ik heb mijn project afgerond."],
@@ -193,10 +200,10 @@ describe("opt-in daily highlight", () => {
     instance.record.mockReturnValueOnce(null);
     await instance.service.checkSchedule(due);
     const progress = path.join(instance.dir, "daily-highlight-progress.json");
-    expect(fs.existsSync(progress)).toBe(false);
+    expect(stateExists(progress)).toBe(false);
     await instance.service.checkSchedule(new Date(due.getTime() + 6 * 60_000));
     expect(instance.record).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(fs.readFileSync(progress, "utf8"))).toEqual({
+    expect(stateDoc(progress)).toEqual({
       completedDay: "2026-10-13",
     });
   });
@@ -241,9 +248,10 @@ describe("opt-in daily highlight", () => {
         new Date(scheduled.getTime() + 3 * backoff),
       );
       expect(fourth.record).not.toHaveBeenCalled();
-      expect(
-        JSON.parse(fs.readFileSync(attemptsFile(first.dir), "utf8")),
-      ).toMatchObject({ period: "2026-10-13", attempts: 3 });
+      expect(stateDoc(attemptsFile(first.dir))).toMatchObject({
+        period: "2026-10-13",
+        attempts: 3,
+      });
     });
 
     it.each(["exhausted", "corrupt"])(
@@ -259,39 +267,30 @@ describe("opt-in daily highlight", () => {
         const content =
           state === "corrupt"
             ? "{broken"
-            : JSON.stringify({
+            : {
                 version: 1,
                 period: "2026-10-13",
                 attempts: 3,
                 lastAttemptAt: scheduled.getTime(),
-              });
-        fs.writeFileSync(attemptsFile(instance.dir), content);
+              };
+        seedState(attemptsFile(instance.dir), content);
         await instance.service.checkSchedule(scheduled);
         expect(instance.findWorkflowEvent).toHaveBeenCalledWith(id);
         expect(instance.record).not.toHaveBeenCalled();
         expect(
-          JSON.parse(
-            fs.readFileSync(
-              path.join(instance.dir, "daily-highlight-progress.json"),
-              "utf8",
-            ),
-          ),
+          stateDoc(path.join(instance.dir, "daily-highlight-progress.json")),
         ).toEqual({ completedDay: "2026-10-13" });
-        expect(fs.readFileSync(attemptsFile(instance.dir), "utf8")).toBe(
-          content,
-        );
+        expect(stateDoc(attemptsFile(instance.dir))).toEqual(content);
       },
     );
 
     it("blocks work on a corrupt attempt sidecar and retries after repair", async () => {
       const instance = fixture(true, ["Ik heb mijn project afgerond."]);
-      fs.writeFileSync(attemptsFile(instance.dir), "{broken");
+      seedState(attemptsFile(instance.dir), "{broken");
       await instance.service.checkSchedule(scheduled);
       expect(instance.record).not.toHaveBeenCalled();
-      expect(fs.readFileSync(attemptsFile(instance.dir), "utf8")).toBe(
-        "{broken",
-      );
-      fs.rmSync(attemptsFile(instance.dir));
+      expect(stateText(attemptsFile(instance.dir))).toBe("{broken");
+      dropState(attemptsFile(instance.dir));
       await instance.service.checkSchedule(
         new Date(scheduled.getTime() + backoff),
       );
@@ -300,21 +299,14 @@ describe("opt-in daily highlight", () => {
 
     it("blocks work until an attempt reservation can be saved and retries after backoff", async () => {
       const instance = fixture(true, ["Ik heb mijn project afgerond."]);
-      const rename = fs.renameSync.bind(fs);
-      const failure = vi
-        .spyOn(fs, "renameSync")
-        .mockImplementation((source, destination) => {
-          if (destination === attemptsFile(instance.dir))
-            throw new Error("reservation unavailable");
-          return rename(source, destination);
-        });
+      const failure = failStateWrites(attemptsFile(instance.dir));
       try {
         await instance.service.checkSchedule(scheduled);
         expect(instance.record).not.toHaveBeenCalled();
       } finally {
         failure.mockRestore();
       }
-      expect(fs.existsSync(attemptsFile(instance.dir))).toBe(false);
+      expect(stateExists(attemptsFile(instance.dir))).toBe(false);
       await instance.service.checkSchedule(
         new Date(scheduled.getTime() + backoff - 1),
       );
@@ -369,9 +361,8 @@ describe("verified useful events as a daily highlight", () => {
       expect(JSON.stringify(instance.auditRecord.mock.calls)).not.toMatch(
         /private-|code_run_tests|code_self_test|node_red_flow_create/,
       );
-      const progress = fs.readFileSync(
+      const progress = stateText(
         path.join(instance.dir, "daily-highlight-progress.json"),
-        "utf8",
       );
       expect(JSON.parse(progress)).toEqual({ completedDay: "2026-10-13" });
       expect(progress).not.toMatch(/private-|code_/);
@@ -494,7 +485,7 @@ describe("verified useful events as a daily highlight", () => {
     await instance.service.checkSchedule(due);
     expect(instance.record).not.toHaveBeenCalled();
     expect(
-      fs.existsSync(path.join(instance.dir, "daily-highlight-progress.json")),
+      stateExists(path.join(instance.dir, "daily-highlight-progress.json")),
     ).toBe(false);
     await instance.service.checkSchedule(new Date(due.getTime() + 5 * 60_000));
     expect(instance.record).toHaveBeenCalledOnce();

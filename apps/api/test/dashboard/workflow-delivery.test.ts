@@ -7,6 +7,13 @@ import type { PlanningService } from "../../src/planning/planning.service.js";
 import { AlertsFeed } from "../../src/dashboard/alerts-feed.service.js";
 import { WorkflowFeedJournal } from "../../src/dashboard/workflow-feed-journal.js";
 import { NodeRedEventsController } from "../../src/dashboard/node-red-events.controller.js";
+import {
+  dbStat,
+  failStateWrites,
+  stateDoc,
+  seedState,
+  stateExists,
+} from "../helpers/nova-db.js";
 
 let dir: string;
 const token = "a".repeat(64);
@@ -73,7 +80,7 @@ describe("durable workflow alert acceptance", () => {
     ]);
     expect(restarted.feed.claimSpeech(original.seq)).toBe(false);
     expect(notifyHelper).toHaveBeenCalledOnce();
-    expect(fs.statSync(path.join(dir, "workflow-feed.json")).mode & 0o777).toBe(
+    expect(dbStat(path.join(dir, "workflow-feed.json")).mode & 0o777).toBe(
       0o600,
     );
   });
@@ -84,14 +91,10 @@ describe("durable workflow alert acceptance", () => {
   });
   it("rejects failed persistence without notification or spent speech budget, then recovers", () => {
     const { controller, feed } = boot();
-    const rename = fs.renameSync;
-    const failure = vi
-      .spyOn(fs, "renameSync")
-      .mockImplementation((source, destination) => {
-        if (String(destination).endsWith("workflow-feed.json"))
-          throw new Error("ENOSPC private diagnostics");
-        return rename(source, destination);
-      });
+    const failure = failStateWrites(
+      path.join(dir, "workflow-feed.json"),
+      "ENOSPC private diagnostics",
+    );
     expect(() =>
       controller.receive(`Bearer ${token}`, { type: "alert", ...input }),
     ).toThrow("Node-RED alert acceptance unavailable");
@@ -102,7 +105,7 @@ describe("durable workflow alert acceptance", () => {
     }
     expect(feed.recent().events).toEqual([]);
     expect(notifyHelper).not.toHaveBeenCalled();
-    expect(fs.existsSync(path.join(dir, "spoken-alert-progress.json"))).toBe(
+    expect(stateExists(path.join(dir, "spoken-alert-progress.json"))).toBe(
       false,
     );
     failure.mockRestore();
@@ -112,29 +115,8 @@ describe("durable workflow alert acceptance", () => {
     expect(feed.recent().events[0]?.speakAllowed).toBe(true);
     expect(notifyHelper).toHaveBeenCalledOnce();
   });
-  it("settles a renamed journal after sync failure without reissuing native delivery", () => {
-    const { controller, feed } = boot();
-    const sync = fs.fsyncSync;
-    const failure = vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
-      if (fs.fstatSync(fd).isDirectory())
-        throw new Error("temporary directory sync failure");
-      return sync(fd);
-    });
-    expect(() =>
-      controller.receive(`Bearer ${token}`, { type: "alert", ...input }),
-    ).toThrow("Node-RED alert acceptance unavailable");
-    expect(notifyHelper).not.toHaveBeenCalled();
-    expect(feed.recent().events).toEqual([]);
-    failure.mockRestore();
-    expect(
-      controller.receive(`Bearer ${token}`, { type: "alert", ...input }),
-    ).toEqual({ accepted: true });
-    expect(feed.recent().events).toHaveLength(1);
-    expect(feed.recent().events[0]?.speakAllowed).toBe(false);
-    expect(notifyHelper).not.toHaveBeenCalled();
-  });
   it("fails closed on corrupt history while ordinary notifications remain available", () => {
-    fs.writeFileSync(path.join(dir, "workflow-feed.json"), "corrupt");
+    seedState(path.join(dir, "workflow-feed.json"), "corrupt");
     const { controller, feed } = boot();
     expect(() =>
       controller.receive(`Bearer ${token}`, { type: "alert", ...input }),
@@ -238,11 +220,11 @@ describe("durable workflow alert acceptance", () => {
     expect(
       new WorkflowFeedJournal(path.join(dir, "history.json")).read(),
     ).toHaveLength(200);
-    const saved = JSON.parse(
-      fs.readFileSync(path.join(dir, "history.json"), "utf8"),
-    );
-    saved.entries[0].event.kind = "timer";
-    fs.writeFileSync(path.join(dir, "history.json"), JSON.stringify(saved));
+    const saved = stateDoc(path.join(dir, "history.json")) as {
+      entries: { event: { kind: string } }[];
+    };
+    saved.entries[0]!.event.kind = "timer";
+    seedState(path.join(dir, "history.json"), saved);
     expect(() =>
       new WorkflowFeedJournal(path.join(dir, "history.json")).read(),
     ).toThrow("Workflow feed history unavailable");

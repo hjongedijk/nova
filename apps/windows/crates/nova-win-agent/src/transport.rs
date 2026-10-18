@@ -121,16 +121,13 @@ mod tests {
         },
         time::Duration,
     };
-    fn request(method: &str, path: &str, token: Option<&str>, body: &str, blocked: bool) -> (String, usize) {
+    fn request(method: &str, path: &str, token: Option<&str>, body: &str) -> (String, usize) {
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let address = server.server_addr().to_ip().unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
         let count = calls.clone();
         let mut config = AgentConfig::fresh().unwrap();
         config.token = "abcdefghijklmnopqrstuvwxyz".into();
-        if blocked {
-            config.allowed_ips = vec!["192.168.1.5".parse().unwrap()];
-        }
         let worker = std::thread::spawn(move || {
             respond(
                 server.recv().unwrap(),
@@ -156,21 +153,15 @@ mod tests {
         (response, calls.load(Ordering::SeqCst))
     }
     #[test]
-    fn unauthorized_and_wrong_source_never_dispatch() {
+    fn only_the_pairing_token_is_checked_before_dispatch() {
         for token in [None, Some("Bearer wrong"), Some("abcdefghijklmnopqrstuvwxyz")] {
-            let (response, calls) = request("POST", "/v1/lock", token, "{}", false);
+            let (response, calls) = request("POST", "/v1/lock", token, "{}");
             assert!(response.starts_with("HTTP/1.1 401"), "{response}");
             assert_eq!(calls, 0);
         }
-        let (response, calls) = request(
-            "POST",
-            "/v1/lock",
-            Some("Bearer abcdefghijklmnopqrstuvwxyz"),
-            "{}",
-            true,
-        );
-        assert!(response.starts_with("HTTP/1.1 403"));
-        assert_eq!(calls, 0);
+        let (response, calls) = request("POST", "/v1/lock", Some("Bearer abcdefghijklmnopqrstuvwxyz"), "{}");
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert_eq!(calls, 1);
     }
     #[test]
     fn validates_methods_json_and_size_before_dispatch() {
@@ -180,7 +171,7 @@ mod tests {
             ("POST", "/v1/lock", "[]", 400),
             ("POST", "/v1/lock", &"x".repeat(BODY_LIMIT + 1), 413),
         ] {
-            let (response, calls) = request(method, path, Some("Bearer abcdefghijklmnopqrstuvwxyz"), body, false);
+            let (response, calls) = request(method, path, Some("Bearer abcdefghijklmnopqrstuvwxyz"), body);
             assert!(response.starts_with(&format!("HTTP/1.1 {status}")), "{response}");
             assert_eq!(calls, 0);
         }
@@ -192,7 +183,6 @@ mod tests {
             "/v1/mode",
             Some("Bearer abcdefghijklmnopqrstuvwxyz"),
             r#"{"mode":"helper"}"#,
-            false,
         );
         assert!(response.starts_with("HTTP/1.1 200"));
         assert_eq!(calls, 1);
@@ -207,18 +197,18 @@ mod tests {
             "/v1/desktop/screenshot?display=1",
             "/v1/helper/preferences",
         ] {
-            let (response, calls) = request("GET", path, Some("Bearer abcdefghijklmnopqrstuvwxyz"), "", false);
+            let (response, calls) = request("GET", path, Some("Bearer abcdefghijklmnopqrstuvwxyz"), "");
             assert!(response.starts_with("HTTP/1.1 200"), "{response}");
             assert_eq!(calls, 1);
         }
-        let (response, calls) = request("GET", "/unknown", Some("Bearer abcdefghijklmnopqrstuvwxyz"), "", false);
+        let (response, calls) = request("GET", "/unknown", Some("Bearer abcdefghijklmnopqrstuvwxyz"), "");
         assert!(response.starts_with("HTTP/1.1 404"));
         assert_eq!(calls, 0);
     }
     #[test]
     fn screenshot_query_is_validated_and_forwarded() {
         let token = Some("Bearer abcdefghijklmnopqrstuvwxyz");
-        let (response, calls) = request("GET", "/v1/desktop/screenshot?display=2&maxWidth=960", token, "", false);
+        let (response, calls) = request("GET", "/v1/desktop/screenshot?display=2&maxWidth=960", token, "");
         assert_eq!(calls, 1);
         assert!(response.contains(r#""body":{"display":2,"maxWidth":960}"#));
         for path in [
@@ -226,7 +216,7 @@ mod tests {
             "/v1/desktop/screenshot?display=1&display=2",
             "/v1/desktop/screenshot?unknown=1",
         ] {
-            let (response, calls) = request("GET", path, token, "", false);
+            let (response, calls) = request("GET", path, token, "");
             assert!(response.starts_with("HTTP/1.1 400"));
             assert_eq!(calls, 0);
         }

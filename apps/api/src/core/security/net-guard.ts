@@ -114,6 +114,28 @@ export function isPrivateAddress(address: string): boolean {
   return true; // not an IP: never trust it
 }
 
+const LAN_V4 = (
+  [
+    ["10.0.0.0", 8],
+    ["172.16.0.0", 12],
+    ["192.168.0.0", 16],
+  ] as const
+).map(([base, bits]) => {
+  const start = toInt(base);
+  return [start, start + 2 ** (32 - bits) - 1] as const;
+});
+
+/**
+ * Whether an IPv4 literal is on a private home/office LAN (RFC 1918 only). Read-only LAN discovery
+ * may touch exactly these; loopback, link-local (cloud metadata), CGNAT and public addresses are
+ * never in range, so the scanner cannot be pointed outside the owner's own network.
+ */
+export function isLanAddress(address: string): boolean {
+  if (net.isIP(address) !== 4) return false;
+  const value = toInt(address);
+  return LAN_V4.some(([start, end]) => value >= start && value <= end);
+}
+
 /** A `lookup` for http(s).request that resolves normally, given a rule for which answers are allowed. */
 export function lookupAllowing(
   blocked: (address: string) => boolean,

@@ -1,6 +1,32 @@
 //! Update lifecycle. A background check can announce an update but cannot install it.
 use serde::Serialize;
 
+/// A missing release manifest is distinct from an unsuccessful network check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckFailure {
+    NoPublishedRelease,
+    NetworkOrOther,
+}
+impl CheckFailure {
+    pub fn from_http_status(status: Option<u16>) -> Self {
+        if status == Some(404) {
+            Self::NoPublishedRelease
+        } else {
+            Self::NetworkOrOther
+        }
+    }
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::NoPublishedRelease => {
+                "Er is nog geen ondertekende Windows-update gepubliceerd. Je kunt deze testversie blijven gebruiken."
+            }
+            Self::NetworkOrOther => {
+                "Updatecontrole mislukt. Controleer je internetverbinding of probeer later opnieuw."
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
@@ -80,6 +106,36 @@ impl Status {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_a_verified_missing_manifest_means_unpublished() {
+        assert_eq!(
+            CheckFailure::from_http_status(Some(404)),
+            CheckFailure::NoPublishedRelease
+        );
+        for status in [Some(503), Some(500), Some(403), Some(200), None] {
+            assert_eq!(CheckFailure::from_http_status(status), CheckFailure::NetworkOrOther);
+        }
+    }
+    #[test]
+    fn missing_release_is_distinct_from_network_failure_and_remains_retryable() {
+        let unpublished = CheckFailure::NoPublishedRelease.message();
+        let network = CheckFailure::NetworkOrOther.message();
+        assert!(unpublished.contains("nog geen ondertekende Windows-update gepubliceerd"));
+        assert!(network.contains("internetverbinding"));
+        assert_ne!(unpublished, network);
+        for message in [unpublished, network] {
+            let mut state = Status::new("0.1.74".into());
+            state.begin_check().unwrap();
+            state.failed(message);
+            assert_eq!(state.phase, Phase::Failed);
+            assert_ne!(state.phase, Phase::Current);
+            assert_eq!(state.error.as_deref(), Some(message));
+            assert!(state.begin_install().is_err());
+            state.begin_check().unwrap();
+            assert_eq!(state.phase, Phase::Checking);
+            assert!(state.error.is_none());
+        }
+    }
     #[test]
     fn checks_never_install_and_installs_require_an_available_release() {
         let mut state = Status::new("0.1.74".into());

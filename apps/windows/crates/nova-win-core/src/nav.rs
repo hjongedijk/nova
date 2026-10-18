@@ -1,5 +1,5 @@
-//! Which addresses NOVA Desk may load. The windows only ever show the configured NOVA origin; everything else is
-//! refused, and ordinary web links open in the default browser instead.
+//! Which addresses the helper and wallpaper windows show. They display the configured NOVA origin; ordinary web links
+//! open in the default browser instead. This only decides where a link is shown, it never limits what NOVA may do.
 
 use crate::mode::WallpaperStyle;
 use crate::view::View;
@@ -62,16 +62,9 @@ pub enum Navigation {
 }
 
 pub fn classify(target: &Url, origin: &str) -> Navigation {
-    classify_allowing(target, origin, &[])
-}
-
-/// Like `classify`, with extra origins the user allowed on purpose (`allowedOrigins` in desk.json): the login page of
-/// a reverse proxy often lives on another address than NOVA itself. They may be shown in the window; they never get
-/// the helper's commands.
-pub fn classify_allowing(target: &Url, origin: &str, extra: &[String]) -> Navigation {
     if target.scheme() == "http" || target.scheme() == "https" {
         let target_origin = target.origin().ascii_serialization();
-        if target_origin == origin || extra.contains(&target_origin) {
+        if target_origin == origin {
             return Navigation::Allow;
         }
     }
@@ -177,30 +170,6 @@ mod tests {
         assert_eq!(nav("https://nova.example.nl:8443/"), Navigation::External);
         assert_eq!(nav("https://evil.com/?https://nova.example.nl"), Navigation::External);
         assert_eq!(nav("https://nova.example.nl@evil.com/"), Navigation::External);
-    }
-
-    #[test]
-    fn extra_origins_are_only_allowed_when_listed() {
-        let extra = vec!["https://auth.example.nl".to_string()];
-        let login = Url::parse("https://auth.example.nl/login?rd=x").unwrap();
-        assert_eq!(
-            classify_allowing(&login, "https://nova.example.nl", &extra),
-            Navigation::Allow
-        );
-        assert_eq!(
-            classify_allowing(&login, "https://nova.example.nl", &[]),
-            Navigation::External
-        );
-        let other = Url::parse("https://auth.example.nl.evil.com/").unwrap();
-        assert_eq!(
-            classify_allowing(&other, "https://nova.example.nl", &extra),
-            Navigation::External
-        );
-        let file = Url::parse("file:///c:/x").unwrap();
-        assert_eq!(
-            classify_allowing(&file, "https://nova.example.nl", &extra),
-            Navigation::Block
-        );
     }
 
     #[test]

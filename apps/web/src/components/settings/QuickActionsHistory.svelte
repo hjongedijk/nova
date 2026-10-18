@@ -60,13 +60,7 @@
   }
 
   async function rollback(id: string): Promise<void> {
-    if (
-      busy ||
-      !window.confirm(
-        "Deze eerdere snelle opdrachten herstellen? Dit voert ze niet uit.",
-      )
-    )
-      return;
+    if (busy) return;
     busy = true;
     message = "";
     try {

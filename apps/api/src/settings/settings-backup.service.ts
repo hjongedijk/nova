@@ -1,17 +1,11 @@
-import {
-  Injectable,
-  Optional,
-  type OnModuleDestroy,
-  type OnModuleInit,
-} from "@nestjs/common";
+import { Injectable, Optional, type OnModuleInit } from "@nestjs/common";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type {
-  SettingsImportPrepared,
   SettingsImportResult,
+  SettingsImportSummary,
 } from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { ValidationError } from "../core/errors/validation.error.js";
@@ -32,16 +26,14 @@ import { NodeRedFlowRevisions } from "./node-red-flow-revisions.service.js";
 const digest = (value: unknown) =>
   crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 type Draft = {
-  sessionId: string;
-  expiresAt: number;
-  revision: string;
+  metadata: Record<string, unknown>;
   next: NovaSettings;
   nextLists: Record<string, { id: string; text: string; addedAt: string }[]>;
   nextConnections?: ConnectionFile;
   nodeRedRevision?: string;
   previousNodeRedFlows?: Record<string, unknown>[];
   nextNodeRedFlows?: Record<string, unknown>[];
-  summary: SettingsImportPrepared["summary"];
+  summary: SettingsImportSummary;
 };
 type ImportJournalV1 = {
   version: 1;
@@ -63,15 +55,12 @@ type ImportJournal = {
   digest: string;
 };
 
-/** Private, bounded import candidates; public confirmations contain counts only. */
+/** Imports a settings backup in one step; audit entries contain counts only. */
 @Injectable()
-export class SettingsBackupService implements OnModuleInit, OnModuleDestroy {
-  private readonly drafts = new Map<string, Draft>();
-  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+export class SettingsBackupService implements OnModuleInit {
   private nodeRedImportInProgress = false;
   constructor(
     private readonly settings: SettingsStore,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     @Optional() private readonly planning?: JarvisStateStore,
     @Optional() private readonly connections?: ServiceConnectionsStore,
@@ -270,47 +259,12 @@ export class SettingsBackupService implements OnModuleInit, OnModuleDestroy {
   exportConnections(): BackupConnections {
     return this.connections?.backupValues() ?? {};
   }
-  private drop(id: string): void {
-    this.drafts.delete(id);
-    clearTimeout(this.timers.get(id));
-    this.timers.delete(id);
-  }
-  onModuleDestroy(): void {
-    for (const id of this.drafts.keys()) this.drop(id);
-  }
-  prepare(body: unknown): SettingsImportPrepared {
-    return this.prepareInternal(body);
-  }
-
-  prepareWithNodeRed(
-    body: unknown,
-    snapshot: NodeRedFlowSnapshot,
-  ): SettingsImportPrepared {
-    return this.prepareInternal(body, snapshot);
-  }
-
-  private prepareInternal(
-    body: unknown,
-    nodeRedSnapshot?: NodeRedFlowSnapshot,
-  ): SettingsImportPrepared {
+  private plan(body: unknown, nodeRedSnapshot?: NodeRedFlowSnapshot): Draft {
     if (!body || typeof body !== "object" || Array.isArray(body))
       throw new ValidationError(["Ongeldige importaanvraag."]);
     const value = body as Record<string, unknown>;
-    if (
-      Object.keys(value).some(
-        (key) => !["data", "mode", "acknowledgeEffects"].includes(key),
-      ) ||
-      value.acknowledgeEffects !== true
-    )
-      throw new ValidationError([
-        "Bevestig dat deze import je instellingen en vaardigheden wijzigt.",
-      ]);
-    for (const [id, draft] of this.drafts)
-      if (draft.expiresAt <= this.confirmations.now()) this.drop(id);
-    if (this.drafts.size >= 20)
-      throw new ValidationError([
-        "Te veel imports staan open. Annuleer of wacht tot ze verlopen.",
-      ]);
+    if (Object.keys(value).some((key) => !["data", "mode"].includes(key)))
+      throw new ValidationError(["Ongeldige importaanvraag."]);
     const current = this.settings.get();
     const currentLists = this.planning?.getListsSnapshot() ?? {};
     const currentConnections = this.connections?.snapshot();
@@ -349,29 +303,7 @@ export class SettingsBackupService implements OnModuleInit, OnModuleDestroy {
       changedConnections: plan.summary.changedConnections,
       modelRolesChanged: plan.summary.modelRolesChanged,
     };
-    this.audit.record({
-      sessionId: "settings",
-      tool: "settings_import",
-      risk: "DANGEROUS",
-      confirmation: "pending_admin_ui",
-      arguments: metadata,
-    });
-    const action = this.confirmations.create(
-      `settings-import:${crypto.randomUUID()}`,
-      "settings_import",
-      metadata,
-      "DANGEROUS",
-      undefined,
-      false,
-    );
-    this.drafts.set(action.confirmationId, {
-      sessionId: action.sessionId,
-      expiresAt: action.expiresAt,
-      revision: digest({
-        settings: current,
-        lists: currentLists,
-        connections: currentConnections,
-      }),
+    return {
       next: plan.next,
       nextLists: plan.nextLists,
       ...(nextConnections ? { nextConnections } : {}),
@@ -382,96 +314,25 @@ export class SettingsBackupService implements OnModuleInit, OnModuleDestroy {
             nextNodeRedFlows: structuredClone(plan.nextNodeRedFlows),
           }
         : {}),
+      metadata,
       summary: plan.summary,
-    });
-    const timer = setTimeout(
-      () => this.drop(action.confirmationId),
-      Math.max(0, action.expiresAt - this.confirmations.now()),
-    );
-    timer.unref();
-    this.timers.set(action.confirmationId, timer);
-    return { ok: true, summary: structuredClone(plan.summary), action };
+    };
   }
-  confirm(body: unknown, flowCommit = false): SettingsImportResult {
+  private commit(draft: Draft, flowCommit = false): SettingsImportResult {
     if (this.nodeRedImportInProgress && !flowCommit)
       return {
         ok: false,
         error: "Een andere import wordt verwerkt. Probeer opnieuw.",
       };
-    if (!body || typeof body !== "object" || Array.isArray(body))
-      throw new ValidationError([
-        "Controleer de back-up eerst en bevestig daarna de import.",
-      ]);
-    const value = body as Record<string, unknown>;
-    if (
-      Object.keys(value).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      ) ||
-      typeof value.sessionId !== "string" ||
-      !/^settings-import:[0-9a-f-]{36}$/i.test(value.sessionId) ||
-      typeof value.confirmationId !== "string" ||
-      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
-      typeof value.approve !== "boolean"
-    )
-      throw new ValidationError([
-        "Controleer de back-up eerst en bevestig daarna de import.",
-      ]);
-    const { sessionId, confirmationId, approve } = value as {
-      sessionId: string;
-      confirmationId: string;
-      approve: boolean;
-    };
-    const draft = this.drafts.get(confirmationId);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !draft ||
-      draft.sessionId !== sessionId ||
-      pending?.confirmationId !== confirmationId
-    )
-      return {
-        ok: false,
-        error:
-          "Importbevestiging bestaat niet meer. Controleer de back-up opnieuw.",
-      };
-    this.drop(confirmationId);
-    if (!approve) {
-      this.confirmations.cancel(sessionId);
-      return {
-        ok: true,
-        cancelled: true,
-        imported: 0,
-        importedLists: 0,
-        importedFlows: 0,
-        changedConnections: 0,
-        missingSecrets: [],
-      };
-    }
-    if (!this.confirmations.take(sessionId, confirmationId))
-      return {
-        ok: false,
-        error: "Toestemming verlopen. Controleer de back-up opnieuw.",
-      };
+    const sessionId = "settings";
     const currentLists = this.planning?.getListsSnapshot() ?? {};
-    const currentConnections = this.connections?.snapshot();
-    if (
-      digest({
-        settings: this.settings.get(),
-        lists: currentLists,
-        connections: currentConnections,
-      }) !== draft.revision
-    )
-      return {
-        ok: false,
-        error:
-          "Instellingen zijn intussen gewijzigd. Controleer de back-up opnieuw.",
-      };
     try {
       this.audit.record({
         sessionId,
         tool: "settings_import",
         risk: "DANGEROUS",
-        confirmation: "approved_admin_ui",
-        arguments: pending.args,
+        confirmation: "direct",
+        arguments: draft.metadata,
       });
     } catch {
       return {
@@ -539,8 +400,8 @@ export class SettingsBackupService implements OnModuleInit, OnModuleDestroy {
         sessionId,
         tool: "settings_import",
         risk: "DANGEROUS",
-        confirmation: "confirmed_admin_ui",
-        arguments: pending.args,
+        confirmation: "direct",
+        arguments: draft.metadata,
         result: {
           ok: true,
           imported: draft.summary.incomingSkills,
@@ -563,22 +424,28 @@ export class SettingsBackupService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async confirmWithNodeRed(body: unknown): Promise<SettingsImportResult> {
-    if (!body || typeof body !== "object" || Array.isArray(body))
-      return this.confirm(body);
-    const value = body as Record<string, unknown>;
-    const id =
-      typeof value.confirmationId === "string" ? value.confirmationId : "";
-    const draft = this.drafts.get(id);
-    if (!draft?.nodeRedRevision || !draft.nextNodeRedFlows)
-      return this.confirm(body);
-    if (value.approve !== true) return this.confirm(body);
-    if (
-      typeof value.sessionId !== "string" ||
-      draft.sessionId !== value.sessionId ||
-      this.confirmations.peek(value.sessionId)?.confirmationId !== id
-    )
-      return this.confirm(body);
+  /** Applies a backup without Node-RED flows in one synchronous step. */
+  importLocal(body: unknown): SettingsImportResult {
+    return this.commit(this.plan(body));
+  }
+
+  /** Plans and applies a backup in one step, including Node-RED flows when the backup carries them. */
+  async importBackup(body: unknown): Promise<SettingsImportResult> {
+    const data =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>).data
+        : undefined;
+    const withFlows =
+      !!data &&
+      typeof data === "object" &&
+      !Array.isArray(data) &&
+      "nodeRedFlows" in data;
+    if (withFlows && !this.nodeRed)
+      return { ok: false, error: "Node-RED-flowimport is niet beschikbaar." };
+    const snapshot = withFlows ? await this.nodeRed!.flowSnapshot() : undefined;
+    const draft = this.plan(body, snapshot);
+    if (!draft.nodeRedRevision || !draft.nextNodeRedFlows)
+      return this.commit(draft);
     if (!this.nodeRed)
       return { ok: false, error: "Node-RED-flowimport is niet beschikbaar." };
     if (this.nodeRedImportInProgress)
@@ -596,8 +463,6 @@ export class SettingsBackupService implements OnModuleInit, OnModuleDestroy {
             "Node-RED-flowrevisie kon niet worden gecontroleerd. Probeer opnieuw.",
         };
       if (live.revision !== draft.nodeRedRevision) {
-        this.drop(id);
-        this.confirmations.cancel(draft.sessionId);
         return {
           ok: false,
           error: "Node-RED-flows zijn gewijzigd; laad de back-up opnieuw.",
@@ -618,8 +483,6 @@ export class SettingsBackupService implements OnModuleInit, OnModuleDestroy {
       if (!result.ok || !result.revision) {
         if (result.error?.startsWith("Node-RED-flows zijn gewijzigd")) {
           this.clearJournal();
-          this.drop(id);
-          this.confirmations.cancel(draft.sessionId);
           return { ok: false, error: result.error };
         }
         try {
@@ -638,22 +501,8 @@ export class SettingsBackupService implements OnModuleInit, OnModuleDestroy {
           error: result.error ?? "Node-RED-flowimport is mislukt.",
         };
       }
-      const committed = this.confirm(body, true);
+      const committed = this.commit(draft, true);
       if (committed.ok) {
-        if ("cancelled" in committed && committed.cancelled) {
-          const current = await this.nodeRed.flowSnapshot();
-          const rollback = await this.nodeRed.writeFlowSnapshot(
-            current.revision,
-            draft.previousNodeRedFlows,
-          );
-          if (!rollback.ok)
-            return {
-              ok: false,
-              error:
-                "Import geannuleerd, maar Node-RED-herstel is nog niet bevestigd.",
-            };
-          return { ...committed, importedFlows: 0 };
-        }
         let historyWarning: string | undefined;
         if (this.nodeRedRevisions) {
           try {

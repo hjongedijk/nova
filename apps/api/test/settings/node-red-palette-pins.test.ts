@@ -86,28 +86,15 @@ async function fixture(initial: string | null = null, wrongReadback = false) {
       NOVA_ADMIN_PIN: "synthetic-pin",
     },
   });
-  const prepare = async (install: boolean) => {
-    const state = await app.api.get(route).set(headers);
-    expect(state.status).toBe(200);
-    return app.api
-      .post(`${route}/prepare`)
+  const change = (install: boolean) =>
+    app.api
+      .post(`${route}/change`)
       .set(headers)
-      .send({ module: name, install, revision: state.body.revision });
-  };
-  const confirm = (
-    action: { sessionId: string; confirmationId: string },
-    approve = true,
-  ) =>
-    app.api.post(`${route}/confirm`).set(headers).send({
-      sessionId: action.sessionId,
-      confirmationId: action.confirmationId,
-      approve,
-    });
+      .send({ module: name, install });
   return {
     ...app,
     writes,
-    prepare,
-    confirm,
+    change,
     restart: () => {
       if (pendingVersion) version = pendingVersion;
       pendingVersion = null;
@@ -115,19 +102,11 @@ async function fixture(initial: string | null = null, wrongReadback = false) {
   };
 }
 
-describe("confirmed exact-version Node-RED palette changes", () => {
-  it("binds the server pin to confirmation, HTTP write, readback and audit", async () => {
+describe("exact-version Node-RED palette changes in one step", () => {
+  it("installs the server pin immediately with HTTP write, readback and audit", async () => {
     const f = await fixture();
     try {
-      const staged = await f.prepare(true);
-      expect(staged.status).toBe(200);
-      expect(staged.body.warning).toContain(`${name}@${pin}`);
-      expect(staged.body.action).toMatchObject({
-        risk: "DANGEROUS",
-        args: { targetVersion: pin },
-      });
-      expect(f.writes).toHaveLength(0);
-      const result = await f.confirm(staged.body.action);
+      const result = await f.change(true);
       expect(result.status).toBe(200);
       expect(result.body).toMatchObject({
         ok: true,
@@ -143,30 +122,47 @@ describe("confirmed exact-version Node-RED palette changes", () => {
       expect(f.audits).toContainEqual(
         expect.objectContaining({
           tool: "node_red_palette",
-          confirmation: "approved_admin_ui",
           arguments: { module: name, install: true, targetVersion: pin },
           result: expect.objectContaining({ ok: true, verified: true }),
         }),
       );
-      expect((await f.confirm(staged.body.action)).body.ok).toBe(false);
+      expect((await f.change(true)).status).toBe(400);
       expect(f.writes).toHaveLength(1);
-      expect((await f.prepare(true)).status).toBe(400);
-      const removal = await f.prepare(false);
-      expect(removal.body.action.args.targetVersion).toBeNull();
-      expect((await f.confirm(removal.body.action)).body.ok).toBe(true);
+      expect((await f.change(false)).body.ok).toBe(true);
       expect(f.writes[1]).toEqual({ method: "DELETE", body: null });
+      expect((await f.change(false)).status).toBe(400);
     } finally {
       await f.app.close();
     }
   });
-  it("offers a confirmed upgrade when the installed version differs", async () => {
+  it("rejects unknown modules and extra body fields", async () => {
+    const f = await fixture();
+    try {
+      expect(
+        (
+          await f.api
+            .post(`${route}/change`)
+            .set(headers)
+            .send({ module: "node-red-node-other", install: true })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await f.api
+            .post(`${route}/change`)
+            .set(headers)
+            .send({ module: name, install: true, sessionId: "x" })
+        ).status,
+      ).toBe(400);
+      expect(f.writes).toHaveLength(0);
+    } finally {
+      await f.app.close();
+    }
+  });
+  it("upgrades when the installed version differs and reports a pending restart", async () => {
     const f = await fixture("0.9.0");
     try {
-      const staged = await f.prepare(true);
-      expect(staged.status).toBe(200);
-      expect(staged.body.warning).toContain("0.9.0");
-      expect(staged.body.warning).toContain(pin);
-      const accepted = await f.confirm(staged.body.action);
+      const accepted = await f.change(true);
       expect(accepted.body).toMatchObject({
         ok: true,
         verified: false,
@@ -187,7 +183,7 @@ describe("confirmed exact-version Node-RED palette changes", () => {
           }),
         }),
       );
-      expect((await f.prepare(true)).status).toBe(400);
+      expect((await f.change(true)).status).toBe(400);
       f.restart();
       const active = await f.api.get(route).set(headers);
       expect(active.body.modules[0]).toMatchObject({
@@ -195,7 +191,7 @@ describe("confirmed exact-version Node-RED palette changes", () => {
         pendingVersion: null,
         restartRequired: false,
       });
-      expect((await f.prepare(true)).status).toBe(400);
+      expect((await f.change(true)).status).toBe(400);
       expect(f.writes).toEqual([
         { method: "POST", body: { module: name, version: pin } },
       ]);
@@ -203,11 +199,10 @@ describe("confirmed exact-version Node-RED palette changes", () => {
       await f.app.close();
     }
   });
-  it("does not claim verification when the installed version differs from the approved pin", async () => {
+  it("does not claim verification when the installed version differs from the pin", async () => {
     const f = await fixture(null, true);
     try {
-      const staged = await f.prepare(true);
-      const result = await f.confirm(staged.body.action);
+      const result = await f.change(true);
       expect(result.status).toBe(503);
       expect(result.body.ok).not.toBe(true);
       expect(f.writes).toHaveLength(1);
@@ -221,34 +216,17 @@ describe("confirmed exact-version Node-RED palette changes", () => {
       await f.app.close();
     }
   });
-  it("rejects an approval after the server-owned pin changes and requires a new approval", async () => {
+  it("uses the server-owned pin that is current at request time", async () => {
     const f = await fixture();
     try {
-      const staged = await f.prepare(true);
       Object.defineProperty(f.app.get(NovaConfig), "nodeRedPaletteAllowlist", {
         value: JSON.stringify([{ name, version: "2.0.0" }]),
         configurable: true,
       });
-      expect((await f.confirm(staged.body.action)).status).toBe(503);
-      expect(f.writes).toHaveLength(0);
-      const next = await f.prepare(true);
-      expect(next.body.action.args.targetVersion).toBe("2.0.0");
-      expect((await f.confirm(next.body.action)).body.ok).toBe(true);
+      expect((await f.change(true)).body.ok).toBe(true);
       expect(f.writes).toEqual([
         { method: "POST", body: { module: name, version: "2.0.0" } },
       ]);
-    } finally {
-      await f.app.close();
-    }
-  });
-  it("cancels a pinned change without a package write", async () => {
-    const f = await fixture();
-    try {
-      const staged = await f.prepare(true);
-      expect((await f.confirm(staged.body.action, false)).body.cancelled).toBe(
-        true,
-      );
-      expect(f.writes).toHaveLength(0);
     } finally {
       await f.app.close();
     }

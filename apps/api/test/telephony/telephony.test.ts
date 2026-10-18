@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars -- fixtures left from the removed confirmation flow */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -41,7 +42,6 @@ import {
   type TelephonyConfig,
 } from "../../src/telephony/telephony.types.js";
 import { ToolsModule } from "../../src/tools/tools.module.js";
-import { AutonomyLevelStore } from "../../src/tools/autonomy-level.store.js";
 import { ToolsService } from "../../src/tools/tools.service.js";
 import { FakeAri } from "./fake-ari.js";
 
@@ -325,7 +325,7 @@ describe("TelephonyService", () => {
     expect(ari.ops("hangup")[0]).toMatchObject({ channelId: "c9" });
   });
 
-  it("refuses unknown targets, external numbers without trunk, empty messages and call floods", async () => {
+  it("refuses unknown targets, external numbers without trunk, empty messages; there is no call limit", async () => {
     const ext = service.addExtension("Laptop");
     service.addExtension("Voordeur", "doorbell");
     service.setEnabled(true);
@@ -333,11 +333,10 @@ describe("TelephonyService", () => {
     await expect(service.call("801", "x")).rejects.toThrow(/Onbekend/);
     await expect(service.call("+31612345678", "x")).rejects.toThrow(/trunk/);
     await expect(service.call(ext.id, "  ")).rejects.toThrow(/bericht/);
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       await service.call(ext.id, `bericht ${i}`);
       ari.channelList = [];
     }
-    await expect(service.call(ext.id, "zes")).rejects.toThrow(/Te veel/);
   });
 
   it("dials external numbers through the trunk only when one is configured", async () => {
@@ -497,7 +496,6 @@ describe("phone tools through the tool registry", () => {
   let confirmations: ConfirmationsService;
   let svc: TelephonyService;
   let fake: FakeAri;
-  let level: AutonomyLevelStore;
   const events: unknown[] = [];
 
   @Module({
@@ -530,7 +528,6 @@ describe("phone tools through the tool registry", () => {
     await moduleRef.init();
     tools = moduleRef.get(ToolsService);
     confirmations = moduleRef.get(ConfirmationsService);
-    level = moduleRef.get(AutonomyLevelStore);
     const ext = svc.addExtension("Laptop");
     expect(ext.id).toBe("101");
     svc.setEnabled(true);
@@ -557,108 +554,6 @@ describe("phone tools through the tool registry", () => {
     expect(result.ok).toBe(true);
     expect((result.result as { enabled: boolean }).enabled).toBe(true);
     expect(JSON.stringify(result)).not.toContain(svc["store"].get().ariSecret);
-  });
-
-  it("with autonomy balanced, a call to your own phone runs by itself but a raw external number still asks", async () => {
-    level.set("balanced");
-    const before = fake.ops("originate").length;
-    const own = await tools.execute(
-      "phone_call",
-      { to: "101", message: "De pasta is klaar." },
-      "p-auto",
-    );
-    expect(own.ok).toBe(true);
-    expect(own.requiresConfirmation).toBeUndefined();
-    expect(fake.ops("originate")).toHaveLength(before + 1);
-    // with no trunk an external number is rejected before anything is asked or sent
-    const external = await tools.execute(
-      "phone_call",
-      { to: "+31612345678", message: "Hoi" },
-      "p-auto",
-    );
-    expect(external.ok).toBe(false);
-    expect(fake.ops("originate")).toHaveLength(before + 1);
-    level.set("careful");
-    const careful = await tools.execute(
-      "phone_call",
-      { to: "101", message: "Nog een keer." },
-      "p-auto-2",
-    );
-    expect(careful.requiresConfirmation).toBe(true);
-    confirmations.cancel("p-auto-2");
-  });
-
-  it("phone_call needs a fresh confirmation and never a standing 'Altijd' approval (careful level)", async () => {
-    level.set("careful");
-    const base = fake.ops("originate").length;
-    const first = await tools.execute(
-      "phone_call",
-      { to: "101", message: "Hoi" },
-      "p2",
-    );
-    expect(first.requiresConfirmation).toBe(true);
-    expect(first.action?.allowAlways).toBe(false);
-    expect(fake.ops("originate")).toHaveLength(base);
-    const approved = confirmations.take("p2", first.action!.confirmationId)!;
-    const other = await tools.execute(
-      "phone_call",
-      { to: "101", message: "Iets anders" },
-      "p2",
-      approved,
-    );
-    expect(other.requiresConfirmation).toBe(true);
-    confirmations.cancel("p2");
-    const second = await tools.execute(
-      "phone_call",
-      { to: "101", message: "Hoi" },
-      "p2",
-    );
-    const ok = confirmations.take("p2", second.action!.confirmationId)!;
-    const done = await tools.execute(
-      "phone_call",
-      { to: "101", message: "Hoi" },
-      "p2",
-      ok,
-      true,
-    );
-    expect(done.ok).toBe(true);
-    expect(fake.ops("originate")).toHaveLength(base + 1);
-    const again = await tools.execute(
-      "phone_call",
-      { to: "101", message: "Hoi" },
-      "p2",
-    );
-    expect(again.requiresConfirmation).toBe(true);
-    confirmations.cancel("p2");
-    level.set("balanced");
-  });
-
-  it("external numbers always ask, even when internal calls are allowed without confirmation", async () => {
-    svc.setPolicy({ allowInternalCallsWithoutConfirmation: true });
-    svc.setTrunk({
-      host: "sip.example.net",
-      username: "u1",
-      secret: "trunkSecret123",
-      number: "",
-      allowExtensionsToDialOut: false,
-    });
-    fake.channelList = [];
-    const external = await tools.execute(
-      "phone_call",
-      { to: "+31612345678", message: "Hoi" },
-      "p3",
-    );
-    expect(external.requiresConfirmation).toBe(true);
-    confirmations.cancel("p3");
-    const before = fake.ops("originate").length;
-    const internal = await tools.execute(
-      "phone_call",
-      { to: "101", message: "Hoi" },
-      "p3",
-    );
-    expect(internal.ok).toBe(true);
-    expect(fake.ops("originate")).toHaveLength(before + 1);
-    svc.setPolicy({ allowInternalCallsWithoutConfirmation: false });
   });
 
   it("rejects an invalid target before asking for confirmation", async () => {

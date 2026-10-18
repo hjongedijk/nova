@@ -8,7 +8,6 @@ import {
   petShop,
   startFakeApi,
   type FakeApi,
-  type Handler,
 } from "./fake-api.js";
 import { makeEngine } from "./helpers.js";
 
@@ -145,78 +144,6 @@ describe("maintenance", () => {
     }
     expect(env.registry.get("pets")!.status).toBe("unreachable");
     api = await startFakeApi(petShop);
-  });
-
-  it("schema drift: new reads are enabled, new writes stay off, removed operations disappear, changed writes wait for approval", async () => {
-    const next = structuredClone(OPENAPI3) as unknown as {
-      paths: Record<string, Record<string, unknown>>;
-    };
-    delete next.paths["/pets/{id}/archive"];
-    next.paths["/owners"] = {
-      get: { operationId: "listOwners", summary: "Owners" },
-      post: { operationId: "createOwner", summary: "New owner" },
-    };
-    // reads healed inside the spec: the list call gets a renamed pagination parameter
-    next.paths["/pets"] = {
-      get: {
-        operationId: "listPets",
-        summary: "List pets",
-        parameters: [
-          { name: "page_size", in: "query", schema: { type: "integer" } },
-        ],
-      },
-      // a write whose definition changed (new required body field)
-      post: {
-        operationId: "createPet",
-        summary: "Create a pet",
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  name: { type: "string" },
-                  owner: { type: "string" },
-                },
-                required: ["name", "owner"],
-              },
-            },
-          },
-        },
-      },
-    };
-    const handler: Handler = (hit) =>
-      hit.url === "/openapi.json" ? { body: next } : petShop(hit);
-    api.handle(handler);
-    const result = await env.engine.refresh("pets");
-    expect(result.added.sort()).toEqual(["createOwner", "listOwners"]);
-    expect(result.removed).toEqual(["archivePet"]);
-    expect(result.changedOps).toEqual(["listPets"]);
-    expect(result.pendingApproval).toEqual(["createPet"]);
-    const ops = Object.fromEntries(
-      env.registry.get("pets")!.operations.map((o) => [o.id, o]),
-    );
-    expect(ops.listOwners).toMatchObject({ enabled: true, risk: "READ_ONLY" });
-    expect(ops.createOwner).toMatchObject({ enabled: false, risk: "CONFIRM" });
-    expect(ops.archivePet).toMatchObject({ enabled: false, status: "gone" });
-    expect(ops.listPets!.params.map((p) => p.name)).toEqual(["page_size"]);
-    expect(ops.createPet!.pending).toBeDefined();
-    expect(ops.createPet!.body!.schema.required).toEqual(["name"]);
-    // the engine will not call a switched-off or vanished operation
-    await expect(
-      env.engine.call("pets", "archivePet", { id: "1" }),
-    ).rejects.toThrow(/no longer offered/);
-    await expect(env.engine.call("pets", "createOwner", {})).rejects.toThrow(
-      /switched off/,
-    );
-    // the user approves the changed definition
-    env.engine.configure("pets", "createPet", { applyPending: true });
-    expect(
-      env.registry.get("pets")!.operations.find((o) => o.id === "createPet")!
-        .body!.schema.required,
-    ).toEqual(["name", "owner"]);
-    expect(env.registry.get("pets")!.specVersion).toBeGreaterThan(1);
   });
 
   it("weekly re-discovery raises a drift alert through maintenance", async () => {

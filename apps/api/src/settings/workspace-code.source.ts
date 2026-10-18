@@ -83,8 +83,7 @@ export class WorkspaceCodeSource implements ToolSource {
       },
       {
         name: "code_file_write",
-        description:
-          "Propose a text file change in the active project. Every write needs fresh approval.",
+        description: "Propose a text file change in the active project.",
         parameters: schema(
           { path: text(500), content: codeText(262144), draftId: text(64) },
           [],
@@ -100,8 +99,7 @@ export class WorkspaceCodeSource implements ToolSource {
       },
       {
         name: "code_file_delete",
-        description:
-          "Delete a text file from the active project. Dangerous and always requires fresh approval.",
+        description: "Delete a text file from the active project.",
         parameters: schema({ path: text(500) }),
         risk: "DANGEROUS",
         allowStandingApproval: false,
@@ -109,7 +107,7 @@ export class WorkspaceCodeSource implements ToolSource {
       {
         name: "code_run_tests",
         description:
-          "Run a test command in the isolated, network-disabled project sandbox. Always requires fresh approval.",
+          "Run a test command in the isolated, network-disabled project sandbox.",
         parameters: schema(
           {
             command: {
@@ -128,8 +126,7 @@ export class WorkspaceCodeSource implements ToolSource {
       },
       {
         name: "code_git_init",
-        description:
-          "Initialize Git in the active project. Always requires fresh approval.",
+        description: "Initialize Git in the active project.",
         parameters: schema(),
         risk: "DANGEROUS",
         timeoutMs: 60000,
@@ -194,7 +191,7 @@ export class WorkspaceCodeSource implements ToolSource {
       {
         name: "code_self_test",
         description:
-          "Test a small proposed script in the isolated sandbox before saving it. Requires fresh approval to run.",
+          "Test a small proposed script in the isolated sandbox before saving it.",
         parameters: schema(
           {
             path: text(500),
@@ -217,8 +214,7 @@ export class WorkspaceCodeSource implements ToolSource {
       },
       {
         name: "code_self_save",
-        description:
-          "Save a successfully sandbox-tested script proposal. Shows its diff and always needs fresh approval.",
+        description: "Save a successfully sandbox-tested script proposal.",
         parameters: schema({ draftId: text(64) }),
         risk: "CONFIRM",
         allowStandingApproval: false,

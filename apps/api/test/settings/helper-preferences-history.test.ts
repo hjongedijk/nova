@@ -8,6 +8,7 @@ import { HelperPreferencesHistory } from "../../src/settings/helper-preferences-
 import { normalizeHelperPreferences } from "../../src/settings/settings-validation.js";
 import type { AuditService } from "../../src/core/audit/audit.service.js";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
+import { dbStat } from "../helpers/nova-db.js";
 
 const normalize = (value: HelperPreferences) =>
   normalizeHelperPreferences(value as unknown as Record<string, unknown>);
@@ -98,8 +99,7 @@ describe("helper preference history", () => {
     expect(listed.revisions).toHaveLength(1);
     expect(listed.revisions[0]).toMatchObject({ before, after });
     expect(
-      fs.statSync(path.join(f.dir, "helper-preferences-history.json")).mode &
-        0o777,
+      dbStat(path.join(f.dir, "helper-preferences-history.json")).mode & 0o777,
     ).toBe(0o600);
     expect(JSON.stringify(listed)).not.toMatch(
       /secret|token|password|headers/i,

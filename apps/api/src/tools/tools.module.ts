@@ -3,7 +3,6 @@ import { DiscoveryModule } from "@nestjs/core";
 import { ConfirmationsModule } from "../confirmations/confirmations.module.js";
 import { MemoryModule } from "../memory/memory.module.js";
 import { SettingsStoreModule } from "../settings/store/settings-store.module.js";
-import { AutonomyLevelStore } from "./autonomy-level.store.js";
 import { ToolsController } from "./tools.controller.js";
 import { ToolsService } from "./tools.service.js";
 import { ToolCatalogSource } from "./tool-catalog.source.js";
@@ -21,10 +20,9 @@ import { ToolCatalogSource } from "./tool-catalog.source.js";
     SettingsStoreModule,
   ],
   controllers: [ToolsController],
-  providers: [ToolsService, ToolCatalogSource, AutonomyLevelStore],
+  providers: [ToolsService, ToolCatalogSource],
   exports: [
     ToolsService,
-    AutonomyLevelStore,
     ConfirmationsModule,
     MemoryModule,
     SettingsStoreModule,

@@ -200,6 +200,16 @@
   const status = $derived(
     shell.awaiting ? "Ik luister" : MODE_LABELS[chat.uiState],
   );
+  /** idle, listening, thinking or speaking: drives the colour and motion of the panel. */
+  const orbState = $derived(
+    shell.awaiting
+      ? "listening"
+      : chat.uiState === "ready"
+        ? "idle"
+        : chat.uiState === "executing"
+          ? "thinking"
+          : chat.uiState,
+  );
   const nextAppointment = $derived(dashboard.overview?.nextAppointment ?? null);
   function appointmentStart(): string {
     if (!nextAppointment) return "";
@@ -859,6 +869,8 @@
   class="hp"
   bind:this={panel}
   data-view={waiting ? "confirmation" : view}
+  data-state={paused ? "idle" : orbState}
+  style:--level={audioLevel.level}
   class:expanded
   class:desk
   class:deskfull={desk && fullscreen}

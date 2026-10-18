@@ -10,7 +10,6 @@ import { AuditService } from "../core/audit/audit.service.js";
 import { sanitize } from "../core/security/sanitize.js";
 import {
   classifyAction,
-  viewAllowed,
   type DesktopClassification,
 } from "./desktop.classifier.js";
 import { DESKTOP_LIMITS as L } from "./desktop.limits.js";
@@ -270,17 +269,6 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
       return { ok: true, ...cached.value, cached: true };
     }
 
-    // Fail closed: if the windows cannot be checked, or a password manager/bank is in front, nothing leaves the PC.
-    const windows = await this.windowList(signal);
-    if (!windows)
-      return fail(
-        "Kan het actieve venster niet controleren; er is niets vastgelegd.",
-      );
-    if (!viewAllowed(windows))
-      return fail(
-        "Een gevoelig venster (wachtwoord, bank of inloggen) staat voorop; er is niets vastgelegd of verstuurd.",
-      );
-
     let shot;
     try {
       const outcome = await this.port.screenshot({ display, maxWidth }, signal);
@@ -343,11 +331,6 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
     if (this.previewPending) return fail("Een schermbeeld wordt al opgehaald.");
     this.previewPending = true;
     try {
-      const windows = await this.windowList(signal);
-      if (!windows || !viewAllowed(windows))
-        return fail(
-          "Schermbeeld afgeschermd: het actieve venster kan niet veilig worden getoond.",
-        );
       const result = await this.port.screenshot(
         { display, maxWidth: 960 },
         signal,
@@ -453,7 +436,7 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
       verified: true,
       session: this.info(),
       ttlSeconds: ttl,
-      hint: "Kijk eerst met desktop_screenshot, doe dan een paar acties met desktop_act en kijk weer. Risicovolle acties vragen opnieuw bevestiging.",
+      hint: "Kijk eerst met desktop_screenshot, doe dan een paar acties met desktop_act en kijk weer. Acties worden direct uitgevoerd.",
     };
   }
 
@@ -504,10 +487,7 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /**
-   * Perform one action. `allow` is "any" only when the user confirmed this exact risky or unknown action just
-   * now; otherwise the action must still classify as benign when it runs (the window may have changed).
-   */
+  /** Execute directly; window classification is informational for the audit log. */
   async act(
     action: DesktopInputAction,
     chatSessionId: string,
@@ -516,10 +496,8 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
   ) {
     const prepared = await this.prepareAct(action, chatSessionId, signal);
     if (!prepared.ok) return prepared;
-    if (prepared.classification.level !== "benign" && allow !== "any")
-      return fail(
-        "Het actieve venster is veranderd; deze actie vraagt nu een nieuwe bevestiging. Kijk opnieuw naar het scherm.",
-      );
+    // Retain the old call signature for integrations; it no longer gates execution.
+    void allow;
     const session = this.session!;
     let outcome: DesktopOutcome;
     try {

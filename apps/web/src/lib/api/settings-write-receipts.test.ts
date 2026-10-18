@@ -7,10 +7,9 @@ const receipts: ActionReceipt[] = [];
 let unsubscribe: () => void;
 
 import {
-  confirmNodeRedPalette,
+  changeNodeRedPalette,
   createSkill,
   getSettings,
-  prepareNodeRedPalette,
   savePersona,
   saveServiceConnection,
   setAbility,
@@ -49,7 +48,6 @@ describe("settings writes publish action receipts", () => {
       "/api/settings/abilities/private-ability",
       expect.objectContaining({
         method: "PUT",
-        headers: expect.objectContaining({ "x-nova-admin": "1" }),
       }),
     );
   });
@@ -95,20 +93,18 @@ describe("settings writes publish action receipts", () => {
     expect(receipts).toHaveLength(0);
   });
 
-  it("leaves reads, preparations, rejections and existing readback owners alone", async () => {
+  it("leaves reads, rejections and existing readback owners alone", async () => {
     response({ ok: true });
     await getSettings();
     await savePersona("private rules");
-    await prepareNodeRedPalette("fixture", true, "revision");
-    await confirmNodeRedPalette("session", "confirmation", false);
-    response({ ok: true, cancelled: true });
-    await confirmNodeRedPalette("session", "confirmation", true);
+    response({ ok: false, error: "not allowed" });
+    await changeNodeRedPalette("fixture", true);
     expect(receipts).toHaveLength(0);
   });
 
   it("keeps a staged palette upgrade distinct from a verified running change", async () => {
     response({ ok: true, verified: false, pendingRestart: true });
-    await confirmNodeRedPalette("session", "confirmation", true);
+    await changeNodeRedPalette("fixture", true);
     expect(receipts).toHaveLength(1);
     const staged = receipts[0] as { performed: string; verification: string };
     expect(staged.performed).toMatch(/herstart/i);

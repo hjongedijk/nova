@@ -55,9 +55,6 @@
         {#if ability.state === "partial"}
           <Badge text="{ability.enabledCount} van {ability.total} aan" />
         {/if}
-        {#if ability.changes}
-          <Badge tone="warn" text="vraagt eerst bevestiging" />
-        {/if}
         <p>{ability.description}</p>
         {#if ability.example}
           <p>Zeg bijvoorbeeld: “{ability.example}”</p>

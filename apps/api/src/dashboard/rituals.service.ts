@@ -1,10 +1,13 @@
 import {
+  readJsonStateOrEnoent,
+  writeJsonState,
+} from "../core/db/json-state.js";
+import {
   Injectable,
   Logger,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
-import fs from "node:fs";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { HomeAssistantService } from "../home/home-assistant.service.js";
@@ -254,8 +257,8 @@ export class RitualsService implements OnModuleInit, OnModuleDestroy {
 
   private readProgress(day: string): RitualProgress {
     try {
-      const value = JSON.parse(
-        fs.readFileSync(this.progressFile, "utf8"),
+      const value = readJsonStateOrEnoent(
+        this.progressFile,
       ) as Partial<RitualProgress>;
       if (value.day === day)
         return {
@@ -280,10 +283,7 @@ export class RitualsService implements OnModuleInit, OnModuleDestroy {
 
   private saveProgress(progress: RitualProgress): void {
     try {
-      const temporary = `${this.progressFile}.tmp`;
-      fs.writeFileSync(temporary, JSON.stringify(progress), { mode: 0o600 });
-      fs.chmodSync(temporary, 0o600);
-      fs.renameSync(temporary, this.progressFile);
+      writeJsonState(this.progressFile, progress);
     } catch {
       this.paused = true;
       this.logger.error("Ritual progress could not be saved; schedule paused");

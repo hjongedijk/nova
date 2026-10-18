@@ -5,6 +5,7 @@ import { MemoryModule } from "../memory/memory.module.js";
 import { RoutingModule } from "../routing/routing.module.js";
 import { SettingsModule } from "../settings/settings.module.js";
 import { ChatController } from "./chat.controller.js";
+import { CorrectionLearner } from "./correction-learner.service.js";
 import { ConfirmationHandler } from "./confirmation-handler.service.js";
 import { ContextBuilder } from "./context-builder.service.js";
 import { OrchestratorService } from "./orchestrator.service.js";
@@ -28,10 +29,11 @@ import { DailyMemorySummaryService } from "./daily-memory-summary.service.js";
   providers: [
     OrchestratorService,
     ContextBuilder,
+    CorrectionLearner,
     ConfirmationHandler,
     OutcomeService,
     DailyMemorySummaryService,
   ],
-  exports: [OrchestratorService, ConfirmationHandler],
+  exports: [OrchestratorService, ConfirmationHandler, CorrectionLearner],
 })
 export class ChatModule {}

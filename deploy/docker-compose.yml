@@ -14,33 +14,22 @@ services:
     container_name: nova
     env_file: .env
     environment:
-      # Internal wiring: fixed, not from .env.
+      # Internal wiring: fixed, not from .env. Everything else (tokens, public URL, optional
+      # defaults) reaches NOVA through env_file above; do not repeat ${VAR:-} pass-throughs here.
       PORT: 8080
       HTTPS_PORT: 8443
       NOVA_DATA_DIR: /data
       NOVA_BACKUP_DIR: /backups
-      NOVA_PIPER_TTS_URL: ${NOVA_PIPER_TTS_URL:-}
       # This service has restart: unless-stopped, so NOVA may safely request a graceful restart.
       NOVA_RESTART_ENABLED: "true"
       NOVA_STACK_CONTROL_URL: http://stack-control:8090
       # Asterisk (profile telephony) shares the private network; NOVA only talks to it when Telefonie is on.
       NOVA_ASTERISK_ARI_URL: http://asterisk:8088
-      NOVA_STACK_CONTROL_TOKEN: ${NOVA_STACK_CONTROL_TOKEN:-}
       OMNIROUTE_URL: http://omniroute:20128/v1
       OMNIROUTE_DATABASE: /omniroute/storage.sqlite
       MQTT_URL: mqtt://mqtt:1883
       QDRANT_URL: http://qdrant:6333
       NODE_RED_URL: http://node-red:1880
-      NODE_RED_EVENT_TOKEN: ${NODE_RED_EVENT_TOKEN:-}
-      NODE_RED_FLOW_ALLOWLIST: ${NODE_RED_FLOW_ALLOWLIST:-[]}
-      OPENROUTESERVICE_API_KEY: ${OPENROUTESERVICE_API_KEY:-}
-      NODE_RED_FLOW_TOKEN: ${NODE_RED_FLOW_TOKEN:-}
-      NODE_RED_ADMIN_TOKEN: ${NODE_RED_ADMIN_TOKEN:-}
-      NODE_RED_EDITOR_URL: ${NODE_RED_EDITOR_URL:-}
-      HOME_ASSISTANT_URL: ${HOME_ASSISTANT_URL:-http://host.docker.internal:8123}
-      NTFY_URL: ${NTFY_URL:-}
-      NTFY_TOPIC: ${NTFY_TOPIC:-}
-      NTFY_TOKEN: ${NTFY_TOKEN:-}
     ports:
       - "8080:8080" # http (behind a reverse proxy: only this one)
       - "8443:8443" # https with nova-data/certs (microphone and app install on the LAN)
@@ -109,7 +98,7 @@ services:
   # Optional telephony: Asterisk PBX that NOVA controls over ARI (Settings > Telefonie). Enable with
   # COMPOSE_PROFILES=...,telephony after switching Telefonie on once (that generates the configuration). No host
   # ports: it registers outward to a SIP trunk (for example sip.linphone.org) and only NOVA reaches ARI and
-  # AudioSocket on the private network. Publish SIP/RTP yourself only for phones on your own LAN. See docs/telephony.md.
+  # AudioSocket on the private network. Publish SIP/RTP yourself only for phones on your own LAN. See docs/integrations.md#telephony-and-conversations.
   asterisk:
     <<: *restart
     profiles: [telephony]
@@ -137,7 +126,7 @@ services:
   # Encrypted (LIME) Linphone chat with NOVA, profile linphone-chat. Logs in with the SAME Linphone account as Asterisk (the
   # trunk), as a second device: it never touches calls and ignores cleartext texts (Asterisk handles those). BUILT LOCALLY
   # (docker compose build linphone-chat), never pushed to a registry: the Belledonne wheel inside is GPLv3.
-  # Needs two secret files you create once (see docs/linphone-encrypted-chat.md): secrets/linphone_password and
+  # Needs two secret files you create once (see docs/integrations.md#encrypted-linphone-chat-bridge): secrets/linphone_password and
   # secrets/nova_message_token, mode 0400, owner uid 10001. Data (LIME keys, chat DB, device id): nova-data/linphone-chat,
   # owner uid 10001, mode 0700. Anyone who can read that folder can read the chats.
   linphone-chat:
@@ -254,7 +243,6 @@ services:
       TZ: ${TZ:-Europe/Amsterdam}
       NODE_RED_EVENT_TOKEN: ${NODE_RED_EVENT_TOKEN:-}
       NODE_RED_FLOW_TOKEN: ${NODE_RED_FLOW_TOKEN:-}
-      NOVA_APP_TOKEN: ${NOVA_APP_TOKEN:-}
     volumes:
       - ./nodered-data:/data
       - ./nodered:/opt/nova/nodered-seed:ro
@@ -316,7 +304,7 @@ services:
       TZ: ${TZ:-Europe/Amsterdam}
     volumes: ["./home-assistant-data:/config"]
 
-# Only used by the linphone-chat profile; the files must exist before that profile starts (docs/linphone-encrypted-chat.md).
+# Only used by the linphone-chat profile; the files must exist before that profile starts (docs/integrations.md#encrypted-linphone-chat-bridge).
 secrets:
   linphone_password:
     file: ./secrets/linphone_password

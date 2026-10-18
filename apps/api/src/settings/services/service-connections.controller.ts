@@ -6,10 +6,8 @@ import {
   Param,
   Post,
   Put,
-  UseGuards,
 } from "@nestjs/common";
 import { ValidationError } from "../../core/errors/validation.error.js";
-import { SettingsGuard } from "../settings.guard.js";
 import { MqttService } from "../../core/mqtt/mqtt.service.js";
 import { ServiceConnectionsStore } from "./service-connections.store.js";
 import { ServiceConnectionsAdapter } from "./service-connections.adapter.js";
@@ -21,7 +19,6 @@ import { decodeWindowsPairCode } from "./windows-pairing.js";
 
 type Change = { values?: unknown; clearSecrets?: unknown } | undefined;
 @Controller("settings/services")
-@UseGuards(SettingsGuard)
 export class ServiceConnectionsController {
   constructor(
     private readonly store: ServiceConnectionsStore,
@@ -169,34 +166,11 @@ export class ServiceConnectionsController {
       this.store.candidate(id, body?.values ?? {}, body?.clearSecrets),
     );
   }
-  @Post("history/:revision/prepare-rollback")
+  @Post("history/:revision/rollback")
   @HttpCode(200)
-  prepareRollback(@Param("revision") revision: string) {
+  rollback(@Param("revision") revision: string) {
     if (!/^[0-9a-f-]{36}$/i.test(revision))
       throw new ValidationError(["Ongeldige wijziging."]);
-    return this.rollbackHistory.prepareRollback(revision);
-  }
-  @Post("history/confirm-rollback")
-  @HttpCode(200)
-  confirmRollback(@Body() body: unknown) {
-    if (!body || typeof body !== "object" || Array.isArray(body))
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const value = body as Record<string, unknown>;
-    if (
-      Object.keys(value).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      ) ||
-      typeof value.sessionId !== "string" ||
-      !/^settings-service-history:[0-9a-f-]{36}$/i.test(value.sessionId) ||
-      typeof value.confirmationId !== "string" ||
-      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
-      typeof value.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    return this.rollbackHistory.confirm(
-      value.sessionId,
-      value.confirmationId,
-      value.approve,
-    );
+    return this.rollbackHistory.rollback(revision);
   }
 }

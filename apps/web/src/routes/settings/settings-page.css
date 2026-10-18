@@ -10,30 +10,21 @@
   --s5: 24px;
   --s6: 32px;
   --s7: 48px;
-  --radius: 12px;
-  --radius-s: 8px;
-  --bg: #081421;
-  --surface: #0e1e31;
-  --surface-2: #153049;
-  --ink: #04101c;
-  --mist: #f0f5fa;
-  --dim: #bccbdb;
-  --line: #34506b;
-  --glow: #8fd6f6;
-  --good: #86e3bc;
-  --alert: #ff9f88;
-  --amber: #f6d27e;
-  --sans: "Sora", "Segoe UI", system-ui, sans-serif;
+  --radius: 6px;
+  --radius-s: 4px;
+  --bg: var(--ink);
+  --surface: color-mix(in srgb, var(--mist) 4%, var(--air));
+  --surface-2: color-mix(in srgb, var(--mist) 7%, var(--air));
   width: 100%;
   height: auto;
   min-height: 100dvh;
   overflow: visible;
-  background: var(--bg);
+  background: transparent;
   color: var(--mist);
   border: 0;
   border-radius: 0;
   padding: 0;
-  font: 400 16px/1.6 var(--sans);
+  font: 400 15px/1.5 var(--sans);
 }
 .settings-page a {
   color: var(--glow);
@@ -51,9 +42,9 @@
   border-bottom: 1px solid var(--line);
 }
 .settings-home {
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+  font-size: 21px;
+  font-weight: 300;
+  letter-spacing: 0.22em;
   text-decoration: none;
 }
 .settings-back {
@@ -64,7 +55,7 @@
 }
 .settings-layout {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   max-width: 1280px;
   margin: 0 auto;
 }
@@ -86,8 +77,8 @@
 }
 .settings-search input {
   width: 100%;
-  min-height: 48px;
-  padding: var(--s3);
+  min-height: 44px;
+  padding: 10px var(--s3);
   background: var(--surface);
   color: var(--mist);
   border: 1px solid var(--line);
@@ -136,7 +127,7 @@
 /* ---- content column ---- */
 .settings-content {
   min-width: 0;
-  padding: var(--s6) var(--s6) var(--s7);
+  padding: var(--s5) var(--s5) var(--s6);
   max-width: 920px;
 }
 .settings-parts {
@@ -151,10 +142,10 @@
   min-height: 44px;
   padding: 0 var(--s4);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-s);
   color: var(--dim);
   text-decoration: none;
-  font-size: 16px;
+  font-size: 14px;
 }
 .settings-parts a:hover {
   color: var(--mist);
@@ -173,7 +164,7 @@
   gap: var(--s2) var(--s4);
 }
 .settings-content h1 {
-  font-size: clamp(28px, 3.4vw, 34px);
+  font-size: clamp(25px, 3vw, 28px);
   line-height: 1.2;
   font-weight: 600;
   margin: 0;
@@ -182,16 +173,7 @@
   color: var(--dim);
   max-width: 62ch;
   margin: var(--s2) 0 var(--s5);
-  font-size: 17px;
-}
-.settings-lock,
-.settings-unlock button {
-  margin-bottom: var(--s4);
-}
-.settings-unlock {
-  display: grid;
-  gap: var(--s3);
-  max-width: 360px;
+  font-size: 15px;
 }
 
 /* messages stay in view while a long page is edited */

@@ -1,16 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  OmniRouteComboCreatePrepared,
-  OmniRouteComboCreateResult,
-} from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
+import type { OmniRouteComboCreateResult } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { claimConfirmation } from "./confirmation-step.js";
 import { ValidationError } from "../core/errors/validation.error.js";
-import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
 import { RoutingService } from "../routing/routing.service.js";
@@ -24,8 +17,6 @@ const validModelId = (value: unknown): value is string =>
   typeof value === "string" &&
   /^[a-zA-Z0-9_.:/-]{1,200}$/.test(value) &&
   !/(^|\/)\.{1,2}(\/|$)/.test(value);
-const revision = (value: unknown) =>
-  crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const unavailable =
   "Combo aanmaken is niet beschikbaar. Controleer de OmniRoute-koppeling.";
 const comboName = (value: unknown): string =>
@@ -54,7 +45,6 @@ export class OmniRouteComboCreate {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
@@ -117,7 +107,7 @@ export class OmniRouteComboCreate {
       throw new Error("Er bestaat al een combo met deze naam.");
   }
 
-  private async inventoryRevision(models: Model[]) {
+  private async assertEligible(models: Model[]) {
     const eligible = await this.eligibleModels();
     const current = new Set(
       eligible.map((model) => `${model.provider}/${model.modelId}`),
@@ -128,25 +118,20 @@ export class OmniRouteComboCreate {
       throw new Error(
         "Een gekozen model is niet meer beschikbaar via een actief account.",
       );
-    return revision(eligible);
   }
 
-  async prepare(
+  async create(
     rawName: unknown,
     rawModels: unknown,
-    acknowledgeGlobalEffect: unknown,
-  ): Promise<OmniRouteComboCreatePrepared> {
+  ): Promise<OmniRouteComboCreateResult> {
     const name = comboName(rawName);
     if (
       !name ||
       !Array.isArray(rawModels) ||
       rawModels.length < 1 ||
-      rawModels.length > 8 ||
-      acknowledgeGlobalEffect !== true
+      rawModels.length > 8
     )
-      throw new ValidationError([
-        "Vul een naam in, kies 1–8 modellen en bevestig dat deze combo zichtbaar wordt voor OmniRoute-clients.",
-      ]);
+      throw new ValidationError(["Vul een naam in en kies 1–8 modellen."]);
     const models: Model[] = [];
     for (const value of rawModels) {
       if (typeof value !== "string" || !validModelId(value))
@@ -163,47 +148,7 @@ export class OmniRouteComboCreate {
         .size !== models.length
     )
       throw new ValidationError(["Kies ieder model maar één keer."]);
-    try {
-      const route = this.routing.verifyForManagement();
-      if (!route.ready || !route.policyVerified || !route.freeOnly)
-        throw new Error(unavailable);
-      await this.assertUnique(name);
-      const inventoryRevision = await this.inventoryRevision(models);
-      const args = { name, models, inventoryRevision };
-      this.audit.record({
-        sessionId: "settings",
-        tool: "omniroute_combo_create",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: {
-          name: String(sanitize(name)).slice(0, 80),
-          models,
-          inventoryRevision,
-        },
-      });
-      return {
-        ok: true,
-        name: String(sanitize(name)).slice(0, 80),
-        models: models.map((model) => `${model.provider}/${model.modelId}`),
-        action: this.confirmations.create(
-          `settings-combo-create:${crypto.randomUUID()}`,
-          "omniroute_combo_create",
-          args,
-          "DANGEROUS",
-          inventoryRevision,
-          false,
-        ),
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        error:
-          error instanceof Error &&
-          error.message === "Er bestaat al een combo met deze naam."
-            ? "Er bestaat al een combo met deze naam."
-            : unavailable,
-      };
-    }
+    return this.execute(name, models);
   }
 
   private stored(id: string): ComboRow | undefined {
@@ -217,31 +162,11 @@ export class OmniRouteComboCreate {
     }
   }
 
-  async confirm(
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
+  private async execute(
+    rawName: string,
+    rawModels: Model[],
   ): Promise<OmniRouteComboCreateResult> {
-    if (
-      !/^settings-combo-create:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const claimed = claimConfirmation(
-      this.confirmations,
-      sessionId,
-      confirmationId,
-      approve,
-      {
-        tool: "omniroute_combo_create",
-        stale:
-          "Deze bevestiging staat niet meer open. Vul de combo opnieuw in.",
-        expired: "Bevestiging verlopen. Vul de combo opnieuw in.",
-      },
-    );
-    if ("reply" in claimed) return claimed.reply;
-    const action = claimed.action;
-    const key = String(action.args.name);
+    const key = rawName;
     if (this.inFlight.has(key))
       return { ok: false, error: "Deze combo wordt al aangemaakt." };
     this.inFlight.add(key);
@@ -253,37 +178,28 @@ export class OmniRouteComboCreate {
           const route = this.routing.verifyForManagement();
           if (!route.ready || !route.policyVerified || !route.freeOnly)
             return { ok: false, error: unavailable };
-          name = comboName(action.args.name);
-          models = Array.isArray(action.args.models)
-            ? (action.args.models as Model[])
-            : [];
-          if (
-            !name ||
-            !models.length ||
-            (await this.inventoryRevision(models)) !==
-              action.args.inventoryRevision
-          )
-            return {
-              ok: false,
-              error:
-                "De modellen of accounts zijn gewijzigd. Controleer de keuze opnieuw.",
-            };
+          name = rawName;
+          models = rawModels;
+          await this.assertEligible(models);
           await this.assertUnique(name);
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool: "omniroute_combo_create",
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "before_execute",
-            arguments: {
-              name,
-              modelCount: models.length,
-              inventoryRevision: action.args.inventoryRevision,
-            },
+            arguments: { name, modelCount: models.length },
           });
           operation.block("policy_change");
-        } catch {
-          return { ok: false, error: unavailable };
+        } catch (error) {
+          return {
+            ok: false,
+            error:
+              error instanceof Error &&
+              error.message === "Er bestaat al een combo met deze naam."
+                ? "Er bestaat al een combo met deze naam."
+                : unavailable,
+          };
         }
         try {
           const created = object(
@@ -342,9 +258,9 @@ export class OmniRouteComboCreate {
           try {
             this.audit.record({
               sessionId: "settings",
-              tool: action.tool,
+              tool: "omniroute_combo_create",
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
               arguments: { id, name, modelCount: models.length },
               result: { ok: true },
@@ -359,9 +275,9 @@ export class OmniRouteComboCreate {
           try {
             this.audit.record({
               sessionId: "settings",
-              tool: action.tool,
+              tool: "omniroute_combo_create",
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
               arguments: { name, modelCount: models.length },
               result: { ok: false },

@@ -3,6 +3,8 @@
 //! On other systems everything here says "not supported", so the rest of the app still compiles.
 
 use nova_win_core::desktop::{DesktopSnapshot, InsertAfter};
+#[cfg(not(windows))]
+use nova_win_core::forward::PointerKind;
 use nova_win_core::geometry::Rect;
 
 #[cfg(windows)]
@@ -12,13 +14,15 @@ mod imp {
     use nova_win_core::desktop::{
         needs_reorder, IconWorker, CHILD_STYLE, REORDER_FLAGS, SHOW_FLAGS, SPAWN_WORKER_MESSAGE,
     };
+    use nova_win_core::forward::PointerKind;
     use std::sync::{Mutex, OnceLock};
     use windows::core::{w, BOOL, PCWSTR};
-    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, FindWindowExW, FindWindowW, GetClassNameW, GetParent, GetWindow, IsWindow, SendMessageTimeoutW,
-        SetParent, SetWindowLongW, SetWindowPos, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HWND_BOTTOM, SET_WINDOW_POS_FLAGS,
-        SMTO_NORMAL,
+        CallNextHookEx, EnumWindows, FindWindowExW, FindWindowW, GetAncestor, GetClassNameW, GetMessageW, GetParent,
+        GetWindow, IsWindow, SendMessageTimeoutW, SetParent, SetWindowLongW, SetWindowPos, SetWindowsHookExW,
+        WindowFromPoint, GA_ROOT, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HWND_BOTTOM, MSG, MSLLHOOKSTRUCT,
+        SET_WINDOW_POS_FLAGS, SMTO_NORMAL, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
     };
 
     fn hwnd(value: u64) -> HWND {
@@ -153,6 +157,55 @@ mod imp {
         });
     }
 
+    type Sink = fn(PointerKind, (i32, i32));
+    static SINK: OnceLock<Sink> = OnceLock::new();
+
+    /// True when the topmost window at the point belongs to the desktop (Progman / WorkerW), not to an application.
+    pub fn over_desktop(x: i32, y: i32) -> bool {
+        unsafe {
+            let hit = WindowFromPoint(POINT { x, y });
+            if hit.0.is_null() {
+                return false;
+            }
+            let root = GetAncestor(hit, GA_ROOT);
+            let root = if root.0.is_null() { hit } else { root };
+            nova_win_core::forward::is_desktop_class(&class_of(root))
+        }
+    }
+
+    unsafe extern "system" fn mouse_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+        if code >= 0 {
+            let kind = match w.0 as u32 {
+                WM_MOUSEMOVE => Some(PointerKind::Move),
+                WM_LBUTTONDOWN => Some(PointerKind::Down),
+                WM_LBUTTONUP => Some(PointerKind::Up),
+                _ => None,
+            };
+            if let (Some(kind), Some(sink)) = (kind, SINK.get()) {
+                let info = &*(l.0 as *const MSLLHOOKSTRUCT);
+                // Never block the mouse: the sink decides quickly and hands the work to another thread.
+                sink(kind, (info.pt.x, info.pt.y));
+            }
+        }
+        CallNextHookEx(None, code, w, l)
+    }
+
+    /// Watches the mouse system-wide (a low-level hook on its own thread). The wallpaper sits behind the icon
+    /// layer, so Windows never delivers clicks to it; the sink replays them. The hook never swallows an event.
+    pub fn watch_mouse(sink: Sink) {
+        if SINK.set(sink).is_err() {
+            return;
+        }
+        std::thread::spawn(|| unsafe {
+            if let Err(error) = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), None, 0) {
+                crate::log!("mouse forwarding for the wallpaper is unavailable: {error}");
+                return;
+            }
+            let mut msg = MSG::default();
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
+        });
+    }
+
     pub fn autostart_enabled() -> bool {
         use winreg::{enums::HKEY_CURRENT_USER, RegKey};
         RegKey::predef(HKEY_CURRENT_USER)
@@ -191,6 +244,10 @@ mod imp {
         Err("NOVA Desk places wallpaper windows on Windows only".into())
     }
     pub fn keep_behind_icons(_window: isize) {}
+    pub fn over_desktop(_x: i32, _y: i32) -> bool {
+        false
+    }
+    pub fn watch_mouse(_sink: fn(PointerKind, (i32, i32))) {}
     pub fn autostart_enabled() -> bool {
         false
     }

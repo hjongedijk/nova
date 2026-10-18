@@ -3,15 +3,12 @@ import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type {
   OmniRouteTokenLimit,
-  OmniRouteTokenLimitPrepared,
   OmniRouteTokenLimitResult,
   OmniRouteTokenLimitsReport,
   OmniRouteTokenResetInterval,
 } from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { claimConfirmation } from "./confirmation-step.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
@@ -58,7 +55,6 @@ export class OmniRouteTokenLimits {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
   ) {}
 
@@ -220,105 +216,15 @@ export class OmniRouteTokenLimits {
     }
   }
 
-  async prepare(
+  async apply(
     id: string,
     rawLimit: unknown,
     rawInterval: unknown,
-    acknowledge: unknown,
-  ): Promise<OmniRouteTokenLimitPrepared> {
-    if (
-      !safeId(id) ||
-      !tokenCount(rawLimit) ||
-      !isInterval(rawInterval) ||
-      acknowledge !== true
-    )
-      throw new ValidationError([
-        "Vul een positieve tokenlimiet in, kies de periode en bevestig dat dit alle clients met deze sleutel raakt.",
-      ]);
-    try {
-      const current = await this.current(id);
-      const old = current.global;
-      if (old) {
-        if (old.resetInterval !== rawInterval)
-          return {
-            ok: false,
-            error:
-              "De periode van een bestaande limiet kan hier niet worden gewijzigd.",
-          };
-        if (rawLimit > old.tokenLimit)
-          return {
-            ok: false,
-            error: "Een bestaande tokenlimiet kan hier alleen worden verlaagd.",
-          };
-        if (old.enabled && rawLimit === old.tokenLimit)
-          return { ok: false, error: "Deze actieve limiet is al ingesteld." };
-      }
-      const sessionId = `settings-token-limit:${crypto.randomUUID()}`;
-      this.audit.record({
-        sessionId: "settings",
-        tool: "omniroute_token_limit",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: {
-          keyId: id,
-          scopeType: "global",
-          oldLimit: old?.tokenLimit ?? null,
-          tokenLimit: rawLimit,
-          resetInterval: rawInterval,
-        },
-      });
-      return {
-        ok: true,
-        oldLimit: old?.tokenLimit ?? null,
-        tokenLimit: rawLimit,
-        resetInterval: rawInterval,
-        action: this.confirmations.create(
-          sessionId,
-          "omniroute_token_limit",
-          {
-            keyId: id,
-            revision: current.revision,
-            tokenLimit: rawLimit,
-            resetInterval: rawInterval,
-            existingLimitId: old?.id ?? null,
-            resetTime: old?.resetTime ?? "00:00",
-          },
-          "DANGEROUS",
-          current.revision,
-          false,
-        ),
-      };
-    } catch {
-      return { ok: false, error: ERROR };
-    }
-  }
-
-  async confirm(
-    id: string,
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
   ): Promise<OmniRouteTokenLimitResult> {
-    if (
-      !safeId(id) ||
-      !/^settings-token-limit:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige tokenlimietbevestiging."]);
-    const claimed = claimConfirmation(
-      this.confirmations,
-      sessionId,
-      confirmationId,
-      approve,
-      {
-        tool: "omniroute_token_limit",
-        arg: { name: "keyId", value: id },
-        stale: "Deze bevestiging staat niet meer open.",
-        expired: "Bevestiging verlopen. Bereid de wijziging opnieuw voor.",
-      },
-    );
-    if ("reply" in claimed) return claimed.reply;
-    const action = claimed.action;
+    if (!safeId(id) || !tokenCount(rawLimit) || !isInterval(rawInterval))
+      throw new ValidationError([
+        "Vul een positieve tokenlimiet in en kies de periode.",
+      ]);
     if (this.inFlight.has(id))
       return {
         ok: false,
@@ -326,29 +232,11 @@ export class OmniRouteTokenLimits {
       };
     this.inFlight.add(id);
     try {
-      const desiredLimit = action.args.tokenLimit;
-      const interval = action.args.resetInterval;
-      const previousId = action.args.existingLimitId;
-      const resetTime = action.args.resetTime;
-      if (
-        !tokenCount(desiredLimit) ||
-        !isInterval(interval) ||
-        (previousId !== null &&
-          (typeof previousId !== "string" ||
-            !/^[0-9a-f-]{36}$/i.test(previousId))) ||
-        !validClock(resetTime)
-      )
-        return { ok: false, error: ERROR };
+      const desiredLimit = rawLimit;
+      const interval = rawInterval;
       const before = await this.current(id);
-      if (
-        before.revision !== action.args.revision ||
-        before.global?.id !== (previousId ?? undefined)
-      )
-        return {
-          ok: false,
-          error:
-            "De sleutel of limieten zijn intussen gewijzigd. Laad ze opnieuw.",
-        };
+      const previousId = before.global?.id ?? null;
+      const resetTime = before.global?.resetTime ?? "00:00";
       if (
         before.global &&
         (before.global.resetInterval !== interval ||
@@ -362,9 +250,9 @@ export class OmniRouteTokenLimits {
         };
       this.audit.record({
         sessionId: "settings",
-        tool: action.tool,
+        tool: "omniroute_token_limit",
         risk: "DANGEROUS",
-        confirmation: "confirmed_admin_ui",
+        confirmation: "direct",
         phase: "before_execute",
         arguments: {
           keyId: id,
@@ -406,9 +294,9 @@ export class OmniRouteTokenLimits {
       try {
         this.audit.record({
           sessionId: "settings",
-          tool: action.tool,
+          tool: "omniroute_token_limit",
           risk: "DANGEROUS",
-          confirmation: "confirmed_admin_ui",
+          confirmation: "direct",
           phase: "after_execute",
           arguments: {
             keyId: id,

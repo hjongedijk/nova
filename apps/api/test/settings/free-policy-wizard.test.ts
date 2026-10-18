@@ -1,10 +1,8 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -12,7 +10,6 @@ import {
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { ValidationError } from "../../src/core/errors/validation.error.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
-import { connectionFingerprint } from "../../src/routing/connection-binding.js";
 import { RoutingManagementBarrier } from "../../src/routing/routing-management-barrier.service.js";
 import {
   FreeRoutingBlockedError,
@@ -20,7 +17,6 @@ import {
 } from "../../src/routing/routing.service.js";
 import { FreePolicyWizardController } from "../../src/settings/free-policy-wizard.controller.js";
 import { FreePolicyWizard } from "../../src/settings/free-policy-wizard.service.js";
-import { ADMIN, createApp } from "./helpers.js";
 
 const connectionId = "11111111-1111-4111-8111-111111111111";
 const otherId = "22222222-2222-4222-8222-222222222222";
@@ -28,16 +24,7 @@ const keyId = "33333333-3333-4333-8333-333333333333";
 const modelId = "llama-3.3-70b-versatile";
 const canonical = `groq/${modelId}`;
 const officialSource = "https://console.groq.com/docs/rate-limits";
-const initialNow = 1_700_000_000_000;
-const acknowledgements = {
-  acknowledgeBillingDisabled: true,
-  acknowledgeHardStop: true,
-  acknowledgeTerms: true,
-  acknowledgeAllClients: true,
-  acknowledgeQuotaRefresh: true,
-};
 const input = () => ({
-  ...acknowledgements,
   selection: [{ connectionId, modelId, officialSource }],
 });
 const model = {
@@ -139,9 +126,6 @@ function fixture() {
     timestamp: "fixture",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
-  let now = initialNow;
-  confirmations.now = () => now;
   const routing = new RoutingService(config as NovaConfig);
   const barrier = new RoutingManagementBarrier(config as NovaConfig, routing);
   const configured = vi.fn(() => true);
@@ -230,29 +214,10 @@ function fixture() {
   const wizard = new FreePolicyWizard(
     config as NovaConfig,
     management as unknown as OmniRouteManagement,
-    confirmations,
     audit,
     barrier,
   );
-  cleanups.push(() => wizard.onModuleDestroy());
-  const validInput = async () => {
-    const options = await wizard.options();
-    const inventoryToken = (options as unknown as { inventoryToken?: string })
-      .inventoryToken;
-    if (!options.available || !inventoryToken)
-      throw new Error("Missing fixture inventory token");
-    return { ...input(), inventoryToken };
-  };
-  const prepare = async () => {
-    const result = await wizard.prepare(await validInput());
-    expect(result.ok).toBe(true);
-    if (!result.action) throw new Error("Missing fixture approval");
-    return result.action;
-  };
-  const approve = (
-    action: Awaited<ReturnType<typeof prepare>>,
-    approval = true,
-  ) => wizard.confirm(action.sessionId, action.confirmationId, approval);
+  const apply = (value: unknown = input()) => wizard.apply(value);
   const publicPrivate = (value: unknown) => {
     const exposed = JSON.stringify(value);
     for (const secret of [
@@ -276,94 +241,23 @@ function fixture() {
     marker,
     oldPolicy,
     record,
-    confirmations,
     routing,
     barrier,
     configured,
     request,
     wizard,
-    validInput,
-    prepare,
-    approve,
+    apply,
     expectBlocked,
     publicPrivate,
-    advance: (ms: number) => {
-      now += ms;
-    },
   };
 }
 
-describe("free policy wizard preparation", () => {
-  it.each(["missing", "invalid", "tampered", "expired", "other-instance"])(
-    "rejects %s inventory acknowledgement before catalog or writes",
-    async (failure) => {
-      const f = fixture();
-      const value: Record<string, unknown> = await f.validInput();
-      if (failure === "missing") delete value.inventoryToken;
-      if (failure === "invalid") value.inventoryToken = "invalid-token";
-      if (failure === "tampered")
-        value.inventoryToken = `${String(value.inventoryToken).slice(0, -1)}${String(value.inventoryToken).endsWith("a") ? "b" : "a"}`;
-      if (failure === "expired") f.advance(600000);
-      if (failure === "other-instance")
-        value.inventoryToken = (await fixture().validInput()).inventoryToken;
-      f.request.mockClear();
-      expect(await f.wizard.prepare(value)).toMatchObject({ ok: false });
-      expect(f.request).not.toHaveBeenCalled();
-      expect(f.record).not.toHaveBeenCalled();
-      expect(fs.existsSync(f.marker)).toBe(false);
-    },
-  );
-
-  it.each(["credential", "account", "key", "settings", "policy", "override"])(
-    "rejects %s drift between loaded options and prepare",
-    async (change) => {
-      const f = fixture();
-      const value = await f.validInput();
-      if (change === "credential")
-        f.db
-          .prepare(
-            "UPDATE provider_connections SET api_key='rotated' WHERE id=?",
-          )
-          .run(connectionId);
-      if (change === "account")
-        f.db
-          .prepare("UPDATE provider_connections SET is_active=0 WHERE id=?")
-          .run(connectionId);
-      if (change === "key")
-        f.db
-          .prepare("UPDATE api_keys SET allowed_models='[\"changed\"]'")
-          .run();
-      if (change === "settings") f.set("hidePaidModels", true);
-      if (change === "policy") fs.writeFileSync(f.policyFile, "changed");
-      if (change === "override")
-        f.db
-          .prepare("INSERT INTO auto_candidate_overrides VALUES (?,'auto',?,1)")
-          .run(keyId, connectionId);
-      f.request.mockClear();
-      expect(await f.wizard.prepare(value)).toMatchObject({ ok: false });
-      expect(f.request).not.toHaveBeenCalled();
-      expect(f.record).not.toHaveBeenCalled();
-      expect(fs.existsSync(f.marker)).toBe(false);
-    },
-  );
-
-  it("rejects each missing required operator acknowledgement before reading the catalog", async () => {
-    const f = fixture();
-    for (const acknowledgement of Object.keys(acknowledgements)) {
-      const value: Record<string, unknown> = input();
-      delete value[acknowledgement];
-      await expect(f.wizard.prepare(value)).rejects.toThrow(ValidationError);
-    }
-    expect(f.request).not.toHaveBeenCalled();
-    expect(f.record).not.toHaveBeenCalled();
-  });
-
+describe("free policy wizard options and validation", () => {
   it("projects read-only safe options without credentials, hashes, source attestations or eligibility claims", async () => {
     const f = fixture();
     const before = f.db.prepare("SELECT * FROM key_value").all();
     expect(await f.wizard.options()).toEqual({
       available: true,
-      inventoryToken: expect.any(String),
       verified: false,
       accounts: [
         { id: connectionId, provider: "groq", name: "[redacted]" },
@@ -399,20 +293,8 @@ describe("free policy wizard preparation", () => {
         models: [],
         verified: false,
       });
-      expect(await f.wizard.prepare(input())).toMatchObject({ ok: false });
+      expect(await f.apply()).toMatchObject({ ok: false });
       expect(f.request).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each(Object.keys(acknowledgements))(
-    "requires %s before requests or writes",
-    async (ack) => {
-      const f = fixture();
-      await expect(
-        f.wizard.prepare({ ...input(), [ack]: false }),
-      ).rejects.toThrow(ValidationError);
-      expect(f.request).not.toHaveBeenCalled();
-      expect(f.record).not.toHaveBeenCalled();
     },
   );
 
@@ -421,6 +303,8 @@ describe("free policy wizard preparation", () => {
     [],
     {},
     { ...input(), always: true },
+    { ...input(), acknowledgeBillingDisabled: true },
+    { ...input(), inventoryToken: "x" },
     { ...input(), selection: [] },
     {
       ...input(),
@@ -428,121 +312,42 @@ describe("free policy wizard preparation", () => {
     },
   ])("rejects strict malformed shapes %j", async (value) => {
     const f = fixture();
-    const withToken =
-      value && typeof value === "object" && !Array.isArray(value)
-        ? { ...value, inventoryToken: (await f.validInput()).inventoryToken }
-        : value;
-    await expect(f.wizard.prepare(withToken)).rejects.toThrow(ValidationError);
+    await expect(f.apply(value)).rejects.toThrow(ValidationError);
     expect(f.request.mock.calls.every(([, options]) => !options)).toBe(true);
     expect(fs.existsSync(f.marker)).toBe(false);
   });
-
-  it("prepares dangerous unique sixty-second metadata approvals while the source, fingerprints and draft remain private", async () => {
-    const f = fixture();
-    const before = f.db.prepare("SELECT * FROM api_keys").all();
-    const first = await f.prepare();
-    const second = await f.prepare();
-    expect(first).toMatchObject({
-      tool: "free_policy_replace",
-      risk: "DANGEROUS",
-      allowAlways: false,
-      createdAt: initialNow,
-      expiresAt: initialNow + 60000,
-      args: {
-        models: [canonical],
-        accounts: 1,
-        evidenceSource: "operator-account",
-        nativeQuotaVerified: false,
-      },
-    });
-    expect(Object.keys(first.args).sort()).toEqual([
-      "accounts",
-      "evidenceSource",
-      "models",
-      "nativeQuotaVerified",
-    ]);
-    expect(first.sessionId).toMatch(/^settings-policy:/);
-    expect(first.sessionId).not.toBe(second.sessionId);
-    expect(first.confirmationId).not.toBe(second.confirmationId);
-    f.publicPrivate([first, second, f.record.mock.calls]);
-    expect(JSON.stringify([first, f.record.mock.calls])).not.toMatch(
-      /[a-f0-9]{64}/,
-    );
-    expect(f.db.prepare("SELECT * FROM api_keys").all()).toEqual(before);
-    expect(fs.readFileSync(f.policyFile, "utf8")).toBe(f.oldPolicy);
-    expect(fs.existsSync(f.marker)).toBe(false);
-  });
-
-  it("erases private drafts autonomously at expiry, cleans shutdown timers and frees capacity", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const f = fixture();
-    const state = f.wizard as unknown as {
-      drafts: Map<string, unknown>;
-      timers: Map<string, ReturnType<typeof setTimeout>>;
-    };
-    const action = await f.prepare();
-    expect(state.drafts.size).toBe(1);
-    expect(vi.getTimerCount()).toBe(1);
-    f.advance(59999);
-    vi.advanceTimersByTime(59999);
-    expect(state.drafts.size).toBe(1);
-    f.advance(1);
-    vi.advanceTimersByTime(1);
-    expect(state.drafts.size).toBe(0);
-    expect(state.timers.size).toBe(0);
-    expect(vi.getTimerCount()).toBe(0);
-    f.publicPrivate(f.confirmations.peek(action.sessionId));
-    await f.prepare();
-    f.wizard.onModuleDestroy();
-    expect(state.drafts.size).toBe(0);
-    expect(state.timers.size).toBe(0);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("rechecks the twenty-draft cap after concurrently awaiting catalog requests", async () => {
-    const f = fixture();
-    const value = await f.validInput();
-    const original = f.request.getMockImplementation()!;
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    f.request.mockImplementation(async (endpoint, options) => {
-      await gate;
-      return original(endpoint, options);
-    });
-    const pending = Array.from({ length: 25 }, () => f.wizard.prepare(value));
-    release();
-    const results = await Promise.all(pending);
-    expect(results.filter((result) => result.ok)).toHaveLength(20);
-    expect(results.filter((result) => !result.ok)).toHaveLength(5);
-    f.advance(60000);
-    expect((await f.wizard.prepare(await f.validInput())).ok).toBe(true);
-  });
 });
 
-describe("free policy wizard confirmation and proof failures", () => {
-  it("rejects malformed session and confirmation identifiers without requests", async () => {
+describe("free policy wizard apply and proof failures", () => {
+  it("applies the policy in one call and writes an audit trail without secrets", async () => {
     const f = fixture();
-    await expect(
-      f.wizard.confirm("chat-session", crypto.randomUUID(), true),
-    ).rejects.toThrow(ValidationError);
-    await expect(
-      f.wizard.confirm(
-        `settings-policy:${crypto.randomUUID()}`,
-        "bad-id",
-        true,
-      ),
-    ).rejects.toThrow(ValidationError);
-    expect(f.request).not.toHaveBeenCalled();
+    expect(await f.apply()).toMatchObject({
+      ok: true,
+      verified: true,
+      routeReady: true,
+    });
+    expect(f.record).toHaveBeenCalled();
+    f.publicPrivate(f.record.mock.calls);
+    expect(f.request.mock.calls.filter(([, options]) => options)).toHaveLength(
+      2,
+    );
+  });
+
+  it("blocks writes when before_execute auditing fails", async () => {
+    const f = fixture();
+    f.record.mockImplementation((entry) => {
+      if (entry.phase === "before_execute")
+        throw new Error("fixture audit failure");
+      return { ...entry, id: "fixture", timestamp: "fixture" };
+    });
+    expect(await f.apply()).toMatchObject({ ok: false });
+    expect(f.request.mock.calls.every(([, options]) => !options)).toBe(true);
   });
 
   it("records bounded private policy-only history without secret material", async () => {
     const f = fixture();
-    const action = await f.prepare();
-    expect(await f.approve(action)).toMatchObject({ ok: true, verified: true });
-    const nextAction = await f.prepare();
-    expect(await f.approve(nextAction)).toMatchObject({
+    expect(await f.apply()).toMatchObject({ ok: true, verified: true });
+    expect(await f.apply()).toMatchObject({
       ok: true,
       verified: true,
     });
@@ -571,8 +376,7 @@ describe("free policy wizard confirmation and proof failures", () => {
 
   it("rejects history directories with broader permissions", async () => {
     const f = fixture();
-    const action = await f.prepare();
-    expect(await f.approve(action)).toMatchObject({ ok: true });
+    expect(await f.apply()).toMatchObject({ ok: true });
     fs.chmodSync(path.join(f.dir, "free-policy-history"), 0o755);
     expect(() => f.wizard.history()).toThrow("History directory unavailable");
   });
@@ -582,7 +386,7 @@ describe("free policy wizard confirmation and proof failures", () => {
     f.db
       .prepare("INSERT INTO auto_candidate_overrides VALUES (?,'auto',?,1)")
       .run(keyId, connectionId);
-    expect(await f.wizard.prepare(await f.validInput())).toMatchObject({
+    expect(await f.apply()).toMatchObject({
       ok: false,
     });
     expect(f.record).not.toHaveBeenCalled();
@@ -591,11 +395,10 @@ describe("free policy wizard confirmation and proof failures", () => {
 
   it("retains the process inference stop and prevents PATCH when marker persistence fails", async () => {
     const f = fixture();
-    const action = await f.prepare();
     vi.spyOn(fs, "writeFileSync").mockImplementationOnce(() => {
       throw new Error("fixture marker failure");
     });
-    expect(await f.approve(action)).toMatchObject({ ok: false });
+    expect(await f.apply()).toMatchObject({ ok: false });
     expect(f.request.mock.calls.every(([, options]) => !options)).toBe(true);
     expect(f.routing.status()).toMatchObject({
       ready: false,
@@ -605,76 +408,10 @@ describe("free policy wizard confirmation and proof failures", () => {
     expect(fs.readFileSync(f.policyFile, "utf8")).toBe(f.oldPolicy);
   });
 
-  it("rejects mismatched sessions and cancels without native or policy writes", async () => {
-    const f = fixture();
-    const first = await f.prepare();
-    const second = await f.prepare();
-    expect(
-      await f.wizard.confirm(second.sessionId, first.confirmationId, true),
-    ).toMatchObject({ ok: false });
-    expect(
-      await f.wizard.confirm(
-        `settings-policy:${crypto.randomUUID()}`,
-        first.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: false });
-    expect(await f.approve(first, false)).toEqual({ ok: true });
-    expect(await f.approve(first)).toMatchObject({ ok: false });
-    expect(f.request.mock.calls.every(([, options]) => !options)).toBe(true);
-    f.publicPrivate(f.record.mock.calls);
-    expect(fs.existsSync(f.marker)).toBe(false);
-  });
-
-  it.each([60000, 60001])(
-    "rejects expired confirmation at %i ms without writes",
-    async (elapsed) => {
-      const f = fixture();
-      const action = await f.prepare();
-      f.advance(elapsed);
-      expect(await f.approve(action)).toMatchObject({ ok: false });
-      expect(f.request.mock.calls.every(([, options]) => !options)).toBe(true);
-    },
-  );
-
-  it.each(["credential", "provider", "settings", "key", "policy", "override"])(
-    "rejects stale %s before writes",
-    async (change) => {
-      const f = fixture();
-      const action = await f.prepare();
-      if (change === "credential")
-        f.db
-          .prepare(
-            "UPDATE provider_connections SET api_key='rotated' WHERE id=?",
-          )
-          .run(connectionId);
-      if (change === "provider")
-        f.db
-          .prepare(
-            "UPDATE provider_connections SET provider='changed' WHERE id=?",
-          )
-          .run(connectionId);
-      if (change === "settings") f.set("hidePaidModels", true);
-      if (change === "key")
-        f.db
-          .prepare("UPDATE api_keys SET allowed_models='[\"changed\"]'")
-          .run();
-      if (change === "policy") fs.writeFileSync(f.policyFile, "changed");
-      if (change === "override")
-        f.db
-          .prepare("INSERT INTO auto_candidate_overrides VALUES (?,'auto',?,1)")
-          .run(keyId, connectionId);
-      expect(await f.approve(action)).toMatchObject({ ok: false });
-      expect(f.request.mock.calls.every(([, options]) => !options)).toBe(true);
-      expect(fs.existsSync(f.marker)).toBe(false);
-    },
-  );
-
   it.each(["echo", "CAS409", "partial-key", "wrong-key-fields"])(
     "keeps inference blocked when native persistence %s",
     async (failure) => {
       const f = fixture();
-      const action = await f.prepare();
       const original = f.request.getMockImplementation()!;
       f.request.mockImplementation(async (endpoint, options) => {
         if (!options) return original(endpoint, options);
@@ -693,7 +430,7 @@ describe("free policy wizard confirmation and proof failures", () => {
             .run();
         return result;
       });
-      expect(await f.approve(action)).toMatchObject({
+      expect(await f.apply()).toMatchObject({
         ok: false,
         verified: null,
         routeReady: false,
@@ -701,7 +438,7 @@ describe("free policy wizard confirmation and proof failures", () => {
       f.expectBlocked();
       expect(fs.readFileSync(f.policyFile, "utf8")).toBe(f.oldPolicy);
       expect(fs.existsSync(`${f.policyFile}.backup`)).toBe(false);
-      expect(await f.approve(action)).toMatchObject({ ok: false });
+      expect(await f.apply()).toMatchObject({ ok: false });
     },
   );
 
@@ -720,7 +457,6 @@ describe("free policy wizard confirmation and proof failures", () => {
     "cannot activate policy with invalid selected native account structure %s",
     async (failure) => {
       const f = fixture();
-      const action = await f.prepare();
       const original = f.request.getMockImplementation()!;
       f.request.mockImplementation(async (endpoint, options) => {
         if (endpoint !== "/api/v1/auto-combo/auto/candidates")
@@ -743,7 +479,7 @@ describe("free policy wizard confirmation and proof failures", () => {
         if (failure === "locked") row.modelLocked = true;
         return { channel: "auto", candidates: [row] };
       });
-      expect(await f.approve(action)).toMatchObject({
+      expect(await f.apply()).toMatchObject({
         ok: false,
         verified: null,
         routeReady: false,
@@ -782,134 +518,10 @@ describe("free policy wizard confirmation and proof failures", () => {
     },
   );
 
-  it.each(["prepare", "before_execute"])(
-    "blocks writes on %s audit failure",
-    async (phase) => {
-      const f = fixture();
-      const action = phase === "before_execute" ? await f.prepare() : undefined;
-      f.record.mockImplementation((entry) => {
-        if (phase === "prepare" || entry.phase === phase)
-          throw new Error("fixture audit failure");
-        return { ...entry, id: "fixture", timestamp: "fixture" };
-      });
-      expect(
-        action
-          ? await f.approve(action)
-          : await f.wizard.prepare(await f.validInput()),
-      ).toMatchObject({ ok: false });
-      expect(f.request.mock.calls.every(([, options]) => !options)).toBe(true);
-      expect(fs.existsSync(f.marker)).toBe(false);
-    },
-  );
-
-  it("consumes overlapping approval while native settings PATCH is pending", async () => {
-    const f = fixture();
-    const first = await f.prepare();
-    const second = await f.prepare();
-    const original = f.request.getMockImplementation()!;
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    f.request.mockImplementation(async (endpoint, options) => {
-      if (endpoint === "/api/settings") {
-        f.expectBlocked();
-        await gate;
-        throw new Error("fixture delayed failure");
-      }
-      return original(endpoint, options);
-    });
-    const pending = f.approve(first);
-    try {
-      expect(await f.approve(second)).toMatchObject({ ok: false });
-      expect(f.confirmations.has(second.sessionId)).toBe(false);
-    } finally {
-      release();
-    }
-    expect(await pending).toMatchObject({ ok: false, verified: null });
-    expect(await f.approve(second)).toMatchObject({ ok: false });
-    f.expectBlocked();
-  });
-
-  it("rejects old attestations after pre-prepare rotation, then binds renewed attestations without claiming cached SAFE quota verification", async () => {
-    const f = fixture();
-    const oldInput = await f.validInput();
-    const rotatedCredential = "fixture-rotated-before-prepare";
-    f.db
-      .prepare("UPDATE provider_connections SET api_key=? WHERE id=?")
-      .run(rotatedCredential, connectionId);
-    expect(await f.wizard.prepare(oldInput)).toMatchObject({ ok: false });
-    expect(f.request.mock.calls.every(([, options]) => !options)).toBe(true);
-    expect(fs.existsSync(f.marker)).toBe(false);
-    const action = await f.prepare();
-    const original = f.request.getMockImplementation()!;
-    f.request.mockImplementation(async (endpoint, options) => {
-      if (endpoint !== "/api/v1/auto-combo/auto/candidates")
-        return original(endpoint, options);
-      f.expectBlocked();
-      return {
-        channel: "auto",
-        candidates: [
-          {
-            ...candidate(),
-            freeAccessExclusion: null,
-            nativeQuota: {
-              status: "SAFE",
-              fetchedAt: "2000-01-01T00:00:00Z",
-              credentialFingerprint: "old-credential-cache",
-            },
-          },
-        ],
-      };
-    });
-    expect(await f.approve(action)).toEqual({
-      ok: true,
-      verified: true,
-      routeReady: true,
-      evidenceSource: "operator-account",
-      nativeQuotaVerified: false,
-    });
-    const policy = JSON.parse(fs.readFileSync(f.policyFile, "utf8"));
-    expect(policy.verifiedConnections).toEqual([
-      {
-        id: connectionId,
-        provider: "groq",
-        fingerprint: connectionFingerprint({
-          id: connectionId,
-          provider: "groq",
-          auth_type: "apikey",
-          api_key: rotatedCredential,
-        }),
-      },
-    ]);
-    expect(policy.catalog[0]).toMatchObject({
-      billingVerified: true,
-      hardStopGuaranteed: true,
-      accountFreeVerified: true,
-      nativeAutoEligible: true,
-    });
-    expect(policy.catalog[0]).not.toHaveProperty("nativeQuota");
-    expect(fs.readFileSync(f.policyFile, "utf8")).not.toContain(
-      rotatedCredential,
-    );
-    for (const [entry] of f.record.mock.calls)
-      if (entry.tool === "free_policy_replace" && entry.arguments)
-        expect(entry.arguments).toMatchObject({
-          evidenceSource: "operator-account",
-          nativeQuotaVerified: false,
-        });
-    expect(f.routing.assertFree()).toMatchObject({
-      ready: true,
-      policyVerified: true,
-      freeOnly: true,
-    });
-  });
-
   it.each(["absent", "economic-exclusion", "other-account"])(
     "treats native free-access fields as no economic proof: %s",
     async (scenario) => {
       const f = fixture();
-      const action = await f.prepare();
       const original = f.request.getMockImplementation()!;
       f.request.mockImplementation(async (endpoint, options) => {
         if (endpoint !== "/api/v1/auto-combo/auto/candidates")
@@ -927,7 +539,7 @@ describe("free policy wizard confirmation and proof failures", () => {
               : [row],
         };
       });
-      expect(await f.approve(action)).toMatchObject({
+      expect(await f.apply()).toMatchObject({
         ok: true,
         verified: true,
         routeReady: true,
@@ -942,7 +554,6 @@ describe("free policy wizard confirmation and proof failures", () => {
     "saves an atomic private policy and backup after structural proof, with post-audit failure=%s",
     async (auditFails) => {
       const f = fixture();
-      const action = await f.prepare();
       const rename = vi.spyOn(fs, "renameSync");
       if (auditFails)
         f.record.mockImplementation((entry) => {
@@ -950,7 +561,7 @@ describe("free policy wizard confirmation and proof failures", () => {
             throw new Error("fixture final audit failure");
           return { ...entry, id: "fixture", timestamp: "fixture" };
         });
-      const result = await f.approve(action);
+      const result = await f.apply();
       expect(result).toMatchObject({
         ok: true,
         verified: true,
@@ -989,16 +600,11 @@ describe("free policy wizard confirmation and proof failures", () => {
         new RoutingService(f.config as NovaConfig).assertFree().ready,
       ).toBe(true);
       f.publicPrivate(f.record.mock.calls);
-      expect(await f.approve(action)).toMatchObject({ ok: false });
-      expect(
-        f.request.mock.calls.filter(([, options]) => options),
-      ).toHaveLength(2);
     },
   );
 
   it("does not publish a partially written backup and retries with the intact original policy", async () => {
     const f = fixture();
-    const action = await f.prepare();
     const originalOpen = fs.openSync;
     const originalWrite = fs.writeFileSync;
     let backupDescriptor: number | undefined;
@@ -1019,7 +625,7 @@ describe("free policy wizard confirmation and proof failures", () => {
         }
         originalWrite(filename, content, options);
       });
-    expect(await f.approve(action)).toMatchObject({
+    expect(await f.apply()).toMatchObject({
       ok: false,
       verified: null,
       routeReady: false,
@@ -1032,7 +638,7 @@ describe("free policy wizard confirmation and proof failures", () => {
     ).toEqual([]);
     open.mockRestore();
     write.mockRestore();
-    expect(await f.approve(await f.prepare())).toMatchObject({
+    expect(await f.apply()).toMatchObject({
       ok: true,
       verified: true,
       routeReady: true,
@@ -1044,133 +650,12 @@ describe("free policy wizard confirmation and proof failures", () => {
 });
 
 describe("free policy wizard HTTP boundary", () => {
-  it("rejects malformed and standing approval confirmation bodies before delegation", () => {
-    const service = { confirm: vi.fn() };
+  it("delegates the single apply route straight to the service", () => {
+    const service = { apply: vi.fn(() => ({ ok: true })) };
     const controller = new FreePolicyWizardController(
       service as unknown as FreePolicyWizard,
     );
-    for (const body of [
-      null,
-      [],
-      {},
-      { sessionId: "s", confirmationId: "c", approve: "yes" },
-      { sessionId: "s", confirmationId: "c", approve: true, always: true },
-    ])
-      expect(() => controller.confirm(body)).toThrow(ValidationError);
-    expect(service.confirm).not.toHaveBeenCalled();
-  });
-
-  it("requires PIN for reads and PIN plus admin for writes with no model policy setter", async () => {
-    const nova = await createApp({ env: { NOVA_ADMIN_PIN: "4321" } });
-    const wizard = nova.app.get(FreePolicyWizard);
-    const options = vi.spyOn(wizard, "options").mockResolvedValue({
-      available: true,
-      verified: false,
-      accounts: [],
-      models: [],
-    });
-    const prepare = vi.spyOn(wizard, "prepare").mockResolvedValue({ ok: true });
-    const confirm = vi.spyOn(wizard, "confirm").mockResolvedValue({ ok: true });
-    const history = vi.spyOn(wizard, "history").mockReturnValue({
-      revisions: [],
-      truncated: false,
-    });
-    try {
-      expect(
-        nova.tools.forModel().map((tool) => tool.function.name),
-      ).not.toContain("free_policy_replace");
-      expect(
-        nova.tools
-          .forModel()
-          .filter((tool) =>
-            /policy.*(?:set|replace)|(?:set|replace).*policy/i.test(
-              tool.function.name,
-            ),
-          ),
-      ).toEqual([]);
-      for (const [route, body] of [
-        ["prepare", input()],
-        [
-          "confirm",
-          {
-            sessionId: `settings-policy:${crypto.randomUUID()}`,
-            confirmationId: crypto.randomUUID(),
-            approve: true,
-          },
-        ],
-      ] as const) {
-        const endpoint = `/api/settings/omniroute/policy/${route}`;
-        expect(
-          (await nova.api.post(endpoint).set(ADMIN).send(body)).status,
-        ).toBe(401);
-        expect(
-          (
-            await nova.api
-              .post(endpoint)
-              .set(ADMIN)
-              .set("x-nova-pin", "wrong")
-              .send(body)
-          ).status,
-        ).toBe(401);
-        expect(
-          (await nova.api.post(endpoint).set("x-nova-pin", "4321").send(body))
-            .status,
-        ).toBe(403);
-      }
-      expect(
-        (await nova.api.get("/api/settings/omniroute/policy").set(ADMIN))
-          .status,
-      ).toBe(401);
-      expect(
-        (
-          await nova.api
-            .get("/api/settings/omniroute/policy/history")
-            .set(ADMIN)
-        ).status,
-      ).toBe(401);
-      expect(options).not.toHaveBeenCalled();
-      expect(prepare).not.toHaveBeenCalled();
-      expect(confirm).not.toHaveBeenCalled();
-      expect(history).not.toHaveBeenCalled();
-      expect(
-        (
-          await nova.api
-            .get("/api/settings/omniroute/policy/history")
-            .set(ADMIN)
-            .set("x-nova-pin", "4321")
-        ).status,
-      ).toBe(200);
-      expect(history).toHaveBeenCalledOnce();
-      expect(
-        (
-          await nova.api
-            .get("/api/settings/omniroute/policy")
-            .set("x-nova-pin", "4321")
-        ).status,
-      ).toBe(200);
-      expect(
-        (
-          await nova.api
-            .get("/api/settings/omniroute/policy")
-            .set(ADMIN)
-            .set("x-nova-pin", "4321")
-        ).status,
-      ).toBe(200);
-      expect(
-        (
-          await nova.api
-            .post("/api/settings/omniroute/policy/prepare")
-            .set(ADMIN)
-            .set("x-nova-pin", "4321")
-            .send(input())
-        ).status,
-      ).toBe(200);
-    } finally {
-      options.mockRestore();
-      prepare.mockRestore();
-      confirm.mockRestore();
-      history.mockRestore();
-      await nova.app.close();
-    }
+    expect(controller.apply(input())).toEqual({ ok: true });
+    expect(service.apply).toHaveBeenCalledWith(input());
   });
 });

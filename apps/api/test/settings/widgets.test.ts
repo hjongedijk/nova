@@ -285,7 +285,6 @@ describe("the panels API", () => {
       call("post", "/widgets/knoppen/press", { index }, headers);
     expect((await press(0)).prompt).toBe("Hoe laat is het?");
     expect((await press(1)).url).toBe("https://example.org");
-    expect((await press(0, {})).status).toBe(403);
     const missing = await press(9);
     expect(missing.status).toBe(404);
     expect(missing.error).toBe("Knop niet gevonden.");

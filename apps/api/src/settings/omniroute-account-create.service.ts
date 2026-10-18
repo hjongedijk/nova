@@ -1,11 +1,6 @@
 import { Injectable } from "@nestjs/common";
-import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  OmniRouteAccountCreatePrepared,
-  OmniRouteAccountCreateResult,
-} from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
+import type { OmniRouteAccountCreateResult } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { ValidationError } from "../core/errors/validation.error.js";
@@ -15,14 +10,6 @@ import { RoutingManagementBarrier } from "../routing/routing-management-barrier.
 import { RoutingService } from "../routing/routing.service.js";
 import { object, sameSecret } from "./request-input.js";
 
-type PendingSecret = {
-  requestId: string;
-  provider: string;
-  name: string;
-  key: string;
-  expiresAt: number;
-  timer: ReturnType<typeof setTimeout>;
-};
 type StoredAccount = {
   id: string;
   provider: string;
@@ -50,15 +37,13 @@ function storedCredentialMatches(stored: string, key: string): boolean {
   return stored.length > key.length || sameSecret(stored, key);
 }
 
-/** Keeps a provider credential in process memory only until its one-use confirmation expires. */
+/** Creates a provider account in one step; the credential is passed straight to OmniRoute and never stored, echoed or audited. */
 @Injectable()
 export class OmniRouteAccountCreate {
-  private readonly secrets = new Map<string, PendingSecret>();
   private readonly inFlight = new Set<string>();
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
@@ -98,80 +83,6 @@ export class OmniRouteAccountCreate {
       );
   }
 
-  async prepare(
-    rawProvider: unknown,
-    rawName: unknown,
-    rawKey: unknown,
-    acknowledgeEffects: unknown,
-  ): Promise<OmniRouteAccountCreatePrepared> {
-    const provider = typeof rawProvider === "string" ? rawProvider.trim() : "";
-    const name = typeof rawName === "string" ? rawName.trim() : "";
-    const key = typeof rawKey === "string" ? rawKey.trim() : "";
-    if (
-      !validProvider(provider) ||
-      !validName(name) ||
-      !key ||
-      key.length > 64_000 ||
-      acknowledgeEffects !== true
-    )
-      throw new ValidationError([
-        "Vul de provider-ID, accountnaam en API-sleutel in en bevestig de clientbrede toegang en mogelijke providerverzoeken door OmniRoute.",
-      ]);
-    try {
-      this.assertGateway();
-      await this.assertUnique(provider, name);
-      const requestId = crypto.randomUUID();
-      const action = this.confirmations.create(
-        `settings-account-create:${requestId}`,
-        "omniroute_account_create",
-        { requestId, provider, name },
-        "DANGEROUS",
-        undefined,
-        false,
-      );
-      const timer = setTimeout(
-        () => this.secrets.delete(action.confirmationId),
-        60_500,
-      );
-      timer.unref?.();
-      this.secrets.set(action.confirmationId, {
-        requestId,
-        provider,
-        name,
-        key,
-        expiresAt: action.expiresAt,
-        timer,
-      });
-      this.audit.record({
-        sessionId: "settings",
-        tool: "omniroute_account_create",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: {
-          provider,
-          name: String(sanitize(name)).slice(0, 200),
-          credentialPresent: true,
-        },
-      });
-      return {
-        ok: true,
-        provider,
-        name: String(sanitize(name)).slice(0, 200),
-        action,
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        error:
-          error instanceof Error &&
-          error.message ===
-            "Er bestaat al een account met deze naam voor deze provider."
-            ? "Er bestaat al een account met deze naam voor deze provider."
-            : unavailable,
-      };
-    }
-  }
-
   private stored(id: string): StoredAccount | undefined {
     const db = new DatabaseSync(this.config.omniDatabase, { readOnly: true });
     try {
@@ -185,54 +96,25 @@ export class OmniRouteAccountCreate {
     }
   }
 
-  async confirm(
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
+  async create(
+    rawProvider: unknown,
+    rawName: unknown,
+    rawKey: unknown,
   ): Promise<OmniRouteAccountCreateResult> {
+    const provider = typeof rawProvider === "string" ? rawProvider.trim() : "";
+    const name = typeof rawName === "string" ? rawName.trim() : "";
+    const key = typeof rawKey === "string" ? rawKey.trim() : "";
     if (
-      !/^settings-account-create:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
+      !validProvider(provider) ||
+      !validName(name) ||
+      !key ||
+      key.length > 64_000
     )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !pending ||
-      pending.tool !== "omniroute_account_create" ||
-      pending.confirmationId !== confirmationId
-    )
-      return {
-        ok: false,
-        error:
-          "Deze bevestiging staat niet meer open. Vul het account opnieuw in.",
-      };
-    const secret = this.secrets.get(confirmationId);
-    if (!secret || secret.expiresAt <= Date.now()) {
-      if (secret) clearTimeout(secret.timer);
-      this.secrets.delete(confirmationId);
-      this.confirmations.cancel(sessionId, "expired_admin_ui");
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Vul het account opnieuw in.",
-      };
-    }
-    if (!approve) {
-      clearTimeout(secret.timer);
-      this.secrets.delete(confirmationId);
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action) {
-      clearTimeout(secret.timer);
-      this.secrets.delete(confirmationId);
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Vul het account opnieuw in.",
-      };
-    }
-    clearTimeout(secret.timer);
-    this.secrets.delete(confirmationId);
+      throw new ValidationError([
+        "Vul de provider-ID, accountnaam en API-sleutel in.",
+      ]);
+    const secret = { provider, name, key };
+    const tool = "omniroute_account_create";
     const busyKey = `${secret.provider}/${secret.name.toLocaleLowerCase()}`;
     if (this.inFlight.has(busyKey))
       return { ok: false, error: "Dit provideraccount wordt al toegevoegd." };
@@ -241,18 +123,12 @@ export class OmniRouteAccountCreate {
       return await this.barrier.run(async (operation) => {
         try {
           this.assertGateway();
-          if (
-            action.args.requestId !== secret.requestId ||
-            action.args.provider !== secret.provider ||
-            action.args.name !== secret.name
-          )
-            throw new Error(unavailable);
           await this.assertUnique(secret.provider, secret.name);
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool,
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "before_execute",
             arguments: {
               provider: secret.provider,
@@ -262,8 +138,16 @@ export class OmniRouteAccountCreate {
             },
           });
           operation.block("account_change");
-        } catch {
-          return { ok: false, error: unavailable };
+        } catch (error) {
+          return {
+            ok: false,
+            error:
+              error instanceof Error &&
+              error.message ===
+                "Er bestaat al een account met deze naam voor deze provider."
+                ? error.message
+                : unavailable,
+          };
         }
         try {
           const created = object(
@@ -317,9 +201,9 @@ export class OmniRouteAccountCreate {
           try {
             this.audit.record({
               sessionId: "settings",
-              tool: action.tool,
+              tool,
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
               arguments: { id, provider: secret.provider, name: result.name },
               result: { ok: true, credentialPresent: true },
@@ -334,9 +218,9 @@ export class OmniRouteAccountCreate {
           try {
             this.audit.record({
               sessionId: "settings",
-              tool: action.tool,
+              tool,
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
               arguments: {
                 provider: secret.provider,

@@ -7,11 +7,9 @@ import {
   Post,
   Put,
   Query,
-  UseGuards,
 } from "@nestjs/common";
 import { AuditService } from "../core/audit/audit.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
-import { SettingsGuard } from "../settings/settings.guard.js";
 import { isDesktopTool } from "./desktop.audit.js";
 import { DesktopService } from "./desktop.service.js";
 import type { DesktopSettings } from "./desktop.types.js";
@@ -24,7 +22,6 @@ const KEYS: (keyof DesktopSettings)[] = [
 
 /** The Bureaublad settings section: switches, session status, stop button and the audit list. */
 @Controller("settings/desktop")
-@UseGuards(SettingsGuard)
 export class DesktopController {
   constructor(
     private readonly desktop: DesktopService,

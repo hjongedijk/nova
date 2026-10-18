@@ -2,7 +2,6 @@
 use crate::transport::Outcome;
 use serde_json::{json, Value};
 use std::{
-    collections::VecDeque,
     io::Read,
     net::TcpStream,
     path::PathBuf,
@@ -21,34 +20,6 @@ type Result<T> = std::result::Result<T, (u16, String)>;
 fn failure(message: impl ToString) -> (u16, String) {
     (400, message.to_string())
 }
-fn risky(text: &str) -> bool {
-    let text = text.to_lowercase();
-    [
-        "buy",
-        "purchase",
-        "checkout",
-        "order",
-        "aankoop",
-        "bevestig",
-        "pay",
-        "delete",
-        "remove account",
-        "subscribe",
-        "donate",
-        "transfer",
-        "bestel",
-        "koop",
-        "afreken",
-        "betaal",
-        "betal",
-        "verwijder",
-        "doneer",
-        "abonneer",
-    ]
-    .iter()
-    .any(|word| text.contains(word))
-}
-
 #[cfg(windows)]
 struct BrowserJob(windows::Win32::Foundation::HANDLE);
 #[cfg(windows)]
@@ -120,7 +91,7 @@ fn resume_browser(child: &Child) -> Result<()> {
 }
 fn successful(value: Value) -> Value {
     let mut value = value;
-    if value.get("risky") == Some(&json!(true)) || value.get("error").is_some() {
+    if value.get("error").is_some() {
         value["ok"] = json!(false);
     } else {
         value["ok"] = json!(true);
@@ -137,9 +108,6 @@ pub struct Browser {
     port: Option<u16>,
     current: Option<String>,
     world: Option<(String, i64)>,
-    actions: VecDeque<Instant>,
-    allowed: Vec<String>,
-    blocked: Vec<String>,
     engine: String,
     guard: Option<(Arc<AtomicU64>, u64)>,
 }
@@ -153,42 +121,18 @@ impl Browser {
             port: None,
             current: None,
             world: None,
-            actions: VecDeque::new(),
-            allowed: vec![],
-            blocked: vec![],
             engine: "google".into(),
             guard: None,
         }
     }
-    /// Import only host/search preferences; enabled and pause policy belongs to the caller.
+    /// Imports the default search engine only. There are no host lists: NOVA may open any website.
     pub fn configure(&mut self, settings: &Value) {
-        fn hosts(v: &Value) -> Vec<String> {
-            v.as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-                .map(|s| s.trim().to_lowercase())
-                .filter(|s| !s.is_empty())
-                .take(200)
-                .collect()
-        }
-        self.allowed = hosts(&settings["allowedHosts"]);
-        self.blocked = hosts(&settings["blockedHosts"]);
         self.engine = settings["defaultEngine"].as_str().unwrap_or("google").to_string();
     }
     fn safe_url(&self, raw: &str) -> Result<String> {
         let u = Url::parse(raw).map_err(failure)?;
-        if !matches!(u.scheme(), "http" | "https")
-            || !u.username().is_empty()
-            || u.password().is_some()
-            || raw.len() > 2000
-        {
-            return Err(failure("Only HTTP(S) URLs without credentials are allowed"));
-        }
-        let host = u.host_str().ok_or_else(|| failure("Missing hostname"))?.to_lowercase();
-        let matches = |entry: &String| host == *entry || host.ends_with(&format!(".{entry}"));
-        if self.blocked.iter().any(matches) || (!self.allowed.is_empty() && !self.allowed.iter().any(matches)) {
-            return Err((403, "Website blocked by browser settings".into()));
+        if !matches!(u.scheme(), "http" | "https") || u.host_str().is_none() {
+            return Err(failure("Only HTTP(S) URLs are supported"));
         }
         Ok(u.to_string())
     }
@@ -200,7 +144,7 @@ impl Browser {
         {
             return Err((
                 409,
-                "Browser action cancelled because permissions or pause state changed".into(),
+                "Browser action cancelled because the owner paused NOVA or pressed the emergency stop".into(),
             ));
         }
         Ok(())
@@ -483,9 +427,7 @@ impl Browser {
         self.location(&target)
     }
     fn location(&self, tab: &Value) -> Result<Value> {
-        let result = self.evaluate(tab, "({url:location.href,title:document.title})".into(), None)?;
-        self.safe_url(result["url"].as_str().unwrap_or(""))?;
-        Ok(result)
+        self.evaluate(tab, "({url:location.href,title:document.title})".into(), None)
     }
     fn invalidate(&mut self, tab: &Value) {
         let _ = self.effect(tab, "clear", &json!({}));
@@ -535,20 +477,6 @@ impl Browser {
         let action = path.strip_prefix("/v1/browser/").unwrap_or(path);
         if action == "status" && self.child.is_none() {
             return Ok(json!({"ok":true,"browser":"chromium","headless":false,"running":false,"tabs":[]}));
-        }
-        if action != "status" {
-            let now = Instant::now();
-            while self
-                .actions
-                .front()
-                .is_some_and(|t| now.duration_since(*t) >= Duration::from_secs(60))
-            {
-                self.actions.pop_front();
-            }
-            if self.actions.len() >= 60 {
-                return Err((429, "Too many browser actions per minute".into()));
-            }
-            self.actions.push_back(now);
         }
         self.start()?;
         match action {
@@ -638,14 +566,6 @@ impl Browser {
                 let info = self.effect(&tab, "probe", &args)?;
                 if action == "click" {
                     let label = info["label"].as_str().unwrap_or("");
-                    if risky(label) && body["confirmed"] != true {
-                        return Ok(
-                            json!({"risky":true,"label":label,"error":"User confirmation required for this action"}),
-                        );
-                    }
-                    if let Some(href) = info["href"].as_str().filter(|href| !href.is_empty()) {
-                        self.safe_url(href)?;
-                    }
                     if info["clear"] != true {
                         return Err(failure("Element is covered; dismiss the overlay first"));
                     }
@@ -662,33 +582,8 @@ impl Browser {
                     Ok(result)
                 } else {
                     let text = body["text"].as_str().ok_or_else(|| failure("Missing text"))?;
-                    if text.is_empty() || text.chars().count() > 500 {
-                        return Err(failure("Text must contain 1–500 characters"));
-                    }
-                    let hint = format!(
-                        "{} {}",
-                        info["type"].as_str().unwrap_or(""),
-                        info["hint"].as_str().unwrap_or("")
-                    )
-                    .to_lowercase();
-                    if [
-                        "pass",
-                        "wachtwoord",
-                        "pwd",
-                        "cvv",
-                        "cvc",
-                        "card",
-                        "iban",
-                        "pin",
-                        "otp",
-                        "2fa",
-                        "secret",
-                        "cc-",
-                    ]
-                    .iter()
-                    .any(|s| hint.contains(s))
-                    {
-                        return Err((403, "Enter passwords, PINs and payment information yourself".into()));
+                    if text.is_empty() || text.chars().count() > 5000 {
+                        return Err(failure("Text must contain 1–5000 characters"));
                     }
                     if info["tag"] != "input" && info["tag"] != "textarea" && info["editable"] != true {
                         return Err(failure("Element is not editable"));
@@ -733,7 +628,6 @@ impl Browser {
                 let index = history["currentIndex"].as_i64().unwrap_or(0) + if action == "back" { -1 } else { 1 };
                 if index >= 0 {
                     if let Some(entry) = history["entries"].as_array().and_then(|e| e.get(index as usize)) {
-                        self.safe_url(entry["url"].as_str().unwrap_or(""))?;
                         self.cdp(&tab, "Page.navigateToHistoryEntry", json!({"entryId":entry["id"]}))?;
                     }
                 }
@@ -818,26 +712,30 @@ mod tests {
     #[test]
     fn success_replies_are_explicit() {
         assert_eq!(successful(json!({"url":"https://example.com"}))["ok"], true);
-        assert_eq!(successful(json!({"risky":true}))["ok"], false);
         assert_eq!(successful(json!({"error":"refused"}))["ok"], false);
     }
     #[test]
-    fn urls_and_host_policy() {
-        let mut browser = Browser::new(PathBuf::from("unused"));
-        for url in ["file:///secret", "javascript:alert(1)", "https://user:pass@example.com"] {
+    fn any_website_may_be_opened_but_only_http_urls() {
+        let browser = Browser::new(PathBuf::from("unused"));
+        for url in ["file:///secret", "javascript:alert(1)", "not a url"] {
             assert!(browser.safe_url(url).is_err());
         }
-        browser.configure(&json!({"allowedHosts":["example.com"],"blockedHosts":["private.example.com"]}));
-        assert!(browser.safe_url("https://sub.example.com").is_ok());
-        assert!(browser.safe_url("https://badexample.com").is_err());
-        assert!(browser.safe_url("https://private.example.com").is_err());
+        for url in [
+            "https://sub.example.com",
+            "https://private.example.com/login",
+            "http://192.168.1.1:8080/admin",
+            "https://user:pass@example.com",
+        ] {
+            assert!(browser.safe_url(url).is_ok(), "{url}");
+        }
     }
     #[test]
-    fn sensitive_clicks_require_confirmation() {
-        for label in ["Buy now", "Betalen", "Verwijder account", "Subscribe"] {
-            assert!(risky(label));
-        }
-        assert!(!risky("Read article"));
+    fn the_only_setting_imported_is_the_search_engine() {
+        let mut browser = Browser::new(PathBuf::from("unused"));
+        browser.configure(&json!({"allowedHosts":["example.com"],"blockedHosts":["x.com"],"defaultEngine":"bing"}));
+        assert_eq!(browser.engine, "bing");
+        assert!(browser.safe_url("https://other.example.org").is_ok());
+        assert!(browser.safe_url("https://x.com").is_ok());
     }
     /// Opt-in local fixture: no external navigation and no Windows desktop required.
     #[test]
@@ -979,22 +877,15 @@ mod tests {
         let read = browser.route("read", &json!({})).unwrap();
         assert!(read["text"].as_str().unwrap().contains("Trusted fixture click"));
         let buy = element(&read, "Buy now");
-        let refused = browser.route("click", &json!({"id":buy})).unwrap();
-        assert_eq!(refused["ok"], false);
-        assert_eq!(refused["risky"], true);
-        assert_eq!(
-            browser.route("click", &json!({"id":buy,"confirmed":true})).unwrap()["ok"],
-            true
-        );
+        assert_eq!(browser.route("click", &json!({"id":buy})).unwrap()["ok"], true);
         let read = browser.route("read", &json!({})).unwrap();
         assert!(read["text"].as_str().unwrap().contains("Purchase fixture confirmed"));
         let secret = element(&read, "Password fixture");
         assert_eq!(
             browser
                 .route("type", &json!({"id":secret,"text":"synthetic-only"}))
-                .unwrap_err()
-                .0,
-            403
+                .unwrap()["typed"],
+            14
         );
         assert_eq!(
             browser.route("open", &json!({"url":url,"newTab":true})).unwrap()["ok"],

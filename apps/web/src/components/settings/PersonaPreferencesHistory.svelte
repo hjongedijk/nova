@@ -27,12 +27,6 @@
   }
 
   async function rollback(revision: PersonaPreferencesRevision) {
-    if (
-      !window.confirm(
-        "Herstel NOVA's eerdere stijl en profiel? Latere wijzigingen worden beschermd tegen overschrijven.",
-      )
-    )
-      return;
     busy = true;
     message = "";
     try {

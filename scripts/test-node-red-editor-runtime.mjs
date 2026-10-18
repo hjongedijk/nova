@@ -127,23 +127,19 @@ async function run() {
   failureMessage = "Build required: npm run build -w @nova/api";
   const modules = [
     "core/config/nova-config.js",
-    "access/access.service.js",
     "settings/node-red-management.service.js",
     "settings/node-red-editor-access.service.js",
     "settings/node-red-editor-proxy.service.js",
     "settings/node-red-editor.controller.js",
-    "settings/settings.guard.js",
   ];
   for (const module of modules) await access(new URL(module, apiDist));
   require("reflect-metadata");
   const [
     configModule,
-    accessModule,
     managementModule,
     editorAccessModule,
     proxyModule,
     controllerModule,
-    guardModule,
   ] = await Promise.all(
     modules.map((module) => import(new URL(module, apiDist).href)),
   );
@@ -243,29 +239,22 @@ async function run() {
   const { ExpressAdapter } = require("@nestjs/platform-express");
   const express = require("express");
   const { NovaConfig } = configModule;
-  const { AppAccessService } = accessModule;
   const { NodeRedManagement } = managementModule;
   const { NodeRedEditorAccess } = editorAccessModule;
   const { NodeRedEditorProxy } = proxyModule;
   const { NodeRedEditorController } = controllerModule;
-  const { SettingsGuard } = guardModule;
   const config = {
     nodeRedUrl,
     nodeRedAdminToken: token,
-    appToken: "",
-    reverseProxyAuth: true,
-    adminPin: "",
   };
   class FixtureModule {}
   Module({
     controllers: [NodeRedEditorController],
     providers: [
       { provide: NovaConfig, useValue: config },
-      AppAccessService,
       NodeRedManagement,
       NodeRedEditorAccess,
       NodeRedEditorProxy,
-      SettingsGuard,
     ],
   })(FixtureModule);
   const server = express();
@@ -283,7 +272,7 @@ async function run() {
     <button id="open">Open editor</button>
     <script>document.querySelector('button').onclick=async()=>{
       const response=await fetch('/api/node-red-editor/_nova/session',{
-        method:'POST',headers:{'content-type':'application/json','x-nova-admin':'1'},body:'{}'});
+        method:'POST',headers:{'content-type':'application/json'},body:'{}'});
       const grant=await response.json();
       if(!response.ok||grant.url!=='/api/node-red-editor/')return;
       const frame=document.createElement('iframe');frame.src=grant.url;

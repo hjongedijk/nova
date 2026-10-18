@@ -2,7 +2,6 @@ import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { ValidationError } from "../core/errors/validation.error.js";
@@ -14,18 +13,6 @@ import {
 } from "../integrations/mcp/reviewed-mcp-servers.js";
 import { readMcpServers, RISKS } from "../integrations/mcp/mcp-config.js";
 import type { Risk } from "@nova/contracts";
-
-type Draft = {
-  sessionId: string;
-  server: string;
-  enabled: boolean;
-  tool?: string;
-  risk?: Risk;
-  fileDigest: string;
-  expiresAt: number;
-  rollbackRevisionId?: string;
-  catalogOperation?: "add" | "remove";
-};
 
 type McpSettingRevision = {
   id: string;
@@ -57,11 +44,9 @@ function serverFingerprint(value: unknown): string {
   return crypto.createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
-/** One-time confirmed edits and private history for NOVA-owned MCP settings. */
+/** Direct edits and private history for NOVA-owned MCP settings. */
 @Injectable()
 export class McpManagement {
-  private readonly drafts = new Map<string, Draft>();
-  private readonly fingerprintKey = crypto.randomBytes(32);
   private readonly file: string;
   private readonly historyFile: string;
   private readonly dataRoot: string;
@@ -70,7 +55,6 @@ export class McpManagement {
   constructor(
     config: NovaConfig,
     private readonly hub: McpHub,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
   ) {
     const file = path.resolve(config.mcpConfig);
@@ -123,183 +107,10 @@ export class McpManagement {
     };
   }
 
-  prepareCatalog(server: string, operation: "add" | "remove") {
-    for (const [id, draft] of this.drafts) {
-      const pending = this.confirmations.peek(draft.sessionId);
-      if (!pending || pending.expiresAt <= Date.now()) this.drafts.delete(id);
-    }
-    if (this.drafts.size >= 20)
-      return {
-        ok: false as const,
-        error: "Wacht tot een open bevestiging verloopt.",
-      };
-    if (
-      !/^[a-zA-Z0-9_.-]{1,80}$/.test(server) ||
-      !["add", "remove"].includes(operation)
-    )
-      throw new ValidationError(["Ongeldige MCP-cataloguskeuze."]);
-    const spec = reviewedMcpServerSpec(server);
-    if (!spec)
-      throw new ValidationError([
-        "Deze MCP-server staat niet in de beoordeelde catalogus.",
-      ]);
-    const { data, fileDigest } = this.read();
-    const current = data.servers[server];
-    if (
-      operation === "add"
-        ? current !== undefined
-        : !current || !isReviewedMcpServer(server, current as never)
-    )
-      throw new ValidationError([
-        operation === "add"
-          ? "Deze MCP-server staat al ingesteld."
-          : "Alleen een beoordeelde MCP-server kan worden verwijderd.",
-      ]);
-    const sessionId = `settings-mcp-catalog:${crypto.randomUUID()}`;
-    const action = this.confirmations.create(
-      sessionId,
-      "settings_mcp_catalog_change",
-      { server, operation },
-      "DANGEROUS",
-      undefined,
-      false,
-    );
-    try {
-      this.audit.record({
-        sessionId,
-        tool: "settings_mcp_catalog_change",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: { server, operation },
-      });
-    } catch {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return {
-        ok: false as const,
-        error: "Auditlog niet beschikbaar; MCP-wijziging gestopt.",
-      };
-    }
-    this.drafts.set(action.confirmationId, {
-      sessionId,
-      server,
-      enabled: false,
-      catalogOperation: operation,
-      fileDigest,
-      expiresAt: action.expiresAt,
-    });
-    return {
-      ok: true as const,
-      warning:
-        operation === "add"
-          ? "De beoordeelde MCP-server wordt toegevoegd en blijft uitgeschakeld tot je hem apart inschakelt."
-          : "De MCP-server wordt uit de configuratie verwijderd en een actieve verbinding wordt direct gesloten.",
-      action,
-    };
-  }
-
-  async confirmCatalog(
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
-  ) {
-    const draft = this.drafts.get(confirmationId);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !draft ||
-      !draft.catalogOperation ||
-      draft.sessionId !== sessionId ||
-      draft.expiresAt <= Date.now() ||
-      pending?.tool !== "settings_mcp_catalog_change" ||
-      pending.confirmationId !== confirmationId
-    )
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
-    this.drafts.delete(confirmationId);
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true as const, cancelled: true as const };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
-    let current: ReturnType<McpManagement["read"]>;
-    try {
-      current = this.read();
-    } catch {
-      return {
-        ok: false as const,
-        error: "MCP-configuratie is niet leesbaar; niets gewijzigd.",
-      };
-    }
-    const operation = draft.catalogOperation;
-    const spec = reviewedMcpServerSpec(draft.server);
-    const rollbackRevision = draft.rollbackRevisionId
-      ? this.readHistory().find(
-          (item) =>
-            item.id === draft.rollbackRevisionId &&
-            item.server === draft.server &&
-            item.change.kind === "catalog" &&
-            item.change.operation === "add",
-        )
-      : undefined;
-    const latestServerRevision = this.readHistory().find(
-      (item) => item.server === draft.server,
-    );
-    const currentServer = current.data.servers[draft.server];
-    const validCatalogRollback =
-      !draft.rollbackRevisionId ||
-      (!!rollbackRevision &&
-        latestServerRevision?.id === rollbackRevision.id &&
-        rollbackRevision.change.kind === "catalog" &&
-        !!spec &&
-        currentServer?.enabled === false &&
-        serverFingerprint(currentServer) ===
-          rollbackRevision.change.specFingerprint &&
-        serverFingerprint(currentServer) === serverFingerprint(spec));
-    if (
-      action.args.server !== draft.server ||
-      action.args.operation !== operation ||
-      (draft.rollbackRevisionId !== undefined &&
-        action.args.rollbackRevisionId !== draft.rollbackRevisionId) ||
-      current.fileDigest !== draft.fileDigest ||
-      !spec ||
-      !validCatalogRollback ||
-      (!draft.rollbackRevisionId &&
-        (operation === "add"
-          ? currentServer !== undefined
-          : !currentServer ||
-            !isReviewedMcpServer(draft.server, currentServer as never)))
-    )
-      return {
-        ok: false as const,
-        error:
-          "MCP-configuratie is intussen gewijzigd. Bekijk de catalogus opnieuw.",
-      };
-    try {
-      this.audit.record({
-        sessionId,
-        tool: action.tool,
-        risk: "DANGEROUS",
-        confirmation: "approved_admin_ui",
-        phase: "attempt",
-        arguments: { server: draft.server, operation },
-      });
-    } catch {
-      return {
-        ok: false as const,
-        error: "Auditlog niet beschikbaar; MCP-wijziging gestopt.",
-      };
-    }
-    if (operation === "add") current.data.servers[draft.server] = { ...spec };
-    else delete current.data.servers[draft.server];
+  private writeConfig(data: unknown): void {
     const temporary = `${this.file}.${process.pid}.tmp`;
     try {
-      fs.writeFileSync(temporary, JSON.stringify(current.data, null, 2), {
+      fs.writeFileSync(temporary, JSON.stringify(data, null, 2), {
         mode: 0o600,
       });
       fs.chmodSync(temporary, 0o600);
@@ -316,20 +127,106 @@ export class McpManagement {
       } finally {
         fs.closeSync(directory);
       }
+    } finally {
+      fs.rmSync(temporary, { force: true });
+    }
+  }
+
+  private auditAttempt(
+    sessionId: string,
+    tool: string,
+    args: Record<string, unknown>,
+  ): boolean {
+    try {
+      this.audit.record({
+        sessionId,
+        tool,
+        risk: "DANGEROUS",
+        confirmation: "direct",
+        phase: "attempt",
+        arguments: args,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private auditVerified(
+    sessionId: string,
+    tool: string,
+    args: Record<string, unknown>,
+  ): boolean {
+    try {
+      this.audit.record({
+        sessionId,
+        tool,
+        risk: "DANGEROUS",
+        confirmation: "direct",
+        phase: "verified",
+        arguments: args,
+        result: { ok: true },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Adds a reviewed catalog server (disabled) or removes one, immediately. */
+  async changeCatalog(
+    server: string,
+    operation: "add" | "remove",
+    rollbackRevisionId?: string,
+  ) {
+    if (
+      !/^[a-zA-Z0-9_.-]{1,80}$/.test(server) ||
+      !["add", "remove"].includes(operation)
+    )
+      throw new ValidationError(["Ongeldige MCP-cataloguskeuze."]);
+    const spec = reviewedMcpServerSpec(server);
+    if (!spec)
+      throw new ValidationError([
+        "Deze MCP-server staat niet in de beoordeelde catalogus.",
+      ]);
+    const current = this.read();
+    const currentServer = current.data.servers[server];
+    if (rollbackRevisionId === undefined) {
+      if (
+        operation === "add"
+          ? currentServer !== undefined
+          : !currentServer ||
+            !isReviewedMcpServer(server, currentServer as never)
+      )
+        throw new ValidationError([
+          operation === "add"
+            ? "Deze MCP-server staat al ingesteld."
+            : "Alleen een beoordeelde MCP-server kan worden verwijderd.",
+        ]);
+    }
+    const sessionId = `settings-mcp-catalog:${crypto.randomUUID()}`;
+    const auditArgs = { server, operation };
+    if (!this.auditAttempt(sessionId, "settings_mcp_catalog_change", auditArgs))
+      return {
+        ok: false as const,
+        error: "Auditlog niet beschikbaar; MCP-wijziging gestopt.",
+      };
+    if (operation === "add") current.data.servers[server] = { ...spec };
+    else delete current.data.servers[server];
+    try {
+      this.writeConfig(current.data);
     } catch {
       return {
         ok: false as const,
         error: "MCP-configuratie kon niet veilig worden opgeslagen.",
       };
-    } finally {
-      fs.rmSync(temporary, { force: true });
     }
     try {
-      const verified = this.read().data.servers[draft.server];
+      const verified = this.read().data.servers[server];
       if (
         operation === "add"
           ? !verified ||
-            !isReviewedMcpServer(draft.server, verified as never) ||
+            !isReviewedMcpServer(server, verified as never) ||
             verified.enabled !== false
           : verified !== undefined
       )
@@ -348,61 +245,37 @@ export class McpManagement {
       this.appendHistory({
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
-        server: draft.server,
+        server,
         change: {
           kind: "catalog",
           operation,
           specFingerprint: serverFingerprint(
             operation === "add" ? spec : currentServer,
           ),
-          ...(draft.rollbackRevisionId
-            ? { rollbackOf: draft.rollbackRevisionId }
-            : {}),
+          ...(rollbackRevisionId ? { rollbackOf: rollbackRevisionId } : {}),
         },
       });
     } catch {
       historyWarning =
         "De MCP-catalogus is gewijzigd, maar de lokale wijzigingsgeschiedenis kon niet worden opgeslagen.";
     }
-    // The attempt record already exists. Do not turn a verified filesystem and
-    // hub change into an apparent failure if the final audit append fails.
-    try {
-      this.audit.record({
-        sessionId,
-        tool: action.tool,
-        risk: "DANGEROUS",
-        confirmation: "confirmed_admin_ui",
-        phase: "verified",
-        arguments: { server: draft.server, operation },
-        result: { ok: true },
-      });
-    } catch {
-      // The safe outcome is still independently verified above.
-    }
+    this.auditVerified(sessionId, "settings_mcp_catalog_change", auditArgs);
     return {
       ok: true as const,
       verified: true as const,
-      server: draft.server,
+      server,
       operation,
       ...(historyWarning ? { warning: historyWarning } : {}),
     };
   }
 
-  prepareRollback(server: string, revisionId: string) {
+  /** Reverts one history entry immediately. */
+  async rollback(server: string, revisionId: string) {
     if (
       !/^[a-zA-Z0-9_.-]{1,80}$/.test(server) ||
       !/^[0-9a-f-]{36}$/i.test(revisionId)
     )
       throw new ValidationError(["Ongeldige MCP-herstelkeuze."]);
-    for (const [id, draft] of this.drafts) {
-      const pending = this.confirmations.peek(draft.sessionId);
-      if (!pending || pending.expiresAt <= Date.now()) this.drafts.delete(id);
-    }
-    if (this.drafts.size >= 20)
-      return {
-        ok: false as const,
-        error: "Wacht tot een open bevestiging verloopt.",
-      };
     const revision = this.readHistory().find(
       (item) => item.id === revisionId && item.server === server,
     );
@@ -410,7 +283,7 @@ export class McpManagement {
       throw new ValidationError([
         "Deze MCP-wijziging staat niet in de geschiedenis.",
       ]);
-    const { data, fileDigest } = this.read();
+    const { data } = this.read();
     if (revision.change.kind === "catalog") {
       const latest = this.readHistory().find((item) => item.server === server);
       const spec = data.servers[server];
@@ -428,55 +301,13 @@ export class McpManagement {
         throw new ValidationError([
           "Alleen een ongewijzigde, uitgeschakelde NOVA-toevoeging kan worden teruggedraaid.",
         ]);
-      const sessionId = `settings-mcp-catalog:${crypto.randomUUID()}`;
-      const action = this.confirmations.create(
-        sessionId,
-        "settings_mcp_catalog_change",
-        { server, operation: "remove", rollbackRevisionId: revision.id },
-        "DANGEROUS",
-        undefined,
-        false,
-      );
-      try {
-        this.audit.record({
-          sessionId,
-          tool: "settings_mcp_catalog_change",
-          risk: "DANGEROUS",
-          confirmation: "pending_admin_ui",
-          arguments: { server, operation: "remove", rollback: true },
-        });
-      } catch {
-        this.confirmations.cancel(sessionId, "rejected_admin_ui");
-        return {
-          ok: false as const,
-          error: "Auditlog niet beschikbaar; MCP-herstel gestopt.",
-        };
-      }
-      this.drafts.set(action.confirmationId, {
-        sessionId,
-        server,
-        enabled: false,
-        catalogOperation: "remove",
-        rollbackRevisionId: revision.id,
-        fileDigest,
-        expiresAt: action.expiresAt,
-      });
-      return {
-        ok: true as const,
-        warning:
-          "Dit verwijdert alleen de ongewijzigde MCP-server die NOVA heeft toegevoegd. De server moet uitgeschakeld blijven; apart opgeslagen inloggegevens blijven bewaard. Eenmalige gevaarlijke bevestiging vereist.",
-        action,
-      };
+      return this.changeCatalog(server, "remove", revision.id);
     }
     const spec = data.servers[server];
     if (!spec)
       throw new ValidationError(["Deze MCP-server is niet meer ingesteld."]);
     const change = revision.change;
-    let tool: string | undefined;
-    let rollbackRisk: Risk | undefined;
     if (change.kind === "tool-risk") {
-      tool = change.tool;
-      rollbackRisk = change.before;
       const currentRisk =
         spec.toolRisks && typeof spec.toolRisks === "object"
           ? (spec.toolRisks as Record<string, unknown>)[change.tool]
@@ -492,67 +323,13 @@ export class McpManagement {
         throw new ValidationError([
           "MCP-gereedschapsrisico is intussen gewijzigd of niet actief. Bekijk de status opnieuw.",
         ]);
-    } else if ((spec.enabled !== false) !== change.after) {
+      return this.setToolRisk(server, change.tool, change.before);
+    }
+    if ((spec.enabled !== false) !== change.after)
       throw new ValidationError([
         "MCP-stand is intussen gewijzigd. Bekijk de status opnieuw.",
       ]);
-    }
-    const isRiskChange = change.kind === "tool-risk";
-    const risk = rollbackRisk;
-    const enabled =
-      change.kind === "enabled" ? change.before : spec.enabled !== false;
-    const confirmationTool = isRiskChange
-      ? "settings_mcp_tool_risk"
-      : "settings_mcp_server_toggle";
-    const args = isRiskChange
-      ? { server, tool, risk, rollbackRevisionId: revision.id }
-      : { server, enabled, rollbackRevisionId: revision.id };
-    const sessionId = `settings-mcp:${crypto.randomUUID()}`;
-    const action = this.confirmations.create(
-      sessionId,
-      confirmationTool,
-      args,
-      "DANGEROUS",
-      undefined,
-      false,
-    );
-    try {
-      this.audit.record({
-        sessionId,
-        tool: confirmationTool,
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: isRiskChange
-          ? { server, tool, risk, rollback: true }
-          : { server, enabled, rollback: true },
-      });
-    } catch {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return {
-        ok: false as const,
-        error: "Auditlog niet beschikbaar; MCP-herstel gestopt.",
-      };
-    }
-    const rollbackDraft: Draft = {
-      sessionId,
-      server,
-      enabled,
-      fileDigest,
-      expiresAt: action.expiresAt,
-      rollbackRevisionId: revision.id,
-    };
-    if (tool !== undefined && risk !== undefined) {
-      rollbackDraft.tool = tool;
-      rollbackDraft.risk = risk;
-    }
-    this.drafts.set(action.confirmationId, rollbackDraft);
-    return {
-      ok: true as const,
-      warning: isRiskChange
-        ? `Dit zet het eerdere risico voor ${tool} terug naar ${risk}. Eenmalige gevaarlijke bevestiging vereist.`
-        : "Dit zet de eerdere MCP-stand terug en start of stopt de MCP-server. Eenmalige gevaarlijke bevestiging vereist.",
-      action,
-    };
+    return this.setEnabled(server, change.before);
   }
 
   private readHistory(): McpSettingRevision[] {
@@ -729,84 +506,65 @@ export class McpManagement {
       Array.isArray(parsed.servers)
     )
       throw new ValidationError(["MCP-configuratie is ongeldig."]);
-    const fileDigest = crypto
-      .createHmac("sha256", this.fingerprintKey)
-      .update(raw)
-      .digest("hex");
     return {
       data: parsed as { servers: Record<string, Record<string, unknown>> },
-      fileDigest,
     };
   }
 
-  prepare(server: string, enabled: boolean) {
-    for (const [id, draft] of this.drafts) {
-      const pending = this.confirmations.peek(draft.sessionId);
-      if (!pending || pending.expiresAt <= Date.now()) this.drafts.delete(id);
-    }
-    if (this.drafts.size >= 20)
-      return {
-        ok: false as const,
-        error: "Wacht tot een open bevestiging verloopt.",
-      };
+  async setEnabled(server: string, enabled: boolean) {
     if (!/^[a-zA-Z0-9_.-]{1,80}$/.test(server) || typeof enabled !== "boolean")
       throw new ValidationError(["Ongeldige MCP-wijziging."]);
-    const { data, fileDigest } = this.read();
-    const spec = data.servers[server];
+    const current = this.read();
+    const spec = current.data.servers[server];
     if (!spec || typeof spec.command !== "string" || !spec.command)
       throw new ValidationError(["Deze MCP-server is niet ingesteld."]);
     if ((spec.enabled !== false) === enabled)
       throw new ValidationError(["Deze MCP-server staat al in die stand."]);
     const sessionId = `settings-mcp:${crypto.randomUUID()}`;
-    const action = this.confirmations.create(
-      sessionId,
-      "settings_mcp_server_toggle",
-      { server, enabled },
-      "DANGEROUS",
-      undefined,
-      false,
-    );
-    try {
-      this.audit.record({
-        sessionId,
-        tool: "settings_mcp_server_toggle",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: { server, enabled },
-      });
-    } catch {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
+    const auditArgs = { server, enabled };
+    if (!this.auditAttempt(sessionId, "settings_mcp_server_toggle", auditArgs))
       return {
         ok: false as const,
         error: "Auditlog niet beschikbaar; MCP-wijziging gestopt.",
       };
+    const previousEnabled = spec.enabled !== false;
+    spec.enabled = enabled;
+    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    this.writeConfig(current.data);
+    let warning: string | undefined;
+    try {
+      this.appendHistory({
+        id: crypto.randomUUID(),
+        at: new Date().toISOString(),
+        server,
+        change: { kind: "enabled", before: previousEnabled, after: enabled },
+      });
+    } catch {
+      warning =
+        "MCP-stand is gewijzigd, maar de lokale wijzigingsgeschiedenis kon niet worden opgeslagen.";
     }
-    this.drafts.set(action.confirmationId, {
-      sessionId,
-      server,
-      enabled,
-      fileDigest,
-      expiresAt: action.expiresAt,
-    });
+    try {
+      await this.hub.reconfigure();
+    } catch {
+      warning = [
+        warning,
+        "Configuratie is opgeslagen; de MCP-verbinding kon nog niet worden bijgewerkt.",
+      ]
+        .filter(Boolean)
+        .join(" ");
+    }
+    if (!this.auditVerified(sessionId, "settings_mcp_server_toggle", auditArgs))
+      warning =
+        "MCP-stand is gewijzigd, maar de resultaatmelding kon niet worden geauditeerd.";
     return {
       ok: true as const,
-      warning: enabled
-        ? "Inschakelen start het ingestelde MCP-programma en stelt de bijbehorende gereedschappen beschikbaar."
-        : "Uitschakelen stopt het MCP-programma en haalt de gereedschappen weg.",
-      action,
+      server,
+      enabled,
+      ...(warning ? { warning } : {}),
     };
   }
 
-  prepareToolRisk(server: string, tool: string, risk: Risk) {
-    for (const [id, draft] of this.drafts) {
-      const pending = this.confirmations.peek(draft.sessionId);
-      if (!pending || pending.expiresAt <= Date.now()) this.drafts.delete(id);
-    }
-    if (this.drafts.size >= 20)
-      return {
-        ok: false as const,
-        error: "Wacht tot een open bevestiging verloopt.",
-      };
+  async setToolRisk(server: string, tool: string, risk: Risk) {
     if (
       !/^[a-zA-Z0-9_.-]{1,80}$/.test(server) ||
       !/^[a-zA-Z0-9_.-]{1,128}$/.test(tool) ||
@@ -829,178 +587,43 @@ export class McpManagement {
       throw new ValidationError([
         "Dit gereedschap is niet actief. Haal eerst de serverstatus opnieuw op.",
       ]);
-    const toolRisks = spec.toolRisks;
-    const currentRisk =
-      toolRisks && typeof toolRisks === "object" && !Array.isArray(toolRisks)
-        ? (toolRisks as Record<string, unknown>)[tool]
-        : undefined;
-    const effectiveRisk = currentRisk ?? spec.risk;
-    if (effectiveRisk === risk)
-      throw new ValidationError(["Dit gereedschap heeft dit risico al."]);
-    const sessionId = `settings-mcp:${crypto.randomUUID()}`;
-    const action = this.confirmations.create(
-      sessionId,
-      "settings_mcp_tool_risk",
-      { server, tool, risk },
-      "DANGEROUS",
-      undefined,
-      false,
-    );
-    try {
-      this.audit.record({
-        sessionId,
-        tool: "settings_mcp_tool_risk",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: { server, tool, risk },
-      });
-    } catch {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return {
-        ok: false as const,
-        error: "Auditlog niet beschikbaar; MCP-risicowijziging gestopt.",
-      };
-    }
-    this.drafts.set(action.confirmationId, {
-      sessionId,
-      server,
-      enabled: spec.enabled !== false,
-      tool,
-      risk,
-      fileDigest: current.fileDigest,
-      expiresAt: action.expiresAt,
-    });
-    return {
-      ok: true as const,
-      warning:
-        "Dit wijzigt het risiconiveau van één MCP-gereedschap. De volgende uitvoering gebruikt deze bevestigingsregels.",
-      action,
-    };
-  }
-
-  async confirmToolRisk(
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
-  ) {
-    const draft = this.drafts.get(confirmationId);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !draft ||
-      !draft.tool ||
-      !draft.risk ||
-      draft.sessionId !== sessionId ||
-      draft.expiresAt <= Date.now() ||
-      pending?.confirmationId !== confirmationId
-    )
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
-    this.drafts.delete(confirmationId);
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true as const, cancelled: true as const };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
-    let current: ReturnType<McpManagement["read"]>;
-    try {
-      current = this.read();
-    } catch {
-      return {
-        ok: false as const,
-        error: "MCP-configuratie is niet leesbaar; niets gewijzigd.",
-      };
-    }
-    const spec = current.data.servers[draft.server];
-    if (
-      action.args.server !== draft.server ||
-      action.args.tool !== draft.tool ||
-      action.args.risk !== draft.risk ||
-      (draft.rollbackRevisionId !== undefined &&
-        action.args.rollbackRevisionId !== draft.rollbackRevisionId) ||
-      current.fileDigest !== draft.fileDigest ||
-      !spec ||
-      spec.enabled === false ||
-      !this.hub
-        .status()
-        .servers.some(
-          (entry) =>
-            entry.id === draft.server &&
-            entry.tools.some((item) => item.name === draft.tool),
-        )
-    )
-      return {
-        ok: false as const,
-        error:
-          "MCP-configuratie of gereedschapsstatus is intussen gewijzigd. Bekijk de status opnieuw.",
-      };
-    this.audit.record({
-      sessionId,
-      tool: "settings_mcp_tool_risk",
-      risk: "DANGEROUS",
-      confirmation: "approved_admin_ui",
-      arguments: { server: draft.server, tool: draft.tool, risk: draft.risk },
-      phase: "attempt",
-    });
     const existingRisks =
       spec.toolRisks &&
       typeof spec.toolRisks === "object" &&
       !Array.isArray(spec.toolRisks)
         ? (spec.toolRisks as Record<string, unknown>)
         : {};
-    const previousRisk = RISKS.includes(existingRisks[draft.tool] as Risk)
-      ? (existingRisks[draft.tool] as Risk)
+    const effectiveRisk = existingRisks[tool] ?? spec.risk;
+    if (effectiveRisk === risk)
+      throw new ValidationError(["Dit gereedschap heeft dit risico al."]);
+    const sessionId = `settings-mcp:${crypto.randomUUID()}`;
+    const auditArgs = { server, tool, risk };
+    if (!this.auditAttempt(sessionId, "settings_mcp_tool_risk", auditArgs))
+      return {
+        ok: false as const,
+        error: "Auditlog niet beschikbaar; MCP-risicowijziging gestopt.",
+      };
+    const previousRisk = RISKS.includes(existingRisks[tool] as Risk)
+      ? (existingRisks[tool] as Risk)
       : RISKS.includes(spec.risk as Risk)
         ? (spec.risk as Risk)
         : "CONFIRM";
-    spec.toolRisks = { ...existingRisks, [draft.tool]: draft.risk };
-    const temporary = `${this.file}.${process.pid}.tmp`;
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(current.data, null, 2), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      const fd = fs.openSync(temporary, "r");
-      try {
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-      fs.renameSync(temporary, this.file);
-      const directory = fs.openSync(path.dirname(this.file), "r");
-      try {
-        fs.fsyncSync(directory);
-      } finally {
-        fs.closeSync(directory);
-      }
-    } finally {
-      fs.rmSync(temporary, { force: true });
-    }
+    spec.toolRisks = { ...existingRisks, [tool]: risk };
+    this.writeConfig(current.data);
     let warning: string | undefined;
     try {
       this.appendHistory({
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
-        server: draft.server,
-        change: {
-          kind: "tool-risk",
-          tool: draft.tool,
-          before: previousRisk,
-          after: draft.risk,
-        },
+        server,
+        change: { kind: "tool-risk", tool, before: previousRisk, after: risk },
       });
     } catch {
       warning =
         "Risiconiveau is gewijzigd, maar de lokale wijzigingsgeschiedenis kon niet worden opgeslagen.";
     }
     try {
-      await this.hub.refresh(draft.server);
+      await this.hub.refresh(server);
     } catch {
       warning = [
         warning,
@@ -1009,153 +632,14 @@ export class McpManagement {
         .filter(Boolean)
         .join(" ");
     }
-    try {
-      this.audit.record({
-        sessionId,
-        tool: "settings_mcp_tool_risk",
-        risk: "DANGEROUS",
-        confirmation: "confirmed_admin_ui",
-        arguments: { server: draft.server, tool: draft.tool, risk: draft.risk },
-        result: { ok: true },
-        phase: "verified",
-      });
-    } catch {
+    if (!this.auditVerified(sessionId, "settings_mcp_tool_risk", auditArgs))
       warning =
         "Risiconiveau is gewijzigd, maar de resultaatmelding kon niet worden geauditeerd.";
-    }
     return {
       ok: true as const,
-      server: draft.server,
-      tool: draft.tool,
-      risk: draft.risk,
-      ...(warning ? { warning } : {}),
-    };
-  }
-
-  async confirm(sessionId: string, confirmationId: string, approve: boolean) {
-    const draft = this.drafts.get(confirmationId);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !draft ||
-      draft.sessionId !== sessionId ||
-      draft.expiresAt <= Date.now() ||
-      pending?.confirmationId !== confirmationId
-    )
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
-    this.drafts.delete(confirmationId);
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true as const, cancelled: true as const };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
-    let current: ReturnType<McpManagement["read"]>;
-    try {
-      current = this.read();
-    } catch {
-      return {
-        ok: false as const,
-        error: "MCP-configuratie is niet leesbaar; niets gewijzigd.",
-      };
-    }
-    if (
-      action.args.server !== draft.server ||
-      action.args.enabled !== draft.enabled ||
-      (draft.rollbackRevisionId !== undefined &&
-        action.args.rollbackRevisionId !== draft.rollbackRevisionId) ||
-      current.fileDigest !== draft.fileDigest ||
-      (current.data.servers[draft.server]?.enabled !== false) === draft.enabled
-    )
-      return {
-        ok: false as const,
-        error:
-          "MCP-configuratie is intussen gewijzigd. Bekijk de status opnieuw.",
-      };
-    this.audit.record({
-      sessionId,
-      tool: "settings_mcp_server_toggle",
-      risk: "DANGEROUS",
-      confirmation: "approved_admin_ui",
-      arguments: { server: draft.server, enabled: draft.enabled },
-      phase: "attempt",
-    });
-    const previousEnabled =
-      current.data.servers[draft.server]!.enabled !== false;
-    current.data.servers[draft.server]!.enabled = draft.enabled;
-    const temporary = `${this.file}.${process.pid}.tmp`;
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(current.data, null, 2), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      const fd = fs.openSync(temporary, "r");
-      try {
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-      fs.renameSync(temporary, this.file);
-      const directory = fs.openSync(path.dirname(this.file), "r");
-      try {
-        fs.fsyncSync(directory);
-      } finally {
-        fs.closeSync(directory);
-      }
-    } finally {
-      fs.rmSync(temporary, { force: true });
-    }
-    let warning: string | undefined;
-    try {
-      this.appendHistory({
-        id: crypto.randomUUID(),
-        at: new Date().toISOString(),
-        server: draft.server,
-        change: {
-          kind: "enabled",
-          before: previousEnabled,
-          after: draft.enabled,
-        },
-      });
-    } catch {
-      warning =
-        "MCP-stand is gewijzigd, maar de lokale wijzigingsgeschiedenis kon niet worden opgeslagen.";
-    }
-    try {
-      await this.hub.reconfigure();
-    } catch {
-      warning = [
-        warning,
-        "Configuratie is opgeslagen; de MCP-verbinding kon nog niet worden bijgewerkt.",
-      ]
-        .filter(Boolean)
-        .join(" ");
-    }
-    try {
-      this.audit.record({
-        sessionId,
-        tool: "settings_mcp_server_toggle",
-        risk: "DANGEROUS",
-        confirmation: "confirmed_admin_ui",
-        arguments: { server: draft.server, enabled: draft.enabled },
-        result: { ok: true },
-        phase: "verified",
-      });
-    } catch {
-      warning =
-        "MCP-stand is gewijzigd, maar de resultaatmelding kon niet worden geauditeerd.";
-    }
-    return {
-      ok: true as const,
-      server: draft.server,
-      enabled: draft.enabled,
+      server,
+      tool,
+      risk,
       ...(warning ? { warning } : {}),
     };
   }

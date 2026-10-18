@@ -9,7 +9,7 @@ import { ObjectivesStore } from "./objectives.store.js";
 
 /**
  * Standing objectives: ongoing goals NOVA keeps watching with read-only tools, without a model call for routine checks.
- * See docs/objectives.md.
+ * See docs/features.md#standing-objectives.
  */
 @Module({
   imports: [AgentModule, PlanningModule, ToolsModule],

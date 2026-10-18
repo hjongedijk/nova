@@ -9,6 +9,7 @@ import type {
 import {
   messageOf,
   validMemoryId,
+  type CorrectionOptions,
   type MemoryWriteOutcome,
   type SemanticBackend,
 } from "./backend.js";
@@ -586,7 +587,11 @@ export class QdrantMemory implements SemanticBackend {
   }
 
   /** Replace a record's text with supersede semantics: the old text stays as history. */
-  async correct(id: string, text: unknown): Promise<MemoryWriteOutcome> {
+  async correct(
+    id: string,
+    text: unknown,
+    options: CorrectionOptions = {},
+  ): Promise<MemoryWriteOutcome> {
     if (!validMemoryId(id)) throw new Error("Invalid memory ID");
     if (!this.beginMutation())
       return { ok: false, error: "Memory index is rebuilding; retry shortly" };
@@ -597,11 +602,12 @@ export class QdrantMemory implements SemanticBackend {
         return { ok: false, error: "Memory not found" };
       const candidate = memoryCandidate(text, {
         explicit: true,
+        ...(options.origin ? { origin: options.origin } : {}),
         type: old.type,
         related_entity: old.related_entity,
         related_area: old.related_area,
         related_device: old.related_device,
-        tags: old.tags,
+        tags: [...(old.tags ?? []), ...(options.tags ?? [])],
         importance: old.importance,
         kind: old.kind === "assumption" ? "fact" : old.kind,
       });

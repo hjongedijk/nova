@@ -8,14 +8,11 @@ import {
   Req,
   Res,
   ServiceUnavailableException,
-  UseGuards,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { AppAccessService } from "../access/access.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { NodeRedEditorAccess } from "./node-red-editor-access.service.js";
 import { NodeRedEditorProxy } from "./node-red-editor-proxy.service.js";
-import { SettingsGuard } from "./settings.guard.js";
 
 function emptyBody(body: unknown): void {
   if (
@@ -52,13 +49,11 @@ export class NodeRedEditorController {
   constructor(
     private readonly editorAccess: NodeRedEditorAccess,
     private readonly proxy: NodeRedEditorProxy,
-    private readonly appAccess: AppAccessService,
   ) {}
 
-  /** A fresh editor capability needs the settings screen's normal admin checks. */
+  /** A fresh editor capability is issued to the same-origin settings screen. */
   @Post("session")
   @HttpCode(200)
-  @UseGuards(SettingsGuard)
   async open(
     @Body() body: unknown,
     @Req() request: Request,
@@ -66,13 +61,6 @@ export class NodeRedEditorController {
   ) {
     response.setHeader("Cache-Control", "no-store");
     emptyBody(body);
-    if (
-      !this.appAccess.privacyProtected ||
-      !this.appAccess.isAuthorized(request)
-    )
-      throw new ForbiddenException(
-        "Node-RED-editor vereist beveiligde NOVA-toegang.",
-      );
     if (!sameOrigin(request))
       throw new ForbiddenException("Ongeldige oorsprong voor Node-RED-editor.");
     let upstreamAuth: boolean;

@@ -67,3 +67,53 @@ describe("TtsService.speakProfile", () => {
     expect(calls[1]?.[1]).toBe("jarvis-en-GB-piper");
   });
 });
+
+describe("phone calls use the Settings voice", () => {
+  it("synthesizes with the saved Maarten voice and prosody, not the server default", async () => {
+    const { store: s } = store();
+    s.set({ voice: "nl-NL-MaartenNeural", rate: 2, pitch: 1 });
+    const service = new TtsService(s);
+    const voices: string[] = [];
+    service.engine = async (_text, voice) => {
+      voices.push(voice);
+      return Buffer.from("mp3");
+    };
+    const phone = await service.speakProfile("Er staat iemand aan de deur");
+    const web = await service.speak(
+      "Er staat iemand aan de deur",
+      "nl-NL-MaartenNeural",
+      { rate: 2, pitch: 1 },
+    );
+    expect(voices).toEqual(["nl-NL-MaartenNeural"]);
+    expect(phone.cached || web.cached).toBe(true);
+  });
+  it("keeps the Piper voice chosen in Settings instead of dropping it", () => {
+    expect(store().store.set({ voice: "jarvis-en-GB-piper" }).voice).toBe(
+      "jarvis-en-GB-piper",
+    );
+  });
+  it("injects the saved profile into the TtsService that telephony uses", async () => {
+    const { Test } = await import("@nestjs/testing");
+    const { TtsModule } = await import("../../src/tts/tts.module.js");
+    const { NovaConfig } = await import("../../src/core/config/nova-config.js");
+    const { dir } = store();
+    const module = await Test.createTestingModule({ imports: [TtsModule] })
+      .useMocker((token) =>
+        token === NovaConfig
+          ? { dataFile: (name: string) => path.join(dir, name) }
+          : undefined,
+      )
+      .compile();
+    module
+      .get(VoiceProfileStore)
+      .set({ voice: "nl-NL-MaartenNeural", rate: 0, pitch: 0 });
+    const tts = module.get(TtsService);
+    const voices: string[] = [];
+    tts.engine = async (_text, voice) => {
+      voices.push(voice);
+      return Buffer.from("mp3");
+    };
+    await tts.speakProfile("Hallo");
+    expect(voices).toEqual(["nl-NL-MaartenNeural"]);
+  });
+});

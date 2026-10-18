@@ -30,6 +30,69 @@ async function agent(
 }
 
 describe("Windows tools", () => {
+  it("shows the independent Windows app version while retaining legacy protocol fallback", async () => {
+    const current = await agent("agent-token", (_seen, send) =>
+      send(200, { ok: true, agent: "2026-10-18.3", appVersion: "0.1.0" }),
+    );
+    expect((await current.pc.settingsStatus()).version).toBe("0.1.0");
+    const legacy = await agent("agent-token", (_seen, send) =>
+      send(200, { ok: true, agent: "2026-10-18.3" }),
+    );
+    expect((await legacy.pc.settingsStatus()).version).toBe("2026-10-18.3");
+    const malformed = await agent("agent-token", (_seen, send) =>
+      send(200, {
+        ok: true,
+        agent: "2026-10-18.3",
+        appVersion: "private-host.local/secret",
+      }),
+    );
+    const status = await malformed.pc.settingsStatus();
+    expect(status.version).toBe("2026-10-18.3");
+    expect(JSON.stringify(status)).not.toContain("private-host.local");
+  });
+
+  it("projects only known local permissions and elevation into settings status", async () => {
+    const { pc } = await agent("agent-token", (_seen, send) =>
+      send(200, {
+        ok: true,
+        agent: "0.1.74",
+        permissions: {
+          view: true,
+          control: false,
+          browser: true,
+          token: "private-value",
+        },
+        elevated: true,
+        runElevated: true,
+      }),
+    );
+    const status = await pc.settingsStatus();
+    expect(status).toMatchObject({
+      available: true,
+      permissions: { view: true, control: false, browser: true },
+      elevated: true,
+      runElevated: true,
+    });
+    expect(JSON.stringify(status)).not.toContain("private-value");
+  });
+
+  it("omits malformed permission and elevation fields from older agent replies", async () => {
+    const { pc } = await agent("agent-token", (_seen, send) =>
+      send(200, {
+        ok: true,
+        agent: "0.1.73",
+        permissions: { view: "yes" },
+        elevated: "yes",
+        runElevated: 1,
+      }),
+    );
+    const status = await pc.settingsStatus();
+    expect(status.available).toBe(true);
+    expect(status).not.toHaveProperty("permissions");
+    expect(status).not.toHaveProperty("elevated");
+    expect(status).not.toHaveProperty("runElevated");
+  });
+
   it("explains an unimplemented native route without exposing upstream details", async () => {
     const { pc } = await agent("agent-token", (_seen, send) =>
       send(501, { ok: false, error: "private-native-diagnostic" }),

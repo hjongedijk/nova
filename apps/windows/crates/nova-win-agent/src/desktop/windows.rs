@@ -108,52 +108,6 @@ pub(super) fn native_windows() -> Outcome {
         .map_err(|_| error("Vensters konden niet worden gelezen"))?;
     Ok(json!({"ok":true,"windows":list.items}))
 }
-fn denied(window: &Value) -> bool {
-    let text = format!(
-        "{} {}",
-        window["title"].as_str().unwrap_or(""),
-        window["process"].as_str().unwrap_or("")
-    )
-    .to_lowercase();
-    [
-        "keepass",
-        "bitwarden",
-        "1password",
-        "lastpass",
-        "dashlane",
-        "enpass",
-        "proton pass",
-        "nordpass",
-        "wachtwoord",
-        "password",
-        "passkey",
-        "credential",
-        "windows security",
-        "windows-beveiliging",
-        "user account control",
-        "consent",
-        "logonui",
-        "aanmelden bij windows",
-        "bank",
-        "rabobank",
-        "abn amro",
-        "bunq",
-        "inloggen",
-        "sign in",
-    ]
-    .iter()
-    .any(|term| text.contains(term))
-}
-pub(super) fn protected_foreground() -> Result<(), (u16, String)> {
-    let windows = native_windows()?;
-    if windows["windows"]
-        .as_array()
-        .is_some_and(|list| list.iter().any(|w| w["foreground"] == true && denied(w)))
-    {
-        return Err((403, "Het actieve venster is beschermd".into()));
-    }
-    Ok(())
-}
 // RAII always restores the selected GDI object before releasing its bitmap/DC.
 struct Capture {
     source: HDC,
@@ -182,24 +136,6 @@ impl Drop for Capture {
 pub(super) fn capture(index: u32, max_width: u32) -> Outcome {
     let _dpi = Dpi::enter();
     let d = screen(index)?;
-    let list = native_windows()?;
-    if list["windows"].as_array().is_some_and(|windows| {
-        windows.iter().any(|window| {
-            if window["minimized"] == true || !denied(window) {
-                return false;
-            }
-            let x = window["x"].as_i64().unwrap_or(0);
-            let y = window["y"].as_i64().unwrap_or(0);
-            let w = window["width"].as_i64().unwrap_or(0);
-            let h = window["height"].as_i64().unwrap_or(0);
-            x < i64::from(d.x) + i64::from(d.width)
-                && y < i64::from(d.y) + i64::from(d.height)
-                && x + w > i64::from(d.x)
-                && y + h > i64::from(d.y)
-        })
-    }) {
-        return Err((403, "Een beschermd venster is zichtbaar op dit beeldscherm".into()));
-    }
     if d.width <= 0 || d.height <= 0 {
         return Err(error("Ongeldig beeldscherm"));
     }
@@ -459,16 +395,13 @@ pub(super) fn native_input(input: &Input, body: &Value, cancelled: &dyn Fn() -> 
         }
         Input::Focus(id) => {
             let list = native_windows()?;
-            let target = list["windows"]
+            list["windows"]
                 .as_array()
                 .and_then(|list| {
                     list.iter()
                         .find(|w| w["id"].as_str().and_then(|s| s.parse::<isize>().ok()) == Some(*id))
                 })
                 .ok_or_else(|| (404, "Venster bestaat niet meer".into()))?;
-            if denied(target) {
-                return Err((403, "Dit venster is beschermd".into()));
-            }
             let hwnd = HWND(*id as *mut _);
             check()?;
             unsafe {

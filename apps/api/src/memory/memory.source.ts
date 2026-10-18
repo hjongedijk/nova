@@ -72,7 +72,7 @@ export class MemorySource implements ToolSource {
       {
         name: "memory_remember",
         description:
-          "Store only durable facts the user explicitly asked NOVA to remember (for example ‘Onthoud dat…’). Include that request prefix in text. Use PERSON/PET/HABIT/PROJECT/PREFERENCE when appropriate; never save secrets/transient state. Duplicates are merged; a changed fact (same subject, new value) replaces the old one and the result message says what changed, so relay it. Only when you are guessing (user did not say it), set origin=inferred: it is saved as an unconfirmed assumption and never overrides what the user said.",
+          "Store durable facts: what the user explicitly asked NOVA to remember (for example ‘Onthoud dat…’; include that prefix in text), or a clear durable preference/fact the owner stated by themselves (then set origin=inferred). Use PERSON/PET/HABIT/PROJECT/PREFERENCE when appropriate; never save secrets/transient state. Duplicates are merged; a changed fact (same subject, new value) replaces the old one and the result message says what changed, so relay it. Only when you are guessing (user did not say it), set origin=inferred: it is saved as an unconfirmed assumption and never overrides what the user said.",
         parameters: schema(
           {
             text: { type: "string", minLength: 5, maxLength: 2000 },
@@ -112,7 +112,7 @@ export class MemorySource implements ToolSource {
       {
         name: "memory_forget",
         description:
-          "Delete exactly one semantic memory by ID. include_history=true also deletes the older versions that were replaced by it. Requires confirmation.",
+          "Delete exactly one semantic memory by ID. include_history=true also deletes the older versions that were replaced by it.",
         parameters: schema(
           { id: text(), include_history: { type: "boolean" } },
           ["id"],

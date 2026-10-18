@@ -1,5 +1,3 @@
-import type { PendingConfirmation } from "./chat.js";
-
 export interface NativeGatewayReport {
   available: boolean;
   error?: string;
@@ -25,12 +23,6 @@ export interface NativeGatewayReport {
   };
 }
 
-export interface NativeMemoryPrepared {
-  ok: boolean;
-  error?: string;
-  enabled?: boolean;
-  action?: PendingConfirmation;
-}
 export interface NativeMemoryResult {
   ok: boolean;
   error?: string;
@@ -60,14 +52,6 @@ export interface NativeMemoryRecords {
   next: number | null;
   error?: string;
 }
-export interface NativeMemoryRecordPrepared {
-  ok: boolean;
-  error?: string;
-  action?: PendingConfirmation;
-}
-export interface NativeMemoryRecordsDeletePrepared extends NativeMemoryRecordPrepared {
-  count?: number;
-}
 export interface NativeMemoryRecordResult {
   ok: boolean;
   error?: string;
@@ -82,19 +66,14 @@ export interface NativeSkillDocument {
   documentation?: string;
 }
 export type NativeSkillMode = "on" | "off" | "auto";
-export interface NativeSkillModePrepared {
-  ok: boolean;
-  error?: string;
-  name?: string;
-  scope?: "nova" | "global";
-  action?: PendingConfirmation;
-}
 export interface NativeSkillModeResult {
   ok: boolean;
   error?: string;
   verified?: boolean | null;
   mode?: NativeSkillMode;
   enabled?: boolean;
+  name?: string;
+  scope?: "nova" | "global";
   auditWarning?: string;
   historyWarning?: string;
 }
@@ -111,15 +90,10 @@ export interface NativeSkillModeHistory {
   truncated: boolean;
 }
 
-export interface NativeSkillRemovalPrepared {
-  ok: boolean;
-  error?: string;
-  name?: string;
-  action?: PendingConfirmation;
-}
 export interface NativeSkillRemovalResult {
   ok: boolean;
   error?: string;
+  name?: string;
   verified?: boolean | null;
   auditWarning?: string;
 }
@@ -128,12 +102,6 @@ export interface NativePromptReplacement {
   enabled: boolean;
   prefixPrompt: string;
   suffixPrompt: string;
-  acknowledgeGlobal: true;
-}
-export interface NativePromptPrepared {
-  ok: boolean;
-  error?: string;
-  action?: PendingConfirmation;
 }
 export interface NativePromptResult {
   ok: boolean;
@@ -144,8 +112,8 @@ export interface NativePromptResult {
 export interface NativePromptRevision {
   id: string;
   at: string;
-  before: Omit<NativePromptReplacement, "acknowledgeGlobal">;
-  after: Omit<NativePromptReplacement, "acknowledgeGlobal">;
+  before: NativePromptReplacement;
+  after: NativePromptReplacement;
 }
 export interface NativePromptHistory {
   revisions: NativePromptRevision[];
@@ -217,14 +185,6 @@ export interface OmniRouteTokenLimitsReport {
   limits: OmniRouteTokenLimit[];
   truncated: boolean;
 }
-export interface OmniRouteTokenLimitPrepared {
-  ok: boolean;
-  error?: string;
-  oldLimit?: number | null;
-  tokenLimit?: number;
-  resetInterval?: OmniRouteTokenResetInterval;
-  action?: PendingConfirmation;
-}
 export interface OmniRouteTokenLimitResult {
   ok: boolean;
   error?: string;
@@ -238,7 +198,6 @@ export interface OmniRouteKeyModelAccessOptions {
   accessMode: "restricted" | "all" | "unknown";
   allowedModels: string[];
   verifiedFreeModels: string[];
-  revision: string | null;
 }
 export interface OmniRouteKeyModelAccessHistory {
   revisions: {
@@ -255,19 +214,8 @@ export interface OmniRouteKeyModelAccessHistory {
   truncated: boolean;
 }
 
-export interface OmniRouteKeyModelAccessPrepared {
-  ok: true;
-  name: string;
-  modelCount: number;
-  warning?: string;
-  action: PendingConfirmation;
-}
-export type OmniRouteKeyModelAccessPrepareResult =
-  OmniRouteKeyModelAccessPrepared | { ok: false; error: string };
-
 export interface OmniRouteKeyModelAccessResult {
   ok: boolean;
-  cancelled?: boolean;
   verified?: boolean | null;
   routeReady?: boolean;
   allowedModels?: string[];
@@ -275,15 +223,6 @@ export interface OmniRouteKeyModelAccessResult {
   error?: string;
 }
 
-export interface OmniRouteKeyActivationPrepared {
-  ok: true;
-  name: string;
-  currentEnabled: boolean;
-  enabled: boolean;
-  action: PendingConfirmation;
-}
-export type OmniRouteKeyActivationPrepareResult =
-  OmniRouteKeyActivationPrepared | { ok: false; error: string };
 export interface OmniRouteKeyActivationResult {
   ok: boolean;
   verified?: boolean | null;
@@ -325,19 +264,6 @@ export interface OmniRouteUsageReport {
   }[];
 }
 
-export interface OmniRouteAccountRemovalPrepared {
-  ok: boolean;
-  error?: string;
-  name?: string;
-  action?: PendingConfirmation;
-}
-export interface OmniRouteAccountCreatePrepared {
-  ok: boolean;
-  error?: string;
-  provider?: string;
-  name?: string;
-  action?: PendingConfirmation;
-}
 export interface OmniRouteAccountCreateResult {
   ok: boolean;
   error?: string;
@@ -349,14 +275,6 @@ export interface OmniRouteAccountCreateResult {
   routeReady?: boolean;
   auditWarning?: string;
 }
-export interface OmniRouteAccountKeyUpdatePrepared {
-  ok: boolean;
-  error?: string;
-  id?: string;
-  provider?: string;
-  name?: string;
-  action?: PendingConfirmation;
-}
 export interface OmniRouteAccountKeyUpdateResult {
   ok: boolean;
   error?: string;
@@ -364,15 +282,6 @@ export interface OmniRouteAccountKeyUpdateResult {
   id?: string;
   routeReady?: boolean;
   auditWarning?: string;
-}
-export interface OmniRouteAccountRenamePrepared {
-  ok: boolean;
-  error?: string;
-  id?: string;
-  provider?: string;
-  oldName?: string;
-  newName?: string;
-  action?: PendingConfirmation;
 }
 export interface OmniRouteAccountRenameHistoryEntry {
   id: string;
@@ -404,23 +313,6 @@ export interface OmniRouteAccountRemovalResult {
   auditWarning?: string;
 }
 
-export interface OmniRouteComboActivationPrepared {
-  ok: boolean;
-  error?: string;
-  name?: string;
-  currentEnabled?: boolean;
-  enabled?: boolean;
-  action?: PendingConfirmation;
-}
-
-export type OmniRouteComboCreatePrepared =
-  | {
-      ok: true;
-      name: string;
-      models: string[];
-      action: PendingConfirmation;
-    }
-  | { ok: false; error: string };
 export interface OmniRouteComboCreateResult {
   ok: boolean;
   error?: string;
@@ -430,25 +322,12 @@ export interface OmniRouteComboCreateResult {
   routeReady?: boolean;
   auditWarning?: string;
 }
-export interface OmniRouteComboRemovalPrepared {
-  ok: boolean;
-  error?: string;
-  name?: string;
-  action?: PendingConfirmation;
-}
 export interface OmniRouteComboRemovalResult {
   ok: boolean;
   error?: string;
   verified?: boolean | null;
   routeReady?: boolean;
   auditWarning?: string;
-}
-export interface OmniRouteComboUpdatePrepared {
-  ok: boolean;
-  error?: string;
-  name?: string;
-  models?: string[];
-  action?: PendingConfirmation;
 }
 export interface OmniRouteComboUpdateHistoryEntry {
   id: string;
@@ -481,14 +360,6 @@ export interface OmniRouteComboActivationResult {
   historyWarning?: string;
 }
 
-export interface OmniRouteAccountActivationPrepared {
-  ok: boolean;
-  error?: string;
-  name?: string;
-  currentEnabled?: boolean;
-  enabled?: boolean;
-  action?: PendingConfirmation;
-}
 export interface OmniRouteAccountActivationResult {
   ok: boolean;
   error?: string;
@@ -510,7 +381,6 @@ export interface OmniRouteActivationHistoryEntry {
 }
 
 export interface FreePolicyOptions {
-  inventoryToken?: string;
   available: boolean;
   error?: string;
   accounts: { id: string; provider: string; name: string }[];
@@ -524,22 +394,11 @@ export interface FreePolicyOptions {
   verified: false;
 }
 export interface FreePolicySelection {
-  inventoryToken: string;
   selection: {
     connectionId: string;
     modelId: string;
     officialSource: string;
   }[];
-  acknowledgeBillingDisabled: true;
-  acknowledgeHardStop: true;
-  acknowledgeTerms: true;
-  acknowledgeAllClients: true;
-  acknowledgeQuotaRefresh: true;
-}
-export interface FreePolicyPrepared {
-  ok: boolean;
-  error?: string;
-  action?: PendingConfirmation;
 }
 export interface FreePolicyResult {
   ok: boolean;

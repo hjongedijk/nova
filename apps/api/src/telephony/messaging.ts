@@ -191,7 +191,6 @@ export class TelephonyMessaging {
         message: text.slice(0, MAX_IN),
         inputMode: "text",
         responseLanguage: lang,
-        readOnlyOnly: true,
         signal: AbortSignal.timeout(40_000),
       });
       if (!result.unavailable) {

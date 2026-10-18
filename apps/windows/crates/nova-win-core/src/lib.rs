@@ -5,6 +5,7 @@ pub mod args;
 pub mod autostart;
 pub mod config;
 pub mod desktop;
+pub mod forward;
 pub mod geometry;
 pub mod mode;
 pub mod nav;

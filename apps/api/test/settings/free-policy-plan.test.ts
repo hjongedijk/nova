@@ -31,11 +31,6 @@ const selection = () => ({
 });
 const input = () => ({
   selection: [selection()],
-  acknowledgeBillingDisabled: true,
-  acknowledgeHardStop: true,
-  acknowledgeTerms: true,
-  acknowledgeAllClients: true,
-  acknowledgeQuotaRefresh: true,
 });
 const build = (
   value: unknown = input(),
@@ -116,7 +111,7 @@ describe("operator-attested free policy plan", () => {
     expect(result.nativeModelAllowlist).not.toBe(result.enabledModels);
   });
 
-  it("allows several exact models on the same account and explicitly acknowledged caution", () => {
+  it("allows several exact models on the same account and caution terms", () => {
     const another = { ...model, modelId: "other", tos: "caution" };
     const value = input();
     value.selection.push({ ...selection(), modelId: "other" });
@@ -139,15 +134,8 @@ describe("operator-attested free policy plan", () => {
     { ...input(), selection: [] },
     { ...input(), selection: {} },
   ])("rejects invalid overall input: %j", (value) => rejected(value));
-  it.each([
-    "acknowledgeBillingDisabled",
-    "acknowledgeHardStop",
-    "acknowledgeTerms",
-    "acknowledgeAllClients",
-    "acknowledgeQuotaRefresh",
-  ])("requires explicit true for %s", (field) => {
-    for (const value of [false, undefined, "true", 1])
-      rejected({ ...input(), [field]: value });
+  it("rejects the removed acknowledgement fields", () => {
+    rejected({ ...input(), acknowledgeBillingDisabled: true });
   });
   it("rejects more than twenty selections before constructing a plan", () =>
     rejected({ ...input(), selection: Array.from({ length: 21 }, selection) }));

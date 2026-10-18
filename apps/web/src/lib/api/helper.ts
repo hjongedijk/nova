@@ -56,7 +56,7 @@ export function requestHelperSize(
   return running;
 }
 
-/** The displays the helper can appear on (no PIN needed; the page only moves NOVA's own helper window). */
+/** The displays the helper can appear on (the page only moves NOVA's own helper window). */
 export const getHelperDisplays = () =>
   getJson<HelperDisplays>("/settings/helper/displays");
 

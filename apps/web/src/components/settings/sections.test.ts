@@ -10,8 +10,8 @@ import {
 } from "./sections.ts";
 
 describe("settings structure", () => {
-  it("has at most six everyday pages and one set-apart expert page", () => {
-    expect(MAIN_PAGES.length).toBeLessThanOrEqual(6);
+  it("has one Windows service page and one set-apart expert page", () => {
+    expect(MAIN_PAGES.filter((page) => page.id === "windows")).toHaveLength(1);
     expect(PAGES.at(-1)?.id).toBe("geavanceerd");
     expect(MAIN_PAGES.map((page) => page.id)).not.toContain("geavanceerd");
   });
@@ -30,7 +30,13 @@ describe("old links", () => {
     ["general", "", "gesprek", "snelle-opdrachten"],
     ["models", "", "modellen", null],
     ["connections", "", "huis", "home-assistant"],
-    ["devices", "", "huis", "pc"],
+    ["devices", "", "windows", "pc"],
+    ["desktop", "", "windows", "pc-bedienen"],
+    ["windowsagent", "", "windows", "windows-agent"],
+    ["geavanceerd", "#windows-agent", "windows", "windows-agent"],
+    ["huis", "#pc-bedienen", "windows", "pc-bedienen"],
+    ["automation", "", "huis", "connection-node-red"],
+    ["geavanceerd", "#koppelingen", "huis", "koppelingen"],
     ["safety", "", "zelf", "toestemmingen"],
     ["objectives", "", "zelf", "doelen"],
     ["documents", "", "geheugen", "documenten"],
@@ -40,7 +46,7 @@ describe("old links", () => {
     [
       "models",
       "#model-role-history-title",
-      "geavanceerd",
+      "modellen",
       "model-role-history-title",
     ],
     ["personality", "#persona-history", "gesprek", "persona-history"],
@@ -62,7 +68,7 @@ describe("search", () => {
   it("finds expert items and links to the expert page", () => {
     const [first] = searchSettings("mcp");
     expect(first?.id).toBe("services");
-    expect(topicHref(first!)).toBe("/settings?section=geavanceerd#services");
+    expect(topicHref(first!)).toBe("/settings?section=huis#services");
   });
 
   it("finds everyday items by plain words", () => {

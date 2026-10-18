@@ -1,14 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  OmniRouteKeyActivationPrepareResult,
-  OmniRouteKeyActivationResult,
-} from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
+import type { OmniRouteKeyActivationResult } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { claimConfirmation } from "./confirmation-step.js";
+import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
@@ -38,7 +34,6 @@ export class OmniRouteKeyActivation {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
@@ -102,86 +97,13 @@ export class OmniRouteKeyActivation {
       active: raw.isActive,
     };
   }
-  async prepare(
+  async apply(
     id: string,
     enabled: unknown,
-    acknowledgeGlobalEffect: unknown,
     expectedRevision?: string,
-  ): Promise<OmniRouteKeyActivationPrepareResult> {
-    if (
-      !safeId(id) ||
-      typeof enabled !== "boolean" ||
-      acknowledgeGlobalEffect !== true
-    )
-      throw new Error(
-        "Kies een status en bevestig dat deze sleutel voor alle OmniRoute-clients geldt.",
-      );
-    try {
-      const route = this.routing.verifyForManagement();
-      if (!route.freeOnly) throw new Error(fail);
-      const current = await this.current(id);
-      if (expectedRevision && digest(current.row) !== expectedRevision)
-        return {
-          ok: false,
-          error:
-            "De sleutel is intussen gewijzigd. Laad de geschiedenis opnieuw.",
-        };
-      if (current.active === enabled)
-        return { ok: false, error: "Deze sleutel heeft die status al." };
-      const revision = digest(current.row);
-      const args = { id, enabled, revision };
-      this.audit.record({
-        sessionId: "settings",
-        tool: "omniroute_key_activation",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: args,
-      });
-      return {
-        ok: true,
-        name: current.name,
-        currentEnabled: current.active,
-        enabled,
-        action: this.confirmations.create(
-          `settings-key-activation:${crypto.randomUUID()}`,
-          "omniroute_key_activation",
-          args,
-          "DANGEROUS",
-          revision,
-          false,
-        ),
-      };
-    } catch {
-      return { ok: false, error: fail };
-    }
-  }
-  async confirm(
-    id: string,
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
   ): Promise<OmniRouteKeyActivationResult> {
-    if (
-      !safeId(id) ||
-      !/^settings-key-activation:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new Error("Ongeldige bevestiging.");
-    const claimed = claimConfirmation(
-      this.confirmations,
-      sessionId,
-      confirmationId,
-      approve,
-      {
-        tool: "omniroute_key_activation",
-        arg: { name: "id", value: id },
-        stale:
-          "Deze bevestiging staat niet meer open. Kies de sleutel opnieuw.",
-        expired: "Bevestiging verlopen. Kies de sleutel opnieuw.",
-      },
-    );
-    if ("reply" in claimed) return claimed.reply;
-    const action = claimed.action;
+    if (!safeId(id) || typeof enabled !== "boolean")
+      throw new ValidationError(["Kies een geldige status voor de sleutel."]);
     if (this.inFlight.has(id))
       return { ok: false, error: "Deze sleutel wordt al gewijzigd." };
     this.inFlight.add(id);
@@ -196,33 +118,26 @@ export class OmniRouteKeyActivation {
           )
             return { ok: false, error: fail };
           before = await this.current(id);
-          if (
-            digest(before.row) !== action.args.revision ||
-            typeof action.args.enabled !== "boolean" ||
-            before.active === action.args.enabled
-          )
+          if (expectedRevision && digest(before.row) !== expectedRevision)
             return {
               ok: false,
               error:
-                "De sleutel is ondertussen gewijzigd. Kies de wijziging opnieuw.",
+                "De sleutel is intussen gewijzigd. Laad de geschiedenis opnieuw.",
             };
+          if (before.active === enabled)
+            return { ok: false, error: "Deze sleutel heeft die status al." };
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool: "omniroute_key_activation",
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "before_execute",
-            arguments: {
-              id,
-              enabled: action.args.enabled,
-              revision: action.args.revision,
-            },
+            arguments: { id, enabled },
           });
           operation.block("policy_change");
         } catch {
           return { ok: false, error: fail };
         }
-        const enabled = action.args.enabled as boolean;
         let after: Awaited<ReturnType<OmniRouteKeyActivation["current"]>>;
         try {
           await this.management.request(`/api/keys/${id}`, {
@@ -277,9 +192,9 @@ export class OmniRouteKeyActivation {
         try {
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool: "omniroute_key_activation",
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "after_execute",
             arguments: { id, enabled },
             result: { ok: true },

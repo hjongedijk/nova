@@ -60,7 +60,7 @@ export const ABILITIES: AbilityDefinition[] = [
     id: "servers",
     name: "Servers en netwerk",
     description:
-      "Proxmox en je virtuele machines, opslag, bereikbaarheid en meldingen. Starten en stoppen vraagt altijd eerst bevestiging.",
+      "Proxmox en je virtuele machines, opslag, bereikbaarheid en meldingen.",
     example: "Welke virtuele machines draaien er?",
     changes: true,
     match: /^(?:proxmox_|termix_|pangolin_|network_check$|alerts_list$)/,

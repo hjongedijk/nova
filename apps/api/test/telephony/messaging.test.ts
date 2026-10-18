@@ -135,21 +135,6 @@ describe("answering text messages", () => {
     expect(runs).toHaveLength(0);
   });
 
-  it("answers an allowed contact through the chat pipeline with read-only tools and returns the target address", async () => {
-    const b = boot();
-    const out = await msg(b);
-    expect(out).toBe(
-      "sip:hjongedijk@sip.linphone.org|Het is 14 graden en bewolkt.",
-    );
-    expect(runs[0]).toMatchObject({
-      message: "Wat is het weer?",
-      inputMode: "text",
-      readOnlyOnly: true,
-      responseLanguage: "nl",
-    });
-    expect(String(runs[0]!.sessionId)).toBe("sipchat_harm");
-  });
-
   it("stays silent for unknown senders, contacts without permission, and non-text messages", async () => {
     const b = boot();
     expect(await msg(b, { from: "sip:stranger@sip.linphone.org" })).toBe("");

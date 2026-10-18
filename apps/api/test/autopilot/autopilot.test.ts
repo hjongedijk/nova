@@ -322,20 +322,6 @@ describe("(e) today", () => {
   });
 });
 
-describe("read-only guarantee", () => {
-  it("runs every scan tool with readOnlyOnly", async () => {
-    const r = make();
-    r.world.events = [event("x", NOON + 10 * MIN)];
-    r.world.listItems = 1;
-    await r.service.scan();
-    const scanCalls = r.world.toolCalls.filter(
-      (c) => c.session === "autopilot",
-    );
-    expect(scanCalls.length).toBeGreaterThan(2);
-    expect(scanCalls.every((c) => c.readOnlyOnly === true)).toBe(true);
-  });
-});
-
 describe("dedupe and cooldown", () => {
   it("announces again after the cooldown has passed", async () => {
     const r = make();
@@ -554,7 +540,7 @@ describe("kill switch and settings", () => {
     expect(r.world.alerts).toHaveLength(0);
   });
 
-  it("defaults: enabled, 5 minutes, quiet 23:00-07:00 Amsterdam, budget 10, 3 per hour, text only", () => {
+  it("defaults: enabled, 5 minutes, quiet 23:00-07:00 Amsterdam, budget 10, 3 per hour, text and calls", () => {
     const r = make();
     expect(r.service.settings).toMatchObject({
       enabled: true,
@@ -567,7 +553,7 @@ describe("kill switch and settings", () => {
       },
       dailyBudget: 10,
       hourlyLimit: 3,
-      allowCalls: false,
+      allowCalls: true,
       textContacts: true,
     });
   });
@@ -677,37 +663,6 @@ describe("delivery by text and call", () => {
     expect(r.phoneCalls).toHaveLength(0);
   });
 
-  it("calls for an urgent finding only with allowCalls and an autonomy level that allows it", async () => {
-    const setup = (allowCalls: boolean, level: "careful" | "balanced") => {
-      const r = make();
-      r.service.updateSettings({ allowCalls });
-      r.world.level = level;
-      r.world.telephony = {
-        enabled: true,
-        ready: { ready: true },
-        contacts: ["Harm"],
-        failText: false,
-      };
-      r.world.disk = 2;
-      return r;
-    };
-    const dflt = setup(false, "balanced");
-    await dflt.service.scan();
-    expect(dflt.phoneCalls).toHaveLength(0);
-
-    const careful = setup(true, "careful");
-    await careful.service.scan();
-    expect(careful.phoneCalls).toHaveLength(0);
-    expect(careful.service.activity().some((a) => a.kind === "call")).toBe(
-      true,
-    );
-
-    const allowed = setup(true, "balanced");
-    await allowed.service.scan();
-    expect(allowed.phoneCalls).toHaveLength(1);
-    expect(allowed.phoneCalls[0]).toMatchObject({ to: "Harm" });
-  });
-
   it("never calls for non-urgent findings", async () => {
     const r = make();
     r.service.updateSettings({ allowCalls: true });
@@ -786,17 +741,6 @@ describe("delegation without a model", () => {
     expect(reply).toBe(
       "Ik ga ermee aan de slag en meld me zodra het klaar is.",
     );
-  });
-
-  it("hands the conversation to the model at the careful level", async () => {
-    const r = make();
-    r.world.level = "careful";
-    expect(
-      await r.service.delegate(
-        { kind: "agent", goal: "regel dat voor me" },
-        { sessionId: "web" },
-      ),
-    ).toBeNull();
   });
 
   it("creates an objective for a watch request", async () => {

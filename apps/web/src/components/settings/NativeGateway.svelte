@@ -1,148 +1,74 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import NativePromptEditor from "./NativePromptEditor.svelte";
   import type {
     NativeGatewayReport,
-    NativeMemoryPrepared,
     NativeMemoryHistory,
     NativeMemoryRecords,
-    NativeMemoryRecordPrepared,
-    NativeMemoryRecordsDeletePrepared,
     NativeSkillDocument,
     NativeSkillMode,
     NativeSkillModeHistory,
-    NativeSkillModePrepared,
-    NativeSkillRemovalPrepared,
   } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
   import {
     getNativeGateway,
     getNativeSkillDocument,
-    prepareNativeSkillMode,
-    confirmNativeSkillMode,
+    setNativeSkillMode,
     getNativeSkillModeHistory,
-    prepareNativeSkillModeRollback,
-    prepareNativeSkillRemoval,
-    confirmNativeSkillRemoval,
-    prepareNativeMemory,
-    confirmNativeMemory,
+    rollbackNativeSkillMode,
+    removeNativeSkill,
+    setNativeMemory,
     getNativeMemoryHistory,
     getNativeMemoryRecords,
-    prepareNativeMemoryRollback,
-    prepareNativeMemoryRecordDelete,
-    prepareNativeMemoryRecordsDelete,
-    prepareNativeMemoryRecordUpdate,
-    confirmNativeMemoryRecordDelete,
-    confirmNativeMemoryRecordsDelete,
-    confirmNativeMemoryRecordUpdate,
+    rollbackNativeMemory,
+    deleteNativeMemoryRecord,
+    deleteNativeMemoryRecords,
+    updateNativeMemoryRecord,
   } from "#lib/api/settings.ts";
   let report = $state<NativeGatewayReport | null>(null);
   let document = $state<NativeSkillDocument | null>(null);
   let busy = $state(false);
   let error = $state("");
   let notice = $state("");
-  let globalAcknowledged = $state<Record<string, boolean>>({});
   let modeHistories = $state<Record<string, NativeSkillModeHistory>>({});
-  let pending = $state<
-    (NativeSkillModePrepared & { id: string; mode: NativeSkillMode }) | null
-  >(null);
-  let pendingRemoval = $state<
-    (NativeSkillRemovalPrepared & { id: string }) | null
-  >(null);
-  let pendingMemory = $state<
-    (NativeMemoryPrepared & { enabled: boolean }) | null
-  >(null);
-  let memoryAcknowledged = $state(false);
   let memoryHistory = $state<NativeMemoryHistory | null>(null);
   let memoryRecords = $state<NativeMemoryRecords | null>(null);
-  let pendingMemoryDelete = $state<NativeMemoryRecordPrepared | null>(null);
-  let pendingMemoryBulkDelete =
-    $state<NativeMemoryRecordsDeletePrepared | null>(null);
   let selectedMemoryIds = $state<string[]>([]);
-  let pendingMemoryEdit = $state<NativeMemoryRecordPrepared | null>(null);
   let editingMemoryId = $state<string | null>(null);
   let editingMemoryContent = $state("");
-  let expired = $state(false);
-  let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   const modeName = (mode: NativeSkillMode) =>
     ({ on: "Aan", off: "Uit", auto: "Automatisch" })[mode];
-  async function prepare(
+  async function applyMode(
     id: string,
     mode: NativeSkillMode,
-    scope: "nova" | "global",
     rollbackRevisionId?: string,
   ) {
     busy = true;
     error = "";
     notice = "";
     try {
-      const acknowledged =
-        scope === "global" && globalAcknowledged[id] === true;
       const result = rollbackRevisionId
-        ? await prepareNativeSkillModeRollback(
-            id,
-            rollbackRevisionId,
-            acknowledged,
-          )
-        : await prepareNativeSkillMode(id, mode, acknowledged);
-      if (!result.ok || !result.action) {
-        error = result.error || "Wijziging kon niet worden voorbereid.";
+        ? await rollbackNativeSkillMode(id, rollbackRevisionId)
+        : await setNativeSkillMode(id, mode);
+      if (!result.ok || result.verified !== true) {
+        error = result.error || "Wijziging kon niet worden gecontroleerd.";
         return;
       }
-      pending = { ...result, id, mode };
-      if (scope === "global") globalAcknowledged[id] = false;
-      expired = false;
-      clearTimeout(expiryTimer);
-      expiryTimer = setTimeout(
-        () => {
-          expired = true;
-        },
-        Math.max(0, result.action.expiresAt - Date.now()),
-      );
+      const skill = report?.skills.find((item) => item.id === id);
+      if (skill && result.mode && typeof result.enabled === "boolean") {
+        skill.mode = result.mode;
+        skill.enabled = result.enabled;
+      }
+      // Keep history on-demand. Refresh it after a change only when the
+      // user has already opened this skill's history panel.
+      if (modeHistories[id]) {
+        const history = await getNativeSkillModeHistory(id).catch(() => null);
+        if (history) modeHistories[id] = history;
+      }
+      notice = `Modus opgeslagen en gecontroleerd. De gateway kan maximaal één minuut achterlopen.${result.auditWarning ? ` ${result.auditWarning}` : ""}${result.historyWarning ? ` ${result.historyWarning}` : ""}`;
     } catch {
       error =
-        "Wijziging kon niet worden voorbereid. Controleer je PIN en de koppeling.";
+        "Wijziging kon niet worden afgerond. Controleer de status voordat je opnieuw wijzigt.";
     } finally {
-      busy = false;
-    }
-  }
-  async function confirm(approve: boolean) {
-    const current = pending;
-    if (!current?.action) return;
-    busy = true;
-    error = "";
-    try {
-      const result = await confirmNativeSkillMode(
-        current.id,
-        current.action.sessionId,
-        current.action.confirmationId,
-        approve,
-      );
-      if (!result.ok)
-        error = result.error || "Wijziging kon niet worden gecontroleerd.";
-      else if (approve && result.verified === true) {
-        const skill = report?.skills.find((item) => item.id === current.id);
-        if (skill && result.mode && typeof result.enabled === "boolean") {
-          skill.mode = result.mode;
-          skill.enabled = result.enabled;
-        }
-        if (current.scope === "global") globalAcknowledged[current.id] = false;
-        // Keep history on-demand. Refresh it after a change only when the
-        // user has already opened this skill's history panel.
-        if (modeHistories[current.id]) {
-          const history = await getNativeSkillModeHistory(current.id).catch(
-            () => null,
-          );
-          if (history) modeHistories[current.id] = history;
-        }
-        notice = `Modus opgeslagen en gecontroleerd. De gateway kan maximaal één minuut achterlopen.${result.auditWarning ? ` ${result.auditWarning}` : ""}${result.historyWarning ? ` ${result.historyWarning}` : ""}`;
-      } else notice = "Wijziging geannuleerd.";
-    } catch {
-      error =
-        "Bevestiging kon niet worden afgerond. Controleer de status voordat je opnieuw wijzigt.";
-    } finally {
-      pending = null;
-      clearTimeout(expiryTimer);
       busy = false;
     }
   }
@@ -157,117 +83,43 @@
       busy = false;
     }
   }
-  async function prepareRemoval(id: string) {
+  async function removeSkill(id: string) {
     busy = true;
     error = "";
     notice = "";
     try {
-      const result = await prepareNativeSkillRemoval(id);
-      if (!result.ok || !result.action) {
-        error = result.error || "Verwijderen kon niet worden voorbereid.";
+      const result = await removeNativeSkill(id);
+      if (!result.ok || result.verified !== true) {
+        error = result.error || "Verwijderen kon niet worden gecontroleerd.";
         return;
       }
-      pendingRemoval = { ...result, id };
-    } catch {
-      error =
-        "Verwijderen kon niet worden voorbereid. Controleer je PIN en de koppeling.";
-    } finally {
-      busy = false;
-    }
-  }
-  async function confirmRemoval(approve: boolean) {
-    const current = pendingRemoval;
-    if (!current?.action) return;
-    busy = true;
-    error = "";
-    try {
-      const result = await confirmNativeSkillRemoval(
-        current.id,
-        current.action.sessionId,
-        current.action.confirmationId,
-        approve,
-      );
-      if (!result.ok || (approve && result.verified !== true))
-        error = result.error || "Verwijderen kon niet worden gecontroleerd.";
-      else {
-        if (approve && report)
-          report.skills = report.skills.filter(
-            (skill) => skill.id !== current.id,
-          );
-        notice = approve
-          ? `Skill verwijderd en gecontroleerd.${result.auditWarning ? ` ${result.auditWarning}` : ""}`
-          : "Verwijderen geannuleerd.";
-      }
+      if (report)
+        report.skills = report.skills.filter((skill) => skill.id !== id);
+      notice = `Skill verwijderd en gecontroleerd.${result.auditWarning ? ` ${result.auditWarning}` : ""}`;
     } catch {
       error =
         "Verwijderen kon niet worden afgerond. Laad het overzicht opnieuw.";
     } finally {
-      pendingRemoval = null;
       busy = false;
     }
   }
-  async function prepareMemory(enabled: boolean) {
+  async function applyMemory(enabled: boolean, rollbackId?: string) {
     busy = true;
     error = "";
     notice = "";
     try {
-      const result = await prepareNativeMemory(enabled, true);
-      if (!result.ok || !result.action) {
-        error = result.error || "Wijziging kon niet worden voorbereid.";
+      const result = rollbackId
+        ? await rollbackNativeMemory(rollbackId)
+        : await setNativeMemory(enabled);
+      if (!result.ok || !result.verified) {
+        error = result.error || "Wijziging kon niet worden gecontroleerd.";
         return;
       }
-      pendingMemory = { ...result, enabled };
-      memoryAcknowledged = false;
-    } catch {
-      error =
-        "Wijziging kon niet worden voorbereid. Controleer de PIN en OmniRoute.";
-    } finally {
-      busy = false;
-    }
-  }
-  async function confirmMemory(approve: boolean) {
-    const current = pendingMemory;
-    if (!current?.action) return;
-    busy = true;
-    error = "";
-    try {
-      const result = await confirmNativeMemory(
-        current.action.sessionId,
-        current.action.confirmationId,
-        approve,
-      );
-      if (!result.ok)
-        error = result.error || "Wijziging kon niet worden bevestigd.";
-      else if (approve && result.verified) {
-        if (report) report.memory.enabled = result.enabled ?? current.enabled;
-        memoryHistory = await getNativeMemoryHistory().catch(
-          () => memoryHistory,
-        );
-        notice = `Gateway-geheugen ${result.enabled ? "ingeschakeld" : "uitgeschakeld"} voor alle clients.${result.auditWarning ? ` ${result.auditWarning}` : ""}`;
-      } else notice = "Wijziging geannuleerd.";
+      if (report) report.memory.enabled = result.enabled ?? enabled;
+      memoryHistory = await getNativeMemoryHistory().catch(() => memoryHistory);
+      notice = `Gateway-geheugen ${result.enabled ? "ingeschakeld" : "uitgeschakeld"} voor alle clients.${result.auditWarning ? ` ${result.auditWarning}` : ""}`;
     } catch {
       error = "Uitkomst onbekend. Laad de geheugenstatus opnieuw.";
-    } finally {
-      pendingMemory = null;
-      memoryAcknowledged = false;
-      busy = false;
-    }
-  }
-  async function rollbackMemory(id: string) {
-    busy = true;
-    error = "";
-    notice = "";
-    try {
-      const result = await prepareNativeMemoryRollback(id);
-      if (!result.ok || !result.action) {
-        error = result.error || "Herstel kon niet worden voorbereid.";
-        return;
-      }
-      pendingMemory = { ...result, enabled: result.enabled ?? false };
-      memoryAcknowledged = false;
-    } catch {
-      error =
-        "Herstel kon niet worden voorbereid. Controleer de PIN en OmniRoute.";
     } finally {
       busy = false;
     }
@@ -291,142 +143,61 @@
       busy = false;
     }
   }
-  async function prepareMemoryRecordDelete(id: string) {
+  async function deleteMemoryRecord(id: string) {
     busy = true;
     error = "";
     try {
-      const result = await prepareNativeMemoryRecordDelete(id);
-      if (!result.ok || !result.action) {
-        error = result.error || "Verwijderen kon niet worden voorbereid.";
-        return;
+      const result = await deleteNativeMemoryRecord(id);
+      if (!result.ok || result.verified !== true)
+        error = result.error || "Verwijdering kon niet worden gecontroleerd.";
+      else {
+        notice = "Geheugenrecord verwijderd.";
+        await loadMemoryRecords();
       }
-      pendingMemoryDelete = result;
     } catch {
-      error = "Verwijderen kon niet worden voorbereid. Laad records opnieuw.";
+      error = "Uitkomst onbekend. Laad de records opnieuw.";
     } finally {
       busy = false;
     }
   }
-  async function prepareMemoryRecordsBulkDelete() {
+  async function deleteSelectedMemoryRecords() {
     if (!selectedMemoryIds.length) return;
     busy = true;
     error = "";
     try {
-      const result = await prepareNativeMemoryRecordsDelete(selectedMemoryIds);
-      if (!result.ok || !result.action) {
-        error = result.error || "Bulkverwijdering kon niet worden voorbereid.";
-        return;
-      }
-      pendingMemoryBulkDelete = result;
-    } catch {
-      error =
-        "Bulkverwijdering kon niet worden voorbereid. Laad records opnieuw.";
-    } finally {
-      busy = false;
-    }
-  }
-  async function prepareMemoryRecordUpdate(id: string) {
-    busy = true;
-    error = "";
-    try {
-      const result = await prepareNativeMemoryRecordUpdate(
-        id,
-        editingMemoryContent,
-      );
-      if (!result.ok || !result.action) {
-        error = result.error || "Wijziging kon niet worden voorbereid.";
-        return;
-      }
-      pendingMemoryEdit = result;
-    } catch {
-      error = "Wijziging kon niet worden voorbereid. Laad records opnieuw.";
-    } finally {
-      busy = false;
-    }
-  }
-  async function confirmMemoryRecordDelete(approve: boolean) {
-    const action = pendingMemoryDelete?.action;
-    if (!action) return;
-    busy = true;
-    error = "";
-    try {
-      const result = await confirmNativeMemoryRecordDelete(
-        action.sessionId,
-        action.confirmationId,
-        approve,
-      );
-      if (!result.ok || (approve && result.verified !== true))
-        error = result.error || "Verwijdering kon niet worden gecontroleerd.";
-      else {
-        notice = approve
-          ? "Geheugenrecord verwijderd."
-          : "Verwijderen geannuleerd.";
-        if (approve) await loadMemoryRecords();
-      }
-    } catch {
-      error = "Uitkomst onbekend. Laad de records opnieuw.";
-    } finally {
-      pendingMemoryDelete = null;
-      busy = false;
-    }
-  }
-  async function confirmMemoryRecordsBulkDelete(approve: boolean) {
-    const action = pendingMemoryBulkDelete?.action;
-    if (!action) return;
-    busy = true;
-    error = "";
-    try {
-      const result = await confirmNativeMemoryRecordsDelete(
-        action.sessionId,
-        action.confirmationId,
-        approve,
-      );
-      if (!result.ok || (approve && result.verified !== true))
+      const result = await deleteNativeMemoryRecords(selectedMemoryIds);
+      if (!result.ok || result.verified !== true)
         error =
           result.error || "Bulkverwijdering kon niet worden gecontroleerd.";
       else {
-        notice = approve
-          ? "Geselecteerde geheugenrecords verwijderd."
-          : "Bulkverwijdering geannuleerd.";
-        if (approve) await loadMemoryRecords();
-        else selectedMemoryIds = [];
+        notice = "Geselecteerde geheugenrecords verwijderd.";
+        await loadMemoryRecords();
       }
     } catch {
       error = "Uitkomst onbekend. Vernieuw de geheugenrecords.";
     } finally {
-      pendingMemoryBulkDelete = null;
       busy = false;
     }
   }
-  async function confirmMemoryRecordEdit(approve: boolean) {
-    const action = pendingMemoryEdit?.action;
-    if (!action) return;
+  async function saveMemoryRecord(id: string) {
     busy = true;
     error = "";
     try {
-      const result = await confirmNativeMemoryRecordUpdate(
-        action.sessionId,
-        action.confirmationId,
-        approve,
-      );
-      if (!result.ok || (approve && result.verified !== true))
+      const result = await updateNativeMemoryRecord(id, editingMemoryContent);
+      if (!result.ok || result.verified !== true)
         error = result.error || "Wijziging kon niet worden gecontroleerd.";
       else {
-        notice = approve
-          ? "Geheugenrecord bijgewerkt."
-          : "Wijzigen geannuleerd.";
-        if (approve) await loadMemoryRecords();
+        notice = "Geheugenrecord bijgewerkt.";
+        editingMemoryId = null;
+        editingMemoryContent = "";
+        await loadMemoryRecords();
       }
     } catch {
       error = "Uitkomst onbekend. Laad de records opnieuw.";
     } finally {
-      pendingMemoryEdit = null;
-      editingMemoryId = null;
-      editingMemoryContent = "";
       busy = false;
     }
   }
-  onDestroy(() => clearTimeout(expiryTimer));
   async function load() {
     busy = true;
     error = "";
@@ -463,96 +234,11 @@
     OmniRoute heeft eigen uitvoerbare skills en een aparte
     documentatiecatalogus. Dit overzicht voert niets uit.
   </p>
-  <Button
-    onclick={load}
-    disabled={busy ||
-      !!pending ||
-      !!pendingRemoval ||
-      !!pendingMemory ||
-      !!pendingMemoryDelete ||
-      !!pendingMemoryBulkDelete ||
-      !!pendingMemoryEdit}
+  <Button onclick={load} disabled={busy}
     >{busy ? "Laden…" : "OmniRoute-overzicht laden"}</Button
   >
   {#if error}<p role="status">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
-  {#if pending}
-    <div
-      class="mode-confirm"
-      role="group"
-      aria-label="Native skillwijziging bevestigen"
-    >
-      <h3>{pending.name}: modus {modeName(pending.mode)}</h3>
-      <p>
-        Native skills kunnen code uitvoeren in de gateway. Deze modus geldt
-        {pending.scope === "global"
-          ? " voor alle gateway-clients. "
-          : " voor NOVA. "}
-        NOVA blijft zijn eigen toolbevestigingen gebruiken.
-      </p>
-      <p>
-        {expired
-          ? "Bevestiging verlopen. Annuleer en kies de wijziging opnieuw."
-          : "Bevestig binnen 60 seconden. Deze toestemming geldt één keer."}
-      </p>
-      <Button onclick={() => confirm(true)} disabled={busy || expired}
-        >Bevestig skillmodus voor {pending.scope === "global"
-          ? "alle clients"
-          : "NOVA"}</Button
-      >
-      <Button onclick={() => confirm(false)} disabled={busy}
-        >Annuleer skillmodus</Button
-      >
-    </div>
-  {/if}
-  {#if pendingRemoval}
-    <div
-      class="mode-confirm"
-      role="group"
-      aria-label="NOVA-skill verwijderen bevestigen"
-    >
-      <h3>Verwijder {pendingRemoval.name}?</h3>
-      <p>
-        Dit verwijdert de uitvoerbare skill van NOVA uit OmniRoute. Dit kan niet
-        vanuit NOVA ongedaan worden gemaakt. De gateway kan maximaal één minuut
-        achterlopen.
-      </p>
-      <p>
-        Bevestig deze eenmalige DANGEROUS-wijziging alleen als je deze skill
-        echt wilt verwijderen.
-      </p>
-      <Button onclick={() => confirmRemoval(true)} disabled={busy}
-        >Verwijder skill definitief</Button
-      >
-      <Button onclick={() => confirmRemoval(false)} disabled={busy}
-        >Annuleer verwijderen</Button
-      >
-    </div>
-  {/if}
-  {#if pendingMemory}
-    <div
-      class="mode-confirm"
-      role="group"
-      aria-label="Gateway-geheugenwijziging bevestigen"
-    >
-      <h3>
-        Gateway-geheugen {pendingMemory.enabled
-          ? "inschakelen"
-          : "uitschakelen"}?
-      </h3>
-      <p>
-        Dit geldt voor alle clients op deze OmniRoute-gateway. Inschakelen kan
-        opgeslagen context in verzoeken opnemen en extra tokens gebruiken.
-      </p>
-      <p>Bevestig binnen 60 seconden. Deze toestemming geldt één keer.</p>
-      <Button onclick={() => confirmMemory(true)} disabled={busy}
-        >Bevestig voor alle clients</Button
-      >
-      <Button onclick={() => confirmMemory(false)} disabled={busy}
-        >Annuleer</Button
-      >
-    </div>
-  {/if}
   {#if report}
     {#if !report.available}<p role="status">{report.error}</p>
     {:else}
@@ -560,9 +246,9 @@
       <p>Gateway-status kan maximaal één minuut achterlopen.</p>
       <p>
         Wijzig NOVA- en gedeelde skill-modi. Gedeelde modi gelden voor alle
-        gateway-clients en vragen extra bevestiging. NOVA-skills kunnen na een
-        aparte DANGEROUS-bevestiging worden verwijderd. Gedeelde skills blijven
-        beschermd; installeren en handlercode wijzigen gebeurt niet hier.
+        gateway-clients. NOVA-skills kunnen worden verwijderd. Gedeelde skills
+        blijven beschermd; installeren en handlercode wijzigen gebeurt niet
+        hier.
       </p>
       {#if report.truncated}<p>
           Alleen de eerste 200 gateway-items zijn gecontroleerd. Er kunnen meer
@@ -583,20 +269,8 @@
                 : "Uitgeschakeld"} · modus {skill.mode
               ? modeName(skill.mode)
               : "onbekend"}
-            {#if skill.scope === "global"}
-              <label class="global-ack">
-                <input
-                  type="checkbox"
-                  bind:checked={globalAcknowledged[skill.id]}
-                  disabled={busy || !!pending || !!pendingRemoval}
-                />
-                Ik begrijp dat dit alle OmniRoute-clients raakt.
-              </label>
-            {/if}
             {#if skill.scope === "nova"}
-              <Button
-                onclick={() => prepareRemoval(skill.id)}
-                disabled={busy || !!pending || !!pendingRemoval}
+              <Button onclick={() => removeSkill(skill.id)} disabled={busy}
                 >Verwijder NOVA-skill</Button
               >
             {/if}
@@ -604,23 +278,15 @@
               <div class="mode-buttons">
                 {#each ["on", "off", "auto"] as mode (mode)}
                   <Button
-                    onclick={() =>
-                      prepare(skill.id, mode as NativeSkillMode, skill.scope)}
-                    disabled={busy ||
-                      !!pending ||
-                      !!pendingRemoval ||
-                      skill.mode === mode ||
-                      (skill.scope === "global" &&
-                        globalAcknowledged[skill.id] !== true)}
+                    onclick={() => applyMode(skill.id, mode as NativeSkillMode)}
+                    disabled={busy || skill.mode === mode}
                   >
                     {modeName(mode as NativeSkillMode)}
                     {skill.name}
                   </Button>
                 {/each}
               </div>
-              <Button
-                onclick={() => loadModeHistory(skill.id)}
-                disabled={busy || !!pending || !!pendingRemoval}
+              <Button onclick={() => loadModeHistory(skill.id)} disabled={busy}
                 >Geschiedenis {skill.name}</Button
               >
               {#if modeHistories[skill.id]?.revisions.length}
@@ -635,18 +301,8 @@
                       {#if index === 0}
                         <Button
                           onclick={() =>
-                            prepare(
-                              skill.id,
-                              revision.before,
-                              revision.scope,
-                              revision.id,
-                            )}
-                          disabled={busy ||
-                            !!pending ||
-                            !!pendingRemoval ||
-                            skill.mode !== revision.after ||
-                            (revision.scope === "global" &&
-                              globalAcknowledged[skill.id] !== true)}
+                            applyMode(skill.id, revision.before, revision.id)}
+                          disabled={busy || skill.mode !== revision.after}
                           >Zet terug</Button
                         >
                       {/if}
@@ -693,13 +349,10 @@
               {selectedMemoryIds.length} record(s) geselecteerd (maximaal 25).
             </p>
             <Button
-              onclick={prepareMemoryRecordsBulkDelete}
+              onclick={deleteSelectedMemoryRecords}
               disabled={busy ||
                 !selectedMemoryIds.length ||
-                selectedMemoryIds.length > 25 ||
-                !!pendingMemoryBulkDelete ||
-                !!pendingMemoryDelete ||
-                !!pendingMemoryEdit}>Verwijder selectie</Button
+                selectedMemoryIds.length > 25}>Verwijder selectie</Button
             >
           {/if}
           <ol aria-label="NOVA-geheugenrecords">
@@ -709,10 +362,7 @@
                     type="checkbox"
                     aria-label={`Selecteer record ${item.id}`}
                     checked={selectedMemoryIds.includes(item.id)}
-                    disabled={busy ||
-                      !!pendingMemoryBulkDelete ||
-                      !!pendingMemoryDelete ||
-                      !!pendingMemoryEdit}
+                    disabled={busy}
                     onchange={(event) => {
                       selectedMemoryIds = event.currentTarget.checked
                         ? [...selectedMemoryIds, item.id]
@@ -733,12 +383,11 @@
                     <textarea
                       bind:value={editingMemoryContent}
                       maxlength="4000"
-                      disabled={busy || !!pendingMemoryEdit}></textarea>
+                      disabled={busy}></textarea>
                   </label>
                   <Button
-                    onclick={() => prepareMemoryRecordUpdate(item.id)}
-                    disabled={busy || !!pendingMemoryEdit}
-                    >Wijziging controleren</Button
+                    onclick={() => saveMemoryRecord(item.id)}
+                    disabled={busy}>Wijziging opslaan</Button
                   >
                   <Button
                     onclick={() => {
@@ -753,16 +402,12 @@
                       editingMemoryId = item.id;
                       editingMemoryContent = item.text;
                     }}
-                    disabled={busy ||
-                      !!pendingMemoryDelete ||
-                      !!pendingMemoryEdit}>Bewerk dit record</Button
+                    disabled={busy}>Bewerk dit record</Button
                   >
                 {/if}
                 <Button
-                  onclick={() => prepareMemoryRecordDelete(item.id)}
-                  disabled={busy ||
-                    !!pendingMemoryDelete ||
-                    !!pendingMemoryBulkDelete}>Verwijder dit record</Button
+                  onclick={() => deleteMemoryRecord(item.id)}
+                  disabled={busy}>Verwijder dit record</Button
                 >
               </li>{/each}
           </ol>
@@ -772,73 +417,11 @@
             >{/if}
         {/if}
       </details>
-      {#if pendingMemoryDelete?.action}
-        <div role="group" aria-label="Geheugenrecord verwijderen bevestigen">
-          <h3>Geheugenrecord definitief verwijderen?</h3>
-          <p>
-            Alleen dit NOVA-record wordt verwijderd. Dit kan niet ongedaan
-            worden gemaakt.
-          </p>
-          <Button
-            onclick={() => confirmMemoryRecordDelete(true)}
-            disabled={busy}>Verwijder record</Button
-          >
-          <Button
-            onclick={() => confirmMemoryRecordDelete(false)}
-            disabled={busy}>Annuleer verwijderen</Button
-          >
-        </div>
-      {/if}
-      {#if pendingMemoryBulkDelete?.action}
-        <div role="group" aria-label="Geheugenrecords verwijderen bevestigen">
-          <h3>
-            {pendingMemoryBulkDelete.count} geheugenrecords definitief verwijderen?
-          </h3>
-          <p>
-            Alleen de geselecteerde NOVA-records worden verwijderd. Dit kan niet
-            ongedaan worden gemaakt.
-          </p>
-          <Button
-            onclick={() => confirmMemoryRecordsBulkDelete(true)}
-            disabled={busy}>Verwijder selectie</Button
-          >
-          <Button
-            onclick={() => confirmMemoryRecordsBulkDelete(false)}
-            disabled={busy}>Annuleer bulkverwijdering</Button
-          >
-        </div>
-      {/if}
-      {#if pendingMemoryEdit?.action}
-        <div role="group" aria-label="Geheugenrecord wijzigen bevestigen">
-          <h3>Geheugenrecord wijzigen?</h3>
-          <p>
-            Controleer de nieuwe tekst. Alleen dit NOVA-record wordt aangepast.
-          </p>
-          <pre>{editingMemoryContent}</pre>
-          <Button onclick={() => confirmMemoryRecordEdit(true)} disabled={busy}>
-            Bevestig wijziging
-          </Button>
-          <Button
-            onclick={() => confirmMemoryRecordEdit(false)}
-            disabled={busy}
-          >
-            Annuleer wijziging
-          </Button>
-        </div>
-      {/if}
-      <label class="global-ack">
-        <input
-          type="checkbox"
-          bind:checked={memoryAcknowledged}
-          disabled={busy || !!pendingMemory}
-        />
-        Ik begrijp dat deze geheugenschakelaar alle OmniRoute-clients raakt.
-      </label>
       {#if memoryHistory?.revisions.length}
         <h4>Wijzigingsgeschiedenis</h4>
         <p>
           Alleen de nieuwste stand kan worden teruggezet. Herstel raakt alle
-          gateway-clients en vraagt opnieuw om bevestiging.
+          gateway-clients.
         </p>
         {#if memoryHistory.truncated}<p>
             Alleen de laatste 20 wijzigingen zijn bewaard.
@@ -854,13 +437,9 @@
                 : "Uit"}
               {#if revision.revertedFrom}<span> · herstel</span>{/if}
               <Button
-                onclick={() => rollbackMemory(revision.id)}
-                disabled={busy ||
-                  !!pending ||
-                  !!pendingRemoval ||
-                  !!pendingMemory ||
-                  report.memory.enabled !== revision.after ||
-                  !memoryAcknowledged}>Zet terug</Button
+                onclick={() => applyMemory(revision.before, revision.id)}
+                disabled={busy || report.memory.enabled !== revision.after}
+                >Zet terug</Button
               >
             </li>
           {/each}
@@ -868,12 +447,8 @@
       {/if}
       {#if report.memory.enabled !== null}
         <Button
-          onclick={() => prepareMemory(!report?.memory.enabled)}
-          disabled={busy ||
-            !!pending ||
-            !!pendingRemoval ||
-            !!pendingMemory ||
-            !memoryAcknowledged}
+          onclick={() => applyMemory(!report?.memory.enabled)}
+          disabled={busy}
           >{report.memory.enabled
             ? "Gateway-geheugen uitschakelen"
             : "Gateway-geheugen inschakelen"}</Button
@@ -891,9 +466,7 @@
         {#each report.documentation as skill (skill.id)}<li>
             <strong>{skill.name}</strong>
             <p>{skill.description}</p>
-            <Button
-              onclick={() => read(skill.id)}
-              disabled={busy || !!pending || !!pendingRemoval}
+            <Button onclick={() => read(skill.id)} disabled={busy}
               >Lees {skill.name}</Button
             >
           </li>{/each}
@@ -908,15 +481,6 @@
 </section>
 
 <style>
-  .mode-confirm {
-    border: 1px solid #ff8a4c;
-    padding: 1rem;
-    margin-top: 1rem;
-  }
-  .mode-confirm :global(button) {
-    min-height: 44px;
-    margin: 0 0.5rem 0.5rem 0;
-  }
   .mode-buttons :global(button) {
     min-height: 44px;
   }

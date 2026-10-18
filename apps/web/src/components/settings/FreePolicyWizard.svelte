@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onMount } from "svelte";
   import type {
     FreePolicyOptions,
-    FreePolicyPrepared,
     FreePolicyHistory,
     FreePolicyHistorySnapshot,
   } from "@nova/contracts";
@@ -11,8 +10,7 @@
   import {
     getFreePolicyOptions,
     getFreePolicyHistory,
-    prepareFreePolicy,
-    confirmFreePolicy,
+    applyFreePolicy,
   } from "#lib/api/settings.ts";
 
   let { done, autoload = false }: { done?: () => void; autoload?: boolean } =
@@ -24,26 +22,17 @@
   let accountId = $state("");
   let modelId = $state("");
   let source = $state("");
-  let billing = $state(false);
-  let hardStop = $state(false);
-  let terms = $state(false);
-  let allClients = $state(false);
-  let quotaRefresh = $state(false);
   let busy = $state(false);
   let message = $state("");
-  let pending = $state<FreePolicyPrepared | null>(null);
   let history = $state<FreePolicyHistory | null>(null);
   let historyBusy = $state(false);
   let historyError = $state("");
-  let expired = $state(false);
-  let timer: ReturnType<typeof setTimeout> | undefined;
   const account = $derived(
     options?.accounts.find((item) => item.id === accountId),
   );
   const models = $derived(
     options?.models.filter((item) => item.provider === account?.provider) || [],
   );
-  onDestroy(() => clearTimeout(timer));
   onMount(() => {
     if (autoload) void load();
   });
@@ -78,12 +67,11 @@
       options = await getFreePolicyOptions();
       selection = [];
       accountId = modelId = source = "";
-      billing = hardStop = terms = allClients = quotaRefresh = false;
       if (!options.available)
         message = options.error || "De diensten kunnen nu niet worden geladen.";
     } catch {
       message =
-        "De diensten konden niet worden geladen. Controleer je PIN en of de AI-verbinding aan staat.";
+        "De diensten konden niet worden geladen. Controleer of de AI-verbinding aan staat.";
     } finally {
       busy = false;
     }
@@ -117,61 +105,21 @@
       message = "Kies per aanbieder één account.";
       return;
     }
-    billing = hardStop = terms = allClients = quotaRefresh = false;
     selection = [
       ...selection,
       { connectionId: accountId, modelId, officialSource: source.trim() },
     ];
     message = "";
   }
-  async function prepare() {
+  async function apply() {
     busy = true;
     message = "";
     try {
-      const result = await prepareFreePolicy({
-        inventoryToken: options?.inventoryToken || "",
-        selection,
-        acknowledgeBillingDisabled: true,
-        acknowledgeHardStop: true,
-        acknowledgeTerms: true,
-        acknowledgeAllClients: true,
-        acknowledgeQuotaRefresh: true,
-      });
-      if (!result.ok || !result.action) {
-        message = result.error || "Voorbereiden lukte niet.";
-        return;
-      }
-      pending = result;
-      expired = false;
-      timer = setTimeout(
-        () => {
-          expired = true;
-        },
-        Math.max(0, result.action.expiresAt - Date.now()),
-      );
-    } catch {
-      message =
-        "Voorbereiden lukte niet. Controleer je keuze, de webadressen en je PIN.";
-    } finally {
-      busy = false;
-    }
-  }
-  async function confirm(approve: boolean) {
-    const action = pending?.action;
-    if (!action) return;
-    busy = true;
-    message = "";
-    try {
-      const result = await confirmFreePolicy(
-        action.sessionId,
-        action.confirmationId,
-        approve,
-      );
+      const result = await applyFreePolicy({ selection });
       if (!result.ok)
         message =
           result.error ||
           "Uitkomst onbekend. Controleer de gateway en gratis route.";
-      else if (!approve) message = "Geannuleerd.";
       else if (
         result.verified === true &&
         result.evidenceSource === "operator-account" &&
@@ -189,27 +137,22 @@
       message =
         "We weten niet zeker of het gelukt is. Controleer de status op de pagina Slimme modellen.";
     } finally {
-      clearTimeout(timer);
-      pending = null;
       busy = false;
-      billing = hardStop = terms = allClients = quotaRefresh = false;
     }
   }
 </script>
 
 <section class="policy-wizard" aria-label="Gratis beleid maken">
-  <h2>Gratis diensten bevestigen</h2>
+  <h2>Gratis diensten kiezen</h2>
   <p>
-    NOVA gebruikt alleen diensten waarvan jij hebt bevestigd dat ze gratis zijn.
-    Kies hieronder welke diensten en modellen NOVA mag gebruiken. Jij weet het
-    best of je account echt gratis is, want NOVA kan dat niet zelf controleren.
+    NOVA gebruikt alleen de diensten die je hieronder kiest. Kies welke diensten
+    en modellen NOVA mag gebruiken. Jij weet het best of je account echt gratis
+    is, want NOVA kan dat niet zelf controleren.
   </p>
-  <Button onclick={load} disabled={busy || !!pending}
-    >Mijn diensten laden</Button
-  >
+  <Button onclick={load} disabled={busy}>Mijn diensten laden</Button>
   {#if message}<p role="status">{message}</p>{/if}
   {#if options?.available}
-    <fieldset disabled={busy || !!pending}>
+    <fieldset disabled={busy}>
       <legend>Diensten en modellen kiezen</legend>
       <label
         >Dienst<select
@@ -255,64 +198,15 @@
             <Button
               onclick={() => {
                 selection = selection.filter((_, i) => i !== index);
-                billing = hardStop = terms = allClients = quotaRefresh = false;
               }}>Verwijder keuze {index + 1}</Button
             >
           </li>
         {/each}
       </ul>
-      <label class="check"
-        ><input type="checkbox" bind:checked={billing} />Ik heb bij elke gekozen
-        dienst gecontroleerd dat betalen en automatisch tegoed bijkopen
-        uitstaan.</label
-      >
-      <label class="check"
-        ><input type="checkbox" bind:checked={hardStop} />Ik heb gecontroleerd
-        dat elke dienst stopt zodra het gratis tegoed op is en dan niet
-        automatisch gaat rekenen.</label
-      >
-      <label class="check"
-        ><input type="checkbox" bind:checked={terms} />Mijn accounts hebben
-        recht op dit gratis gebruik en de voorwaarden van de aanbieder staan het
-        toe.</label
-      >
-      <label class="check"
-        ><input type="checkbox" bind:checked={allClients} />Ik snap dat deze
-        keuze de vorige lijst vervangt en geldt voor alle programma’s die deze
-        server gebruiken.</label
-      >
-      <label class="check"
-        ><input type="checkbox" bind:checked={quotaRefresh} />NOVA mag bij de
-        aanbieders opvragen hoeveel tegoed er nog is. Dat bewijst niet dat het
-        gratis is.</label
-      >
-      <Button
-        onclick={prepare}
-        disabled={!selection.length ||
-          !billing ||
-          !hardStop ||
-          !terms ||
-          !allClients ||
-          !quotaRefresh}>Controleren en voorbereiden</Button
+      <Button onclick={apply} disabled={!selection.length || busy}
+        >Beleid toepassen</Button
       >
     </fieldset>
-  {/if}
-  {#if pending?.action}
-    <div class="confirmation">
-      <h3>Nog één keer bevestigen</h3>
-      <p>
-        Tijdens het wijzigen blokkeert NOVA haar antwoorden. Pas na de controle
-        kan ze weer antwoorden.
-      </p>
-      <p>Je hebt 60 seconden om te bevestigen.</p>
-      {#if expired}<p role="status">
-          Te lang gewacht. Annuleer en begin opnieuw.
-        </p>{/if}
-      <Button onclick={() => confirm(true)} disabled={busy || expired}
-        >Ja, dit zijn gratis diensten</Button
-      >
-      <Button onclick={() => confirm(false)} disabled={busy}>Annuleren</Button>
-    </div>
   {/if}
 </section>
 
@@ -367,26 +261,18 @@
   .policy-history {
     margin-block: 2rem;
   }
-  fieldset,
-  .confirmation {
+  fieldset {
     padding: 1rem;
     margin-block: 1rem;
     border: 1px solid var(--border, #555);
     min-width: 0;
-  }
-  .confirmation {
-    border-color: #ff8a33;
   }
   label {
     display: grid;
     gap: 0.5rem;
     margin-block: 1rem;
   }
-  .check {
-    display: flex;
-    align-items: flex-start;
-  }
-  input:not([type="checkbox"]),
+  input,
   select {
     width: 100%;
     min-height: 44px;

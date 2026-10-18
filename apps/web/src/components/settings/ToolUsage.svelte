@@ -36,7 +36,7 @@
       report = await getToolUsage();
     } catch {
       error =
-        "Gebruiksstatistieken konden niet worden geladen. Controleer je PIN.";
+        "Gebruiksstatistieken konden niet worden geladen. Probeer het opnieuw.";
     } finally {
       busy = false;
     }

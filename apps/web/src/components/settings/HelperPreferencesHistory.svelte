@@ -33,12 +33,6 @@
   }
 
   async function rollback(revision: HelperPreferenceRevision) {
-    if (
-      !window.confirm(
-        "Herstel deze helperinstellingen? Latere wijzigingen worden beschermd tegen overschrijven.",
-      )
-    )
-      return;
     busy = true;
     message = "";
     try {

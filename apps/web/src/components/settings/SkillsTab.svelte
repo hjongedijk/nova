@@ -103,10 +103,6 @@
       (entry) => entry.id === revision,
     );
     if (skill.type !== "instruction" || !item) return;
-    const prompt = item.before
-      ? "Deze versie van de instructievaardigheid herstellen? NOVA voert de vaardigheid niet zelf uit."
-      : "De nieuw aangemaakte instructievaardigheid verwijderen? De private versiegeschiedenis wordt ook gewist.";
-    if (!window.confirm(prompt)) return;
     historyBusy = skill.id;
     try {
       const result = await rollbackInstructionSkillContent(skill.id, revision);

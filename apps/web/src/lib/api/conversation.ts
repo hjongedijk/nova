@@ -1,5 +1,4 @@
 import { getJson, sendJson } from "./client.ts";
-import { getPin } from "./pin-session.ts";
 
 export interface ConversationSettings {
   version: 1;
@@ -34,8 +33,7 @@ export interface ConversationOverview {
 }
 
 const headers = (): Record<string, string> => {
-  const pin = getPin();
-  return { "x-nova-admin": "1", ...(pin ? { "x-nova-pin": pin } : {}) };
+  return {};
 };
 
 export const getConversation = () =>

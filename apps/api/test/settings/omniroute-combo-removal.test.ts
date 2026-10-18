@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -70,8 +69,7 @@ function fixture() {
     timestamp: "now",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
-  confirmations.now = () => 1000;
+
   const routing = new RoutingService(config as NovaConfig);
   vi.spyOn(routing, "verifyForManagement").mockReturnValue(ready);
   const barrier = new RoutingManagementBarrier(config as NovaConfig, routing);
@@ -103,7 +101,6 @@ function fixture() {
   const service = new OmniRouteComboRemoval(
     config as NovaConfig,
     management,
-    confirmations,
     audit,
     barrier,
     routing,
@@ -118,34 +115,19 @@ function fixture() {
   };
 }
 
-describe("OmniRoute combo removal", () => {
-  it("protects generated combos and requires the global-effect acknowledgement", async () => {
+describe("OmniRoute combo removal (single step)", () => {
+  it("protects generated combos and rejects invalid ids", async () => {
     const f = fixture();
-    expect(await f.service.prepare("combo-auto", true)).toMatchObject({
-      ok: false,
-    });
-    await expect(f.service.prepare("combo-1", false)).rejects.toThrow(
-      "Bevestig",
+    expect(await f.service.remove("combo-auto")).toMatchObject({ ok: false });
+    await expect(f.service.remove("../x")).rejects.toThrow("Ongeldige");
+    expect(f.request).not.toHaveBeenCalledWith(
+      "/api/combos/combo-auto",
+      expect.objectContaining({ method: "DELETE" }),
     );
-    const prepared = await f.service.prepare("combo-1", true);
-    expect(prepared).toMatchObject({ ok: true, name: "Custom route" });
-    expect(JSON.stringify(prepared)).not.toContain("private prompt");
-    expect(prepared.action).toMatchObject({
-      tool: "omniroute_combo_remove",
-      risk: "DANGEROUS",
-      allowAlways: false,
-    });
   });
-  it("deletes only after confirmation and verifies the SQLite row is absent", async () => {
+  it("deletes in one call and verifies the SQLite row is absent", async () => {
     const f = fixture();
-    const prepared = await f.service.prepare("combo-1", true);
-    if (!prepared.ok || !prepared.action) throw new Error(prepared.error);
-    const result = await f.service.confirm(
-      "combo-1",
-      prepared.action.sessionId,
-      prepared.action.confirmationId,
-      true,
-    );
+    const result = await f.service.remove("combo-1");
     expect(result).toMatchObject({
       ok: true,
       verified: true,
@@ -165,16 +147,11 @@ describe("OmniRoute combo removal", () => {
   it("retains the routing stop when SQLite cannot verify deletion", async () => {
     const f = fixture();
     f.setPersist(false);
-    const prepared = await f.service.prepare("combo-1", true);
-    if (!prepared.ok || !prepared.action) throw new Error(prepared.error);
-    expect(
-      await f.service.confirm(
-        "combo-1",
-        prepared.action.sessionId,
-        prepared.action.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: false, verified: null, routeReady: false });
+    expect(await f.service.remove("combo-1")).toMatchObject({
+      ok: false,
+      verified: null,
+      routeReady: false,
+    });
     expect(
       f.db.prepare("SELECT id FROM combos WHERE id='combo-1'").get(),
     ).toEqual({ id: "combo-1" });

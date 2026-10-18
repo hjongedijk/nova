@@ -13,7 +13,7 @@ import {
 } from "./persona-fixtures.mjs";
 
 const markdown = fs.readFileSync(
-  new URL("../docs/persona-evaluation.md", import.meta.url),
+  new URL("../docs/evaluation.md", import.meta.url),
   "utf8",
 );
 const ids = Array.from(

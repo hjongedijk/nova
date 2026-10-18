@@ -1,11 +1,14 @@
 import {
+  readJsonStateOrEnoent,
+  writeJsonState,
+} from "../core/db/json-state.js";
+import {
   Injectable,
   Logger,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
 import crypto from "node:crypto";
-import fs from "node:fs";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { calendarEventStartInstant } from "../planning/calendar-day.js";
 import { CalDavService } from "../planning/caldav.service.js";
@@ -103,8 +106,8 @@ export class CalendarReminderService implements OnModuleInit, OnModuleDestroy {
 
   private readProgress(): ReminderProgress {
     try {
-      const value = JSON.parse(
-        fs.readFileSync(this.progressFile, "utf8"),
+      const value = readJsonStateOrEnoent(
+        this.progressFile,
       ) as Partial<ReminderProgress>;
       if (
         !Array.isArray(value.reminded) ||
@@ -126,12 +129,7 @@ export class CalendarReminderService implements OnModuleInit, OnModuleDestroy {
 
   private writeProgress(reminded: string[]): void {
     try {
-      const temporary = `${this.progressFile}.tmp`;
-      fs.writeFileSync(temporary, JSON.stringify({ reminded }), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      fs.renameSync(temporary, this.progressFile);
+      writeJsonState(this.progressFile, { reminded });
     } catch {
       this.paused = true;
       this.logger.error(

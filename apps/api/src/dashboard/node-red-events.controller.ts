@@ -15,7 +15,6 @@ import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { AlertsFeed } from "./alerts-feed.service.js";
 import { NodeRedHealth } from "./node-red-health.service.js";
-import { AppAccessPublic } from "../access/access-public.js";
 import { matchesNodeRedToken } from "./node-red-token.js";
 
 const MAX_BODY_BYTES = 4096;
@@ -49,7 +48,6 @@ export class NodeRedEventsController {
   ) {}
 
   @Post()
-  @AppAccessPublic()
   @HttpCode(202)
   receive(
     @Headers("authorization") authorization: string | undefined,

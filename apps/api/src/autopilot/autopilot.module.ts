@@ -6,7 +6,6 @@ import { McpModule } from "../integrations/mcp/mcp.module.js";
 import { ObjectivesModule } from "../objectives/objectives.module.js";
 import { PlanningModule } from "../planning/planning.module.js";
 import { RoutingModule } from "../routing/routing.module.js";
-import { SettingsGuard } from "../settings/settings.guard.js";
 import { TelephonyModule } from "../telephony/telephony.module.js";
 import {
   AutopilotController,
@@ -18,7 +17,7 @@ import { AutopilotStore } from "./autopilot.store.js";
 
 /**
  * The always-on autopilot: deterministic routine scans, unprompted alerts and texts, default standing objectives and direct
- * delegation. See docs/autopilot.md.
+ * delegation. See docs/features.md#autopilot-nova-takes-initiative.
  */
 @Module({
   imports: [
@@ -32,6 +31,6 @@ import { AutopilotStore } from "./autopilot.store.js";
     TelephonyModule,
   ],
   controllers: [AutopilotController, AutopilotSettingsController],
-  providers: [AutopilotStore, AutopilotService, AutopilotSource, SettingsGuard],
+  providers: [AutopilotStore, AutopilotService, AutopilotSource],
 })
 export class AutopilotModule {}

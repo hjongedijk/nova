@@ -8,6 +8,15 @@ import {
   dueWeeklyWindow,
   WeeklyOverviewService,
 } from "../../src/dashboard/weekly-overview.service.js";
+import {
+  failStateWrites,
+  dbStat,
+  dropState,
+  seedState,
+  stateDoc,
+  stateExists,
+  stateText,
+} from "../helpers/nova-db.js";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -161,23 +170,23 @@ describe("opt-in weekly overview", () => {
     expect(logged).not.toContain("taken afgerond");
     expect(logged).not.toContain("Afspraak");
     const progress = path.join(enabled.dir, "weekly-overview-progress.json");
-    expect(JSON.parse(fs.readFileSync(progress, "utf8"))).toEqual({
+    expect(stateDoc(progress)).toEqual({
       completedWeek: "2026-10-11",
     });
-    expect(fs.statSync(progress).mode & 0o777).toBe(0o600);
+    expect(dbStat(progress).mode & 0o777).toBe(0o600);
   });
 
   it("pauses before model generation when saved progress is corrupt", async () => {
     const instance = fixture(true);
     const progress = path.join(instance.dir, "weekly-overview-progress.json");
-    fs.writeFileSync(progress, "{broken");
+    seedState(progress, "{broken");
     const due = new Date("2026-10-11T16:00:00Z");
     await instance.service.checkSchedule(due);
     await instance.service.checkSchedule(new Date(due.getTime() + 6 * 60_000));
     expect(instance.call).not.toHaveBeenCalled();
     expect(instance.record).not.toHaveBeenCalled();
     expect(instance.auditRecord).not.toHaveBeenCalled();
-    expect(fs.readFileSync(progress, "utf8")).toBe("{broken");
+    expect(stateText(progress)).toBe("{broken");
   });
 
   it("does not regenerate an accepted overview after audit failure or restart", async () => {
@@ -197,9 +206,7 @@ describe("opt-in weekly overview", () => {
         .digest("hex");
     expect(instance.record.mock.calls[0]?.[2]).toBe(expectedId);
     expect(instance.accepted.has(expectedId)).toBe(true);
-    fs.rmSync(path.join(instance.dir, "weekly-overview-progress.json"), {
-      force: true,
-    });
+    dropState(path.join(instance.dir, "weekly-overview-progress.json"));
     const restarted = fixture(true, instance);
     await restarted.service.checkSchedule(
       new Date(due.getTime() + 12 * 60_000),
@@ -215,10 +222,10 @@ describe("opt-in weekly overview", () => {
     instance.record.mockReturnValueOnce(null);
     await instance.service.checkSchedule(due);
     const progress = path.join(instance.dir, "weekly-overview-progress.json");
-    expect(fs.existsSync(progress)).toBe(false);
+    expect(stateExists(progress)).toBe(false);
     await instance.service.checkSchedule(new Date(due.getTime() + 6 * 60_000));
     expect(instance.record).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(fs.readFileSync(progress, "utf8"))).toEqual({
+    expect(stateDoc(progress)).toEqual({
       completedWeek: "2026-10-11",
     });
   });
@@ -313,9 +320,10 @@ describe("opt-in weekly overview", () => {
         new Date(scheduled.getTime() + 3 * backoff),
       );
       expect(fourth.call).not.toHaveBeenCalled();
-      expect(
-        JSON.parse(fs.readFileSync(attemptsFile(first.dir), "utf8")),
-      ).toMatchObject({ period: "2026-10-11", attempts: 3 });
+      expect(stateDoc(attemptsFile(first.dir))).toMatchObject({
+        period: "2026-10-11",
+        attempts: 3,
+      });
     });
 
     it.each(["exhausted", "corrupt"])(
@@ -331,40 +339,31 @@ describe("opt-in weekly overview", () => {
         const content =
           state === "corrupt"
             ? "{broken"
-            : JSON.stringify({
+            : {
                 version: 1,
                 period: "2026-10-11",
                 attempts: 3,
                 lastAttemptAt: scheduled.getTime(),
-              });
-        fs.writeFileSync(attemptsFile(instance.dir), content);
+              };
+        seedState(attemptsFile(instance.dir), content);
         await instance.service.checkSchedule(scheduled);
         expect(instance.findWorkflowEvent).toHaveBeenCalledWith(id);
         expect(instance.call).not.toHaveBeenCalled();
         expect(instance.record).not.toHaveBeenCalled();
         expect(
-          JSON.parse(
-            fs.readFileSync(
-              path.join(instance.dir, "weekly-overview-progress.json"),
-              "utf8",
-            ),
-          ),
+          stateDoc(path.join(instance.dir, "weekly-overview-progress.json")),
         ).toEqual({ completedWeek: "2026-10-11" });
-        expect(fs.readFileSync(attemptsFile(instance.dir), "utf8")).toBe(
-          content,
-        );
+        expect(stateDoc(attemptsFile(instance.dir))).toEqual(content);
       },
     );
 
     it("blocks work on a corrupt attempt sidecar and retries after repair", async () => {
       const instance = fixture(true);
-      fs.writeFileSync(attemptsFile(instance.dir), "{broken");
+      seedState(attemptsFile(instance.dir), "{broken");
       await instance.service.checkSchedule(scheduled);
       expect(instance.call).not.toHaveBeenCalled();
-      expect(fs.readFileSync(attemptsFile(instance.dir), "utf8")).toBe(
-        "{broken",
-      );
-      fs.rmSync(attemptsFile(instance.dir));
+      expect(stateText(attemptsFile(instance.dir))).toBe("{broken");
+      dropState(attemptsFile(instance.dir));
       await instance.service.checkSchedule(
         new Date(scheduled.getTime() + backoff),
       );
@@ -373,21 +372,14 @@ describe("opt-in weekly overview", () => {
 
     it("blocks work until an attempt reservation can be saved and retries after backoff", async () => {
       const instance = fixture(true);
-      const rename = fs.renameSync.bind(fs);
-      const failure = vi
-        .spyOn(fs, "renameSync")
-        .mockImplementation((source, destination) => {
-          if (destination === attemptsFile(instance.dir))
-            throw new Error("reservation unavailable");
-          return rename(source, destination);
-        });
+      const failure = failStateWrites(attemptsFile(instance.dir));
       try {
         await instance.service.checkSchedule(scheduled);
         expect(instance.call).not.toHaveBeenCalled();
       } finally {
         failure.mockRestore();
       }
-      expect(fs.existsSync(attemptsFile(instance.dir))).toBe(false);
+      expect(stateExists(attemptsFile(instance.dir))).toBe(false);
       await instance.service.checkSchedule(
         new Date(scheduled.getTime() + backoff - 1),
       );

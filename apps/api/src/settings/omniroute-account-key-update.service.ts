@@ -1,15 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  OmniRouteAccountKeyUpdatePrepared,
-  OmniRouteAccountKeyUpdateResult,
-} from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
+import type { OmniRouteAccountKeyUpdateResult } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { ValidationError } from "../core/errors/validation.error.js";
-import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
 import { RoutingService } from "../routing/routing.service.js";
@@ -22,12 +16,6 @@ type Account = {
   authType: "apikey";
   active: boolean | null;
   key: string;
-};
-type PendingSecret = Account & {
-  requestId: string;
-  replacement: string;
-  expiresAt: number;
-  timer: ReturnType<typeof setTimeout>;
 };
 type StoredAccount = {
   id: string;
@@ -42,15 +30,12 @@ const validId = (value: unknown): value is string =>
 const unavailable =
   "API-sleutel vervangen is niet beschikbaar. Controleer of dit een API-sleutelaccount is en probeer opnieuw.";
 
-/** Rotates API-key credentials only; keeps the new value in memory until one-use approval. */
+/** Rotates API-key credentials only, in one step; the new key is never stored, echoed or audited. */
 @Injectable()
 export class OmniRouteAccountKeyUpdate {
-  private readonly secrets = new Map<string, PendingSecret>();
-
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
@@ -109,146 +94,40 @@ export class OmniRouteAccountKeyUpdate {
     };
   }
 
-  async prepare(
+  async update(
     rawId: unknown,
     rawKey: unknown,
-    acknowledgeEffects: unknown,
-  ): Promise<OmniRouteAccountKeyUpdatePrepared> {
+  ): Promise<OmniRouteAccountKeyUpdateResult> {
     const id = typeof rawId === "string" ? rawId.trim() : "";
     const replacement = typeof rawKey === "string" ? rawKey.trim() : "";
-    if (
-      !validId(id) ||
-      !replacement ||
-      replacement.length > 64_000 ||
-      acknowledgeEffects !== true
-    )
+    if (!validId(id) || !replacement || replacement.length > 64_000)
       throw new ValidationError([
-        "Selecteer een API-sleutelaccount, voer de nieuwe sleutel in en bevestig de clientbrede wijziging en mogelijke OmniRoute-cloudsync.",
+        "Selecteer een API-sleutelaccount en voer de nieuwe sleutel in.",
       ]);
-    try {
-      this.assertGateway();
-      const account = await this.readAccount(id);
-      if (sameSecret(account.key, replacement))
-        throw new Error("De nieuwe sleutel is gelijk aan de huidige sleutel.");
-      const requestId = crypto.randomUUID();
-      const action = this.confirmations.create(
-        `settings-account-key-update:${requestId}`,
-        "omniroute_account_key_update",
-        { requestId, id },
-        "DANGEROUS",
-        undefined,
-        false,
-      );
-      const timer = setTimeout(
-        () => this.secrets.delete(action.confirmationId),
-        60_500,
-      );
-      timer.unref?.();
-      this.secrets.set(action.confirmationId, {
-        ...account,
-        requestId,
-        replacement,
-        expiresAt: action.expiresAt,
-        timer,
-      });
-      this.audit.record({
-        sessionId: "settings",
-        tool: action.tool,
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: { id, provider: account.provider, credentialPresent: true },
-      });
-      return {
-        ok: true,
-        id,
-        provider: String(sanitize(account.provider)),
-        name: String(sanitize(account.name)),
-        action,
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        error:
-          error instanceof Error &&
-          error.message ===
-            "De nieuwe sleutel is gelijk aan de huidige sleutel."
-            ? "De nieuwe sleutel is gelijk aan de huidige sleutel."
-            : unavailable,
-      };
-    }
-  }
-
-  async confirm(
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
-  ): Promise<OmniRouteAccountKeyUpdateResult> {
-    if (
-      !/^settings-account-key-update:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !pending ||
-      pending.tool !== "omniroute_account_key_update" ||
-      pending.confirmationId !== confirmationId
-    )
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Vul de sleutel opnieuw in.",
-      };
-    const secret = this.secrets.get(confirmationId);
-    const clear = () => {
-      if (secret) clearTimeout(secret.timer);
-      this.secrets.delete(confirmationId);
-    };
-    if (!secret || secret.expiresAt <= Date.now()) {
-      clear();
-      this.confirmations.cancel(sessionId, "expired_admin_ui");
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Vul de sleutel opnieuw in.",
-      };
-    }
-    if (!approve) {
-      clear();
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    clear();
-    if (!action)
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Vul de sleutel opnieuw in.",
-      };
-
+    const tool = "omniroute_account_key_update";
     try {
       return await this.barrier.run(async (operation) => {
+        let provider: string;
+        let name: string;
         try {
           this.assertGateway();
-          if (
-            action.args.requestId !== secret.requestId ||
-            action.args.id !== secret.id
-          )
-            throw new Error(unavailable);
-          const before = await this.readAccount(secret.id);
-          if (
-            before.provider !== secret.provider ||
-            before.name !== secret.name ||
-            !sameSecret(before.key, secret.key)
-          )
-            throw new Error(unavailable);
+          const before = await this.readAccount(id);
+          if (sameSecret(before.key, replacement))
+            return {
+              ok: false,
+              error: "De nieuwe sleutel is gelijk aan de huidige sleutel.",
+            };
+          provider = before.provider;
+          name = before.name;
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool,
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "before_execute",
             arguments: {
-              id: secret.id,
-              provider: secret.provider,
+              id,
+              provider,
               credentialPresent: true,
               cloudSyncMayRun: true,
             },
@@ -259,15 +138,15 @@ export class OmniRouteAccountKeyUpdate {
         }
 
         try {
-          await this.management.request(`/api/providers/${secret.id}`, {
+          await this.management.request(`/api/providers/${id}`, {
             method: "PUT",
-            body: { apiKey: secret.replacement },
+            body: { apiKey: replacement },
           });
-          const after = await this.readAccount(secret.id);
+          const after = await this.readAccount(id);
           if (
-            after.provider !== secret.provider ||
-            after.name !== secret.name ||
-            !sameSecret(after.key, secret.replacement)
+            after.provider !== provider ||
+            after.name !== name ||
+            !sameSecret(after.key, replacement)
           )
             throw new Error("Credential persistence not verified");
           let routeReady = false;
@@ -281,17 +160,17 @@ export class OmniRouteAccountKeyUpdate {
           const result: OmniRouteAccountKeyUpdateResult = {
             ok: true,
             verified: true,
-            id: secret.id,
+            id,
             routeReady,
           };
           try {
             this.audit.record({
               sessionId: "settings",
-              tool: action.tool,
+              tool,
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
-              arguments: { id: secret.id, provider: secret.provider },
+              arguments: { id, provider: provider },
               result: { ok: true, credentialPresent: true },
               verification: { persisted: true, routeReady },
             });
@@ -304,11 +183,11 @@ export class OmniRouteAccountKeyUpdate {
           try {
             this.audit.record({
               sessionId: "settings",
-              tool: action.tool,
+              tool,
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
-              arguments: { id: secret.id, provider: secret.provider },
+              arguments: { id, provider: provider },
               result: { ok: false },
               verification: { persisted: null, routeReady: false },
             });

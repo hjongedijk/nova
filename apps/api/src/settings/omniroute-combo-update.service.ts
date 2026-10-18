@@ -1,14 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  OmniRouteComboUpdatePrepared,
-  OmniRouteComboUpdateResult,
-} from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
+import type { OmniRouteComboUpdateResult } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { claimConfirmation } from "./confirmation-step.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
@@ -52,7 +47,6 @@ export class OmniRouteComboUpdate {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
@@ -141,25 +135,21 @@ export class OmniRouteComboUpdate {
       throw new Error("Er bestaat al een combo met deze naam.");
   }
 
-  async prepare(
+  async update(
     id: string,
     rawName: unknown,
     rawModels: unknown,
-    acknowledge: unknown,
     rollbackRevisionId?: string,
-  ): Promise<OmniRouteComboUpdatePrepared> {
+  ): Promise<OmniRouteComboUpdateResult> {
     const name = nameValue(rawName);
     if (
       !validId(id) ||
       !name ||
       !Array.isArray(rawModels) ||
       rawModels.length < 1 ||
-      rawModels.length > 8 ||
-      acknowledge !== true
+      rawModels.length > 8
     )
-      throw new ValidationError([
-        "Vul een naam in, kies 1–8 modellen en bevestig dat deze wijziging alle OmniRoute-clients kan raken.",
-      ]);
+      throw new ValidationError(["Vul een naam in en kies 1–8 modellen."]);
     const models = rawModels.map((model) => {
       if (typeof model !== "string")
         throw new ValidationError(["Ongeldig model."]);
@@ -172,118 +162,31 @@ export class OmniRouteComboUpdate {
     });
     if (new Set(models).size !== models.length)
       throw new ValidationError(["Kies ieder model maar één keer."]);
-    try {
-      const route = this.routing.verifyForManagement();
-      if (!route.ready || !route.policyVerified || !route.freeOnly)
-        throw new Error(unavailable);
-      const before = await this.current(id);
-      if (rollbackRevisionId) {
-        const revision = this.history.rollbackTarget(id, rollbackRevisionId);
-        if (revision.afterRevision !== hash(before.row))
-          throw new Error("Combo is intussen gewijzigd.");
-      }
-      if (
-        name === before.row.name &&
-        JSON.stringify(models) === JSON.stringify(before.models)
-      )
-        return { ok: false, error: "De combo is niet gewijzigd." };
-      await this.assertUniqueName(name, id);
-      const eligible = await this.eligibleModels();
-      if (models.some((model) => !eligible.includes(model)))
-        throw new Error(
-          "Een gekozen model is niet meer beschikbaar via een actief account.",
-        );
-      const revision = hash(before.row);
-      this.audit.record({
-        sessionId: "settings",
-        tool: "omniroute_combo_update",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: {
-          id,
-          revision,
-          name: String(sanitize(name)),
-          modelCount: models.length,
-        },
-      });
-      return {
-        ok: true,
-        name: String(sanitize(name)).slice(0, 80),
-        models,
-        action: this.confirmations.create(
-          `settings-combo-update:${crypto.randomUUID()}`,
-          "omniroute_combo_update",
-          {
-            id,
-            revision,
-            name,
-            models,
-            eligibleRevision: hash(eligible),
-            ...(rollbackRevisionId ? { rollbackRevisionId } : {}),
-          },
-          "DANGEROUS",
-          revision,
-          false,
-        ),
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        error:
-          error instanceof Error &&
-          [
-            "Een gekozen model is niet meer beschikbaar via een actief account.",
-            "Er bestaat al een combo met deze naam.",
-          ].includes(error.message)
-            ? error.message
-            : unavailable,
-      };
-    }
+    return this.execute(id, name, models, rollbackRevisionId);
   }
 
-  async prepareRollback(id: string, revisionId: string) {
+  async rollback(id: string, revisionId: string) {
+    if (!validId(id)) throw new ValidationError(["Ongeldige combo."]);
     const target = this.history.rollbackTarget(id, revisionId);
-    const current = await this.current(id);
-    if (target.afterRevision !== hash(current.row))
-      return {
-        ok: false as const,
-        error: "De combo is later gewijzigd. Herlaad de geschiedenis.",
-      };
-    return this.prepare(
-      id,
-      target.beforeName,
-      target.beforeModels,
-      true,
-      revisionId,
-    );
+    try {
+      const current = await this.current(id);
+      if (target.afterRevision !== hash(current.row))
+        return {
+          ok: false as const,
+          error: "De combo is later gewijzigd. Herlaad de geschiedenis.",
+        };
+    } catch {
+      return { ok: false as const, error: unavailable };
+    }
+    return this.update(id, target.beforeName, target.beforeModels, revisionId);
   }
 
-  async confirm(
+  private async execute(
     id: string,
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
+    name: string,
+    models: string[],
+    rollbackRevisionId?: string,
   ): Promise<OmniRouteComboUpdateResult> {
-    if (
-      !validId(id) ||
-      !/^settings-combo-update:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const claimed = claimConfirmation(
-      this.confirmations,
-      sessionId,
-      confirmationId,
-      approve,
-      {
-        tool: "omniroute_combo_update",
-        arg: { name: "id", value: id },
-        stale: "Deze bevestiging staat niet meer open. Kies de combo opnieuw.",
-        expired: "Bevestiging verlopen. Kies de combo opnieuw.",
-      },
-    );
-    if ("reply" in claimed) return claimed.reply;
-    const action = claimed.action;
     if (this.inFlight.has(id))
       return { ok: false, error: "Deze combo wordt al bewerkt." };
     this.inFlight.add(id);
@@ -296,10 +199,10 @@ export class OmniRouteComboUpdate {
           if (!route.ready || !route.policyVerified || !route.freeOnly)
             throw new Error(unavailable);
           before = await this.current(id);
-          if (typeof action.args.rollbackRevisionId === "string") {
+          if (rollbackRevisionId) {
             const revision = this.history.rollbackTarget(
               id,
-              action.args.rollbackRevisionId,
+              rollbackRevisionId,
             );
             if (revision.afterRevision !== hash(before.row))
               return {
@@ -308,47 +211,44 @@ export class OmniRouteComboUpdate {
                   "De combo is intussen gewijzigd. Controleer de geschiedenis opnieuw.",
               };
           }
+          if (
+            name === before.row.name &&
+            JSON.stringify(models) === JSON.stringify(before.models)
+          )
+            return { ok: false, error: "De combo is niet gewijzigd." };
           const eligible = await this.eligibleModels();
-          if (
-            hash(before.row) !== action.args.revision ||
-            hash(eligible) !== action.args.eligibleRevision
-          )
-            return {
-              ok: false,
-              error:
-                "De combo of modellen zijn gewijzigd. Controleer de keuze opnieuw.",
-            };
-          const name = nameValue(action.args.name);
-          const models = Array.isArray(action.args.models)
-            ? (action.args.models as string[])
-            : [];
-          if (
-            !name ||
-            !models.length ||
-            models.some((model) => !eligible.includes(model))
-          )
-            throw new Error(unavailable);
+          if (models.some((model) => !eligible.includes(model)))
+            throw new Error(
+              "Een gekozen model is niet meer beschikbaar via een actief account.",
+            );
           await this.assertUniqueName(name, id);
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool: "omniroute_combo_update",
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "before_execute",
             arguments: {
               id,
-              revision: action.args.revision,
               name: String(sanitize(name)),
               modelCount: models.length,
             },
           });
           operation.block("policy_change");
-        } catch {
-          return { ok: false, error: unavailable };
+        } catch (error) {
+          return {
+            ok: false,
+            error:
+              error instanceof Error &&
+              [
+                "Een gekozen model is niet meer beschikbaar via een actief account.",
+                "Er bestaat al een combo met deze naam.",
+              ].includes(error.message)
+                ? error.message
+                : unavailable,
+          };
         }
         try {
-          const name = nameValue(action.args.name);
-          const models = action.args.models as string[];
           await this.management.request(`/api/combos/${id}`, {
             method: "PUT",
             body: { name, models },
@@ -367,17 +267,15 @@ export class OmniRouteComboUpdate {
             afterModels: after.models,
             beforeRevision: hash(before.row),
             afterRevision: hash(after.row),
-            ...(typeof action.args.rollbackRevisionId === "string"
-              ? { revertedFrom: action.args.rollbackRevisionId }
-              : {}),
+            ...(rollbackRevisionId ? { revertedFrom: rollbackRevisionId } : {}),
           });
         } catch {
           try {
             this.audit.record({
               sessionId: "settings",
-              tool: action.tool,
+              tool: "omniroute_combo_update",
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
               arguments: { id },
               result: { ok: false },
@@ -411,9 +309,9 @@ export class OmniRouteComboUpdate {
         try {
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool: "omniroute_combo_update",
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "after_execute",
             arguments: { id },
             result: { ok: true },

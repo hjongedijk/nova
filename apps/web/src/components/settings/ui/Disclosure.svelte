@@ -15,6 +15,7 @@
     id,
     lazy = false,
     anchors = "",
+    group,
     children,
   }: {
     title: string;
@@ -24,6 +25,7 @@
     id?: string;
     lazy?: boolean;
     anchors?: string;
+    group?: string;
     children: Snippet;
   } = $props();
   let seen = $state(false);
@@ -36,6 +38,7 @@
   class="ds-disclosure {kind}"
   bind:open
   {id}
+  name={group}
   data-anchors={anchors || undefined}
   data-lazy={lazy || undefined}
 >

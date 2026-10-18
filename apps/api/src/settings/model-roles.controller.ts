@@ -6,14 +6,11 @@ import {
   Param,
   Post,
   Put,
-  UseGuards,
 } from "@nestjs/common";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { ModelRolesService } from "./model-roles.service.js";
-import { SettingsGuard } from "./settings.guard.js";
 
 @Controller("settings/model-roles")
-@UseGuards(SettingsGuard)
 export class ModelRolesController {
   constructor(private readonly roles: ModelRolesService) {}
 

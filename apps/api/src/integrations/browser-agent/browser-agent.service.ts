@@ -156,7 +156,7 @@ export class BrowserAgentService implements ToolSource {
       {
         name: "browser_click_confirmed",
         description:
-          "Click a button that buys, pays, orders, donates, subscribes or deletes, by its number from browser_read. The user is asked to confirm before it happens. Only use it when the user clearly wants that action.",
+          "Click a button that buys, pays, orders, donates, subscribes or deletes, by its number from browser_read. Only use it when the user clearly wants that action.",
         parameters: schema({ id }, ["id"]),
         risk: "CONFIRM",
         timeoutMs: 40000,

@@ -1,11 +1,13 @@
 export type Urgency = "info" | "warn" | "urgent";
-export type ScanName = "calendar" | "home" | "health" | "nudges" | "today";
+export type ScanName =
+  "calendar" | "home" | "health" | "nudges" | "today" | "discovery";
 export const SCAN_NAMES: readonly ScanName[] = [
   "calendar",
   "home",
   "health",
   "nudges",
   "today",
+  "discovery",
 ];
 
 /** What a scan found. The text is built from templates in code: no model, no private content beyond a title. */
@@ -51,7 +53,8 @@ export type ActivityKind =
   | "heal"
   | "bootstrap"
   | "delegated"
-  | "setting";
+  | "setting"
+  | "tuning";
 
 /** Metadata only: never message text, titles of events or names of people. */
 export interface ActivityEntry {
@@ -72,6 +75,43 @@ export interface FindingSummary {
   outcome: string;
 }
 
+/** What the owner did with an initiative. "stopped" is a 'doe dat niet meer'. */
+export type Reaction = "dismissed" | "ignored" | "acted" | "stopped";
+
+/** The values the owner chose; self-tuning may go quieter than this but never louder, and recovers up to it. */
+export interface TuningCeiling {
+  dailyBudget: number;
+  intervalMinutes: number;
+  quietStart: string;
+  quietEnd: string;
+}
+
+/** How the autopilot adjusts itself from the owner's reactions; persisted in autopilot.json. */
+export interface TuningState {
+  ceiling: TuningCeiling | null;
+  /** scan -> multiplier on finding cooldowns (1 = as designed). */
+  cooldownFactor: Partial<Record<ScanName, number>>;
+  /** finding key -> epoch ms until which it is muted ('doe dat niet meer'). */
+  mutedKeys: Record<string, number>;
+  /** Announced findings still waiting for a reaction. */
+  pending: { id: string; key: string; scan: ScanName; at: number }[];
+  reactions: {
+    at: number;
+    scan: ScanName;
+    reaction: Reaction;
+    /** Minutes since local midnight when the nudge was delivered. */
+    minute: number;
+  }[];
+}
+
+export const emptyTuning = (): TuningState => ({
+  ceiling: null,
+  cooldownFactor: {},
+  mutedKeys: {},
+  pending: [],
+  reactions: [],
+});
+
 export interface AutopilotFile {
   version: 1;
   settings: AutopilotSettings;
@@ -89,6 +129,7 @@ export interface AutopilotFile {
   /** Pending findings from the last scan, for the status view. */
   lastFindings: FindingSummary[];
   activity: ActivityEntry[];
+  tuning: TuningState;
 }
 
 export const DEFAULT_SETTINGS: AutopilotSettings = {
@@ -104,13 +145,14 @@ export const DEFAULT_SETTINGS: AutopilotSettings = {
   hourlyLimit: 3,
   textContacts: true,
   textMinUrgency: "info",
-  allowCalls: false,
+  allowCalls: true,
   scans: {
     calendar: true,
     home: true,
     health: true,
     nudges: true,
     today: true,
+    discovery: true,
   },
   calendarLeadMinutes: 30,
   staleMinutes: 30,
@@ -123,6 +165,8 @@ export const LIMITS = {
   sentKeepMs: 7 * 86_400_000,
   minInterval: 1,
   maxInterval: 60,
+  reactions: 60,
+  pending: 50,
 } as const;
 
 export class AutopilotError extends Error {}

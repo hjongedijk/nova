@@ -1,6 +1,6 @@
 //! Signed GitHub updates. Only the local settings window can request installation.
 use crate::{app, log, state::Shared, tray};
-use nova_win_core::update::{Phase, Status};
+use nova_win_core::update::{CheckFailure, Phase, Status};
 use std::{
     sync::Mutex,
     time::{Duration, Instant},
@@ -61,6 +61,34 @@ fn fail(app: &AppHandle, message: &str) {
     publish(app);
 }
 
+/// Only probes the application's embedded updater endpoint after a failed check.
+/// HEAD reads no artifact or manifest body and never changes update availability.
+async fn probe_manifest_status(app: &AppHandle) -> Option<u16> {
+    let endpoint = app
+        .config()
+        .plugins
+        .0
+        .get("updater")?
+        .get("endpoints")?
+        .as_array()?
+        .first()?
+        .as_str()?
+        .to_owned();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .connect_timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .ok()?;
+    client
+        .head(endpoint)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .ok()
+        .map(|response| response.status().as_u16())
+}
+
 pub async fn check(app: &AppHandle, automatic: bool) -> Result<(), String> {
     {
         let state = app.state::<Updates>();
@@ -114,7 +142,18 @@ pub async fn check(app: &AppHandle, automatic: bool) -> Result<(), String> {
         }
         Err(error) => {
             log!("update check failed: {error}");
-            let message = "Updatecontrole mislukt. Controleer je internetverbinding of probeer later opnieuw.";
+            let failure = match &error {
+                // The plugin discards non-success HTTP status codes. Confirm a missing
+                // manifest separately; outages and access failures are not unpublished releases.
+                tauri_plugin_updater::Error::ReleaseNotFound => {
+                    CheckFailure::from_http_status(probe_manifest_status(app).await)
+                }
+                tauri_plugin_updater::Error::Reqwest(error) => {
+                    CheckFailure::from_http_status(error.status().map(|status| status.as_u16()))
+                }
+                _ => CheckFailure::NetworkOrOther,
+            };
+            let message = failure.message();
             fail(app, message);
             Err(message.into())
         }

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { AppAccessService } from "../../src/access/access.service.js";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { ApiErrorFilter } from "../../src/core/errors/validation.error.js";
 import {
@@ -11,7 +10,6 @@ import {
 } from "../../src/settings/node-red-editor-access.service.js";
 import { NodeRedEditorController } from "../../src/settings/node-red-editor.controller.js";
 import { NodeRedEditorProxy } from "../../src/settings/node-red-editor-proxy.service.js";
-import { SettingsGuard } from "../../src/settings/settings.guard.js";
 
 const BASE = "/api/node-red-editor/_nova";
 const ORIGIN = "https://nova.example";
@@ -19,21 +17,19 @@ const ORIGIN = "https://nova.example";
 describe("Node-RED editor session endpoints", () => {
   let app: INestApplication;
   let editor: NodeRedEditorAccess;
-  let config: { adminPin: string; appToken: string; reverseProxyAuth: boolean };
+  let config: Record<string, never>;
   let proxy: {
     ready: ReturnType<typeof vi.fn>;
     closeSession: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(async () => {
-    config = { adminPin: "4321", appToken: "", reverseProxyAuth: true };
+    config = {};
     proxy = { ready: vi.fn(async () => true), closeSession: vi.fn() };
     const module = await Test.createTestingModule({
       controllers: [NodeRedEditorController],
       providers: [
-        AppAccessService,
         NodeRedEditorAccess,
-        SettingsGuard,
         { provide: NovaConfig, useValue: config },
         { provide: NodeRedEditorProxy, useValue: proxy },
       ],
@@ -52,13 +48,11 @@ describe("Node-RED editor session endpoints", () => {
     request(app.getHttpServer())
       .post(`${BASE}/session`)
       .set("Host", "nova.example")
-      .set("Origin", ORIGIN)
-      .set("x-nova-pin", "4321")
-      .set("x-nova-admin", "1");
+      .set("Origin", ORIGIN);
   const cookieOf = (response: request.Response) =>
     String(response.headers["set-cookie"]?.[0] ?? "").split(";")[0]!;
 
-  it("mints through settings protection with no second global unlock behind a trusted proxy", async () => {
+  it("mints without any unlock", async () => {
     const result = await mint().send({});
     expect(result.status).toBe(200);
     expect(result.headers["cache-control"]).toBe("no-store");
@@ -68,14 +62,6 @@ describe("Node-RED editor session endpoints", () => {
     expect(JSON.stringify(result.body)).not.toContain(token);
     expect(String(result.headers["set-cookie"])).toMatch(/HttpOnly/);
     expect(proxy.ready).toHaveBeenCalledOnce();
-  });
-
-  it("does not probe readiness before the settings PIN and admin header pass", async () => {
-    const noPin = await mint().unset("x-nova-pin").send({});
-    expect(noPin.status).toBe(401);
-    const noAdmin = await mint().unset("x-nova-admin").send({});
-    expect(noAdmin.status).toBe(403);
-    expect(proxy.ready).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -99,15 +85,6 @@ describe("Node-RED editor session endpoints", () => {
       expect(proxy.ready).not.toHaveBeenCalled();
     },
   );
-
-  it("rejects unprotected or globally locked requests before probing upstream", async () => {
-    config.reverseProxyAuth = false;
-    expect((await mint().send({})).status).toBe(403);
-    config.reverseProxyAuth = true;
-    config.appToken = "fixture-app-access";
-    expect((await mint().send({})).status).toBe(403);
-    expect(proxy.ready).not.toHaveBeenCalled();
-  });
 
   it("does not accept spoofed forwarding headers as the matching request host", async () => {
     const result = await mint()
@@ -180,19 +157,6 @@ describe("Node-RED editor session endpoints", () => {
       expect(result.headers["set-cookie"]).toBeUndefined();
     }
     expect(proxy.ready).toHaveBeenCalledOnce();
-  });
-
-  it("requires current privacy protection for renewal", async () => {
-    const initial = await mint().send({});
-    config.reverseProxyAuth = false;
-    const result = await request(app.getHttpServer())
-      .post(`${BASE}/renew`)
-      .set("Host", "nova.example")
-      .set("Origin", ORIGIN)
-      .set("Cookie", cookieOf(initial))
-      .send({});
-    expect(result.status).toBe(403);
-    expect(result.headers["set-cookie"]).toBeUndefined();
   });
 
   it("closes only the authorized session and immediately revokes its tracked sockets", async () => {

@@ -6,7 +6,6 @@ import {
   Param,
   Post,
   Query,
-  UseGuards,
 } from "@nestjs/common";
 import type {
   NativeGatewayReport,
@@ -16,7 +15,6 @@ import type {
 import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
-import { SettingsGuard } from "./settings.guard.js";
 import { NativeMemorySettingsService } from "./native-memory-settings.service.js";
 import { NativeMemoryRecordsService } from "./native-memory-records.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
@@ -32,7 +30,6 @@ const error = "OmniRoute-beheer is niet beschikbaar. Controleer de koppeling.";
 
 /** Fixed read-only management endpoints. Runtime handlers and other owners stay server-side. */
 @Controller("settings/omniroute/native")
-@UseGuards(SettingsGuard)
 export class NativeGatewayController {
   constructor(
     private readonly config: NovaConfig,
@@ -195,91 +192,25 @@ export class NativeGatewayController {
     }
   }
 
-  @Post("memories/delete/prepare")
+  @Post("memories/delete")
   @HttpCode(200)
-  prepareMemoryRecordDelete(@Body() body: unknown) {
+  deleteMemoryRecord(@Body() body: unknown) {
     this.assertGateway();
-    return this.memoryRecordsManager.prepare(body);
+    return this.memoryRecordsManager.delete(body);
   }
 
-  @Post("memories/delete-many/prepare")
+  @Post("memories/delete-many")
   @HttpCode(200)
-  prepareMemoryRecordsDelete(@Body() body: unknown) {
+  deleteMemoryRecords(@Body() body: unknown) {
     this.assertGateway();
-    return this.memoryRecordsManager.prepareDeleteMany(body);
+    return this.memoryRecordsManager.deleteMany(body);
   }
 
-  @Post("memories/update/prepare")
+  @Post("memories/update")
   @HttpCode(200)
-  prepareMemoryRecordUpdate(@Body() body: unknown) {
+  updateMemoryRecord(@Body() body: unknown) {
     this.assertGateway();
-    return this.memoryRecordsManager.prepareUpdate(body);
-  }
-
-  @Post("memories/delete/confirm")
-  @HttpCode(200)
-  confirmMemoryRecordDelete(@Body() body: unknown) {
-    if (!body || typeof body !== "object" || Array.isArray(body))
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const input = body as Record<string, unknown>;
-    if (
-      Object.keys(input).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      ) ||
-      typeof input.sessionId !== "string" ||
-      typeof input.confirmationId !== "string" ||
-      typeof input.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    return this.memoryRecordsManager.confirm(
-      input.sessionId,
-      input.confirmationId,
-      input.approve,
-    );
-  }
-
-  @Post("memories/delete-many/confirm")
-  @HttpCode(200)
-  confirmMemoryRecordsDelete(@Body() body: unknown) {
-    if (!body || typeof body !== "object" || Array.isArray(body))
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const input = body as Record<string, unknown>;
-    if (
-      Object.keys(input).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      ) ||
-      typeof input.sessionId !== "string" ||
-      typeof input.confirmationId !== "string" ||
-      typeof input.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    return this.memoryRecordsManager.confirm(
-      input.sessionId,
-      input.confirmationId,
-      input.approve,
-    );
-  }
-
-  @Post("memories/update/confirm")
-  @HttpCode(200)
-  confirmMemoryRecordUpdate(@Body() body: unknown) {
-    if (!body || typeof body !== "object" || Array.isArray(body))
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const input = body as Record<string, unknown>;
-    if (
-      Object.keys(input).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      ) ||
-      typeof input.sessionId !== "string" ||
-      typeof input.confirmationId !== "string" ||
-      typeof input.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    return this.memoryRecordsManager.confirm(
-      input.sessionId,
-      input.confirmationId,
-      input.approve,
-    );
+    return this.memoryRecordsManager.update(body);
   }
 
   @Get("memory/history")
@@ -287,52 +218,24 @@ export class NativeGatewayController {
     return this.memory.history();
   }
 
-  @Post("memory/prepare")
+  @Post("memory")
   @HttpCode(200)
-  prepareMemory(@Body() body: unknown) {
-    return this.memory.prepare(body);
+  setMemory(@Body() body: unknown) {
+    return this.memory.apply(body);
   }
 
-  @Post("memory/rollback/prepare")
+  @Post("memory/rollback")
   @HttpCode(200)
-  prepareMemoryRollback(@Body() body: unknown) {
+  rollbackMemory(@Body() body: unknown) {
     if (!body || typeof body !== "object" || Array.isArray(body))
       throw new ValidationError(["Ongeldige geschiedenisactie."]);
     const input = body as Record<string, unknown>;
     if (
-      Object.keys(input).some(
-        (key) => !["revisionId", "acknowledgeGlobal"].includes(key),
-      ) ||
-      typeof input.revisionId !== "string" ||
-      typeof input.acknowledgeGlobal !== "boolean"
+      Object.keys(input).some((key) => key !== "revisionId") ||
+      typeof input.revisionId !== "string"
     )
       throw new ValidationError(["Ongeldige geschiedenisactie."]);
-    return this.memory.prepareRollback(
-      input.revisionId,
-      input.acknowledgeGlobal,
-    );
-  }
-
-  @Post("memory/confirm")
-  @HttpCode(200)
-  confirmMemory(@Body() body: unknown) {
-    if (!body || typeof body !== "object" || Array.isArray(body))
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const input = body as Record<string, unknown>;
-    if (
-      Object.keys(input).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      ) ||
-      typeof input.sessionId !== "string" ||
-      typeof input.confirmationId !== "string" ||
-      typeof input.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    return this.memory.confirm(
-      input.sessionId,
-      input.confirmationId,
-      input.approve,
-    );
+    return this.memory.rollback(input.revisionId);
   }
 
   @Get("documentation/:id")

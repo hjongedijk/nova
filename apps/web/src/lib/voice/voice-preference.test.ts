@@ -4,6 +4,7 @@ import { fetchSpeech } from "#lib/api/chat.ts";
 import {
   saveTtsProsody,
   saveTtsVoice,
+  syncStoredVoiceProfile,
   setServerDefaultVoice,
   ttsLocale,
   ttsProsody,
@@ -145,5 +146,39 @@ describe("TTS voice preference", () => {
       text: "Good morning.",
       voice: "en-GB-RyanNeural",
     });
+  });
+});
+
+describe("stored voice profile start sync", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+  it("pushes the stored voice once when the server has another", async () => {
+    vi.spyOn(storage, "get").mockImplementation((key, fallback) =>
+      key === "novaTtsVoice" ? "nl-NL-MaartenNeural" : fallback,
+    );
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === "PUT"
+        ? new Response("{}", { status: 200 })
+        : new Response(JSON.stringify({ rate: -3, pitch: -2 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(syncStoredVoiceProfile()).resolves.toEqual({
+      status: "synced",
+    });
+    const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+    expect(JSON.parse(String(put?.[1]?.body)).voice).toBe(
+      "nl-NL-MaartenNeural",
+    );
+  });
+  it("leaves the server alone when nothing is stored locally", async () => {
+    vi.spyOn(storage, "get").mockImplementation((_key, fallback) => fallback);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(syncStoredVoiceProfile()).resolves.toEqual({
+      status: "unchanged",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

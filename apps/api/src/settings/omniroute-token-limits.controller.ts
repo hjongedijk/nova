@@ -1,22 +1,8 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  Param,
-  Post,
-  UseGuards,
-} from "@nestjs/common";
-import { ValidationError } from "../core/errors/validation.error.js";
-import { SettingsGuard } from "./settings.guard.js";
+import { Body, Controller, Get, HttpCode, Param, Post } from "@nestjs/common";
 import { OmniRouteTokenLimits } from "./omniroute-token-limits.service.js";
 import { strictBody } from "./request-input.js";
 
-const input = (body: unknown, keys: string[]) =>
-  strictBody(body, keys, "Ongeldige tokenlimietaanvraag.");
-
 @Controller("settings/omniroute/accounts/keys/:id/token-limits")
-@UseGuards(SettingsGuard)
 export class OmniRouteTokenLimitsController {
   constructor(private readonly limits: OmniRouteTokenLimits) {}
 
@@ -25,37 +11,14 @@ export class OmniRouteTokenLimitsController {
     return this.limits.report(id);
   }
 
-  @Post("prepare")
+  @Post()
   @HttpCode(200)
-  prepare(@Param("id") id: string, @Body() body: unknown) {
-    const value = input(body, [
-      "tokenLimit",
-      "resetInterval",
-      "acknowledgeGlobalEffect",
-    ]);
-    return this.limits.prepare(
-      id,
-      value.tokenLimit,
-      value.resetInterval,
-      value.acknowledgeGlobalEffect,
+  apply(@Param("id") id: string, @Body() body: unknown) {
+    const value = strictBody(
+      body,
+      ["tokenLimit", "resetInterval"],
+      "Ongeldige tokenlimietaanvraag.",
     );
-  }
-
-  @Post("confirm")
-  @HttpCode(200)
-  confirm(@Param("id") id: string, @Body() body: unknown) {
-    const value = input(body, ["sessionId", "confirmationId", "approve"]);
-    if (
-      typeof value.sessionId !== "string" ||
-      typeof value.confirmationId !== "string" ||
-      typeof value.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige tokenlimietbevestiging."]);
-    return this.limits.confirm(
-      id,
-      value.sessionId,
-      value.confirmationId,
-      value.approve,
-    );
+    return this.limits.apply(id, value.tokenLimit, value.resetInterval);
   }
 }

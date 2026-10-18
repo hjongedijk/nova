@@ -45,14 +45,6 @@ export function friendlyApiError(
     )
   )
     return copy.network;
-  if (status === 401 || /pin required|pincode required/.test(message))
-    return language === "en"
-      ? "Settings are locked. Enter your PIN and try again."
-      : "Instellingen zijn vergrendeld. Voer je pincode in en probeer opnieuw.";
-  if (status === 403)
-    return language === "en"
-      ? "You are not allowed to do that."
-      : "Je mag deze actie niet uitvoeren.";
   if (status === 404)
     return language === "en"
       ? "That setting or service was not found. Reload and try again."

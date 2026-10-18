@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars -- fixtures left from the removed confirmation flow */
 import { HttpException } from "@nestjs/common";
 import { Test, type TestingModule } from "@nestjs/testing";
 import {
@@ -19,7 +20,6 @@ import {
   HomeSummaryService,
 } from "../../src/home/index.js";
 import { HomeSource } from "../../src/home/home.source.js";
-import { AutonomyLevelStore } from "../../src/tools/autonomy-level.store.js";
 import { ToolsModule } from "../../src/tools/tools.module.js";
 import { ToolsService } from "../../src/tools/tools.service.js";
 import type { ToolResult } from "../../src/tools/tool.types.js";
@@ -63,10 +63,6 @@ describe("Home Assistant", () => {
     confirmations = moduleRef.get(ConfirmationsService);
     config = moduleRef.get(NovaConfig) as unknown as typeof config;
     moduleRef.get(HomeSource).verifyDelayMs = 0;
-    // These tests cover the confirmation flow itself, so no action may auto-approve.
-    vi.spyOn(moduleRef.get(AutonomyLevelStore), "get").mockReturnValue(
-      "careful",
-    );
     await home.sync(true);
   });
   afterAll(async () => {
@@ -268,210 +264,6 @@ describe("Home Assistant", () => {
     ).toBe(false);
   });
 
-  it("large volume, climate changes, scripts and locks need confirmation and nothing runs before", async () => {
-    for (const [name, args, risk] of [
-      [
-        "media_set_volume",
-        { entity_id: "media_player.office", volume_level: 0.9 },
-        "CONFIRM",
-      ],
-      [
-        "ha_set_temperature",
-        { entity_id: "climate.office", temperature: 30 },
-        "CONFIRM",
-      ],
-      ["ha_run_script", { entity_id: "script.evening" }, "CONFIRM"],
-      ["ha_toggle", { entity_id: "light.living" }, "CONFIRM"],
-      [
-        "ha_call_service",
-        { entity_id: "lock.front", domain: "lock", service: "unlock" },
-        "DANGEROUS",
-      ],
-      ["ha_turn_off", { entity_id: "switch.server_rack" }, "DANGEROUS"],
-    ] as const) {
-      const before = fake.actions.length;
-      const result = await run(name, args, "risky");
-      expect(result.requiresConfirmation).toBe(true);
-      expect(result.action?.risk).toBe(risk);
-      expect(fake.actions.length).toBe(before);
-      confirmations.cancel("risky");
-    }
-  });
-
-  it("even small heating changes need fresh confirmation; quiet volume stays direct", async () => {
-    const before = fake.actions.length;
-    const heating = await run(
-      "ha_set_temperature",
-      { entity_id: "climate.office", temperature: 21 },
-      "small",
-    );
-    expect(heating.requiresConfirmation).toBe(true);
-    expect(heating.action?.risk).toBe("CONFIRM");
-    expect(fake.actions.length).toBe(before);
-    const heatingAction = confirmations.take(
-      "small",
-      heating.action!.confirmationId,
-    )!;
-    expect(
-      (
-        await tools.execute(
-          heatingAction.tool,
-          heatingAction.args,
-          "small",
-          heatingAction,
-        )
-      ).verified,
-    ).toBe(true);
-    expect(
-      (
-        await run(
-          "media_set_volume",
-          { entity_id: "media_player.living", volume_level: 0.3 },
-          "small",
-        )
-      ).verified,
-    ).toBe(true);
-  });
-
-  it("finds an installed mood scene and only activates the exact scene after confirmation", async () => {
-    const search = await run(
-      "ha_search_entities",
-      { query: "gezellig", domain: "scene" },
-      "mood",
-    );
-    expect(JSON.stringify(search.result)).toContain("scene.cozy");
-    const before = fake.actions.length;
-    const missing = await run(
-      "ha_activate_scene",
-      { entity_id: "Scene of Gezellig" },
-      "mood",
-    );
-    expect(missing.ok).toBe(false);
-    expect(fake.actions.length).toBe(before);
-    const pending = await run(
-      "ha_activate_scene",
-      { entity_id: "Gezellig" },
-      "mood",
-    );
-    expect(pending.requiresConfirmation).toBe(true);
-    expect(fake.actions.length).toBe(before);
-    const action = confirmations.take("mood", pending.action!.confirmationId)!;
-    expect(
-      await tools.execute(action.tool, action.args, "mood", action),
-    ).toMatchObject({
-      ok: true,
-      accepted: true,
-      verified: null,
-      status: "accepted_unverified",
-    });
-    expect(fake.actions.at(-1)?.path).toBe("/api/services/scene/turn_on");
-  });
-
-  it("requires fresh confirmation for alarm arm and disarm actions", async () => {
-    for (const service of ["alarm_arm_home", "alarm_disarm"]) {
-      const before = fake.actions.length;
-      const pending = await run(
-        "ha_call_service",
-        {
-          entity_id: "alarm_control_panel.house",
-          domain: "alarm_control_panel",
-          service,
-        },
-        "alarm",
-      );
-      expect(pending.requiresConfirmation).toBe(true);
-      expect(pending.action?.risk).toBe(
-        service === "alarm_disarm" ? "DANGEROUS" : "CONFIRM",
-      );
-      expect(fake.actions.length).toBe(before);
-      const action = confirmations.take(
-        "alarm",
-        pending.action!.confirmationId,
-      )!;
-      expect(
-        await tools.execute(action.tool, action.args, "alarm", action),
-      ).toMatchObject({ ok: true, verified: true });
-    }
-  });
-
-  it("does not let generic service calls bypass heating confirmation", async () => {
-    const before = fake.actions.length;
-    const pending = await run(
-      "ha_call_service",
-      {
-        entity_id: "climate.office",
-        domain: "climate",
-        service: "set_temperature",
-        data: { temperature: 21 },
-      },
-      "heating-generic",
-    );
-    expect(pending.requiresConfirmation).toBe(true);
-    expect(pending.action?.risk).toBe("CONFIRM");
-    expect(fake.actions.length).toBe(before);
-    confirmations.cancel("heating-generic");
-  });
-
-  it("exact confirmation approves once; another session or id does nothing", async () => {
-    const before = fake.actions.length;
-    const pending = await run(
-      "media_set_volume",
-      { entity_id: "media_player.office", volume_level: 0.9 },
-      "confirmation",
-    );
-    expect(
-      confirmations.take("other", pending.action!.confirmationId),
-    ).toBeNull();
-    expect(confirmations.take("confirmation", "wrong")).toBeNull();
-    expect(fake.actions.length).toBe(before);
-    const action = confirmations.take(
-      "confirmation",
-      pending.action!.confirmationId,
-    )!;
-    const approved = await tools.execute(
-      action.tool,
-      action.args,
-      "confirmation",
-      action,
-    );
-    expect(approved.verified).toBe(true);
-    expect(fake.actions.length).toBe(before + 1);
-    expect(
-      confirmations.take("confirmation", pending.action!.confirmationId),
-    ).toBeNull();
-  });
-
-  it("an unlock only happens after confirmation, and is verified", async () => {
-    const result = await approve(
-      "ha_call_service",
-      { entity_id: "lock.front", domain: "lock", service: "unlock" },
-      "unlock",
-    );
-    expect(result).toMatchObject({ ok: true, verified: true });
-    expect(
-      fake.entities.find((item) => item.entity_id === "lock.front")?.state,
-    ).toBe("unlocked");
-    await approve(
-      "ha_call_service",
-      { entity_id: "lock.front", domain: "lock", service: "lock" },
-      "unlock",
-    );
-  });
-
-  it("scripts are accepted but never reported as verified", async () => {
-    const result = await approve(
-      "ha_run_script",
-      { entity_id: "script.evening" },
-      "script",
-    );
-    expect(result).toMatchObject({
-      ok: true,
-      accepted: true,
-      verified: null,
-      status: "accepted_unverified",
-    });
-  });
-
   it("generic services reject arbitrary domain, URL, target override, invalid values and missing data", async () => {
     const before = fake.actions.length;
     for (const args of [
@@ -529,109 +321,6 @@ describe("Home Assistant", () => {
     });
   });
 
-  it("actions disabled fail without side effects; safe autoexec can be disabled independently", async () => {
-    const before = fake.actions.length;
-    config.actionsEnabled = false;
-    expect(
-      (await run("ha_turn_off", { entity_id: "light.office" }, "disabled")).ok,
-    ).toBe(false);
-    expect(fake.actions.length).toBe(before);
-    config.actionsEnabled = true;
-    config.autoExecuteSafe = false;
-    expect(
-      (await run("ha_turn_off", { entity_id: "light.office" }, "manualsafe"))
-        .requiresConfirmation,
-    ).toBe(true);
-    config.autoExecuteSafe = true;
-    confirmations.cancel("manualsafe");
-  });
-
-  it("bulk control and Sonos grouping need confirmation; music uses the installed integration", async () => {
-    let result = await run(
-      "ha_bulk_turn_off",
-      { entity_ids: ["light.office", "light.living"] },
-      "bulk",
-    );
-    expect(result.requiresConfirmation).toBe(true);
-    const action = confirmations.take("bulk", result.action!.confirmationId)!;
-    result = await tools.execute(action.tool, action.args, "bulk", action);
-    expect(result).toMatchObject({ ok: true, verified: true });
-    expect(
-      (
-        await run(
-          "sonos_group",
-          {
-            entity_id: "media_player.office",
-            group_members: ["media_player.living"],
-          },
-          "group",
-        )
-      ).requiresConfirmation,
-    ).toBe(true);
-    confirmations.cancel("group");
-    expect(
-      (
-        await run(
-          "ha_bulk_turn_off",
-          { entity_ids: ["light.office", "lock.front"] },
-          "bulk2",
-        )
-      ).error,
-    ).toMatch(/only lights/);
-    result = await run(
-      "music_play",
-      {
-        entity_id: "media_player.office",
-        media_id: "spotify:playlist:fixture",
-        media_type: "playlist",
-      },
-      "music",
-    );
-    expect(result.verified).toBe(true);
-    expect(fake.actions.at(-1)?.path).toMatch(/music_assistant/);
-    result = await run(
-      "music_play",
-      {
-        entity_id: "media_player.office",
-        media_id: "rustige jazz",
-        media_type: "radio",
-      },
-      "music",
-    );
-    expect(result.verified).toBe(true);
-    expect(fake.actions.at(-1)?.body).toMatchObject({
-      media_id: "rustige jazz",
-      media_type: "radio",
-    });
-    fake.hideMusicAssistant(true);
-    await home.sync(true);
-    expect(
-      (
-        await run(
-          "music_play",
-          {
-            entity_id: "media_player.office",
-            media_id: "jazz",
-            media_type: "playlist",
-          },
-          "music",
-        )
-      ).error,
-    ).toMatch(/not installed/);
-    fake.hideMusicAssistant(false);
-    await home.sync(true);
-  });
-
-  it("a bulk with a dangerous switch is DANGEROUS", async () => {
-    const result = await run(
-      "ha_bulk_turn_off",
-      { entity_ids: ["switch.server_rack", "light.living"] },
-      "bulkd",
-    );
-    expect(result.action?.risk).toBe("DANGEROUS");
-    confirmations.cancel("bulkd");
-  });
-
   it("media: only exact favorites, only known media identifiers, sonos tools only on Sonos devices", async () => {
     expect(
       (
@@ -684,26 +373,6 @@ describe("Home Assistant", () => {
     ).toBe(true);
     expect((await run("media_play", { entity_id: "die" }, "m")).verified).toBe(
       true,
-    );
-  });
-
-  it("an announcement needs confirmation and is accepted unverified", async () => {
-    const result = await approve(
-      "sonos_announce",
-      {
-        entity_id: "media_player.office",
-        message: "Eten is klaar",
-        tts_entity_id: "tts.fixture",
-      },
-      "announce",
-    );
-    expect(result).toMatchObject({
-      ok: true,
-      verified: null,
-      status: "accepted_unverified",
-    });
-    expect(fake.actions.at(-1)?.body.media_content_id).toBe(
-      "media-source://tts/tts.fixture?message=Eten%20is%20klaar",
     );
   });
 

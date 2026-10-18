@@ -2,43 +2,30 @@ import type {
   ToolUsageReport,
   FreePolicyOptions,
   FreePolicySelection,
-  FreePolicyPrepared,
   FreePolicyResult,
   FreePolicyHistory,
   OmniRouteAccountsReport,
   OmniRouteApiKeyInventory,
   OmniRouteUsageReport,
   OmniRouteModelVisibilityReport,
-  OmniRouteAccountRemovalPrepared,
   OmniRouteAccountRemovalResult,
-  OmniRouteAccountCreatePrepared,
   OmniRouteAccountCreateResult,
-  OmniRouteAccountKeyUpdatePrepared,
   OmniRouteAccountKeyUpdateResult,
-  OmniRouteAccountRenamePrepared,
   OmniRouteAccountRenameResult,
   OmniRouteAccountRenameHistory,
-  OmniRouteAccountActivationPrepared,
   OmniRouteAccountActivationResult,
   OmniRouteActivationHistoryEntry,
-  OmniRouteKeyActivationPrepareResult,
   OmniRouteKeyActivationResult,
   OmniRouteKeyModelAccessOptions,
   OmniRouteKeyModelAccessHistory,
-  OmniRouteKeyModelAccessPrepareResult,
   OmniRouteKeyModelAccessResult,
-  OmniRouteComboCreatePrepared,
   OmniRouteComboCreateResult,
-  OmniRouteComboRemovalPrepared,
   OmniRouteComboRemovalResult,
-  OmniRouteComboUpdatePrepared,
   OmniRouteComboUpdateHistory,
   OmniRouteTokenLimitsReport,
-  OmniRouteTokenLimitPrepared,
   OmniRouteTokenLimitResult,
   OmniRouteTokenResetInterval,
   OmniRouteComboUpdateResult,
-  OmniRouteComboActivationPrepared,
   OmniRouteComboActivationResult,
   ModelRoleHistory,
   ModelRolesSettings,
@@ -58,34 +45,25 @@ import type {
   InstructionSkillContentRollbackResult,
   QuickActionHistory,
   StackControlStatus,
-  StackRestartPrepared,
   StackRestartResult,
   StackServiceId,
   ManagedTargetsAccessHistory,
-  PendingConfirmation,
   WorkspaceProjectsReport,
   WorkspaceProjectSelectionHistory,
-  WorkspaceProjectSelectionPrepared,
   WorkspaceProjectSelectionResult,
 } from "@nova/contracts";
 import type {
   NativeGatewayReport,
-  NativeMemoryPrepared,
-  NativeMemoryRecordPrepared,
   NativeMemoryRecordResult,
-  NativeMemoryRecordsDeletePrepared,
   NativeMemoryHistory,
   NativeMemoryRecords,
   NativeMemoryResult,
   NativeSkillDocument,
   NativeSkillMode,
   NativeSkillModeHistory,
-  NativeSkillModePrepared,
   NativeSkillModeResult,
-  NativeSkillRemovalPrepared,
   NativeSkillRemovalResult,
   NativePromptReplacement,
-  NativePromptPrepared,
   NativePromptResult,
   NativePromptHistory,
   WindowsAgentStatus,
@@ -94,9 +72,9 @@ import type {
   HelperHotkeyRollbackResult,
   UpdateReport,
   ModelMetricsReport,
-  SettingsImportPrepared,
   SettingsImportResult,
   ServiceConnection,
+  RuntimeSettingGroup,
   ServiceConnectionRevision,
   ServiceConnectionTest,
   ServiceConnectionWrite,
@@ -145,15 +123,11 @@ import type {
   WidgetDisplayHistory,
 } from "@nova/contracts";
 import { getJson, sendJson } from "./client.ts";
-import { getPin } from "./pin-session.ts";
 import { settingsWriteReceipt } from "./settings-receipts.ts";
 import { publishSettingsReceipt } from "./settings-receipt-events.ts";
-export { getPin, setPin, PIN_KEY } from "./pin-session.ts";
 
-/** Every settings call carries these; writes also need x-nova-admin. */
 function headers(): Record<string, string> {
-  const pin = getPin();
-  return { "x-nova-admin": "1", ...(pin ? { "x-nova-pin": pin } : {}) };
+  return {};
 }
 
 const read = <T>(path: string) =>
@@ -178,159 +152,54 @@ const enc = encodeURIComponent;
 export const getSettings = () => read<SettingsOverview>("");
 export const getNativeGateway = () =>
   read<NativeGatewayReport>("/omniroute/native");
-export const prepareNativeMemory = (
-  enabled: boolean,
-  acknowledgeGlobal: true,
-) =>
-  write<NativeMemoryPrepared>("POST", "/omniroute/native/memory/prepare", {
-    enabled,
-    acknowledgeGlobal,
-  });
+export const setNativeMemory = (enabled: boolean) =>
+  write<NativeMemoryResult>("POST", "/omniroute/native/memory", { enabled });
 export const getNativeMemoryHistory = () =>
   read<NativeMemoryHistory>("/omniroute/native/memory/history");
 export const getNativeMemoryRecords = (offset = 0) =>
   read<NativeMemoryRecords>(`/omniroute/native/memories?offset=${offset}`);
-export const prepareNativeMemoryRecordDelete = (id: string) =>
-  write<NativeMemoryRecordPrepared>(
+export const deleteNativeMemoryRecord = (id: string) =>
+  write<NativeMemoryRecordResult>("POST", "/omniroute/native/memories/delete", {
+    id,
+  });
+export const deleteNativeMemoryRecords = (ids: string[]) =>
+  write<NativeMemoryRecordResult>(
     "POST",
-    "/omniroute/native/memories/delete/prepare",
-    { id },
-  );
-export const prepareNativeMemoryRecordsDelete = (ids: string[]) =>
-  write<NativeMemoryRecordsDeletePrepared>(
-    "POST",
-    "/omniroute/native/memories/delete-many/prepare",
+    "/omniroute/native/memories/delete-many",
     { ids },
   );
-export const prepareNativeMemoryRecordUpdate = (id: string, content: string) =>
-  write<NativeMemoryRecordPrepared>(
-    "POST",
-    "/omniroute/native/memories/update/prepare",
-    { id, content },
-  );
-export const confirmNativeMemoryRecordUpdate = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<NativeMemoryRecordResult>(
-    "POST",
-    "/omniroute/native/memories/update/confirm",
-    {
-      sessionId,
-      confirmationId,
-      approve,
-    },
-  );
-export const confirmNativeMemoryRecordDelete = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<NativeMemoryRecordResult>(
-    "POST",
-    "/omniroute/native/memories/delete/confirm",
-    {
-      sessionId,
-      confirmationId,
-      approve,
-    },
-  );
-export const confirmNativeMemoryRecordsDelete = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<NativeMemoryRecordResult>(
-    "POST",
-    "/omniroute/native/memories/delete-many/confirm",
-    { sessionId, confirmationId, approve },
-  );
-export const prepareNativeMemoryRollback = (revisionId: string) =>
-  write<NativeMemoryPrepared>(
-    "POST",
-    "/omniroute/native/memory/rollback/prepare",
-    { revisionId, acknowledgeGlobal: true },
-  );
-export const confirmNativeMemory = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<NativeMemoryResult>("POST", "/omniroute/native/memory/confirm", {
-    sessionId,
-    confirmationId,
-    approve,
+export const updateNativeMemoryRecord = (id: string, content: string) =>
+  write<NativeMemoryRecordResult>("POST", "/omniroute/native/memories/update", {
+    id,
+    content,
   });
-export const prepareNativePrompt = (value: NativePromptReplacement) =>
-  write<NativePromptPrepared>(
-    "POST",
-    "/omniroute/native/prompt/prepare",
-    value,
-  );
+export const rollbackNativeMemory = (revisionId: string) =>
+  write<NativeMemoryResult>("POST", "/omniroute/native/memory/rollback", {
+    revisionId,
+  });
+export const replaceNativePrompt = (value: NativePromptReplacement) =>
+  write<NativePromptResult>("POST", "/omniroute/native/prompt", value);
 export const getNativePromptHistory = () =>
   read<NativePromptHistory>("/omniroute/native/prompt/history");
-export const confirmNativePrompt = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<NativePromptResult>("POST", "/omniroute/native/prompt/confirm", {
-    sessionId,
-    confirmationId,
-    approve,
+export const setNativeSkillMode = (id: string, mode: NativeSkillMode) =>
+  write<NativeSkillModeResult>("POST", `/omniroute/native/skills/${enc(id)}`, {
+    mode,
   });
-export const prepareNativeSkillMode = (
-  id: string,
-  mode: NativeSkillMode,
-  acknowledgeGlobal = false,
-) =>
-  write<NativeSkillModePrepared>(
-    "POST",
-    `/omniroute/native/skills/${enc(id)}/prepare`,
-    { mode, acknowledgeGlobal },
-  );
 export const getNativeSkillModeHistory = (id: string) =>
   read<NativeSkillModeHistory>(
     `/omniroute/native/skills/${encodeURIComponent(id)}/history`,
   );
-export const prepareNativeSkillModeRollback = (
-  id: string,
-  revisionId: string,
-  acknowledgeGlobal: boolean,
-) =>
-  write<NativeSkillModePrepared>(
-    "POST",
-    `/omniroute/native/skills/${encodeURIComponent(id)}/rollback/prepare`,
-    { revisionId, acknowledgeGlobal },
-  );
-export const confirmNativeSkillMode = (
-  id: string,
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const rollbackNativeSkillMode = (id: string, revisionId: string) =>
   write<NativeSkillModeResult>(
     "POST",
-    `/omniroute/native/skills/${enc(id)}/confirm`,
-    { sessionId, confirmationId, approve },
+    `/omniroute/native/skills/${enc(id)}/rollback`,
+    { revisionId },
   );
-export const prepareNativeSkillRemoval = (id: string) =>
-  write<NativeSkillRemovalPrepared>(
-    "POST",
-    `/omniroute/native/skills/${enc(id)}/remove/prepare`,
-    {},
-  );
-export const confirmNativeSkillRemoval = (
-  id: string,
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const removeNativeSkill = (id: string) =>
   write<NativeSkillRemovalResult>(
     "POST",
-    `/omniroute/native/skills/${enc(id)}/remove/confirm`,
-    { sessionId, confirmationId, approve },
+    `/omniroute/native/skills/${enc(id)}/remove`,
+    {},
   );
 export const getNativeSkillDocument = (id: string) =>
   read<NativeSkillDocument>(`/omniroute/native/documentation/${enc(id)}`);
@@ -355,21 +224,11 @@ export const selectWorkspaceProject = (id: string) =>
   write<WorkspaceProjectsReport>("PUT", "/workspace/projects/active", { id });
 export const getWorkspaceProjectSelectionHistory = () =>
   read<WorkspaceProjectSelectionHistory>("/workspace/projects/history");
-export const prepareWorkspaceProjectSelectionRollback = (revision: string) =>
-  write<WorkspaceProjectSelectionPrepared>(
-    "POST",
-    `/workspace/projects/history/${enc(revision)}/prepare-rollback`,
-    {},
-  );
-export const confirmWorkspaceProjectSelectionRollback = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const rollbackWorkspaceProjectSelection = (revision: string) =>
   write<WorkspaceProjectSelectionResult>(
     "POST",
-    "/workspace/projects/history/confirm-rollback",
-    { sessionId, confirmationId, approve },
+    `/workspace/projects/history/${enc(revision)}/rollback`,
+    {},
   );
 export const getWorkspaceCodeTree = () =>
   read<{
@@ -603,35 +462,16 @@ export interface NodeRedPaletteState {
 }
 export const getNodeRedPalette = () =>
   read<NodeRedPaletteState>("/node-red/palette");
-export const prepareNodeRedPalette = (
-  module: string,
-  install: boolean,
-  revision: string,
-) =>
-  write<{ ok: true; warning: string; action: PendingConfirmation }>(
-    "POST",
-    "/node-red/palette/prepare",
-    { module, install, revision },
-  );
-export const confirmNodeRedPalette = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const changeNodeRedPalette = (module: string, install: boolean) =>
   write<
     | {
         ok: true;
-        cancelled?: true;
         state?: NodeRedPaletteState;
         verified?: boolean;
         pendingRestart?: boolean;
       }
     | { ok: false; error: string }
-  >("POST", "/node-red/palette/confirm", {
-    sessionId,
-    confirmationId,
-    approve,
-  });
+  >("POST", "/node-red/palette/change", { module, install });
 export const exportNodeRedFlows = () =>
   write<Record<string, unknown>[]>("POST", "/node-red/flows/export", {});
 export interface NodeRedFlowRevision {
@@ -645,31 +485,14 @@ export const getNodeRedFlowRevisions = () =>
   );
 export const captureNodeRedFlowRevision = () =>
   write<NodeRedFlowRevision>("POST", "/node-red/flow-revisions/capture", {});
-export const prepareNodeRedFlowRestore = (id: string) =>
-  write<{
-    ok: true;
-    warning: string;
-    action: PendingConfirmation;
-  }>("POST", `/node-red/flow-revisions/${enc(id)}/prepare-restore`, {});
-export const confirmNodeRedFlowRestore = (
-  id: string,
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const restoreNodeRedFlowRevision = (id: string) =>
   write<
-    | { ok: true; cancelled: true }
     | {
         ok: true;
         revision: NodeRedFlowRevision & { historyWarning?: string };
       }
     | { ok: false; error: string }
-  >("POST", `/node-red/flow-revisions/${enc(id)}/confirm-restore`, {
-    sessionId,
-    confirmationId,
-    approve,
-  });
-
+  >("POST", `/node-red/flow-revisions/${enc(id)}/restore`, {});
 export const getHelper = () => read<HelperState>("/helper");
 export const getWindowsAgentStatus = () =>
   read<WindowsAgentStatus>("/windows/status");
@@ -679,25 +502,8 @@ export const setHelper = (mode: HelperMode, display: number) =>
   write<HelperState>("POST", "/helper", { mode, display });
 
 export const exportSettings = () => read<SettingsBackup>("/export");
-export const prepareSettingsImport = (
-  data: unknown,
-  mode: "merge" | "replace",
-) =>
-  write<SettingsImportPrepared>("POST", "/import/prepare", {
-    data,
-    mode,
-    acknowledgeEffects: true,
-  });
-export const importSettings = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<SettingsImportResult>("POST", "/import", {
-    sessionId,
-    confirmationId,
-    approve,
-  });
+export const importSettings = (data: unknown, mode: "merge" | "replace") =>
+  write<SettingsImportResult>("POST", "/import", { data, mode });
 
 export const revokeStandingApproval = (id: string) =>
   write<{ ok: true }>("DELETE", `/standing-approvals/${enc(id)}`);
@@ -772,20 +578,8 @@ export const requestServiceRestart = () =>
 
 export const getStackControlStatus = () =>
   read<StackControlStatus>("/stack-control/services");
-export const prepareStackServiceRestart = (service: StackServiceId) =>
-  write<StackRestartPrepared>("POST", "/stack-control/restart/prepare", {
-    service,
-  });
-export const confirmStackServiceRestart = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<StackRestartResult>("POST", "/stack-control/restart/confirm", {
-    sessionId,
-    confirmationId,
-    approve,
-  });
+export const restartStackService = (service: StackServiceId) =>
+  write<StackRestartResult>("POST", "/stack-control/restart", { service });
 export const getMqttOverview = () =>
   read<MqttOverview>("/services/mqtt/overview");
 export const getMcpServerStatus = () => read<McpServerStatus>("/mcp/servers");
@@ -802,105 +596,54 @@ export const saveMcpServerConfig = (
     values,
     clear,
   });
-export const prepareMcpServerCatalogChange = (
+export const changeMcpServerCatalog = (
   id: string,
   operation: "add" | "remove",
 ) =>
   write<{
     ok: boolean;
-    error?: string;
-    warning?: string;
-    action?: PendingConfirmation;
-  }>("POST", `/mcp/servers/${enc(id)}/prepare-catalog`, { operation });
-export const confirmMcpServerCatalogChange = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<{
-    ok: boolean;
     verified?: boolean | null;
-    cancelled?: boolean;
     server?: string;
     operation?: "add" | "remove";
     warning?: string;
     error?: string;
-  }>("POST", "/mcp/servers/confirm-catalog", {
-    sessionId,
-    confirmationId,
-    approve,
-  });
+  }>("POST", `/mcp/servers/${enc(id)}/catalog`, { operation });
 export const getMcpServerActivity = (id: string) =>
   read<McpServerActivity>(`/mcp/servers/${enc(id)}/activity`);
 export const getMcpServerHistory = (id: string) =>
   read<McpSettingHistory>(`/mcp/servers/${enc(id)}/history`);
-export const prepareMcpServerHistoryRollback = (
-  id: string,
-  revisionId: string,
-) =>
+export const rollbackMcpServerHistory = (id: string, revisionId: string) =>
   write<{
     ok: boolean;
-    error?: string;
+    verified?: boolean | null;
+    server?: string;
+    enabled?: boolean;
+    tool?: string;
+    risk?: Risk;
     warning?: string;
-    action?: PendingConfirmation;
-  }>(
-    "POST",
-    `/mcp/servers/${enc(id)}/history/${enc(revisionId)}/prepare-rollback`,
-    {},
-  );
+    error?: string;
+  }>("POST", `/mcp/servers/${enc(id)}/history/${enc(revisionId)}/rollback`, {});
 export const testMcpServerConnection = (id: string) =>
   write<{ ok: boolean; toolCount: number }>(
     "POST",
     `/mcp/servers/${enc(id)}/test`,
     {},
   );
-export const prepareMcpServerToggle = (id: string, enabled: boolean) =>
-  write<{
-    ok: boolean;
-    error?: string;
-    warning?: string;
-    action?: PendingConfirmation;
-  }>("POST", `/mcp/servers/${enc(id)}/prepare-toggle`, { enabled });
-export const confirmMcpServerToggle = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const setMcpServerEnabled = (id: string, enabled: boolean) =>
   write<{
     ok: boolean;
     error?: string;
     warning?: string;
     server?: string;
     enabled?: boolean;
-  }>("POST", "/mcp/servers/confirm-toggle", {
-    sessionId,
-    confirmationId,
-    approve,
-  });
-export const prepareMcpToolRisk = (server: string, tool: string, risk: Risk) =>
-  write<{
-    ok: boolean;
-    error?: string;
-    warning?: string;
-    action?: PendingConfirmation;
-  }>("POST", `/mcp/servers/${enc(server)}/tools/${enc(tool)}/prepare-risk`, {
-    risk,
-  });
-export const confirmMcpToolRisk = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+  }>("POST", `/mcp/servers/${enc(id)}/toggle`, { enabled });
+export const setMcpToolRisk = (server: string, tool: string, risk: Risk) =>
   write<{
     ok: boolean;
     error?: string;
     warning?: string;
     risk?: Risk;
-  }>("POST", "/mcp/servers/confirm-tool-risk", {
-    sessionId,
-    confirmationId,
-    approve,
-  });
+  }>("POST", `/mcp/servers/${enc(server)}/tools/${enc(tool)}/risk`, { risk });
 export const getQdrantOverview = () =>
   read<QdrantOverview>("/services/qdrant/overview");
 export const getWidgetDisplayHistory = (id: string) =>
@@ -943,33 +686,14 @@ export const getManagedTargetsAccess = () =>
   read<ManagedTargetsAccessPolicy>("/managed-targets/access");
 export const getManagedTargetsAccessHistory = () =>
   read<ManagedTargetsAccessHistory>("/managed-targets/access/history");
-export const prepareManagedTargetsAccessRollback = (revision: string) =>
-  write<{
-    ok: boolean;
-    warning?: string;
-    error?: string;
-    action?: PendingConfirmation;
-  }>(
-    "POST",
-    `/managed-targets/access/history/${enc(revision)}/prepare-rollback`,
-    {},
-  );
-export const confirmManagedTargetsAccessRollback = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const rollbackManagedTargetsAccess = (revision: string) =>
   write<{
     ok: boolean;
     error?: string;
     historyWarning?: string;
     auditWarning?: string;
     policy?: ManagedTargetsAccessPolicy;
-  }>("POST", "/managed-targets/access/history/confirm-rollback", {
-    sessionId,
-    confirmationId,
-    approve,
-  });
+  }>("POST", `/managed-targets/access/history/${enc(revision)}/rollback`, {});
 export const saveManagedTargetsAccess = (policy: ManagedTargetsAccessPolicy) =>
   write<{
     ok: true;
@@ -994,33 +718,14 @@ export const getHomeAssistantAccess = () =>
   read<HomeAssistantAccessPolicy>("/home-assistant/access");
 export const getHomeAssistantAccessHistory = () =>
   read<HomeAssistantAccessHistory>("/home-assistant/access/history");
-export const prepareHomeAssistantAccessRollback = (revision: string) =>
-  write<{
-    ok: boolean;
-    warning?: string;
-    error?: string;
-    action?: PendingConfirmation;
-  }>(
-    "POST",
-    `/home-assistant/access/history/${enc(revision)}/prepare-rollback`,
-    {},
-  );
-export const confirmHomeAssistantAccessRollback = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const rollbackHomeAssistantAccess = (revision: string) =>
   write<{
     ok: boolean;
     error?: string;
     historyWarning?: string;
     auditWarning?: string;
     policy?: HomeAssistantAccessPolicy;
-  }>("POST", "/home-assistant/access/history/confirm-rollback", {
-    sessionId,
-    confirmationId,
-    approve,
-  });
+  }>("POST", `/home-assistant/access/history/${enc(revision)}/rollback`, {});
 export const saveHomeAssistantAccess = (policy: HomeAssistantAccessPolicy) =>
   write<{
     ok: true;
@@ -1047,29 +752,13 @@ export const testServiceConnection = (
   });
 export const getConnectionHistory = () =>
   read<{ revisions: ServiceConnectionRevision[] }>("/services/history");
-export const prepareConnectionRollback = (id: string) =>
-  write<{
-    ok: boolean;
-    warning?: string;
-    error?: string;
-    action?: PendingConfirmation;
-  }>("POST", `/services/history/${enc(id)}/prepare-rollback`, {});
-export const confirmConnectionRollback = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const rollbackConnection = (id: string) =>
   write<{
     ok: boolean;
     error?: string;
     auditWarning?: string;
     services?: ServiceConnection[];
-  }>("POST", "/services/history/confirm-rollback", {
-    sessionId,
-    confirmationId,
-    approve,
-  });
-
+  }>("POST", `/services/history/${enc(id)}/rollback`, {});
 export const getOmniRouteAccounts = () =>
   read<OmniRouteAccountsReport>("/omniroute/accounts");
 export const getOmniRouteApiKeys = () =>
@@ -1082,314 +771,164 @@ export const getOmniRouteKeyModelAccessHistory = (id: string) =>
   read<OmniRouteKeyModelAccessHistory>(
     `/omniroute/accounts/keys/${enc(id)}/model-access/history`,
   );
-export const prepareOmniRouteKeyModelAccessRollback = (
+export const rollbackOmniRouteKeyModelAccess = (
   id: string,
   revisionId: string,
 ) =>
-  write<OmniRouteKeyModelAccessPrepareResult>(
+  write<OmniRouteKeyModelAccessResult>(
     "POST",
-    `/omniroute/accounts/keys/${enc(id)}/model-access/prepare-rollback`,
-    { revisionId, acknowledgeGlobalEffect: true },
+    `/omniroute/accounts/keys/${enc(id)}/model-access/rollback`,
+    { revisionId },
   );
-export const prepareOmniRouteKeyModelAccess = (
+export const setOmniRouteKeyModelAccess = (
   id: string,
   allowedModels: string[],
-  revision: string,
-) =>
-  write<OmniRouteKeyModelAccessPrepareResult>(
-    "POST",
-    `/omniroute/accounts/keys/${enc(id)}/model-access/prepare`,
-    { allowedModels, revision, acknowledgeGlobalEffect: true },
-  );
-export const confirmOmniRouteKeyModelAccess = (
-  id: string,
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
 ) =>
   write<OmniRouteKeyModelAccessResult>(
     "POST",
-    `/omniroute/accounts/keys/${enc(id)}/model-access/confirm`,
-    { sessionId, confirmationId, approve },
+    `/omniroute/accounts/keys/${enc(id)}/model-access`,
+    { allowedModels },
   );
 export const getOmniRouteModelVisibility = () =>
   read<OmniRouteModelVisibilityReport>("/omniroute/accounts/model-visibility");
 export const getOmniRouteUsage = () =>
   read<OmniRouteUsageReport>("/omniroute/accounts/usage");
 
-export const prepareOmniRouteAccountActivation = (
-  id: string,
-  enabled: boolean,
-) =>
-  write<OmniRouteAccountActivationPrepared>(
-    "POST",
-    `/omniroute/accounts/${enc(id)}/activation/prepare`,
-    { enabled, acknowledgeGlobalEffect: true },
-  );
-export const confirmOmniRouteAccountActivation = (
-  id: string,
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<OmniRouteAccountActivationResult>(
-    "POST",
-    `/omniroute/accounts/${enc(id)}/activation/confirm`,
-    { sessionId, confirmationId, approve },
-  );
-
-export const prepareOmniRouteKeyActivation = (id: string, enabled: boolean) =>
-  write<OmniRouteKeyActivationPrepareResult>(
-    "POST",
-    `/omniroute/accounts/keys/${enc(id)}/activation/prepare`,
-    { enabled, acknowledgeGlobalEffect: true },
-  );
-export const confirmOmniRouteKeyActivation = (
-  id: string,
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const setOmniRouteKeyActivation = (id: string, enabled: boolean) =>
   write<OmniRouteKeyActivationResult>(
     "POST",
-    `/omniroute/accounts/keys/${enc(id)}/activation/confirm`,
-    { sessionId, confirmationId, approve },
+    `/omniroute/accounts/keys/${enc(id)}/activation`,
+    { enabled },
   );
 export const getOmniRouteKeyActivationHistory = (id: string) =>
   read<{ revisions: OmniRouteActivationHistoryEntry[] }>(
     `/omniroute/accounts/keys/${enc(id)}/activation/history`,
   );
-export const prepareOmniRouteKeyActivationRollback = (
-  id: string,
-  revision: string,
-) =>
-  write<OmniRouteKeyActivationPrepareResult>(
+export const rollbackOmniRouteKeyActivation = (id: string, revision: string) =>
+  write<OmniRouteKeyActivationResult>(
     "POST",
-    `/omniroute/accounts/keys/${enc(id)}/activation/history/${enc(revision)}/prepare-rollback`,
+    `/omniroute/accounts/keys/${enc(id)}/activation/history/${enc(revision)}/rollback`,
     {},
   );
-export const prepareOmniRouteComboCreate = (name: string, models: string[]) =>
-  write<OmniRouteComboCreatePrepared>(
-    "POST",
-    "/omniroute/combos/create/prepare",
-    {
-      name,
-      models,
-      acknowledgeGlobalEffect: true,
-    },
-  );
-export const confirmOmniRouteComboCreate = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<OmniRouteComboCreateResult>(
-    "POST",
-    "/omniroute/combos/create/confirm",
-    {
-      sessionId,
-      confirmationId,
-      approve,
-    },
-  );
-export const prepareOmniRouteComboRemoval = (id: string) =>
-  write<OmniRouteComboRemovalPrepared>(
-    "POST",
-    `/omniroute/combos/${enc(id)}/removal/prepare`,
-    { acknowledgeEffects: true },
-  );
-export const confirmOmniRouteComboRemoval = (
-  id: string,
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const createOmniRouteCombo = (name: string, models: string[]) =>
+  write<OmniRouteComboCreateResult>("POST", "/omniroute/combos/create", {
+    name,
+    models,
+  });
+export const removeOmniRouteCombo = (id: string) =>
   write<OmniRouteComboRemovalResult>(
     "POST",
-    `/omniroute/combos/${enc(id)}/removal/confirm`,
-    { sessionId, confirmationId, approve },
+    `/omniroute/combos/${enc(id)}/removal`,
+    {},
   );
-export const prepareOmniRouteComboUpdate = (
+export const updateOmniRouteCombo = (
   id: string,
   name: string,
   models: string[],
 ) =>
-  write<OmniRouteComboUpdatePrepared>(
+  write<OmniRouteComboUpdateResult>(
     "POST",
-    `/omniroute/combos/${enc(id)}/update/prepare`,
-    { name, models, acknowledgeGlobalEffect: true },
+    `/omniroute/combos/${enc(id)}/update`,
+    { name, models },
   );
 export const getOmniRouteComboUpdateHistory = (id: string) =>
   read<OmniRouteComboUpdateHistory>(
     `/omniroute/combos/${enc(id)}/update/history`,
   );
-export const prepareOmniRouteComboUpdateRollback = (
-  id: string,
-  revision: string,
-) =>
-  write<OmniRouteComboUpdatePrepared>(
-    "POST",
-    `/omniroute/combos/${enc(id)}/update/history/${enc(revision)}/prepare-rollback`,
-    {},
-  );
-export const confirmOmniRouteComboUpdate = (
-  id: string,
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const rollbackOmniRouteComboUpdate = (id: string, revision: string) =>
   write<OmniRouteComboUpdateResult>(
     "POST",
-    `/omniroute/combos/${enc(id)}/update/confirm`,
-    { sessionId, confirmationId, approve },
+    `/omniroute/combos/${enc(id)}/update/history/${enc(revision)}/rollback`,
+    {},
   );
 export const getOmniRouteTokenLimits = (id: string) =>
   read<OmniRouteTokenLimitsReport>(
     `/omniroute/accounts/keys/${enc(id)}/token-limits`,
   );
-export const prepareOmniRouteTokenLimit = (
+export const setOmniRouteTokenLimit = (
   id: string,
   tokenLimit: number,
   resetInterval: OmniRouteTokenResetInterval,
 ) =>
-  write<OmniRouteTokenLimitPrepared>(
-    "POST",
-    `/omniroute/accounts/keys/${enc(id)}/token-limits/prepare`,
-    { tokenLimit, resetInterval, acknowledgeGlobalEffect: true },
-  );
-export const confirmOmniRouteTokenLimit = (
-  id: string,
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
   write<OmniRouteTokenLimitResult>(
     "POST",
-    `/omniroute/accounts/keys/${enc(id)}/token-limits/confirm`,
-    { sessionId, confirmationId, approve },
+    `/omniroute/accounts/keys/${enc(id)}/token-limits`,
+    { tokenLimit, resetInterval },
   );
 
-export const prepareOmniRouteAccountRemoval = (id: string) =>
-  write<OmniRouteAccountRemovalPrepared>(
+export const setOmniRouteAccountActivation = (id: string, enabled: boolean) =>
+  write<OmniRouteAccountActivationResult>(
     "POST",
-    `/omniroute/accounts/${enc(id)}/removal/prepare`,
-    { acknowledgeEffects: true },
+    `/omniroute/accounts/${enc(id)}/activation`,
+    { enabled },
   );
-export const confirmOmniRouteAccountRemoval = (
+export const rollbackOmniRouteAccountActivation = (
   id: string,
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
+  revision: string,
 ) =>
+  write<OmniRouteAccountActivationResult>(
+    "POST",
+    `/omniroute/accounts/${enc(id)}/activation/history/${enc(revision)}/rollback`,
+    {},
+  );
+export const removeOmniRouteAccount = (id: string) =>
   write<OmniRouteAccountRemovalResult>(
     "POST",
-    `/omniroute/accounts/${enc(id)}/removal/confirm`,
-    { sessionId, confirmationId, approve },
+    `/omniroute/accounts/${enc(id)}/removal`,
+    {},
   );
-export const prepareOmniRouteAccountCreate = (
+export const createOmniRouteAccount = (
   provider: string,
   name: string,
   apiKey: string,
-  acknowledgeEffects: boolean,
 ) =>
-  write<OmniRouteAccountCreatePrepared>(
-    "POST",
-    "/omniroute/accounts/create/prepare",
-    { provider, name, apiKey, acknowledgeEffects },
-  );
-export const confirmOmniRouteAccountCreate = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<OmniRouteAccountCreateResult>(
-    "POST",
-    "/omniroute/accounts/create/confirm",
-    { sessionId, confirmationId, approve },
-  );
-export const prepareOmniRouteAccountKeyUpdate = (
-  id: string,
-  apiKey: string,
-  acknowledgeEffects: boolean,
-) =>
-  write<OmniRouteAccountKeyUpdatePrepared>(
-    "POST",
-    "/omniroute/accounts/key-update/prepare",
-    { id, apiKey, acknowledgeEffects },
-  );
-export const confirmOmniRouteAccountKeyUpdate = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+  write<OmniRouteAccountCreateResult>("POST", "/omniroute/accounts/create", {
+    provider,
+    name,
+    apiKey,
+  });
+export const updateOmniRouteAccountKey = (id: string, apiKey: string) =>
   write<OmniRouteAccountKeyUpdateResult>(
     "POST",
-    "/omniroute/accounts/key-update/confirm",
-    { sessionId, confirmationId, approve },
+    "/omniroute/accounts/key-update",
+    { id, apiKey },
   );
-export const prepareOmniRouteAccountRename = (
+export const renameOmniRouteAccount = (id: string, name: string) =>
+  write<OmniRouteAccountRenameResult>("POST", "/omniroute/accounts/rename", {
+    id,
+    name,
+  });
+export const rollbackOmniRouteAccountRename = (
   id: string,
-  name: string,
-  acknowledgeEffects: boolean,
+  revisionId: string,
 ) =>
-  write<OmniRouteAccountRenamePrepared>(
+  write<OmniRouteAccountRenameResult>(
     "POST",
-    "/omniroute/accounts/rename/prepare",
-    { id, name, acknowledgeEffects },
+    `/omniroute/accounts/rename/${enc(id)}/history/${enc(revisionId)}/rollback`,
+    {},
   );
 export const getOmniRouteAccountRenameHistory = (id: string) =>
   read<OmniRouteAccountRenameHistory>(
     `/omniroute/accounts/rename/${enc(id)}/history`,
   );
-export const prepareOmniRouteAccountRenameRollback = (
-  id: string,
-  revisionId: string,
-  acknowledgeEffects: boolean,
-) =>
-  write<OmniRouteAccountRenamePrepared>(
-    "POST",
-    `/omniroute/accounts/rename/${enc(id)}/history/${enc(revisionId)}/prepare-rollback`,
-    { acknowledgeEffects },
-  );
-export const confirmOmniRouteAccountRename = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<OmniRouteAccountRenameResult>(
-    "POST",
-    "/omniroute/accounts/rename/confirm",
-    { sessionId, confirmationId, approve },
-  );
 
-export const prepareOmniRouteComboActivation = (id: string, enabled: boolean) =>
-  write<OmniRouteComboActivationPrepared>(
-    "POST",
-    `/omniroute/combos/${enc(id)}/activation/prepare`,
-    { enabled, acknowledgeGlobalEffect: true },
-  );
-export const confirmOmniRouteComboActivation = (
-  id: string,
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
+export const setOmniRouteComboActivation = (id: string, enabled: boolean) =>
   write<OmniRouteComboActivationResult>(
     "POST",
-    `/omniroute/combos/${enc(id)}/activation/confirm`,
-    { sessionId, confirmationId, approve },
+    `/omniroute/combos/${enc(id)}/activation`,
+    { enabled },
   );
 export const getOmniRouteComboActivationHistory = (id: string) =>
   read<{ revisions: OmniRouteActivationHistoryEntry[] }>(
     `/omniroute/combos/${enc(id)}/activation/history`,
   );
-export const prepareOmniRouteComboActivationRollback = (
+export const rollbackOmniRouteComboActivation = (
   id: string,
   revision: string,
 ) =>
-  write<OmniRouteComboActivationPrepared>(
+  write<OmniRouteComboActivationResult>(
     "POST",
-    `/omniroute/combos/${enc(id)}/activation/history/${enc(revision)}/prepare-rollback`,
+    `/omniroute/combos/${enc(id)}/activation/history/${enc(revision)}/rollback`,
     {},
   );
 
@@ -1397,30 +936,11 @@ export const getFreePolicyOptions = () =>
   read<FreePolicyOptions>("/omniroute/policy");
 export const getFreePolicyHistory = () =>
   read<FreePolicyHistory>("/omniroute/policy/history");
-export const prepareFreePolicy = (value: FreePolicySelection) =>
-  write<FreePolicyPrepared>("POST", "/omniroute/policy/prepare", value);
-export const confirmFreePolicy = (
-  sessionId: string,
-  confirmationId: string,
-  approve: boolean,
-) =>
-  write<FreePolicyResult>("POST", "/omniroute/policy/confirm", {
-    sessionId,
-    confirmationId,
-    approve,
-  });
+export const applyFreePolicy = (value: FreePolicySelection) =>
+  write<FreePolicyResult>("POST", "/omniroute/policy", value);
 export const getOmniRouteAccountActivationHistory = (id: string) =>
   read<{ revisions: OmniRouteActivationHistoryEntry[] }>(
     `/omniroute/accounts/${enc(id)}/activation/history`,
-  );
-export const prepareOmniRouteAccountActivationRollback = (
-  id: string,
-  revision: string,
-) =>
-  write<OmniRouteAccountActivationPrepared>(
-    "POST",
-    `/omniroute/accounts/${enc(id)}/activation/history/${enc(revision)}/prepare-rollback`,
-    {},
   );
 
 export const getToolUsage = () => read<ToolUsageReport>("/tools/usage");
@@ -1446,3 +966,15 @@ export const getNodeRedLogs = () =>
 
 export const pairWindowsAgent = (code: string) =>
   write<ServiceConnectionWrite>("POST", "/services/windows/pair", { code });
+
+export const getRuntimeSettings = () =>
+  read<{ groups: RuntimeSettingGroup[] }>("/runtime");
+export const saveRuntimeSettings = (
+  id: string,
+  values: Record<string, string | boolean>,
+  reset: string[] = [],
+) =>
+  write<{ groups: RuntimeSettingGroup[] }>("PUT", `/runtime/${enc(id)}`, {
+    values,
+    reset,
+  });

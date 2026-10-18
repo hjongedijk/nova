@@ -157,8 +157,7 @@
       report = await getOmniRouteAccounts();
     } catch {
       report = null;
-      error =
-        "Accounts konden niet worden geladen. Controleer je PIN en de koppeling.";
+      error = "Accounts konden niet worden geladen. Controleer de koppeling.";
     } finally {
       busy = false;
     }

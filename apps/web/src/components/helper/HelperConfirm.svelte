@@ -66,7 +66,7 @@
     overflow: hidden;
     padding: 12px 14px 14px;
     border: 1px solid rgba(255, 138, 76, 0.45);
-    border-radius: 0;
+    border-radius: 18px;
     background: linear-gradient(
       180deg,
       rgba(255, 122, 69, 0.16),
@@ -93,8 +93,9 @@
     gap: 8px;
     font: 600 13px/1 inherit;
     font-family: inherit;
-    padding: 8px 8px 8px 14px;
-    border-radius: 0;
+    padding: 0 10px 0 16px;
+    min-height: 44px;
+    border-radius: 14px;
     border: 1px solid transparent;
     cursor: pointer;
   }
@@ -114,9 +115,9 @@
   kbd {
     font: 600 11px/1 inherit;
     font-family: inherit;
-    min-width: 20px;
-    padding: 4px 6px;
-    border-radius: 0;
+    min-width: 22px;
+    padding: 5px 7px;
+    border-radius: 8px;
     text-align: center;
   }
   .hc-yes kbd {

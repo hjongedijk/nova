@@ -4,12 +4,11 @@ import type {
   OmniRouteUsageReport,
   OmniRouteModelVisibilityReport,
 } from "@nova/contracts";
-import { Controller, Get, UseGuards } from "@nestjs/common";
+import { Controller, Get } from "@nestjs/common";
 import { DatabaseSync } from "node:sqlite";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
-import { SettingsGuard } from "./settings.guard.js";
 import { object } from "./request-input.js";
 
 const identifier = (value: unknown, model = false): string =>
@@ -39,7 +38,6 @@ const measure = (value: unknown): number | null =>
 
 /** Private metadata only: a catalog label never establishes account billing safety. */
 @Controller("settings/omniroute/accounts")
-@UseGuards(SettingsGuard)
 export class OmniRouteAccountsController {
   constructor(
     private readonly config: NovaConfig,

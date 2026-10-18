@@ -27,14 +27,12 @@
     getHomeAssistantInventory,
     getHomeAssistantAccess,
     getHomeAssistantAccessHistory,
-    prepareHomeAssistantAccessRollback,
-    confirmHomeAssistantAccessRollback,
+    rollbackHomeAssistantAccess,
     saveHomeAssistantAccess,
     getManagedTargetInventory,
     getManagedTargetsAccess,
     getManagedTargetsAccessHistory,
-    prepareManagedTargetsAccessRollback,
-    confirmManagedTargetsAccessRollback,
+    rollbackManagedTargetsAccess,
     saveManagedTargetsAccess,
     saveServiceConnection,
     pairWindowsAgent,
@@ -54,8 +52,11 @@
   import AdminConfirmation from "#components/admin/AdminConfirmation.svelte";
   import { sessionId } from "#components/admin/session.ts";
   import { executeAction } from "#lib/api/admin.ts";
-  let { ids, showHelp = true }: { ids?: string[]; showHelp?: boolean } =
-    $props();
+  let {
+    ids,
+    showHelp = true,
+    expanded = false,
+  }: { ids?: string[]; showHelp?: boolean; expanded?: boolean } = $props();
   let services = $state<ServiceConnection[]>([]);
   let drafts = $state<Record<string, Record<string, string | boolean>>>({});
   let clear = $state<Record<string, Record<string, boolean>>>({});
@@ -155,6 +156,10 @@
     );
     clear[service.id] = {};
   }
+  // Only the first render honours `expanded`; later renders keep the user's choice.
+  function openOnMount(node: HTMLDetailsElement, shouldOpen: boolean) {
+    if (shouldOpen) node.open = true;
+  }
   function openForFlowLink(node: HTMLDetailsElement, shouldOpen: boolean) {
     if (shouldOpen) node.open = true;
     return {
@@ -169,7 +174,7 @@
         getServiceConnections(),
         getServiceRestartStatus(),
       ]);
-      services = connections.services;
+      services = connections.services ?? [];
       restartStatus = restart;
       services.forEach(reset);
       error = "";
@@ -181,12 +186,6 @@
     }
   }
   async function restart() {
-    if (
-      !window.confirm(
-        "NOVA is kort niet bereikbaar. Herstart nu om de opgeslagen koppelingen toe te passen?",
-      )
-    )
-      return;
     busy = "restart";
     try {
       const result = await requestServiceRestart();
@@ -209,7 +208,11 @@
     const flowId = new URLSearchParams(window.location.search).get(
       "nodeRedFlow",
     );
-    if (flowId && /^[A-Za-z0-9._:-]{1,128}$/.test(flowId)) {
+    if (
+      flowId &&
+      (!ids || ids.includes("node-red")) &&
+      /^[A-Za-z0-9._:-]{1,128}$/.test(flowId)
+    ) {
       selectedNodeRedFlowId = flowId;
       void loadNodeRedFlows();
     }
@@ -328,12 +331,6 @@
     }
   }
   async function reindexQdrant() {
-    if (
-      !window.confirm(
-        "Alle herinneringen opnieuw vectoriseren via de ingestelde, gratis-gecontroleerde OmniRoute-embedding. De actieve index wisselt pas na volledige controle; tijdens het bouwen worden nieuwe geheugenwijzigingen tijdelijk geweigerd. Doorgaan?",
-      )
-    )
-      return;
     busy = "qdrant-reindex";
     qdrantError = "";
     try {
@@ -364,12 +361,6 @@
     }
   }
   async function restoreQdrantIndex(id: string) {
-    if (
-      !window.confirm(
-        "De vorige Qdrant-index wordt actief. Dit werkt alleen zolang deze index en dezelfde embeddinginstelling beschikbaar zijn. Doorgaan?",
-      )
-    )
-      return;
     busy = "qdrant-index-rollback";
     qdrantError = "";
     try {
@@ -405,13 +396,6 @@
   }
   async function saveHomeAccess() {
     if (!homeAccess) return;
-    if (
-      homeAccess.mode === "all" &&
-      !window.confirm(
-        "NOVA krijgt toegang tot alle Home Assistant-apparaten en -entiteiten. Doorgaan?",
-      )
-    )
-      return;
     busy = "home-access";
     try {
       const result = await saveHomeAssistantAccess(homeAccess);
@@ -430,24 +414,7 @@
   async function rollbackHomeAccess(revision: string) {
     busy = "home-access-history";
     try {
-      const prepared = await prepareHomeAssistantAccessRollback(revision);
-      if (!prepared.ok || !prepared.action) {
-        homeInventoryError =
-          prepared.error ?? "Terugzetten kon niet worden voorbereid.";
-        return;
-      }
-      const approve = window.confirm(
-        `${prepared.warning ?? "Terugzetten kan Home Assistant-toegang wijzigen."}\n\nDit vereist eenmalige gevaarlijke bevestiging. Doorgaan?`,
-      );
-      const result = await confirmHomeAssistantAccessRollback(
-        prepared.action.sessionId,
-        prepared.action.confirmationId,
-        approve,
-      );
-      if (!approve) {
-        homeInventoryError = "Terugzetten geannuleerd.";
-        return;
-      }
+      const result = await rollbackHomeAssistantAccess(revision);
       if (!result.ok || !result.policy) {
         homeInventoryError = result.error ?? "Toegang is niet teruggezet.";
         return;
@@ -520,13 +487,6 @@
   }
   async function saveTargetAccess() {
     if (!targetAccess) return;
-    if (
-      targetAccess.mode === "all" &&
-      !window.confirm(
-        "NOVA krijgt toegang tot alle geselecteerde infrastructuurservices en doelen. Doorgaan?",
-      )
-    )
-      return;
     busy = "target-access";
     try {
       const result = await saveManagedTargetsAccess(targetAccess);
@@ -547,24 +507,7 @@
   async function rollbackTargetAccess(revision: string) {
     busy = "target-access-history";
     try {
-      const prepared = await prepareManagedTargetsAccessRollback(revision);
-      if (!prepared.ok || !prepared.action) {
-        targetInventoryError =
-          prepared.error ?? "Terugzetten kon niet worden voorbereid.";
-        return;
-      }
-      const approve = window.confirm(
-        `${prepared.warning ?? "Terugzetten kan de doeltoegang wijzigen."}\n\nDeze wijziging vereist eenmalige gevaarlijke bevestiging. Doorgaan?`,
-      );
-      const result = await confirmManagedTargetsAccessRollback(
-        prepared.action.sessionId,
-        prepared.action.confirmationId,
-        approve,
-      );
-      if (!approve) {
-        targetInventoryError = "Terugzetten geannuleerd.";
-        return;
-      }
+      const result = await rollbackManagedTargetsAccess(revision);
       if (!result.ok || !result.policy) {
         targetInventoryError =
           result.error ?? "Doeltoegang is niet teruggezet.";
@@ -717,213 +660,218 @@
   {#if error}<p role="status">{error}</p>
     <button type="button" onclick={load}>Opnieuw proberen</button>{/if}
   {#if ids?.some( (id) => ["proxmox", "termix", "pangolin"].includes(id) ) || shown.some( (service) => ["proxmox", "termix", "pangolin"].includes(service.id) )}
-    <section aria-label="Server- en machineoverzicht" class="mqtt-overview">
-      <h3>Servers en machines</h3>
-      <p class="hint">
-        On-demand namenoverzicht; alleen-lezen. Dit bepaalt nog niet welke
-        doelen NOVA mag gebruiken.
-      </p>
-      <button
-        type="button"
-        disabled={busy !== null}
-        onclick={loadTargetInventory}>Doelen laden</button
-      >
-      {#if targetInventoryError}<p role="status" class="connection-failed">
-          {targetInventoryError}
-        </p>{/if}
-      {#if targetInventory}
-        {#if targetAccess}<fieldset>
-            <legend>Doeltoegang</legend>
-            <label>
-              <input
-                type="radio"
-                name="managed-target-access-mode"
-                checked={targetAccess.mode === "all"}
-                onchange={() => (targetAccess!.mode = "all")}
-              /> Alle doelen van deze services
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="managed-target-access-mode"
-                checked={targetAccess.mode === "allowlist"}
-                onchange={() => (targetAccess!.mode = "allowlist")}
-              /> Alleen geselecteerde doelen
-            </label>
-          </fieldset>
-        {/if}
-        {#if targetAccess?.mode === "allowlist"}
-          {#if targetInventory.proxmox.configured}<h4>Proxmox-knooppunten</h4>
-            {#each targetInventory.proxmox.nodes as item (item.id ?? item.name)}<label
-              >
-                <input
-                  type="checkbox"
-                  checked={!!item.id &&
-                    targetAccess.proxmoxNodeIds.includes(item.id)}
-                  disabled={!item.id}
-                  onchange={(event) =>
-                    item.id &&
-                    toggleTargetAccess(
-                      "proxmoxNodeIds",
-                      item.id,
-                      event.currentTarget.checked,
-                    )}
-                />
-                {item.name}
-              </label>{/each}
-            <h4>Proxmox-machines</h4>
-            {#each targetInventory.proxmox.guests as item (item.id ?? item.name)}<label
-              >
-                <input
-                  type="checkbox"
-                  checked={!!item.id &&
-                    targetAccess.proxmoxGuestIds.includes(item.id)}
-                  disabled={!item.id}
-                  onchange={(event) =>
-                    item.id &&
-                    toggleTargetAccess(
-                      "proxmoxGuestIds",
-                      item.id,
-                      event.currentTarget.checked,
-                    )}
-                />
-                {item.name}
-              </label>{/each}
-          {/if}
-          {#if targetInventory.termix.configured}<h4>Termix-hosts</h4>
-            {#each targetInventory.termix.hosts as item (item.id ?? item.name)}<label
-              >
-                <input
-                  type="checkbox"
-                  checked={!!item.id &&
-                    targetAccess.termixHostIds.includes(item.id)}
-                  disabled={!item.id}
-                  onchange={(event) =>
-                    item.id &&
-                    toggleTargetAccess(
-                      "termixHostIds",
-                      item.id,
-                      event.currentTarget.checked,
-                    )}
-                />
-                {item.name}
-              </label>{/each}
-          {/if}
-          {#if targetInventory.pangolin.configured}<h4>Pangolin-sites</h4>
-            {#each targetInventory.pangolin.sites as item (item.id ?? item.name)}<label
-              >
-                <input
-                  type="checkbox"
-                  checked={!!item.id &&
-                    targetAccess.pangolinSiteIds.includes(item.id)}
-                  disabled={!item.id}
-                  onchange={(event) =>
-                    item.id &&
-                    toggleTargetAccess(
-                      "pangolinSiteIds",
-                      item.id,
-                      event.currentTarget.checked,
-                    )}
-                />
-                {item.name}
-              </label>{/each}
-            <h4>Pangolin-resources</h4>
-            {#each targetInventory.pangolin.resources as item (item.id ?? item.name)}<label
-              >
-                <input
-                  type="checkbox"
-                  checked={!!item.id &&
-                    targetAccess.pangolinResourceIds.includes(item.id)}
-                  disabled={!item.id}
-                  onchange={(event) =>
-                    item.id &&
-                    toggleTargetAccess(
-                      "pangolinResourceIds",
-                      item.id,
-                      event.currentTarget.checked,
-                    )}
-                />
-                {item.name}
-              </label>{/each}
-          {/if}
-          <p class="hint">
-            Zonder selectie ziet NOVA geen doelen. Een geselecteerd Proxmox-
-            knooppunt geeft toegang tot alle machines op dat knooppunt.
-          </p>
-        {/if}
-        {#if targetAccess}<button
-            type="button"
-            disabled={busy !== null}
-            onclick={saveTargetAccess}>Doeltoegang opslaan</button
-          >{/if}
-        {#if targetAccessHistory?.revisions.length}
-          <h4>Wijzigingsgeschiedenis doeltoegang</h4>
-          {#if targetAccessHistory.truncated}<p class="hint">
-              Oudere wijzigingen zijn opgeschoond.
-            </p>{/if}
-          <ul>
-            {#each targetAccessHistory.revisions as revision (revision.id)}<li>
-                {new Date(revision.at).toLocaleString("nl-NL")} ·
-                {targetPolicySummary(revision.before)} →
-                {targetPolicySummary(revision.after)}
-                <button
-                  type="button"
-                  disabled={busy !== null}
-                  onclick={() => rollbackTargetAccess(revision.id)}
-                  >Herstellen</button
-                >
-              </li>{/each}
-          </ul>
-        {/if}
-        {#if targetInventory.proxmox.configured}<h4>Proxmox</h4>
-          {#if targetInventory.proxmox.error}<p>
-              {targetInventory.proxmox.error}
-            </p>{/if}
-          <ul>
-            {#each targetInventory.proxmox.nodes as item (item.id ?? item.name)}<li
-              >
-                Knooppunt · {item.name}
-              </li>{/each}
-            {#each targetInventory.proxmox.guests as item (item.id ?? item.name)}<li
-              >
-                {item.id ? `VM ${item.id}` : "VM"} · {item.name}
-              </li>{/each}
-          </ul>
-        {:else}<p>Proxmox niet ingesteld.</p>{/if}
-        {#if targetInventory.termix.configured}<h4>Termix</h4>
-          {#if targetInventory.termix.error}<p>
-              {targetInventory.termix.error}
-            </p>{/if}
-          <ul>
-            {#each targetInventory.termix.hosts as item (item.id ?? item.name)}<li
-              >
-                {item.name}
-              </li>{/each}
-          </ul>
-        {:else}<p>Termix niet ingesteld.</p>{/if}
-        {#if targetInventory.pangolin.configured}<h4>Pangolin</h4>
-          {#if targetInventory.pangolin.error}<p>
-              {targetInventory.pangolin.error}
-            </p>{/if}
-          <ul>
-            {#each targetInventory.pangolin.sites as item (item.id ?? item.name)}<li
-              >
-                Site · {item.name}
-              </li>{/each}
-            {#each targetInventory.pangolin.resources as item (item.id ?? item.name)}<li
-              >
-                Resource · {item.name}
-              </li>{/each}
-          </ul>
-        {:else}<p>Pangolin niet ingesteld.</p>{/if}
-        <small
-          >Gecontroleerd: {targetInventory.checkedAt}. Namenoverzicht begrensd
-          tot 200 per lijst.</small
+    <Disclosure
+      title="Servers en machines"
+      hint="Doelen en gedeelde toegangsregels"
+    >
+      <section aria-label="Server- en machineoverzicht" class="mqtt-overview">
+        <p class="hint">
+          On-demand namenoverzicht; alleen-lezen. Dit bepaalt nog niet welke
+          doelen NOVA mag gebruiken.
+        </p>
+        <button
+          type="button"
+          disabled={busy !== null}
+          onclick={loadTargetInventory}>Doelen laden</button
         >
-      {/if}
-    </section>
+        {#if targetInventoryError}<p role="status" class="connection-failed">
+            {targetInventoryError}
+          </p>{/if}
+        {#if targetInventory}
+          {#if targetAccess}<fieldset>
+              <legend>Doeltoegang</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="managed-target-access-mode"
+                  checked={targetAccess.mode === "all"}
+                  onchange={() => (targetAccess!.mode = "all")}
+                /> Alle doelen van deze services
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="managed-target-access-mode"
+                  checked={targetAccess.mode === "allowlist"}
+                  onchange={() => (targetAccess!.mode = "allowlist")}
+                /> Alleen geselecteerde doelen
+              </label>
+            </fieldset>
+          {/if}
+          {#if targetAccess?.mode === "allowlist"}
+            {#if targetInventory.proxmox.configured}<h4>Proxmox-knooppunten</h4>
+              {#each targetInventory.proxmox.nodes as item (item.id ?? item.name)}<label
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!item.id &&
+                      targetAccess.proxmoxNodeIds.includes(item.id)}
+                    disabled={!item.id}
+                    onchange={(event) =>
+                      item.id &&
+                      toggleTargetAccess(
+                        "proxmoxNodeIds",
+                        item.id,
+                        event.currentTarget.checked,
+                      )}
+                  />
+                  {item.name}
+                </label>{/each}
+              <h4>Proxmox-machines</h4>
+              {#each targetInventory.proxmox.guests as item (item.id ?? item.name)}<label
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!item.id &&
+                      targetAccess.proxmoxGuestIds.includes(item.id)}
+                    disabled={!item.id}
+                    onchange={(event) =>
+                      item.id &&
+                      toggleTargetAccess(
+                        "proxmoxGuestIds",
+                        item.id,
+                        event.currentTarget.checked,
+                      )}
+                  />
+                  {item.name}
+                </label>{/each}
+            {/if}
+            {#if targetInventory.termix.configured}<h4>Termix-hosts</h4>
+              {#each targetInventory.termix.hosts as item (item.id ?? item.name)}<label
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!item.id &&
+                      targetAccess.termixHostIds.includes(item.id)}
+                    disabled={!item.id}
+                    onchange={(event) =>
+                      item.id &&
+                      toggleTargetAccess(
+                        "termixHostIds",
+                        item.id,
+                        event.currentTarget.checked,
+                      )}
+                  />
+                  {item.name}
+                </label>{/each}
+            {/if}
+            {#if targetInventory.pangolin.configured}<h4>Pangolin-sites</h4>
+              {#each targetInventory.pangolin.sites as item (item.id ?? item.name)}<label
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!item.id &&
+                      targetAccess.pangolinSiteIds.includes(item.id)}
+                    disabled={!item.id}
+                    onchange={(event) =>
+                      item.id &&
+                      toggleTargetAccess(
+                        "pangolinSiteIds",
+                        item.id,
+                        event.currentTarget.checked,
+                      )}
+                  />
+                  {item.name}
+                </label>{/each}
+              <h4>Pangolin-resources</h4>
+              {#each targetInventory.pangolin.resources as item (item.id ?? item.name)}<label
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!item.id &&
+                      targetAccess.pangolinResourceIds.includes(item.id)}
+                    disabled={!item.id}
+                    onchange={(event) =>
+                      item.id &&
+                      toggleTargetAccess(
+                        "pangolinResourceIds",
+                        item.id,
+                        event.currentTarget.checked,
+                      )}
+                  />
+                  {item.name}
+                </label>{/each}
+            {/if}
+            <p class="hint">
+              Zonder selectie ziet NOVA geen doelen. Een geselecteerd Proxmox-
+              knooppunt geeft toegang tot alle machines op dat knooppunt.
+            </p>
+          {/if}
+          {#if targetAccess}<button
+              type="button"
+              disabled={busy !== null}
+              onclick={saveTargetAccess}>Doeltoegang opslaan</button
+            >{/if}
+          {#if targetAccessHistory?.revisions.length}
+            <h4>Wijzigingsgeschiedenis doeltoegang</h4>
+            {#if targetAccessHistory.truncated}<p class="hint">
+                Oudere wijzigingen zijn opgeschoond.
+              </p>{/if}
+            <ul>
+              {#each targetAccessHistory.revisions as revision (revision.id)}<li
+                >
+                  {new Date(revision.at).toLocaleString("nl-NL")} ·
+                  {targetPolicySummary(revision.before)} →
+                  {targetPolicySummary(revision.after)}
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onclick={() => rollbackTargetAccess(revision.id)}
+                    >Herstellen</button
+                  >
+                </li>{/each}
+            </ul>
+          {/if}
+          {#if targetInventory.proxmox.configured}<h4>Proxmox</h4>
+            {#if targetInventory.proxmox.error}<p>
+                {targetInventory.proxmox.error}
+              </p>{/if}
+            <ul>
+              {#each targetInventory.proxmox.nodes as item (item.id ?? item.name)}<li
+                >
+                  Knooppunt · {item.name}
+                </li>{/each}
+              {#each targetInventory.proxmox.guests as item (item.id ?? item.name)}<li
+                >
+                  {item.id ? `VM ${item.id}` : "VM"} · {item.name}
+                </li>{/each}
+            </ul>
+          {:else}<p>Proxmox niet ingesteld.</p>{/if}
+          {#if targetInventory.termix.configured}<h4>Termix</h4>
+            {#if targetInventory.termix.error}<p>
+                {targetInventory.termix.error}
+              </p>{/if}
+            <ul>
+              {#each targetInventory.termix.hosts as item (item.id ?? item.name)}<li
+                >
+                  {item.name}
+                </li>{/each}
+            </ul>
+          {:else}<p>Termix niet ingesteld.</p>{/if}
+          {#if targetInventory.pangolin.configured}<h4>Pangolin</h4>
+            {#if targetInventory.pangolin.error}<p>
+                {targetInventory.pangolin.error}
+              </p>{/if}
+            <ul>
+              {#each targetInventory.pangolin.sites as item (item.id ?? item.name)}<li
+                >
+                  Site · {item.name}
+                </li>{/each}
+              {#each targetInventory.pangolin.resources as item (item.id ?? item.name)}<li
+                >
+                  Resource · {item.name}
+                </li>{/each}
+            </ul>
+          {:else}<p>Pangolin niet ingesteld.</p>{/if}
+          <small
+            >Gecontroleerd: {targetInventory.checkedAt}. Namenoverzicht begrensd
+            tot 200 per lijst.</small
+          >
+        {/if}
+      </section>
+    </Disclosure>
   {/if}
-  {#if restartStatus?.pendingChanges}
+  {#if restartStatus?.pendingChanges && shown.some((service) => service.restartRequired)}
     <div class="connection-pending" role="status">
       <p>
         Opgeslagen wijzigingen wachten op een herstart van NOVA.
@@ -942,7 +890,9 @@
   {/if}
   {#each shown as service (service.id)}
     <details
+      id={`connection-${service.id}`}
       class="connection-editor"
+      use:openOnMount={expanded}
       use:openForFlowLink={service.id === "node-red" &&
         Boolean(selectedNodeRedFlowId)}
     >
@@ -1529,9 +1479,9 @@
 <style>
   .connection-editor {
     margin: 12px 0;
-    padding: 0 16px 8px;
+    padding: 0 12px;
     border: 1px solid var(--line);
-    border-radius: 12px;
+    border-radius: var(--radius);
     background: var(--surface);
   }
   .connection-editor summary {
@@ -1540,13 +1490,16 @@
     justify-content: space-between;
     gap: 14px;
     cursor: pointer;
-    min-height: 56px;
-    font-size: 17px;
+    min-height: 44px;
+    font-size: 15px;
   }
   .connection-editor summary span,
   .connection-field small {
     color: var(--dim);
-    font-size: 15px;
+    font-size: 14px;
+  }
+  .connection-editor[open] {
+    padding-bottom: 12px;
   }
   .connection-editor fieldset {
     margin: 20px 0 0;
@@ -1563,7 +1516,7 @@
   .connection-field {
     display: grid;
     gap: 6px;
-    margin-bottom: 18px;
+    margin-bottom: 12px;
     max-width: 650px;
   }
   .connection-field label {
@@ -1600,7 +1553,7 @@
   }
   .connection-status {
     border: 1px solid var(--line);
-    padding: 4px 12px;
+    padding: 2px 8px;
     border-radius: 999px;
     white-space: nowrap;
   }

@@ -2,12 +2,10 @@ import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
 import type {
   StackControlStatus,
-  StackRestartPrepared,
   StackRestartResult,
   StackServiceId,
   StackServiceStatus,
 } from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { ValidationError } from "../core/errors/validation.error.js";
@@ -74,7 +72,6 @@ const baseError =
 export class StackControlService {
   constructor(
     private readonly config: NovaConfig,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
   ) {}
 
@@ -372,7 +369,8 @@ export class StackControlService {
     }
   }
 
-  async prepareRestart(value: unknown): Promise<StackRestartPrepared> {
+  /** Restarts one NOVA-stack service immediately. */
+  async restart(value: unknown): Promise<StackRestartResult> {
     if (
       typeof value !== "string" ||
       !restartableIds.includes(value as StackServiceId)
@@ -387,89 +385,27 @@ export class StackControlService {
         error: "Deze service draait niet of status ontbreekt.",
       };
     const sessionId = `settings-stack-restart:${crypto.randomUUID()}`;
+    const tool = "settings_stack_service_restart";
     const args = { service, revision: current.revision };
     this.audit.record({
       sessionId,
-      tool: "settings_stack_service_restart",
+      tool,
       risk: "DANGEROUS",
-      confirmation: "pending_admin_ui",
       arguments: args,
-    });
-    return {
-      ok: true,
-      service,
-      label: current.label,
-      action: this.confirmations.create(
-        sessionId,
-        "settings_stack_service_restart",
-        args,
-        "DANGEROUS",
-        current.revision,
-        false,
-      ),
-    };
-  }
-
-  async confirmRestart(
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
-  ): Promise<StackRestartResult> {
-    if (
-      !/^settings-stack-restart:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const pending = this.confirmations.peek(sessionId);
-    const service = pending?.args.service;
-    const revision = pending?.args.revision;
-    if (
-      !pending ||
-      pending.tool !== "settings_stack_service_restart" ||
-      typeof service !== "string" ||
-      !ids.includes(service as StackServiceId) ||
-      typeof revision !== "string" ||
-      pending.confirmationId !== confirmationId
-    )
-      return {
-        ok: false,
-        error: "Deze bevestiging is verlopen. Laad de status opnieuw.",
-      };
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false,
-        error: "Deze bevestiging is verlopen. Laad de status opnieuw.",
-      };
-    if (!approve) {
-      this.audit.record({
-        sessionId,
-        tool: action.tool,
-        risk: "DANGEROUS",
-        arguments: action.args,
-        confirmation: "rejected_admin_ui",
-      });
-      return { ok: false, error: "Herstart geannuleerd." };
-    }
-    this.audit.record({
-      sessionId,
-      tool: action.tool,
-      risk: "DANGEROUS",
-      arguments: action.args,
-      confirmation: "approved_admin_ui",
+      confirmation: "direct",
       phase: "before_execute",
     });
     try {
       await this.call(`/services/${service}/restart`, "POST", {
-        expectedRevision: revision,
+        expectedRevision: current.revision,
       });
       try {
         this.audit.record({
           sessionId,
-          tool: action.tool,
+          tool,
           risk: "DANGEROUS",
-          arguments: action.args,
-          confirmation: "confirmed_admin_ui",
+          arguments: args,
+          confirmation: "direct",
           phase: "after_execute",
           result: { ok: true, service },
           verification: { brokerAcknowledged: true },
@@ -477,21 +413,21 @@ export class StackControlService {
       } catch {
         /* The initial audit record still records the attempted action. */
       }
-      return { ok: true, service: service as StackServiceId };
+      return { ok: true, service };
     } catch {
       try {
         this.audit.record({
           sessionId,
-          tool: action.tool,
+          tool,
           risk: "DANGEROUS",
-          arguments: action.args,
-          confirmation: "confirmed_admin_ui",
+          arguments: args,
+          confirmation: "direct",
           phase: "after_execute",
           result: { ok: false, service },
           verification: { brokerAcknowledged: false },
         });
       } catch {
-        /* Keep the confirmation audit if the outcome record cannot be written. */
+        /* Keep the first audit record if the outcome record cannot be written. */
       }
       return {
         ok: false,

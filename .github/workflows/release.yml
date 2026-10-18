@@ -1,9 +1,10 @@
 name: Release
 
-# git tag v0.1.6 && git push origin v0.1.6
+# NOVA (image, compose assets): scripts/release.sh nova  -> tag vX.Y.Z
+# Windows agent (signed installer): scripts/release.sh windows -> tag windows-vX.Y.Z
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "windows-v*"]
 
 permissions:
   contents: write
@@ -11,6 +12,7 @@ permissions:
 
 jobs:
   image:
+    if: startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -48,6 +50,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   omniroute-image:
+    if: startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -83,10 +86,10 @@ jobs:
           cache-from: type=gha,scope=omniroute
           cache-to: type=gha,mode=max,scope=omniroute
 
-  # Windows artifacts are independent: a failed Windows build does not block the server release.
+  # Windows tags publish independently; failures must fail the Windows release.
   windows:
+    if: startsWith(github.ref_name, 'windows-v')
     runs-on: windows-latest
-    continue-on-error: true
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
@@ -94,6 +97,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/windows
+      - name: Check tag matches apps/windows/VERSION
+        shell: bash
+        run: test "windows-v$(tr -d '[:space:]' < apps/windows/VERSION)" = "${GITHUB_REF_NAME}"
       - name: Test native agent
         working-directory: apps/windows
         run: cargo test --locked -p nova-win-core -p nova-win-agent
@@ -106,16 +112,29 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: pwsh
         run: ./.github/scripts/build-windows.ps1 -Version "${{ github.ref_name }}"
+      # Versioned release: the signed installer. Never "latest", so /releases/latest stays NOVA's.
       - uses: softprops/action-gh-release@v3
         with:
+          body_path: docs/release-notes/${{ github.ref_name }}.md
+          make_latest: false
           files: |
             windows-out/NOVA-Setup-*.exe
             windows-out/NOVA-Setup-*.exe.sig
-            windows-out/latest.json
             windows-out/nova-windows.zip
+          fail_on_unmatched_files: true
+      # Stable update endpoint: one prerelease whose latest.json is replaced on every Windows release.
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: windows-latest
+          name: NOVA voor Windows (updatefeed)
+          body: Updatefeed voor de Windows-app. Download installers via de windows-v* releases.
+          prerelease: true
+          make_latest: false
+          files: windows-out/latest.json
           fail_on_unmatched_files: true
 
   agents:
+    if: startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -125,6 +144,7 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           body_path: docs/release-notes/${{ github.ref_name }}.md
+          make_latest: true
           files: |
             deploy/docker-compose.yml
             nova-compose.tar.gz

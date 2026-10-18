@@ -1,4 +1,4 @@
-//! Authentication, the unified config and non-destructive legacy import.
+//! Authentication (the pairing token is the only credential), the unified config and non-destructive legacy import.
 use crate::config::{self, DeskConfig};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,9 @@ pub struct AppEntry {
 pub struct AgentConfig {
     pub token: String,
     pub port: u16,
-    pub allowed_ips: Vec<IpAddr>,
+    /// Legacy key from older configs: read and ignored (any source address is accepted), never written back.
+    #[serde(default, skip_serializing)]
+    pub allowed_ips: Vec<Value>,
     pub apps: BTreeMap<String, AppEntry>,
     #[serde(default)]
     pub legacy_preferences: BTreeMap<String, Value>,
@@ -29,12 +31,17 @@ pub struct AgentConfig {
     pub hotkeys: BTreeMap<String, String>,
     #[serde(default)]
     pub automation: AutomationPermissions,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub run_elevated: bool,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase", default)]
+/// Kept only so old config files and the `/v1/status` shape stay valid. Everything is always allowed.
 pub struct AutomationPermissions {
     pub view: bool,
     pub control: bool,
@@ -44,8 +51,8 @@ pub struct AutomationPermissions {
 impl Default for AutomationPermissions {
     fn default() -> Self {
         Self {
-            view: false,
-            control: false,
+            view: true,
+            control: true,
             browser: true,
         }
     }
@@ -100,8 +107,14 @@ impl AgentConfig {
             legacy_preferences: BTreeMap::new(),
             hotkeys: default_hotkeys(),
             automation: AutomationPermissions::default(),
-            run_elevated: false,
+            run_elevated: true,
         })
+    }
+
+    /// Old configs may carry switches or an IP list from earlier versions. They no longer restrict anything.
+    pub fn normalize(&mut self) {
+        self.automation = AutomationPermissions::default();
+        self.allowed_ips.clear();
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -121,14 +134,8 @@ impl AgentConfig {
         Ok(())
     }
 
-    pub fn authorize(&self, source: IpAddr, header: Option<&str>) -> Result<(), u16> {
-        let source = match source {
-            IpAddr::V6(v) => v.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(source),
-            v => v,
-        };
-        if !self.allowed_ips.is_empty() && !self.allowed_ips.contains(&source) {
-            return Err(403);
-        }
+    /// The pairing token is the only credential. The source address is not checked.
+    pub fn authorize(&self, _source: IpAddr, header: Option<&str>) -> Result<(), u16> {
         let candidate = header.and_then(|h| h.strip_prefix("Bearer ")).unwrap_or("");
         if !bool::from(self.token.as_bytes().ct_eq(candidate.as_bytes())) {
             return Err(401);
@@ -163,6 +170,8 @@ pub fn decode(text: &str) -> Result<(DeskConfig, AgentConfig), String> {
         return Err("Onbekende configversie; bestand blijft bewaard".into());
     }
     let agent: AgentConfig = serde_json::from_value(root["agent"].clone()).map_err(|e| e.to_string())?;
+    let mut agent = agent;
+    agent.normalize();
     agent.validate()?;
     let (desk, warnings) = config::parse(text.trim_start_matches('\u{feff}'))?;
     if !warnings.is_empty() {
@@ -221,9 +230,6 @@ pub fn import_legacy(
         }
         if let Some(port) = old.get("port") {
             agent.port = serde_json::from_value(port.clone()).map_err(|e| e.to_string())?;
-        }
-        if let Some(ips) = old.get("allowedIps") {
-            agent.allowed_ips = serde_json::from_value(ips.clone()).map_err(|e| e.to_string())?;
         }
         if let Some(apps) = old.get("apps") {
             agent.apps = serde_json::from_value(apps.clone()).map_err(|e| e.to_string())?;
@@ -335,40 +341,45 @@ pub fn atomic_save(path: &Path, text: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     #[test]
-    fn old_unified_config_defaults_to_no_desktop_or_elevation() {
+    fn new_and_old_configs_have_everything_allowed() {
         let original = AgentConfig::fresh().unwrap();
+        assert_eq!(original.automation, AutomationPermissions::default());
+        assert!(original.automation.view && original.automation.control && original.automation.browser);
+        assert!(original.run_elevated);
         let mut value: Value = serde_json::from_str(&encode(&DeskConfig::default(), &original)).unwrap();
+        assert!(value["agent"].get("allowedIps").is_none());
         value["agent"].as_object_mut().unwrap().remove("automation");
         value["agent"].as_object_mut().unwrap().remove("runElevated");
         let (_, loaded) = decode(&value.to_string()).unwrap();
-        assert!(!loaded.automation.view);
-        assert!(!loaded.automation.control);
-        assert!(loaded.automation.browser);
-        assert!(!loaded.run_elevated);
+        assert!(loaded.automation.view && loaded.automation.control && loaded.automation.browser);
+        assert!(loaded.run_elevated);
         assert_eq!(loaded.token, original.token);
-        let mut enabled = loaded;
-        enabled.automation.view = true;
-        enabled.run_elevated = true;
-        let (_, saved) = decode(&encode(&DeskConfig::default(), &enabled)).unwrap();
-        assert_eq!(saved.automation, enabled.automation);
-        assert!(saved.run_elevated);
+        // An old config with every lock closed and an IP list still loads, and nothing stays locked.
+        value["agent"]["automation"] = json!({"view": false, "control": false, "browser": false});
+        value["agent"]["allowedIps"] = json!(["192.168.1.2"]);
+        value["agent"]["runElevated"] = json!(false);
+        let (_, old) = decode(&value.to_string()).unwrap();
+        assert!(old.automation.view && old.automation.control && old.automation.browser);
+        assert!(old.allowed_ips.is_empty());
+        // Partial objects are tolerated too.
+        value["agent"]["automation"] = json!({"view": false});
+        assert!(decode(&value.to_string()).unwrap().1.automation.control);
     }
     #[test]
-    fn authentication_checks_both_source_and_bearer() {
-        let mut c = AgentConfig::fresh().unwrap();
+    fn authentication_is_only_the_bearer_token() {
+        let c = AgentConfig::fresh().unwrap();
         let local = "127.0.0.1".parse().unwrap();
         assert_eq!(c.authorize(local, None), Err(401));
         assert_eq!(c.authorize(local, Some(&c.token)), Err(401));
+        assert_eq!(c.authorize(local, Some("Bearer wrong")), Err(401));
         assert!(c.authorize(local, Some(&format!("Bearer {}", c.token))).is_ok());
-        c.allowed_ips = vec!["192.168.1.2".parse().unwrap()];
-        assert_eq!(c.authorize(local, Some(&format!("Bearer {}", c.token))), Err(403));
-        assert_eq!(
-            c.authorize(
-                "::ffff:192.168.1.2".parse().unwrap(),
-                Some(&format!("Bearer {}", c.token))
-            ),
-            Ok(())
-        );
+        // Any source address is accepted with the right token.
+        for source in ["192.168.1.2", "10.9.8.7", "::ffff:192.168.1.2", "fe80::1"] {
+            assert_eq!(
+                c.authorize(source.parse().unwrap(), Some(&format!("Bearer {}", c.token))),
+                Ok(())
+            );
+        }
     }
     #[test]
     fn config_roundtrip_preserves_credentials_and_windows() {
@@ -396,6 +407,7 @@ mod tests {
         let path = dir.join("config.json");
         let (desk, agent) = load_or_import(&path, &dir, &[]).unwrap();
         assert_eq!(agent.token, "abcdefghijklmnopqrstuvwxyz");
+        assert!(agent.allowed_ips.is_empty());
         assert_eq!(desk.mode, crate::mode::Mode::Both);
         assert_eq!(std::fs::read_to_string(dir.join("agent.json")).unwrap(), old);
         std::fs::write(dir.join("agent.json"), "broken").unwrap();
@@ -428,7 +440,7 @@ mod tests {
         assert_eq!(desk.wallpapers["screen1"], crate::mode::WallpaperStyle::Sphere);
         assert_eq!(agent.hotkeys["open"], "Ctrl+Alt+O");
         assert_eq!(agent.legacy_preferences["desktop"]["enabled"], true);
-        // Imported control preferences are retained as data, never activated in stage one.
+        // Imported control preferences are retained as data; no switch from the old agent restricts anything.
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

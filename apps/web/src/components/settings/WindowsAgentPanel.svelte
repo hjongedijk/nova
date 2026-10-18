@@ -30,7 +30,6 @@
   let note = $state("");
   let history = $state<HelperHotkeyHistory | null>(null);
   let historyError = $state("");
-  let pendingRollback = $state<HelperHotkeyRevision | null>(null);
   const warnings = (value: unknown): string =>
     Array.isArray(value)
       ? value
@@ -94,8 +93,7 @@
         note =
           "De agent bevestigt de sneltoetsen niet. Vernieuw de status en controleer de pc.";
     } catch {
-      note =
-        "Sneltoetsen zijn niet opgeslagen. Controleer de verbinding of de beheer-PIN.";
+      note = "Sneltoetsen zijn niet opgeslagen. Controleer de verbinding.";
     } finally {
       busy = false;
     }
@@ -113,7 +111,7 @@
         display: null,
         checkedAt: null,
         error:
-          "De helpermeting kon niet worden geladen. Controleer de beheer-PIN.",
+          "De helpermeting kon niet worden geladen. Controleer de verbinding.",
       };
     } finally {
       debugBusy = false;
@@ -151,7 +149,6 @@
         "Herstel kon niet worden gecontroleerd. Vernieuw de pc-status.";
     } finally {
       busy = false;
-      pendingRollback = null;
     }
   }
   onMount(() => {
@@ -263,26 +260,9 @@
               Naar: {revision.after.open} · {revision.after.speak} · {revision
                 .after.mute} · {revision.after.desktop}
             </p>
-            {#if pendingRollback?.id === revision.id}
-              <div role="group" aria-label="Sneltoetsen herstellen bevestigen">
-                <p>
-                  Dit vervangt de huidige sneltoetsen op de Windows-pc. NOVA
-                  controleert eerst of ze sinds deze wijziging niet zijn
-                  aangepast.
-                </p>
-                <Button onclick={() => restore(revision)} disabled={busy}
-                  >Herstel en controleer op pc</Button
-                >
-                <Button onclick={() => (pendingRollback = null)} disabled={busy}
-                  >Annuleer herstel</Button
-                >
-              </div>
-            {:else}
-              <Button
-                onclick={() => (pendingRollback = revision)}
-                disabled={busy}>Herstel deze sneltoetsen</Button
-              >
-            {/if}
+            <Button onclick={() => restore(revision)} disabled={busy}
+              >Herstel deze sneltoetsen</Button
+            >
           </li>
         {/each}
       </ul>

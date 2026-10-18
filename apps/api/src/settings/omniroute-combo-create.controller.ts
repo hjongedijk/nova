@@ -1,30 +1,16 @@
-import { Body, Controller, HttpCode, Post, UseGuards } from "@nestjs/common";
-import { SettingsGuard } from "./settings.guard.js";
+import { Body, Controller, HttpCode, Post } from "@nestjs/common";
 import { OmniRouteComboCreate } from "./omniroute-combo-create.service.js";
-import { assertConfirmation, strictBody } from "./request-input.js";
-
-const input = (body: unknown, keys: string[]) =>
-  strictBody(body, keys, "Ongeldige combo-aanvraag.");
+import { strictBody } from "./request-input.js";
 
 @Controller("settings/omniroute/combos/create")
-@UseGuards(SettingsGuard)
 export class OmniRouteComboCreateController {
   constructor(private readonly createCombo: OmniRouteComboCreate) {}
-  @Post("prepare") @HttpCode(200) prepare(@Body() body: unknown) {
-    const value = input(body, ["name", "models", "acknowledgeGlobalEffect"]);
-    return this.createCombo.prepare(
-      value.name,
-      value.models,
-      value.acknowledgeGlobalEffect,
+  @Post() @HttpCode(200) create(@Body() body: unknown) {
+    const value = strictBody(
+      body,
+      ["name", "models"],
+      "Ongeldige combo-aanvraag.",
     );
-  }
-  @Post("confirm") @HttpCode(200) confirm(@Body() body: unknown) {
-    const value = input(body, ["sessionId", "confirmationId", "approve"]);
-    assertConfirmation(value);
-    return this.createCombo.confirm(
-      value.sessionId,
-      value.confirmationId,
-      value.approve,
-    );
+    return this.createCombo.create(value.name, value.models);
   }
 }

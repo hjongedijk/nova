@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import crypto from "node:crypto";
 import type { HomeAssistantAccessPolicy } from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { HistoryFile, listRecent, revertedFromField } from "./history-file.js";
@@ -14,7 +13,6 @@ type Revision = {
   after: HomeAssistantAccessPolicy;
   revertedFrom?: string;
 };
-type Draft = { sessionId: string; revision: string; expiresAt: number };
 const digest = (value: unknown) =>
   crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const fields = ["mode", "areaIds", "deviceIds", "entityIds"] as const;
@@ -23,13 +21,11 @@ const fields = ["mode", "areaIds", "deviceIds", "entityIds"] as const;
 @Injectable()
 export class HomeAssistantAccessHistory {
   private readonly history: HistoryFile<Revision>;
-  private readonly drafts = new Map<string, Draft>();
   lastWarning: string | undefined;
 
   constructor(
     config: NovaConfig,
     private readonly home: HomeAssistantService,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
   ) {
     this.history = new HistoryFile<Revision>(
@@ -94,17 +90,8 @@ export class HomeAssistantAccessHistory {
     return listRecent(rows);
   }
 
-  prepareRollback(id: string) {
-    for (const [confirmationId, draft] of this.drafts) {
-      const pending = this.confirmations.peek(draft.sessionId);
-      if (!pending || pending.expiresAt <= Date.now())
-        this.drafts.delete(confirmationId);
-    }
-    if (this.drafts.size >= 20)
-      return {
-        ok: false as const,
-        error: "Wacht tot een open bevestiging verloopt.",
-      };
+  /** Restores the policy from before one recorded change, immediately. */
+  async rollback(id: string) {
     const revision = this.history.all().find((row) => row.id === id);
     if (!revision)
       throw new NotFoundException("Deze wijziging is niet meer beschikbaar.");
@@ -114,72 +101,6 @@ export class HomeAssistantAccessHistory {
         "Home Assistant-toegang is daarna gewijzigd. Terugdraaien is afgebroken.",
       );
     const sessionId = `settings-ha-access-history:${crypto.randomUUID()}`;
-    const action = this.confirmations.create(
-      sessionId,
-      "home_assistant_access_rollback",
-      { revision: id, current: digest(current) },
-      "DANGEROUS",
-      digest(current),
-      false,
-    );
-    this.audit.record({
-      sessionId,
-      tool: "home_assistant_access_rollback",
-      risk: "DANGEROUS",
-      confirmation: "pending_admin_ui",
-      arguments: { revision: id },
-    });
-    this.drafts.set(action.confirmationId, {
-      sessionId,
-      revision: id,
-      expiresAt: action.expiresAt,
-    });
-    return {
-      ok: true as const,
-      warning:
-        "Terugzetten kan NOVA opnieuw toegang geven tot Home Assistant-apparaten.",
-      action,
-    };
-  }
-
-  async confirm(sessionId: string, confirmationId: string, approve: boolean) {
-    const draft = this.drafts.get(confirmationId);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !draft ||
-      draft.sessionId !== sessionId ||
-      draft.expiresAt <= Date.now() ||
-      pending?.confirmationId !== confirmationId
-    )
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
-    this.drafts.delete(confirmationId);
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true as const, cancelled: true as const };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false as const,
-        error: "Bevestiging verlopen. Kies opnieuw.",
-      };
-    const revision = this.history
-      .all()
-      .find((row) => row.id === draft.revision);
-    const current = this.home.accessPolicy();
-    if (
-      !revision ||
-      action.args.current !== digest(current) ||
-      digest(current) !== digest(revision.after)
-    )
-      return {
-        ok: false as const,
-        error:
-          "Home Assistant-toegang is intussen gewijzigd. Kies de wijziging opnieuw.",
-      };
     try {
       await this.home.sync();
     } catch {
@@ -188,11 +109,7 @@ export class HomeAssistantAccessHistory {
         error: "Home Assistant is niet bereikbaar. Toegang is niet teruggezet.",
       };
     }
-    const afterSync = this.home.accessPolicy();
-    if (
-      action.args.current !== digest(afterSync) ||
-      digest(afterSync) !== digest(revision.after)
-    )
+    if (digest(this.home.accessPolicy()) !== digest(revision.after))
       return {
         ok: false as const,
         error:
@@ -202,8 +119,9 @@ export class HomeAssistantAccessHistory {
       sessionId,
       tool: "home_assistant_access_rollback",
       risk: "DANGEROUS",
-      confirmation: "approved_admin_ui",
-      arguments: { revision: draft.revision },
+      confirmation: "direct",
+      phase: "attempt",
+      arguments: { revision: id },
     });
     let restored: HomeAssistantAccessPolicy;
     try {
@@ -215,14 +133,15 @@ export class HomeAssistantAccessHistory {
           "Een eerder gekozen apparaat bestaat niet meer. Toegang is niet teruggezet.",
       };
     }
-    this.record(current, restored, draft.revision);
+    this.record(current, restored, id);
     try {
       this.audit.record({
         sessionId,
         tool: "home_assistant_access_rollback",
         risk: "DANGEROUS",
-        confirmation: "confirmed_admin_ui",
-        arguments: { revision: draft.revision },
+        confirmation: "direct",
+        phase: "verified",
+        arguments: { revision: id },
         result: { ok: true },
       });
     } catch {

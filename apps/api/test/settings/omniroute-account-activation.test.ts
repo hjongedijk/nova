@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -18,6 +17,7 @@ import {
 } from "../../src/routing/routing.service.js";
 import { OmniRouteAccountActivation } from "../../src/settings/omniroute-account-activation.service.js";
 import { OmniRouteActivationHistory } from "../../src/settings/omniroute-activation-history.service.js";
+import { dbStat } from "../helpers/nova-db.js";
 
 const verified: RoutingStatus = {
   ready: true,
@@ -63,8 +63,6 @@ function fixture(initialActive = true) {
     timestamp: "fixture",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
-  confirmations.now = () => 1000;
   const routing = new RoutingService(config as NovaConfig);
   vi.spyOn(routing, "verifyForManagement").mockImplementation(() => {
     const state = db
@@ -129,7 +127,6 @@ function fixture(initialActive = true) {
   const activation = new OmniRouteAccountActivation(
     config as NovaConfig,
     management,
-    confirmations,
     audit,
     barrier,
     routing,
@@ -149,39 +146,25 @@ function fixture(initialActive = true) {
   };
 }
 
-describe("OmniRoute provider account activation", () => {
-  it("requires explicit global-impact acknowledgement and never exposes credentials", async () => {
+describe("OmniRoute provider account activation (single step)", () => {
+  it("rejects invalid input, never exposes credentials and needs no confirmation", async () => {
     const f = fixture();
     await expect(
-      f.activation.prepare("account-1", false, false),
-    ).rejects.toThrow("bevestig");
+      f.activation.set("account-1", "nope" as unknown as boolean),
+    ).rejects.toThrow("geldige");
     expect(f.request).not.toHaveBeenCalled();
-    const prepared = await f.activation.prepare("account-1", false, true);
-    expect(prepared).toMatchObject({
-      ok: true,
-      name: "Friendly account",
-      currentEnabled: true,
-      enabled: false,
-    });
-    expect(JSON.stringify(prepared)).not.toContain("must-not-leak");
-    expect(JSON.stringify(prepared)).not.toContain("apiKey");
-    expect(prepared.action).toMatchObject({
-      tool: "omniroute_account_activation",
-      risk: "DANGEROUS",
-      allowAlways: false,
-    });
+    const result = await f.activation.set("account-1", false);
+    expect(result).toMatchObject({ ok: true, verified: true, enabled: false });
+    expect(JSON.stringify(result)).not.toContain("must-not-leak");
+    expect(JSON.stringify(result)).not.toContain("apiKey");
+    expect(
+      f.record.mock.calls.every(([r]) => r.confirmation === "direct"),
+    ).toBe(true);
   });
 
   it("writes only isActive under the routing barrier and verifies local and gateway state", async () => {
     const f = fixture();
-    const prepared = await f.activation.prepare("account-1", false, true);
-    const action = prepared.action!;
-    const result = await f.activation.confirm(
-      "account-1",
-      action.sessionId,
-      action.confirmationId,
-      true,
-    );
+    const result = await f.activation.set("account-1", false);
     expect(result).toMatchObject({
       ok: true,
       verified: true,
@@ -200,12 +183,9 @@ describe("OmniRoute provider account activation", () => {
         )
         .get(),
     ).toEqual({ is_active: 0 });
-    expect(f.record.mock.calls.map(([record]) => record.phase)).toContain(
-      "before_execute",
-    );
-    expect(f.record.mock.calls.map(([record]) => record.phase)).toContain(
-      "after_execute",
-    );
+    const phases = f.record.mock.calls.map(([record]) => record.phase);
+    expect(phases).toContain("before_execute");
+    expect(phases).toContain("after_execute");
     const history = f.history.list("account-1");
     expect(history.revisions).toMatchObject([
       {
@@ -218,35 +198,29 @@ describe("OmniRoute provider account activation", () => {
     ]);
     expect(JSON.stringify(history)).not.toContain("must-not-leak");
     expect(
-      fs.statSync(path.join(f.dir, "omniroute-account-activation-history.json"))
+      dbStat(path.join(f.dir, "omniroute-account-activation-history.json"))
         .mode & 0o777,
     ).toBe(0o600);
   });
 
-  it("restores only the latest account status after fresh confirmation and revision check", async () => {
+  it("reports a no-op toggle without writing", async () => {
     const f = fixture();
-    const first = await f.activation.prepare("account-1", false, true);
-    const firstResult = await f.activation.confirm(
-      "account-1",
-      first.action!.sessionId,
-      first.action!.confirmationId,
-      true,
-    );
-    expect(firstResult.ok).toBe(true);
+    const result = await f.activation.set("account-1", true);
+    expect(result).toMatchObject({ ok: false });
+    expect(
+      f.request.mock.calls.some(([, options]) => options?.method === "PATCH"),
+    ).toBe(false);
+  });
+
+  it("restores the latest account status in one step", async () => {
+    const f = fixture();
+    expect((await f.activation.set("account-1", false)).ok).toBe(true);
     const latest = f.history.list("account-1").revisions[0]!;
     const target = f.history.rollbackTarget("account-1", latest.id);
-    const rollback = await f.activation.prepare(
+    const result = await f.activation.set(
       "account-1",
       target.enabled,
-      true,
       target.expectedCurrentRevision,
-    );
-    expect(rollback).toMatchObject({ ok: true, enabled: true });
-    const result = await f.activation.confirm(
-      "account-1",
-      rollback.action!.sessionId,
-      rollback.action!.confirmationId,
-      true,
     );
     expect(result).toMatchObject({ ok: true, verified: true, enabled: true });
     expect(f.history.list("account-1").revisions).toHaveLength(2);
@@ -255,15 +229,9 @@ describe("OmniRoute provider account activation", () => {
     );
   });
 
-  it("refuses rollback preparation after an external upstream account change", async () => {
+  it("refuses rollback after an external upstream account change", async () => {
     const f = fixture();
-    const change = await f.activation.prepare("account-1", false, true);
-    await f.activation.confirm(
-      "account-1",
-      change.action!.sessionId,
-      change.action!.confirmationId,
-      true,
-    );
+    await f.activation.set("account-1", false);
     const latest = f.history.list("account-1").revisions[0]!;
     const target = f.history.rollbackTarget("account-1", latest.id);
     f.db
@@ -271,14 +239,13 @@ describe("OmniRoute provider account activation", () => {
         "UPDATE provider_connections SET updated_at='external-change' WHERE id='account-1'",
       )
       .run();
-    const prepared = await f.activation.prepare(
+    const result = await f.activation.set(
       "account-1",
       target.enabled,
-      true,
       target.expectedCurrentRevision,
     );
-    expect(prepared).toMatchObject({ ok: false });
-    expect(JSON.stringify(prepared)).toMatch(/gewijzigd sinds/);
+    expect(result).toMatchObject({ ok: false });
+    expect(JSON.stringify(result)).toMatch(/gewijzigd sinds/);
     expect(
       f.request.mock.calls.filter(([, options]) => options?.method === "PATCH"),
     ).toHaveLength(1);
@@ -287,14 +254,7 @@ describe("OmniRoute provider account activation", () => {
   it("keeps inference blocked when a successful API response cannot be verified", async () => {
     const f = fixture();
     f.setPersisted(false);
-    const prepared = await f.activation.prepare("account-1", false, true);
-    const action = prepared.action!;
-    const result = await f.activation.confirm(
-      "account-1",
-      action.sessionId,
-      action.confirmationId,
-      true,
-    );
+    const result = await f.activation.set("account-1", false);
     expect(result).toMatchObject({
       ok: false,
       verified: null,
@@ -307,21 +267,9 @@ describe("OmniRoute provider account activation", () => {
     expect(() => f.routing.assertFree()).toThrow(FreeRoutingBlockedError);
   });
 
-  it("allows a confirmed recovery toggle while the free route is unready, then verifies before release", async () => {
+  it("allows a recovery toggle while the free route is unready, then verifies before release", async () => {
     const f = fixture(false);
-    const prepared = await f.activation.prepare("account-1", true, true);
-    expect(prepared).toMatchObject({
-      ok: true,
-      currentEnabled: false,
-      enabled: true,
-    });
-    const action = prepared.action!;
-    const result = await f.activation.confirm(
-      "account-1",
-      action.sessionId,
-      action.confirmationId,
-      true,
-    );
+    const result = await f.activation.set("account-1", true);
     expect(result).toMatchObject({
       ok: true,
       verified: true,
@@ -333,38 +281,5 @@ describe("OmniRoute provider account activation", () => {
       body: { isActive: true },
     });
     expect(() => f.routing.assertFree()).not.toThrow();
-  });
-
-  it("rejects stale pending confirmation and cancels cleanly", async () => {
-    const f = fixture();
-    const pending = await f.activation.prepare("account-1", false, true);
-    f.db
-      .prepare(
-        "UPDATE provider_connections SET updated_at='external-change' WHERE id='account-1'",
-      )
-      .run();
-    const stale = await f.activation.confirm(
-      "account-1",
-      pending.action!.sessionId,
-      pending.action!.confirmationId,
-      true,
-    );
-    expect(stale).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("ondertussen gewijzigd"),
-    });
-    expect(
-      f.request.mock.calls.some(([, options]) => options?.method === "PATCH"),
-    ).toBe(false);
-
-    const declined = await f.activation.prepare("account-1", false, true);
-    expect(
-      await f.activation.confirm(
-        "account-1",
-        declined.action!.sessionId,
-        declined.action!.confirmationId,
-        false,
-      ),
-    ).toEqual({ ok: true });
   });
 });

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuditService } from "../../../src/core/audit/audit.service.js";
+import { auditText, dbStat } from "../../helpers/nova-db.js";
 
 const directories: string[] = [];
 const originalToken = process.env.NOVA_TEST_AUDIT_TOKEN;
@@ -28,12 +29,10 @@ describe("audit privacy", () => {
       result: { ok: true },
     });
 
-    const raw = fs.readFileSync(path.join(dir, "actions.jsonl"), "utf8");
+    const raw = auditText(dir);
     expect(raw).not.toContain("private-audit-fixture-token");
     expect(raw).not.toContain("hidden");
-    expect(fs.statSync(path.join(dir, "actions.jsonl")).mode & 0o777).toBe(
-      0o600,
-    );
+    expect(dbStat(dir).mode & 0o777).toBe(0o600);
     expect(audit.read()).toMatchObject([
       { tool: "test_action", arguments: { note: "[redacted]" } },
     ]);

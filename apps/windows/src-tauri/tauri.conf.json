@@ -36,7 +36,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIwQ0NBMTlBRTcwNTJDQUEKUldTcUxBWG5tcUhNSUpoZ3d2RWJIS2JrV0Zsbkp4eDBBTFhqcllBR0pXY2xGNVZzL20wUEc4MUgK",
       "endpoints": [
-        "https://github.com/hjongedijk/nova/releases/latest/download/latest.json"
+        "https://github.com/hjongedijk/nova/releases/download/windows-latest/latest.json"
       ],
       "windows": {
         "installMode": "passive"

@@ -73,8 +73,6 @@
   }
 
   async function restore(id: string): Promise<void> {
-    if (!window.confirm(`Eerdere beschrijving van ${tool.name} herstellen?`))
-      return;
     historyBusy = true;
     try {
       const result = await rollbackToolDescription(tool.name, id);
@@ -114,7 +112,10 @@
       text={RISK_LABEL[tool.risk] ?? tool.risk}
     />
     {#if tool.edited}<Badge tone="edited" text="aangepast" />{/if}
-    <p>{tool.description}</p>
+    <details class="tool-description">
+      <summary>Wat doet dit gereedschap?</summary>
+      <p>{tool.description}</p>
+    </details>
   </div>
   <div class="acts">
     <Button onclick={edit}>Beschrijving</Button>

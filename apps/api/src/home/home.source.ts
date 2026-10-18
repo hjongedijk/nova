@@ -241,7 +241,7 @@ export class HomeSource implements ToolSource {
       ),
       define(
         "ha_call_service",
-        "Call a backend-allowlisted installed Home Assistant service with structured data. Supports alarm_control_panel arm/disarm actions; the backend requires fresh confirmation. Risk and confirmation are enforced by the backend.",
+        "Call a backend-allowlisted installed Home Assistant service with structured data. Supports alarm_control_panel arm/disarm actions.",
         {
           ...target,
           domain: string,
@@ -276,7 +276,7 @@ export class HomeSource implements ToolSource {
       ),
       define(
         "ha_set_temperature",
-        "Set climate temperature in Celsius. Every temperature change requires fresh confirmation.",
+        "Set climate temperature in Celsius.",
         { ...target, temperature: number(5, 35) },
         "SAFE",
       ),
@@ -288,19 +288,19 @@ export class HomeSource implements ToolSource {
       ),
       define(
         "ha_run_script",
-        "Run an installed Home Assistant script. Requires confirmation.",
+        "Run an installed Home Assistant script.",
         target,
         "CONFIRM",
       ),
       define(
         "ha_bulk_turn_off",
-        "Turn off an explicit list of actual entities. Always requires confirmation.",
+        "Turn off an explicit list of actual entities.",
         { entity_ids: idList(2, 50) },
         "CONFIRM",
       ),
       define(
         "media_set_volume",
-        "Set media player volume from 0 to 1. Loud changes require confirmation.",
+        "Set media player volume from 0 to 1.",
         { ...target, volume_level: number(0, 1) },
         "SAFE",
       ),
@@ -312,19 +312,19 @@ export class HomeSource implements ToolSource {
       ),
       define(
         "sonos_group",
-        "Group actual Sonos players with one actual coordinator; requires confirmation.",
+        "Group actual Sonos players with one actual coordinator.",
         { ...target, group_members: idList(1, 20) },
         "CONFIRM",
       ),
       define(
         "sonos_ungroup",
-        "Ungroup an actual Sonos player; requires confirmation.",
+        "Ungroup an actual Sonos player.",
         target,
         "CONFIRM",
       ),
       define(
         "sonos_announce",
-        "Announce a real media-source item or speak text using an installed Home Assistant TTS entity on Sonos. Requires confirmation.",
+        "Announce a real media-source item or speak text using an installed Home Assistant TTS entity on Sonos.",
         {
           ...target,
           media_content_id: string,
@@ -361,7 +361,7 @@ export class HomeSource implements ToolSource {
       ),
       define(
         "media_bulk_pause",
-        "Pause an explicit list of actual media players; requires confirmation.",
+        "Pause an explicit list of actual media players.",
         { entity_ids: idList(2, 50) },
         "CONFIRM",
       ),

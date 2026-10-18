@@ -1,7 +1,7 @@
 /**
  * Navigation and search share one catalogue.
  *
- * Six task-based pages plus one expert area ("Geavanceerd"). Every setting
+ * Service pages and task pages plus one expert area ("Geavanceerd"). Every setting
  * lives in exactly one place. A "topic" is one searchable block on a page and
  * keeps its old section id, so every older link (`/settings?section=voice`,
  * `?section=system#actielog`, ...) still resolves to the page and anchor that
@@ -15,8 +15,13 @@ export const PAGES = [
   },
   {
     id: "huis",
-    name: "Slimme huis",
-    detail: "Koppel je huis, je pc en je telefoon aan NOVA.",
+    name: "Koppelingen",
+    detail: "Home Assistant, Node-RED en je andere verbonden diensten.",
+  },
+  {
+    id: "windows",
+    name: "Windows-pc",
+    detail: "Koppelen, toegang, meekijken, helper en achtergrond op één plek.",
   },
   {
     id: "telefoon",
@@ -26,12 +31,12 @@ export const PAGES = [
   {
     id: "modellen",
     name: "Slimme modellen",
-    detail: "Zo antwoordt NOVA: welke diensten zijn verbonden en werken ze?",
+    detail: "AI-accounts, gratis gebruik, modelkeuze en beschikbaarheid.",
   },
   {
     id: "zelf",
-    name: "Wat NOVA zelf mag doen",
-    detail: "Hoe zelfstandig NOVA is, wat ze mag en waar ze op let.",
+    name: "Taken en functies",
+    detail: "Lopende taken, functies en doelen.",
   },
   {
     id: "geheugen",
@@ -41,7 +46,7 @@ export const PAGES = [
   {
     id: "geavanceerd",
     name: "Geavanceerd",
-    detail: "Alleen voor als je weet wat je doet.",
+    detail: "Gereedschappen, uitbreidingen, onderhoud en diagnostiek.",
   },
 ] as const;
 
@@ -95,21 +100,29 @@ export const TOPICS = [
   },
   {
     id: "devices",
-    page: "huis",
+    page: "windows",
     anchor: "pc",
-    name: "Je pc en NOVA als app",
-    detail: "Achtergrond, helper en NOVA als app op je telefoon of pc.",
+    name: "Windows-pc verbinden en instellen",
+    detail: "Koppelcode, pc-toegang, helper en achtergrond bij elkaar.",
     keywords:
-      "windows helper wallpaper achtergrond scherm display pwa app installeren telefoon downloaden",
+      "windows helper wallpaper achtergrond scherm display app installeren koppelen koppelcode beheerrechten uac downloaden",
   },
   {
     id: "desktop",
-    page: "huis",
+    page: "windows",
     anchor: "pc-bedienen",
     name: "Pc bedienen",
     detail: "Laat NOVA meekijken op je scherm en de pc kort bedienen.",
     keywords:
       "bureaublad scherm pc overnemen muis toetsenbord screenshot windows besturen",
+  },
+  {
+    id: "app",
+    page: "gesprek",
+    anchor: "app-installeren",
+    name: "NOVA installeren op dit apparaat",
+    detail: "De webapp op je telefoon, tablet of computer installeren.",
+    keywords: "pwa app installeren telefoon iphone android beginscherm",
   },
   {
     id: "telephony",
@@ -150,8 +163,8 @@ export const TOPICS = [
     id: "safety",
     page: "zelf",
     anchor: "toestemmingen",
-    name: "Blijvende toestemmingen",
-    detail: "Bekijk en trek blijvende toestemmingen in.",
+    name: "Uitvoering en actielog",
+    detail: "NOVA handelt direct; bekijk en controleer de uitgevoerde acties.",
     keywords:
       "veiligheid altijd goedkeuring confirm pin bevestiging beveiliging toestemmingen intrekken",
   },
@@ -191,7 +204,7 @@ export const TOPICS = [
   },
   {
     id: "integrations",
-    page: "geavanceerd",
+    page: "huis",
     anchor: "koppelingen",
     name: "Overige koppelingen",
     detail: "Proxmox, Qdrant, MQTT, Node-RED, Termix en Pangolin.",
@@ -200,15 +213,15 @@ export const TOPICS = [
   },
   {
     id: "automation",
-    page: "geavanceerd",
-    anchor: "koppelingen",
+    page: "huis",
+    anchor: "connection-node-red",
     name: "Node-RED-flows",
     detail: "Flows, palet en logs achter je automatiseringen.",
     keywords: "flows nodes node-red planning routines editor palet logs",
   },
   {
     id: "services",
-    page: "geavanceerd",
+    page: "huis",
     anchor: "services",
     name: "Services en MCP",
     detail: "Zie of de achtergrondservices en MCP-servers draaien.",
@@ -217,7 +230,7 @@ export const TOPICS = [
   },
   {
     id: "modelexpert",
-    page: "geavanceerd",
+    page: "modellen",
     anchor: "modellen-expert",
     name: "Modellen en accounts (expert)",
     detail: "Accounts, routes, metingen, native gateway en gratis-beleid.",
@@ -226,7 +239,7 @@ export const TOPICS = [
   },
   {
     id: "windowsagent",
-    page: "geavanceerd",
+    page: "windows",
     anchor: "windows-agent",
     name: "Windows-agent en helper",
     detail: "Status, sneltoetsen en geschiedenis van de Windows-agent.",
@@ -272,6 +285,16 @@ export const TOPICS = [
     name: "Zijbalk en panelen",
     detail: "Kies welke informatiepanelen je ziet en waar.",
     keywords: "sidebar zijbalk panelen widgets notitie",
+  },
+  {
+    id: "runtime",
+    page: "geavanceerd",
+    anchor: "voorkeuren",
+    name: "Spraak, nieuws en meldingen",
+    detail:
+      "Spraak naar tekst, embeddings, nieuwsbronnen, ntfy, controledoelen en thuislocatie.",
+    keywords:
+      "stt whisper transcriptie embeddings dimensies nieuws rss feeds ntfy push controle doelen thuis locatie breedtegraad lengtegraad env",
   },
   {
     id: "updates",
@@ -323,11 +346,14 @@ const HASH_HOME: Record<string, SettingsPage> = {
       topic.page,
     ]),
   ),
-  "modellen-expert": "geavanceerd",
+  "modellen-expert": "modellen",
+  "node-red-flows": "huis",
+  "windows-access": "windows",
+  "windows-appearance": "windows",
   "sidebar-history": "geavanceerd",
   "tool-switch-history": "geavanceerd",
-  "model-role-history-title": "geavanceerd",
-  modelrollen: "geavanceerd",
+  "model-role-history-title": "modellen",
+  modelrollen: "modellen",
   actielog: "geavanceerd",
   "persona-history": "gesprek",
   "persona-preferences-history": "gesprek",
@@ -353,8 +379,8 @@ export function resolveSettingsTarget(
 ): SettingsTarget {
   const wanted = hash.replace(/^#/, "");
   const home = wanted ? HASH_HOME[wanted] : undefined;
-  if (isPage(value)) return { page: value, anchor: null };
   if (home) return { page: home, anchor: wanted };
+  if (isPage(value)) return { page: value, anchor: null };
   if (value && LEGACY[value]) return LEGACY[value];
   const topic = TOPICS.find((item) => item.id === value);
   if (topic) return { page: topic.page, anchor: topic.anchor };

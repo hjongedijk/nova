@@ -1,10 +1,8 @@
-import { Controller, Get, Query, Res, UseGuards } from "@nestjs/common";
+import { Controller, Get, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
-import { SettingsGuard } from "./settings.guard.js";
 import { WorkspaceCodeService } from "./workspace-code.service.js";
 
 @Controller("settings/workspace/code")
-@UseGuards(SettingsGuard)
 export class WorkspaceCodeController {
   constructor(private readonly code: WorkspaceCodeService) {}
 

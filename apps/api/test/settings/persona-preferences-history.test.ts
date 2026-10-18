@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ADMIN, createApp, type TestApp } from "./helpers.js";
+import { auditText, dbStat, historyRows } from "../helpers/nova-db.js";
 
 describe("persona style and profile history", () => {
   let nova: TestApp;
@@ -82,11 +83,8 @@ describe("persona style and profile history", () => {
     expect(restoredStyle.body.snapshot.style).toBe("friendly");
 
     const file = path.join(directory, "persona-preferences-history.json");
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
-    const audit = fs.readFileSync(
-      path.join(directory, "actions.jsonl"),
-      "utf8",
-    );
+    expect(dbStat(file).mode & 0o777).toBe(0o600);
+    const audit = auditText(directory);
     expect(audit).not.toContain("overdrijven");
     expect(audit).not.toContain("droog");
   });
@@ -110,6 +108,6 @@ describe("persona style and profile history", () => {
       .set(ADMIN);
     expect(history.body.revisions).toHaveLength(0);
     const file = path.join(directory, "persona-preferences-history.json");
-    expect(fs.existsSync(file)).toBe(false);
+    expect(historyRows(file)).toEqual([]);
   });
 });

@@ -2,10 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NodeRedManagement } from "../../src/settings/node-red-management.service.js";
 import { requestJson } from "../../src/core/http/http-json.js";
 import { StackControlController } from "../../src/settings/stack-control.controller.js";
-import { StackControlService } from "../../src/settings/stack-control.service.js";
-import { ADMIN, createApp } from "./helpers.js";
 import { registerSecrets } from "../../src/core/security/sanitize.js";
-import { SettingsGuard } from "../../src/settings/settings.guard.js";
 vi.mock("../../src/core/http/http-json.js", () => ({ requestJson: vi.fn() }));
 afterEach(() => vi.resetAllMocks());
 const sources = [
@@ -89,11 +86,6 @@ describe("Node-RED log flow links", () => {
     });
     expect(requestJson).not.toHaveBeenCalled();
   });
-  it("keeps the endpoint behind the existing settings guard", () => {
-    expect(Reflect.getMetadata("__guards__", StackControlController)).toContain(
-      SettingsGuard,
-    );
-  });
   it("joins only projected flow IDs onto sanitized broker entries", async () => {
     const entry = {
       at: "2026-10-15T00:00:00Z",
@@ -134,47 +126,4 @@ it("does not expose registered secrets used as flow identifiers", async () => {
     },
   ]);
   expect((await service.resolveLogSources(sources)).available).toBe(false);
-});
-it("requires configured settings PIN on the actual log route", async () => {
-  const app = await createApp({ env: { NOVA_ADMIN_PIN: "fixture-pin" } });
-  try {
-    const logs = vi
-      .spyOn(app.app.get(StackControlService), "nodeRedLogs")
-      .mockResolvedValue({
-        available: true,
-        entries: [],
-        limited: true,
-        truncated: false,
-      });
-    expect(
-      (
-        await app.api
-          .get("/api/settings/stack-control/node-red/logs")
-          .set(ADMIN)
-      ).status,
-    ).toBe(401);
-    expect(logs).not.toHaveBeenCalled();
-    const response = await app.api
-      .get("/api/settings/stack-control/node-red/logs")
-      .set({ ...ADMIN, "x-nova-pin": "fixture-pin" });
-    expect(response.status).toBe(200);
-    expect(response.headers["cache-control"]).toBe("no-store");
-    expect(response.body.entries).toEqual([]);
-    expect(logs).toHaveBeenCalledOnce();
-    logs.mockResolvedValueOnce({
-      available: false,
-      entries: [],
-      limited: true,
-      truncated: false,
-      reason: "Node-RED-logboek is niet beschikbaar.",
-    });
-    const unavailable = await app.api
-      .get("/api/settings/stack-control/node-red/logs")
-      .set({ ...ADMIN, "x-nova-pin": "fixture-pin" });
-    expect(unavailable.status).toBe(200);
-    expect(unavailable.body.available).toBe(false);
-    expect(unavailable.headers["cache-control"]).toBe("no-store");
-  } finally {
-    await app.app.close();
-  }
 });

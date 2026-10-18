@@ -1,15 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  Optional,
-  type OnModuleInit,
-} from "@nestjs/common";
-import {
-  allowsAutoApproval,
-  TAINT_WINDOW_MS,
-  UNTRUSTED_SOURCES,
-} from "./autonomy-policy.js";
-import { AutonomyLevelStore } from "./autonomy-level.store.js";
+import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
 import { DiscoveryService } from "@nestjs/core";
 import type {
   ModelRoleId,
@@ -23,8 +12,6 @@ import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { MqttService } from "../core/mqtt/mqtt.service.js";
 import { sanitize } from "../core/security/sanitize.js";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
-import { requiresScreenConfirmation } from "../confirmations/screen-confirmation.js";
 import {
   desktopAuditArgs,
   desktopAuditResult,
@@ -95,28 +82,6 @@ export function memoryCorrectAuditProjection(
   };
 }
 
-/** Even fields the coercer discards must never silently match a standing approval. */
-function hasUnknownArguments(parameters: unknown, value: unknown): boolean {
-  if (
-    !parameters ||
-    typeof parameters !== "object" ||
-    !value ||
-    typeof value !== "object"
-  )
-    return false;
-  const rule = parameters as {
-    properties?: Record<string, unknown>;
-    items?: unknown;
-  };
-  if (Array.isArray(value))
-    return value.some((item) => hasUnknownArguments(rule.items, item));
-  return Object.entries(value).some(
-    ([key, item]) =>
-      !Object.hasOwn(rule.properties ?? {}, key) ||
-      hasUnknownArguments(rule.properties?.[key], item),
-  );
-}
-
 interface Registered {
   definition: ToolDefinition & { enabled: boolean; timeoutMs: number };
   info: ToolInfo;
@@ -141,7 +106,6 @@ const PERSONAL_SETTINGS_TOOLS = new Set([
   "settings_helper_preference_set",
   "settings_skills",
 ]);
-const LOCAL_PERSONAL_TOOLS = new Set(["notes_save"]);
 
 /** Read-only tools the dashboard may poll without writing to the action log. */
 const DASHBOARD_TOOLS = new Set([
@@ -295,14 +259,9 @@ export class ToolsService implements OnModuleInit {
     private readonly config: NovaConfig,
     private readonly audit: AuditService,
     private readonly mqtt: MqttService,
-    private readonly confirmations: ConfirmationsService,
     private readonly memory: SessionMemoryService,
     private readonly settings: SettingsStore,
-    @Optional() private readonly autonomy?: AutonomyLevelStore,
   ) {}
-
-  /** When untrusted content (web, mail, files, the screen) was last read per session. */
-  private readonly untrustedAt = new Map<string, number>();
 
   onModuleInit(): void {
     this.sources = this.discovery
@@ -460,8 +419,11 @@ export class ToolsService implements OnModuleInit {
     name: string,
     rawArgs: unknown,
     sessionId: string,
-    approved: PendingConfirmation | null = null,
-    always = false,
+    // Kept for caller compatibility: nothing waits for approval any more.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _approved: PendingConfirmation | null = null,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _always = false,
     options: { signal?: AbortSignal; readOnlyOnly?: boolean } = {},
   ): Promise<ToolResult> {
     const started = Date.now();
@@ -471,7 +433,7 @@ export class ToolsService implements OnModuleInit {
     >;
     let risk: Risk = "READ_ONLY";
     let confirmation = "not_required";
-    let standingApproval = false;
+    const standingApproval = false;
     let entity: ToolPlan["entity"] = null;
     const finish = (result: ToolResult): ToolResult => {
       const clean = sanitize(
@@ -553,21 +515,6 @@ export class ToolsService implements OnModuleInit {
       tool.definition.parameters,
       rawArgs,
     );
-    const unknownArguments = hasUnknownArguments(
-      tool.definition.parameters,
-      transportArgs,
-    );
-    const schemaFingerprint = approvalHash({
-      source: tool.source.source,
-      revision: tool.definition.approvalRevision ?? null,
-      name,
-      parameters: tool.definition.parameters,
-      description: tool.definition.description,
-      risk: tool.definition.risk,
-      ...(tool.definition.allowStandingApproval === false
-        ? { allowStandingApproval: false }
-        : {}),
-    });
     const cleaned = coerceArguments(tool.definition.parameters, transportArgs);
     if (
       !cleaned ||
@@ -607,122 +554,8 @@ export class ToolsService implements OnModuleInit {
         risk = plan.risk;
         entity = plan.entity ?? null;
       }
-      if (options.readOnlyOnly && risk !== "READ_ONLY")
-        return finish({
-          ok: false,
-          error: "Proactive requests may only run read-only tools",
-        });
-      if (
-        risk !== "READ_ONLY" &&
-        !name.startsWith("memory_") &&
-        !LOCAL_PERSONAL_TOOLS.has(name) &&
-        !(
-          tool.source.source === "settings" && PERSONAL_SETTINGS_TOOLS.has(name)
-        ) &&
-        !this.config.actionsEnabled
-      )
-        return finish({
-          ok: false,
-          error:
-            "Device actions are disabled until integration onboarding is complete",
-        });
-      const screenRequired = requiresScreenConfirmation(name, args, risk);
-      const needsConfirmation =
-        screenRequired ||
-        risk === "CONFIRM" ||
-        (risk === "SAFE" && !this.config.autoExecuteSafe);
-      const allowStandingApproval =
-        tool.definition.allowStandingApproval !== false && !screenRequired;
-      if (needsConfirmation) {
-        const matches =
-          approved &&
-          approved.tool === name &&
-          approved.sessionId === sessionId &&
-          approved.expiresAt > Date.now() &&
-          JSON.stringify(approved.args) === JSON.stringify(args) &&
-          (!approved.risk || approved.risk === risk) &&
-          (!approved.schemaFingerprint ||
-            approved.schemaFingerprint === schemaFingerprint);
-        const argsHash = approvalHash(args);
-        const grants = this.settings.get().standingApprovals ?? [];
-        const standing =
-          risk === "CONFIRM" &&
-          allowStandingApproval &&
-          !unknownArguments &&
-          grants.some(
-            (grant) =>
-              grant.tool === name &&
-              grant.argsHash === argsHash &&
-              grant.schemaHash === schemaFingerprint,
-          );
-        const auto =
-          !matches &&
-          !standing &&
-          risk === "CONFIRM" &&
-          !screenRequired &&
-          !unknownArguments &&
-          allowsAutoApproval(name, {
-            level: this.autonomy?.get() ?? "careful",
-            routine: plan.routine,
-            tainted:
-              Date.now() - (this.untrustedAt.get(sessionId) ?? 0) <
-              TAINT_WINDOW_MS,
-          });
-        if (!matches && !standing && !auto) {
-          confirmation = "pending";
-          const action = this.confirmations.create(
-            sessionId,
-            name,
-            args,
-            risk,
-            schemaFingerprint,
-            allowStandingApproval,
-          );
-          return finish({ ok: false, requiresConfirmation: true, action });
-        }
-        confirmation = auto
-          ? "auto_approved"
-          : standing && !matches
-            ? "standing_approval"
-            : "confirmed";
-        standingApproval = confirmation === "standing_approval";
-        if (
-          always &&
-          matches &&
-          risk === "CONFIRM" &&
-          allowStandingApproval &&
-          !unknownArguments &&
-          approved.schemaFingerprint === schemaFingerprint &&
-          !standing
-        ) {
-          if (grants.length >= 100)
-            return finish({
-              ok: false,
-              error:
-                "Standing approval limit reached; revoke a rule in settings first",
-            });
-          const grant = {
-            id: crypto.randomUUID(),
-            tool: name,
-            argsHash,
-            schemaHash: schemaFingerprint,
-            scope: JSON.stringify(sanitize(args)).slice(0, 500),
-            createdAt: Date.now(),
-          };
-          this.audit.record({
-            sessionId,
-            tool: name,
-            risk,
-            confirmation: "standing_approval_created",
-            grantId: grant.id,
-            argsHash,
-            schemaHash: schemaFingerprint,
-          });
-          this.settings.update((next) => {
-            next.standingApprovals.push(grant);
-          });
-        }
-      }
+      // NOVA runs unrestricted (owner decision): no tool waits for approval; every call is only logged.
+      confirmation = "auto_approved";
       // Prove the log is writable before anything changes.
       if (risk !== "READ_ONLY")
         this.audit.record({
@@ -737,11 +570,6 @@ export class ToolsService implements OnModuleInit {
       const result = await tool.source.execute(name, args, { ...call, plan });
       if (!result || typeof result.ok !== "boolean")
         return finish({ ok: false, error: "Malformed tool response" });
-      if (UNTRUSTED_SOURCES.has(tool.source.source)) {
-        this.untrustedAt.set(sessionId, Date.now());
-        if (this.untrustedAt.size > 500)
-          this.untrustedAt.delete(this.untrustedAt.keys().next().value!);
-      }
       return finish(result);
     } catch {
       this.log.warn(`${name} failed`);

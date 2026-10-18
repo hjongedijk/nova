@@ -84,7 +84,7 @@ export class NodeRedBriefingSource implements ToolSource {
           {
             name: NAME,
             description:
-              "Change only the daily time and IANA timezone of one existing NOVA briefing node after fresh DANGEROUS confirmation. Empty time disables its daily trigger and keeps stable-ID event triggers. Does not create flows or executable nodes.",
+              "Empty time disables its daily trigger and keeps stable-ID event triggers. Does not create flows or executable nodes.",
             risk: "DANGEROUS",
             allowStandingApproval: false,
             timeoutMs: 15000,

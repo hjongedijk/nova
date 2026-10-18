@@ -1,8 +1,7 @@
-import { readStrictState, writeStrictState } from "./strict-state-file.js";
+import { readJsonState, writeJsonState } from "../core/db/json-state.js";
 
 const RETRY_MS = 5 * 60_000;
 const MAX_ATTEMPTS = 3;
-const MAX_BYTES = 2048;
 const UNAVAILABLE = "Scheduled attempt budget unavailable";
 
 interface AttemptState {
@@ -64,23 +63,27 @@ export class ScheduledAttemptBudget {
   }
 
   private read(): AttemptState | undefined {
-    return readStrictState<AttemptState>(
-      this.file,
-      MAX_BYTES,
-      UNAVAILABLE,
-      (state) =>
-        Object.keys(state).sort().join(",") ===
-          "attempts,lastAttemptAt,period,version" &&
-        state.version === 1 &&
-        validPeriod(state.period) &&
-        Number.isSafeInteger(state.attempts) &&
-        (state.attempts as number) >= 1 &&
-        (state.attempts as number) <= MAX_ATTEMPTS &&
-        validTime(state.lastAttemptAt),
-    );
+    const state = readJsonState(this.file) as
+      Record<string, unknown> | undefined;
+    if (state === undefined) return undefined;
+    if (
+      !state ||
+      typeof state !== "object" ||
+      Array.isArray(state) ||
+      Object.keys(state).sort().join(",") !==
+        "attempts,lastAttemptAt,period,version" ||
+      state.version !== 1 ||
+      !validPeriod(state.period) ||
+      !Number.isSafeInteger(state.attempts) ||
+      (state.attempts as number) < 1 ||
+      (state.attempts as number) > MAX_ATTEMPTS ||
+      !validTime(state.lastAttemptAt)
+    )
+      throw new Error(UNAVAILABLE);
+    return state as unknown as AttemptState;
   }
 
   private write(state: AttemptState): void {
-    writeStrictState(this.file, state);
+    writeJsonState(this.file, state, "dir");
   }
 }

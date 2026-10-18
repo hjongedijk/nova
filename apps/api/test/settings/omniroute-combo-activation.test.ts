@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -64,8 +63,6 @@ function fixture() {
     timestamp: "fixture",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
-  confirmations.now = () => 1_000;
   const routing = new RoutingService(config as NovaConfig);
   const verify = vi
     .spyOn(routing, "verifyForManagement")
@@ -84,7 +81,7 @@ function fixture() {
       const row = read(id);
       if (options?.method === "PATCH") {
         expect(endpoint).toBe("/api/combos/combo-1");
-        expect(options.body).toEqual({ isActive: false });
+        expect(options.body).toEqual({ isActive: expect.any(Boolean) });
         expect(routing.status()).toMatchObject({
           ready: false,
           status: "POLICY_CHANGE_PENDING",
@@ -92,7 +89,7 @@ function fixture() {
         expect(() => routing.assertFree()).toThrow(FreeRoutingBlockedError);
         if (persisted && row) {
           const data = JSON.parse(row.data) as Record<string, unknown>;
-          data.isActive = false;
+          data.isActive = (options.body as { isActive: boolean }).isActive;
           db.prepare("UPDATE combos SET data=? WHERE id=?").run(
             JSON.stringify(data),
             id,
@@ -114,7 +111,6 @@ function fixture() {
   const service = new OmniRouteComboActivation(
     config as NovaConfig,
     management as unknown as OmniRouteManagement,
-    confirmations,
     audit,
     barrier,
     routing,
@@ -134,13 +130,11 @@ function fixture() {
   };
 }
 
-describe("OmniRoute combo activation", () => {
-  it("requires global-effect acknowledgement and rejects managed quota combos", async () => {
+describe("OmniRoute combo activation (single step)", () => {
+  it("rejects an invalid status and managed quota combos without writing", async () => {
     const f = fixture();
-    await expect(f.service.prepare("combo-1", false, false)).rejects.toThrow(
-      "alle OmniRoute-clients",
-    );
-    expect(await f.service.prepare("combo-2", false, true)).toMatchObject({
+    await expect(f.service.apply("combo-1", "off")).rejects.toThrow("status");
+    expect(await f.service.apply("combo-2", false)).toMatchObject({
       ok: false,
     });
     expect(
@@ -148,39 +142,20 @@ describe("OmniRoute combo activation", () => {
     ).toBe(false);
   });
 
-  it("requires a verified free route and prepares a secret-free dangerous confirmation", async () => {
+  it("requires a verified free route", async () => {
     const f = fixture();
     f.verify.mockReturnValue({ ...verified, freeOnly: false });
-    expect(await f.service.prepare("combo-1", false, true)).toMatchObject({
+    expect(await f.service.apply("combo-1", false)).toMatchObject({
       ok: false,
     });
-    f.verify.mockReturnValue(verified);
-    const prepared = await f.service.prepare("combo-1", false, true);
-    expect(prepared).toMatchObject({
-      ok: true,
-      name: "free-route",
-      currentEnabled: true,
-      enabled: false,
-      action: { risk: "DANGEROUS" },
-    });
-    expect(JSON.stringify(prepared)).not.toMatch(
-      /private combo prompt|private-filter/,
-    );
-    expect(JSON.stringify(f.record.mock.calls)).not.toMatch(
-      /private combo prompt|private-filter/,
-    );
+    expect(
+      f.request.mock.calls.some(([, options]) => options?.method === "PATCH"),
+    ).toBe(false);
   });
 
-  it("patches only isActive under a durable inference stop and verifies SQLite/API", async () => {
+  it("patches only isActive in one call under a durable inference stop and verifies SQLite/API", async () => {
     const f = fixture();
-    const prepared = await f.service.prepare("combo-1", false, true);
-    if (!prepared.action) throw new Error("Missing confirmation");
-    const result = await f.service.confirm(
-      "combo-1",
-      prepared.action.sessionId,
-      prepared.action.confirmationId,
-      true,
-    );
+    const result = await f.service.apply("combo-1", false);
     expect(result).toMatchObject({
       ok: true,
       verified: true,
@@ -198,13 +173,6 @@ describe("OmniRoute combo activation", () => {
     expect(JSON.stringify(revisions)).not.toMatch(
       /private combo prompt|private-filter/,
     );
-    const target = f.history.rollbackTarget(
-      "combo-1",
-      revisions[0]!.id,
-      "combo",
-    );
-    expect(target.enabled).toBe(true);
-    expect(target.expectedCurrentRevision).toMatch(/^[a-f0-9]{64}$/);
     expect(
       f.request.mock.calls.map(([path, options]) => [
         path,
@@ -213,48 +181,45 @@ describe("OmniRoute combo activation", () => {
       ]),
     ).toEqual([
       ["/api/combos/combo-1", undefined, undefined],
-      ["/api/combos/combo-1", undefined, undefined],
       ["/api/combos/combo-1", "PATCH", { isActive: false }],
       ["/api/combos/combo-1", undefined, undefined],
     ]);
     expect(fs.existsSync(f.marker)).toBe(false);
+    expect(f.record.mock.calls.map(([entry]) => entry.phase)).toContain(
+      "before_execute",
+    );
     expect(JSON.stringify(f.record.mock.calls)).not.toMatch(
-      /private combo prompt|private-filter/,
+      /private combo prompt|private-filter|pending_admin_ui|confirmed_admin_ui/,
     );
   });
 
-  it("rejects stale confirmation without writing", async () => {
+  it("rolls back the newest change in one call and refuses a stale revision", async () => {
     const f = fixture();
-    const prepared = await f.service.prepare("combo-1", false, true);
-    if (!prepared.action) throw new Error("Missing confirmation");
-    f.db.prepare("UPDATE combos SET sort_order=9 WHERE id='combo-1'").run();
-    const result = await f.service.confirm(
+    await f.service.apply("combo-1", false);
+    const [entry] = f.history.list("combo-1", "combo").revisions;
+    const target = f.history.rollbackTarget("combo-1", entry!.id, "combo");
+    expect(target.enabled).toBe(true);
+    const stale = await f.service.apply(
       "combo-1",
-      prepared.action.sessionId,
-      prepared.action.confirmationId,
-      true,
+      target.enabled,
+      "0".repeat(64),
     );
-    expect(result).toMatchObject({
+    expect(stale).toMatchObject({
       ok: false,
       error: expect.stringContaining("gewijzigd"),
     });
-    expect(
-      f.request.mock.calls.some(([, options]) => options?.method === "PATCH"),
-    ).toBe(false);
-    expect(fs.existsSync(f.marker)).toBe(false);
+    const restored = await f.service.apply(
+      "combo-1",
+      target.enabled,
+      target.expectedCurrentRevision,
+    );
+    expect(restored).toMatchObject({ ok: true, enabled: true });
   });
 
   it("keeps inference blocked when the upstream write is not independently verified", async () => {
     const f = fixture();
     f.setPersisted(false);
-    const prepared = await f.service.prepare("combo-1", false, true);
-    if (!prepared.action) throw new Error("Missing confirmation");
-    const result = await f.service.confirm(
-      "combo-1",
-      prepared.action.sessionId,
-      prepared.action.confirmationId,
-      true,
-    );
+    const result = await f.service.apply("combo-1", false);
     expect(result).toMatchObject({
       ok: false,
       verified: null,
@@ -272,14 +237,7 @@ describe("OmniRoute combo activation", () => {
     f.verify
       .mockReturnValueOnce(verified)
       .mockReturnValueOnce({ ...verified, ready: false, freeOnly: false });
-    const prepared = await f.service.prepare("combo-1", false, true);
-    if (!prepared.action) throw new Error("Missing confirmation");
-    const result = await f.service.confirm(
-      "combo-1",
-      prepared.action.sessionId,
-      prepared.action.confirmationId,
-      true,
-    );
+    const result = await f.service.apply("combo-1", false);
     expect(result).toMatchObject({
       ok: true,
       verified: true,
@@ -287,9 +245,5 @@ describe("OmniRoute combo activation", () => {
       routeReady: false,
     });
     expect(fs.existsSync(f.marker)).toBe(true);
-    expect(f.routing.status()).toMatchObject({
-      ready: false,
-      status: "POLICY_CHANGE_PENDING",
-    });
   });
 });

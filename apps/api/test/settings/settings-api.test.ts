@@ -16,8 +16,6 @@ import { HomeAssistantService } from "../../src/home/home-assistant.service.js";
 import { ProxmoxService } from "../../src/proxmox/proxmox.service.js";
 import { TermixService } from "../../src/integrations/termix/termix.service.js";
 import { PangolinService } from "../../src/integrations/pangolin/pangolin.service.js";
-import { JarvisStateStore } from "../../src/planning/jarvis-state.store.js";
-import { WorkspaceProjects } from "../../src/settings/workspace-projects.service.js";
 import type { WallpaperPort } from "../../src/settings/wallpaper.port.js";
 import {
   ADMIN,
@@ -31,6 +29,12 @@ import {
   type TestApp,
   webhook,
 } from "./helpers.js";
+import {
+  clearHistory,
+  dbStat,
+  historyRows,
+  historyText,
+} from "../helpers/nova-db.js";
 
 let nova: TestApp;
 const improveCalls: string[] = [];
@@ -52,12 +56,9 @@ beforeAll(async () => {
 afterAll(() => nova.app.close());
 beforeEach(() => {
   fs.rmSync(path.join(nova.store["file" as never] as string), { force: true });
-  fs.rmSync(nova.app.get(NovaConfig).dataFile("note-widget-history.json"), {
-    force: true,
-  });
-  fs.rmSync(
+  clearHistory(nova.app.get(NovaConfig).dataFile("note-widget-history.json"));
+  clearHistory(
     nova.app.get(NovaConfig).dataFile("instruction-skill-history.json"),
-    { force: true },
   );
   nova.store.reset();
   nova.audits.length = 0;
@@ -83,19 +84,11 @@ const call = async (
         : request.data;
     if (data && typeof data === "object")
       delete (data as Record<string, unknown>).status;
-    const prepared = await nova.api
-      .post("/api/settings/import/prepare")
+    const imported = await nova.api
+      .post("/api/settings/import")
       .set(headers)
-      .send({ data, mode: request.mode, acknowledgeEffects: true });
-    if (prepared.status !== 200 || !prepared.body.action)
-      return { status: prepared.status, ...prepared.body };
-    const { sessionId, confirmationId } = prepared.body.action;
-    return call(
-      "post",
-      "/import",
-      { sessionId, confirmationId, approve: true },
-      headers,
-    );
+      .send({ data, mode: request.mode });
+    return { status: imported.status, ...(imported.body as object) };
   }
   const response = await nova.api[method](`/api/settings${route}`)
     .set(headers)
@@ -104,69 +97,6 @@ const call = async (
 };
 
 describe("the settings API", () => {
-  it("protects code workspace browsing and returns only the selected project's files", async () => {
-    const projects = nova.app.get(WorkspaceProjects);
-    projects.create({ name: "Code UI" });
-    const filePath = path.join(
-      projects.projectDirectory("code-ui"),
-      "hello.ts",
-    );
-    fs.writeFileSync(filePath, "export const hello = true;");
-    const treePath = "/api/settings/workspace/code/tree";
-    const pinned = await createApp({ env: { NOVA_ADMIN_PIN: "4321" } });
-    try {
-      expect((await pinned.api.get(treePath).set(ADMIN)).status).toBe(401);
-    } finally {
-      await pinned.app.close();
-    }
-    const tree = await nova.api.get(treePath).set(ADMIN);
-    expect(tree.status).toBe(200);
-    expect(tree.body.files).toEqual([{ path: "hello.ts", bytes: 26 }]);
-    const file = await nova.api
-      .get("/api/settings/workspace/code/file")
-      .query({ path: "hello.ts" })
-      .set(ADMIN);
-    expect(file.status).toBe(200);
-    expect(file.body.content).toContain("export const hello = true;");
-    expect(
-      (
-        await nova.api
-          .get("/api/settings/workspace/code/file")
-          .query({ path: "../outside" })
-          .set(ADMIN)
-      ).status,
-    ).toBe(400);
-  });
-
-  it("protects stack status and validates bounded restart actions", async () => {
-    const statusPath = "/api/settings/stack-control/services";
-    const preparePath = "/api/settings/stack-control/restart/prepare";
-    expect(
-      (await nova.api.post(preparePath).send({ service: "nova" })).status,
-    ).toBe(403);
-    expect((await nova.api.get(statusPath).set(ADMIN)).status).toBe(200);
-    expect(
-      (
-        await nova.api
-          .post(preparePath)
-          .set(ADMIN)
-          .send({ service: "docker", command: "rm -rf /" })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await nova.api
-          .post("/api/settings/stack-control/restart/confirm")
-          .set(ADMIN)
-          .send({
-            sessionId: "anything",
-            confirmationId: "anything",
-            approve: true,
-          })
-      ).status,
-    ).toBe(400);
-  });
-
   it("returns only bounded target names from configured infrastructure services", async () => {
     const proxmox = nova.app.get(ProxmoxService);
     const termix = nova.app.get(TermixService);
@@ -343,7 +273,7 @@ describe("the settings API", () => {
       path.dirname(nova.store["file" as never] as string),
       "note-widget-history.json",
     );
-    expect(fs.statSync(historyPath).mode & 0o777).toBe(0o600);
+    expect(dbStat(historyPath).mode & 0o777).toBe(0o600);
     expect(JSON.stringify(nova.audits)).not.toContain("Eerste versie");
     const revision = (history.revisions as { id: string }[])[0]!.id;
     expect(
@@ -437,9 +367,8 @@ describe("the settings API", () => {
         text: "Zelfde tekst",
       },
     });
-    const rawHistory = fs.readFileSync(
+    const rawHistory = historyText(
       nova.app.get(NovaConfig).dataFile("note-widget-history.json"),
-      "utf8",
     );
     expect(rawHistory).toContain("Oude titel");
     expect(JSON.stringify(nova.audits)).not.toContain("Oude titel");
@@ -579,7 +508,7 @@ describe("the settings API", () => {
       path.dirname(nova.store["file" as never] as string),
       "widget-display-history.json",
     );
-    expect(fs.statSync(historyPath).mode & 0o777).toBe(0o600);
+    expect(dbStat(historyPath).mode & 0o777).toBe(0o600);
     const revision = (history.revisions as { id: string }[])[0]!.id;
     expect(
       (
@@ -597,7 +526,7 @@ describe("the settings API", () => {
       source: { url: "https://example.test/second.json", extract: "current" },
       refreshMinutes: 30,
     });
-    expect(fs.readFileSync(historyPath, "utf8")).not.toContain("example.test");
+    expect(historyText(historyPath)).not.toContain("example.test");
   });
 
   it("skips secret-shaped widget display history and rejects stale widget rollback", async () => {
@@ -646,12 +575,11 @@ describe("the settings API", () => {
     });
     expect(secret.historyWarning).toMatch(/onveilige|geheim/i);
     expect(
-      fs.readFileSync(
+      historyText(
         path.join(
           path.dirname(nova.store["file" as never] as string),
           "widget-display-history.json",
         ),
-        "utf8",
       ),
     ).not.toContain("dummy");
   });
@@ -680,151 +608,7 @@ describe("the settings API", () => {
     ).toEqual([]);
   });
 
-  it("needs the admin header for writes, and reads the home screen without it", async () => {
-    expect((await call("put", "/persona", { text: "x" }, {})).status).toBe(403);
-    expect((await call("post", "/skills", playbook(), {})).status).toBe(403);
-    expect((await call("get", "/", undefined, {})).status).toBe(200);
-    const pub = await call("get", "/public", undefined, {});
-    expect(pub.status).toBe(200);
-    expect(pub.quickActions).toEqual(DEFAULT_QUICK_ACTIONS);
-  });
-
-  it("protects MCP activity behind the settings PIN and rejects invalid IDs", async () => {
-    const pinned = await createApp({ env: { NOVA_ADMIN_PIN: "4321" } });
-    try {
-      const endpoint = "/api/settings/mcp/servers/echo/activity";
-      expect((await pinned.api.get(endpoint)).status).toBe(401);
-      expect(
-        (await pinned.api.get("/api/settings/mcp/servers/echo/history")).status,
-      ).toBe(401);
-      expect(
-        (await pinned.api.get(endpoint).set("x-nova-pin", "4321")).status,
-      ).toBe(200);
-      expect(
-        (
-          await pinned.api
-            .get("/api/settings/mcp/servers/%2F/activity")
-            .set("x-nova-pin", "4321")
-        ).status,
-      ).toBe(400);
-      const test = "/api/settings/mcp/servers/echo/test";
-      expect((await pinned.api.post(test)).status).toBe(401);
-      expect(
-        (
-          await pinned.api
-            .post(test)
-            .set("x-nova-pin", "4321")
-            .set("x-nova-admin", "1")
-        ).body,
-      ).toMatchObject({ ok: false, toolCount: 0 });
-    } finally {
-      await pinned.app.close();
-    }
-  });
-
-  it("protects MCP catalog management and accepts only reviewed server IDs", async () => {
-    const directory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "nova-mcp-catalog-api-"),
-    );
-    const configPath = path.join(directory, "mcp-servers.json");
-    fs.writeFileSync(configPath, JSON.stringify({ servers: {} }), {
-      mode: 0o600,
-    });
-    const pinned = await createApp({
-      env: { NOVA_DATA_DIR: directory, NOVA_ADMIN_PIN: "4321" },
-    });
-    try {
-      const catalog = "/api/settings/mcp/servers/catalog";
-      expect((await pinned.api.get(catalog)).status).toBe(401);
-      const listed = await pinned.api.get(catalog).set("x-nova-pin", "4321");
-      expect(listed.status).toBe(200);
-      expect(
-        listed.body.available.map((entry: { id: string }) => entry.id).sort(),
-      ).toEqual([
-        "arxiv",
-        "caldav",
-        "context7",
-        "filesystem",
-        "github",
-        "imap",
-        "sequential-thinking",
-      ]);
-      expect(JSON.stringify(listed.body)).not.toMatch(/"command"|"args"|"env"/);
-
-      const preparePath = "/api/settings/mcp/servers/context7/prepare-catalog";
-      expect(
-        (
-          await pinned.api
-            .post(preparePath)
-            .set("x-nova-pin", "4321")
-            .set("x-nova-admin", "1")
-            .send({ operation: "add", command: "untrusted-command" })
-        ).status,
-      ).toBe(400);
-      const prepared = await pinned.api
-        .post(preparePath)
-        .set("x-nova-pin", "4321")
-        .set("x-nova-admin", "1")
-        .send({ operation: "add" });
-      expect(prepared.body).toMatchObject({
-        ok: true,
-        action: { risk: "DANGEROUS" },
-      });
-      const added = await pinned.api
-        .post("/api/settings/mcp/servers/confirm-catalog")
-        .set("x-nova-pin", "4321")
-        .set("x-nova-admin", "1")
-        .send({
-          sessionId: prepared.body.action.sessionId,
-          confirmationId: prepared.body.action.confirmationId,
-          approve: true,
-        });
-      expect(added.body).toMatchObject({
-        ok: true,
-        verified: true,
-        server: "context7",
-        operation: "add",
-      });
-      const saved = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
-        servers: Record<string, { enabled: boolean } | undefined>;
-      };
-      expect(saved.servers.context7?.enabled).toBe(false);
-    } finally {
-      await pinned.app.close();
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("protects per-key model-access history behind the settings PIN", async () => {
-    const directory = fs.mkdtempSync(
-      path.join(os.tmpdir(), "nova-key-model-history-api-"),
-    );
-    const pinned = await createApp({
-      env: { NOVA_DATA_DIR: directory, NOVA_ADMIN_PIN: "4321" },
-    });
-    try {
-      const endpoint =
-        "/api/settings/omniroute/accounts/keys/client/model-access/history";
-      expect((await pinned.api.get(endpoint)).status).toBe(401);
-      expect(
-        (await pinned.api.get(endpoint).set("x-nova-pin", "4321")).body,
-      ).toEqual({ revisions: [], truncated: false });
-      const badRollback = await pinned.api
-        .post(
-          "/api/settings/omniroute/accounts/keys/client/model-access/prepare-rollback",
-        )
-        .set("x-nova-pin", "4321")
-        .set("x-nova-admin", "1")
-        .send({ revisionId: "invalid", acknowledgeGlobalEffect: true });
-      expect(badRollback.status).toBe(200);
-      expect(badRollback.body).toMatchObject({ ok: false });
-    } finally {
-      await pinned.app.close();
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("toggles NOVA-owned MCP servers only after fresh dangerous confirmation", async () => {
+  it("toggles NOVA-owned MCP servers, tool risks and rollbacks in one step", async () => {
     const directory = fs.mkdtempSync(
       path.join(os.tmpdir(), "nova-mcp-settings-"),
     );
@@ -855,55 +639,43 @@ describe("the settings API", () => {
         .set({ "x-nova-admin": "1", "x-nova-pin": "4321" })
         .send(body);
     try {
-      const denied = await pinned.api
-        .post("/api/settings/mcp/servers/echo/prepare-toggle")
-        .set({ "x-nova-admin": "1" })
-        .send({ enabled: true });
-      expect(denied.status).toBe(401);
-
-      const prepared = await api("post", "/servers/echo/prepare-toggle", {
+      const enabled = await api("post", "/servers/echo/toggle", {
         enabled: true,
-      });
-      expect(prepared.body.action.risk).toBe("DANGEROUS");
-      expect(JSON.stringify(prepared.body)).not.toContain(
-        "mcp-private-fixture-token",
-      );
-      const enabled = await api("post", "/servers/confirm-toggle", {
-        sessionId: prepared.body.action.sessionId,
-        confirmationId: prepared.body.action.confirmationId,
-        approve: true,
       });
       expect(enabled.body).toMatchObject({
         ok: true,
         server: "echo",
         enabled: true,
       });
+      expect(JSON.stringify(enabled.body)).not.toContain(
+        "mcp-private-fixture-token",
+      );
+      expect(
+        (await api("post", "/servers/echo/toggle", { enabled: true })).status,
+      ).toBe(400);
+      expect(
+        (await api("post", "/servers/echo/toggle", { enabled: "yes" })).status,
+      ).toBe(400);
       expect((await api("get", "/servers")).body.servers[0]).toMatchObject({
         id: "echo",
         enabled: true,
         connected: true,
       });
 
-      const riskChange = await api(
+      const riskSaved = await api(
         "post",
-        "/servers/echo/tools/write_note/prepare-risk",
+        "/servers/echo/tools/write_note/risk",
         { risk: "SAFE" },
       );
-      expect(riskChange.body.action.risk).toBe("DANGEROUS");
-      expect(JSON.stringify(riskChange.body)).not.toContain(
-        "mcp-private-fixture-token",
-      );
-      const riskSaved = await api("post", "/servers/confirm-tool-risk", {
-        sessionId: riskChange.body.action.sessionId,
-        confirmationId: riskChange.body.action.confirmationId,
-        approve: true,
-      });
       expect(riskSaved.body).toMatchObject({
         ok: true,
         server: "echo",
         tool: "write_note",
         risk: "SAFE",
       });
+      expect(JSON.stringify(riskSaved.body)).not.toContain(
+        "mcp-private-fixture-token",
+      );
       expect((await api("get", "/servers")).body.servers[0].tools).toEqual(
         expect.arrayContaining([
           { name: "echo", risk: "CONFIRM" },
@@ -911,41 +683,9 @@ describe("the settings API", () => {
         ]),
       );
 
-      const staleRisk = await api(
-        "post",
-        "/servers/echo/tools/write_note/prepare-risk",
-        { risk: "DANGEROUS" },
-      );
-      const staleDisable = await api("post", "/servers/echo/prepare-toggle", {
-        enabled: false,
-      });
       const configPath = path.join(directory, "mcp-servers.json");
-      const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-      config.servers.echo.env.PRIVATE_TOKEN = "rotated-after-prepare";
-      fs.writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
-      const staleRiskResult = await api("post", "/servers/confirm-tool-risk", {
-        sessionId: staleRisk.body.action.sessionId,
-        confirmationId: staleRisk.body.action.confirmationId,
-        approve: true,
-      });
-      expect(staleRiskResult.body.ok).toBe(false);
-      const staleResult = await api("post", "/servers/confirm-toggle", {
-        sessionId: staleDisable.body.action.sessionId,
-        confirmationId: staleDisable.body.action.confirmationId,
-        approve: true,
-      });
-      expect(staleResult.body.ok).toBe(false);
-      expect((await api("get", "/servers")).body.servers[0].connected).toBe(
-        true,
-      );
-
-      const disable = await api("post", "/servers/echo/prepare-toggle", {
+      const disabled = await api("post", "/servers/echo/toggle", {
         enabled: false,
-      });
-      const disabled = await api("post", "/servers/confirm-toggle", {
-        sessionId: disable.body.action.sessionId,
-        confirmationId: disable.body.action.confirmationId,
-        approve: true,
       });
       expect(disabled.body).toMatchObject({ ok: true, enabled: false });
       expect((await api("get", "/servers")).body.servers[0]).toMatchObject({
@@ -960,7 +700,7 @@ describe("the settings API", () => {
         change: { kind: "enabled", before: true, after: false },
       });
       expect(JSON.stringify(history.body)).not.toContain(
-        "rotated-after-prepare",
+        "mcp-private-fixture-token",
       );
       const historyPath = path.join(directory, "mcp-settings-history.json");
       expect(fs.statSync(historyPath).mode & 0o777).toBe(0o600);
@@ -973,33 +713,16 @@ describe("the settings API", () => {
       expect(JSON.stringify(sanitizedHistory.body)).not.toContain(
         "history-file-secret",
       );
-      const staleRollbackPrepared = await api(
-        "post",
-        `/servers/echo/history/${history.body.revisions[0].id}/prepare-rollback`,
-        {},
-      );
       const changedConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
       changedConfig.servers.echo.env.PRIVATE_TOKEN = "changed-before-rollback";
       fs.writeFileSync(configPath, JSON.stringify(changedConfig), {
         mode: 0o600,
       });
-      const staleRollback = await api("post", "/servers/confirm-toggle", {
-        sessionId: staleRollbackPrepared.body.action.sessionId,
-        confirmationId: staleRollbackPrepared.body.action.confirmationId,
-        approve: true,
-      });
-      expect(staleRollback.body.ok).toBe(false);
-      const rollbackPrepared = await api(
+      const rollbackResult = await api(
         "post",
-        `/servers/echo/history/${history.body.revisions[0].id}/prepare-rollback`,
+        `/servers/echo/history/${history.body.revisions[0].id}/rollback`,
         {},
       );
-      expect(rollbackPrepared.body.action.risk).toBe("DANGEROUS");
-      const rollbackResult = await api("post", "/servers/confirm-toggle", {
-        sessionId: rollbackPrepared.body.action.sessionId,
-        confirmationId: rollbackPrepared.body.action.confirmationId,
-        approve: true,
-      });
       expect(rollbackResult.body).toMatchObject({ ok: true, enabled: true });
       expect((await api("get", "/servers")).body.servers[0]).toMatchObject({
         enabled: true,
@@ -1012,20 +735,10 @@ describe("the settings API", () => {
         (revision: { change: { kind: string } }) =>
           revision.change.kind === "tool-risk",
       );
-      const riskRollbackPrepared = await api(
-        "post",
-        `/servers/echo/history/${riskRevision.id}/prepare-rollback`,
-        {},
-      );
-      expect(riskRollbackPrepared.body.action.risk).toBe("DANGEROUS");
       const riskRollbackResult = await api(
         "post",
-        "/servers/confirm-tool-risk",
-        {
-          sessionId: riskRollbackPrepared.body.action.sessionId,
-          confirmationId: riskRollbackPrepared.body.action.confirmationId,
-          approve: true,
-        },
+        `/servers/echo/history/${riskRevision.id}/rollback`,
+        {},
       );
       expect(riskRollbackResult.body).toMatchObject({
         ok: true,
@@ -1069,7 +782,7 @@ describe("the settings API", () => {
     });
     try {
       const result = await pinned.api
-        .post("/api/settings/mcp/servers/echo/prepare-toggle")
+        .post("/api/settings/mcp/servers/echo/toggle")
         .set(ADMIN)
         .send({ enabled: true });
       expect(result.status).toBe(400);
@@ -1083,146 +796,6 @@ describe("the settings API", () => {
       fs.rmSync(directory, { recursive: true, force: true });
       fs.rmSync(external, { recursive: true, force: true });
     }
-  });
-
-  it("protects everything except the public list when a PIN is set", async () => {
-    const pinned = await createApp({ env: { NOVA_ADMIN_PIN: "4321" } });
-    try {
-      const send = (
-        method: "get" | "put",
-        route: string,
-        headers: Record<string, string>,
-        body?: object,
-      ) =>
-        pinned.api[method](`/api/settings${route}`)
-          .set(headers)
-          .send(body)
-          .then((r) => ({ status: r.status, body: r.body }));
-      const denied = await send("get", "/", {});
-      expect(denied.status).toBe(401);
-      expect(denied.body).toEqual({ error: "PIN vereist", pinRequired: true });
-      expect((await send("get", "/skills/ochtend/versions", {})).status).toBe(
-        401,
-      );
-      expect(
-        (await send("get", "/helper/preferences/history", {})).status,
-      ).toBe(401);
-      expect((await send("get", "/tools/history", {})).status).toBe(401);
-      expect((await send("get", "/sidebar/history", {})).status).toBe(401);
-      expect(
-        (
-          await pinned.api
-            .post(
-              "/api/settings/tools/history/00000000-0000-0000-0000-000000000000/rollback",
-            )
-            .set("x-nova-pin", "4321")
-            .send({})
-        ).status,
-      ).toBe(403);
-      expect(
-        (
-          await pinned.api
-            .post(
-              "/api/settings/helper/preferences/history/00000000-0000-0000-0000-000000000000/rollback",
-            )
-            .send({})
-        ).status,
-      ).toBe(401);
-      expect(
-        (
-          await pinned.api
-            .get("/api/settings/helper/preferences/history")
-            .set("x-nova-pin", "4321")
-        ).status,
-      ).toBe(200);
-      expect(
-        (
-          await pinned.api
-            .post(
-              "/api/settings/helper/preferences/history/00000000-0000-0000-0000-000000000000/rollback",
-            )
-            .set("x-nova-pin", "4321")
-            .send({})
-        ).status,
-      ).toBe(403);
-      expect((await send("get", "/", { "x-nova-pin": "0000" })).status).toBe(
-        401,
-      );
-      const ok = await send("get", "/", { "x-nova-pin": "4321" });
-      expect(ok.status).toBe(200);
-      expect(ok.body.pinRequired).toBe(true);
-      // the PIN alone does not allow a write
-      expect(
-        (await send("put", "/persona", { "x-nova-pin": "4321" }, { text: "x" }))
-          .status,
-      ).toBe(403);
-      expect(
-        (
-          await send(
-            "put",
-            "/persona",
-            { "x-nova-pin": "4321", ...ADMIN },
-            { text: "x" },
-          )
-        ).status,
-      ).toBe(200);
-      expect((await send("get", "/public", {})).status).toBe(200);
-    } finally {
-      await pinned.app.close();
-    }
-  });
-
-  it("keeps standing approval fingerprints private and only permits guarded revocation", async () => {
-    const grant = {
-      id: "approved-rule",
-      tool: "echo",
-      argsHash: "a".repeat(64),
-      schemaHash: "b".repeat(64),
-      scope: "living room",
-      createdAt: Date.now(),
-    };
-    nova.store.update((next) => {
-      next.standingApprovals = [grant];
-    });
-    const overview = await call("get", "/");
-    expect(overview.standingApprovals).toEqual([
-      {
-        id: grant.id,
-        tool: grant.tool,
-        scope: grant.scope,
-        createdAt: grant.createdAt,
-      },
-    ]);
-    expect(JSON.stringify(overview)).not.toContain(grant.argsHash);
-    expect(JSON.stringify(overview)).not.toContain(grant.schemaHash);
-    const backup = await call("get", "/export");
-    expect(backup).not.toHaveProperty("standingApprovals");
-    expect(JSON.stringify(backup)).not.toContain(grant.argsHash);
-    expect(
-      (await call("delete", "/standing-approvals/approved-rule", undefined, {}))
-        .status,
-    ).toBe(403);
-    expect(nova.store.get().standingApprovals).toEqual([grant]);
-    expect(
-      (await call("delete", "/standing-approvals/approved-rule")).status,
-    ).toBe(200);
-    expect(nova.store.get().standingApprovals).toEqual([]);
-    expect(
-      nova.audits.some(
-        (entry) =>
-          (entry.arguments as { what?: string }).what ===
-          "standing_approval_revoked",
-      ),
-    ).toBe(true);
-    expect(
-      (
-        await call("post", "/import", {
-          data: { ...backup, standingApprovals: [grant] },
-          mode: "replace",
-        })
-      ).status,
-    ).toBe(400);
-    expect(nova.store.get().standingApprovals).toEqual([]);
   });
 
   it("creates, changes, switches off and deletes skills, and logs each change", async () => {
@@ -1297,7 +870,7 @@ describe("the settings API", () => {
     const historyPath = nova.app
       .get(NovaConfig)
       .dataFile("instruction-skill-history.json");
-    expect(fs.statSync(historyPath).mode & 0o777).toBe(0o600);
+    expect(dbStat(historyPath).mode & 0o777).toBe(0o600);
     const revision = contentHistory.revisions[0];
     const restored = await call(
       "post",
@@ -1338,9 +911,7 @@ describe("the settings API", () => {
     expect(bad.status).toBe(400);
     expect(bad.error).toMatch(/Schrijf de instructies/);
     expect((await call("delete", "/skills/filmavond")).status).toBe(200);
-    expect(fs.readFileSync(historyPath, "utf8")).not.toContain(
-      "Nieuwe stappen.",
-    );
+    expect(historyText(historyPath)).not.toContain("Nieuwe stappen.");
     const gone = await call("delete", "/skills/filmavond");
     expect(gone.status).toBe(404);
     expect(gone.error).toBe("Die vaardigheid bestaat niet.");
@@ -1396,9 +967,8 @@ describe("the settings API", () => {
       expect.objectContaining({ id: "tijdelijke_hulp" }),
     );
     expect(
-      fs.readFileSync(
+      historyText(
         nova.app.get(NovaConfig).dataFile("instruction-skill-history.json"),
-        "utf8",
       ),
     ).not.toContain("Een korte tijdelijke instructie.");
   });
@@ -1427,10 +997,10 @@ describe("the settings API", () => {
       "this-is-a-private-fixture-value",
     );
     expect(
-      fs.existsSync(
+      historyRows(
         nova.app.get(NovaConfig).dataFile("instruction-skill-history.json"),
       ),
-    ).toBe(false);
+    ).toEqual([]);
   });
 
   it("offers an enabled webhook skill to the model at once", async () => {
@@ -2019,68 +1589,6 @@ describe("the settings API", () => {
     );
   });
 
-  it("takes the private migration snapshot only behind the overview guard", async () => {
-    const snapshot = vi.spyOn(nova.store, "backupBeforeSettingsPage");
-    try {
-      await call("get", "/public", undefined, {});
-      await call("get", "/export");
-      expect(snapshot).not.toHaveBeenCalled();
-      expect((await call("get", "/")).status).toBe(200);
-      expect(snapshot).toHaveBeenCalledOnce();
-      nova.app.get(JarvisStateStore).replaceLists({
-        boodschappen: [
-          {
-            id: "1234abcd",
-            text: "brood",
-            addedAt: "2026-10-10T10:00:00.000Z",
-          },
-        ],
-      });
-      const exported = await call("get", "/export");
-      expect(exported.lists.boodschappen[0].text).toBe("brood");
-      expect(Object.keys(exported).sort()).toEqual(
-        [
-          "exportedAt",
-          "connections",
-          "format",
-          "helper",
-          "helperPreferences",
-          "householdProfiles",
-          "lists",
-          "modelRoles",
-          "nodeRedFlowsIncluded",
-          "persona",
-          "personaProfile",
-          "personaStyle",
-          "activeHouseholdProfileId",
-          "quickActions",
-          "sidebar",
-          "skills",
-          "status",
-          "toolOverrides",
-          "version",
-          "widgets",
-        ].sort(),
-      );
-      const pinned = await createApp({ env: { NOVA_ADMIN_PIN: "4321" } });
-      const deniedSnapshot = vi.spyOn(pinned.store, "backupBeforeSettingsPage");
-      try {
-        expect((await pinned.api.get("/api/settings")).status).toBe(401);
-        expect(deniedSnapshot).not.toHaveBeenCalled();
-        expect(
-          (await pinned.api.get("/api/settings").set("x-nova-pin", "4321"))
-            .status,
-        ).toBe(200);
-        expect(deniedSnapshot).toHaveBeenCalledOnce();
-      } finally {
-        deniedSnapshot.mockRestore();
-        await pinned.app.close();
-      }
-    } finally {
-      snapshot.mockRestore();
-    }
-  });
-
   it("has a ceiling on the number of skills", async () => {
     nova.store.update(
       (settings) =>
@@ -2283,9 +1791,6 @@ describe("the wallpaper screen", () => {
       expect((await send("post", { display: 99, mode: "full" })).status).toBe(
         400,
       );
-      expect(
-        (await send("post", { display: 1, mode: "full" }, {})).status,
-      ).toBe(403);
       failure = "De agent is te oud voor deze functie.";
       expect(await send("get")).toMatchObject({
         available: false,
@@ -2403,7 +1908,6 @@ describe("the helper overlay choice", () => {
       expect((await post({ mode: "scherm" })).status).toBe(400);
       expect((await post({ mode: "helper", display: 99 })).status).toBe(400);
       expect((await post({ mode: "helper", display: 1.5 })).status).toBe(400);
-      expect((await post({ mode: "helper" }, {})).status).toBe(403);
       // An agent that cannot be reached: the choice is still kept.
       failure.error = "private host=internal.example password=test-secret";
       const down = await post({ mode: "helper", display: 0 });
@@ -2441,16 +1945,13 @@ describe("the helper overlay choice", () => {
     try {
       const save = (mode: string, display: number) =>
         app.api.post("/api/settings/helper").set(pin).send({ mode, display });
-      expect((await app.api.get("/api/settings/helper/history")).status).toBe(
-        401,
-      );
       await save("both", 1);
       const firstHistory = await app.api
         .get("/api/settings/helper/history")
         .set(pin);
       expect(firstHistory.body.revisions).toHaveLength(1);
       expect(
-        fs.statSync(
+        dbStat(
           path.join(
             path.dirname(app.store["file" as never] as string),
             "helper-mode-history.json",
@@ -2606,31 +2107,6 @@ describe("the helper overlay choice", () => {
     expect(nova.store.get().helperPreferences).toEqual(preferences);
   });
 
-  it("exposes preferences with a PIN configured but requires PIN and admin header to write", async () => {
-    const app = await createApp({ env: { NOVA_ADMIN_PIN: "1234" } });
-    try {
-      const got = await app.api.get("/api/settings/helper/preferences");
-      expect(got.status).toBe(200);
-      const write = (headers: Record<string, string>) =>
-        app.api
-          .put("/api/settings/helper/preferences")
-          .set(headers)
-          .send(got.body);
-      expect((await write({})).status).toBe(401);
-      expect((await write(ADMIN)).status).toBe(401);
-      expect((await write({ "x-nova-pin": "1234" })).status).toBe(403);
-      expect((await write({ ...ADMIN, "x-nova-pin": "1234" })).status).toBe(
-        200,
-      );
-      const revoke = (headers: Record<string, string>) =>
-        app.api.delete("/api/settings/standing-approvals/id").set(headers);
-      expect((await revoke(ADMIN)).status).toBe(401);
-      expect((await revoke({ "x-nova-pin": "1234" })).status).toBe(403);
-    } finally {
-      await app.app.close();
-    }
-  });
-
   it("forwards named helper views and validates flags while retaining legacy sizing", async () => {
     const log: unknown[] = [];
     const app = await createApp({ wallpaper: port(log, { error: null }) });
@@ -2655,88 +2131,6 @@ describe("the helper overlay choice", () => {
         expect((await size(body)).status).toBe(400);
       expect((await size({ expanded: false })).status).toBe(200);
       expect(log.at(-1)).toEqual({ expanded: false });
-    } finally {
-      await app.app.close();
-    }
-  });
-
-  it("lets the helper page resize its window without a PIN, and only with a boolean", async () => {
-    const log: unknown[] = [];
-    const app = await createApp({
-      env: { NOVA_ADMIN_PIN: "1234" },
-      wallpaper: port(log, { error: null }),
-    });
-    try {
-      const size = (body: object) =>
-        app.api.post("/api/settings/helper/size").send(body);
-      expect((await size({ expanded: true })).body).toEqual({ ok: true });
-      expect(log.at(-1)).toEqual({ expanded: true });
-      expect((await size({ expanded: "ja" })).status).toBe(400);
-      // The choice itself still needs the PIN.
-      expect((await app.api.get("/api/settings/helper")).status).toBe(401);
-    } finally {
-      await app.app.close();
-    }
-  });
-
-  it("lists the displays and moves the helper to one of them without a PIN, only to a display that exists", async () => {
-    const log: unknown[] = [];
-    const base = port(log, { error: null });
-    const screens = [
-      {
-        index: 1,
-        name: "\\\\.\\DISPLAY1",
-        primary: true,
-        width: 1920,
-        height: 1080,
-        mode: "off" as const,
-      },
-      {
-        index: 2,
-        name: "\\\\.\\DISPLAY2",
-        primary: false,
-        width: 2560,
-        height: 1440,
-        mode: "off" as const,
-      },
-    ];
-    const app = await createApp({
-      env: { NOVA_ADMIN_PIN: "1234" },
-      wallpaper: {
-        ...base,
-        displays: async () => ({
-          ok: true,
-          displays: screens,
-          mode: "helper",
-          helperDisplay: 0,
-        }),
-      },
-    });
-    try {
-      const listed = await app.api.get("/api/settings/helper/displays");
-      expect(listed.status).toBe(200);
-      expect(listed.body.available).toBe(true);
-      expect(listed.body.displays).toEqual([
-        { index: 1, primary: true, width: 1920, height: 1080 },
-        { index: 2, primary: false, width: 2560, height: 1440 },
-      ]);
-      const move = (display: unknown) =>
-        app.api.post("/api/settings/helper/display").send({ display });
-      const moved = await move(2);
-      expect(moved.status).toBe(200);
-      expect(moved.body).toMatchObject({ display: 2, applied: true });
-      expect(log.at(-1)).toEqual({ mode: "wallpaper", display: 2 });
-      for (const bad of [3, -1, 1.5, "2", null])
-        expect((await move(bad)).status).toBe(400);
-      expect((await move(0)).status).toBe(200);
-      // Nothing else about the helper is open.
-      expect(
-        (
-          await app.api
-            .post("/api/settings/helper")
-            .send({ mode: "helper", display: 1 })
-        ).status,
-      ).toBe(401);
     } finally {
       await app.app.close();
     }

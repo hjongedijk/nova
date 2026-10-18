@@ -7,6 +7,7 @@ import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { RoutingService } from "../../src/routing/routing.service.js";
 import { ModelRolesService } from "../../src/settings/model-roles.service.js";
 import { SettingsStore } from "../../src/settings/store/settings.store.js";
+import { dbStat, historyRows, setHistoryRows } from "../helpers/nova-db.js";
 
 const dirs: string[] = [];
 function fixture(
@@ -159,11 +160,15 @@ describe("model role preferences", () => {
       f.service.save(next);
       const id = f.service.history().revisions[0]!.id;
       const file = path.join(dirs.at(-1)!, "model-roles-history.json");
-      const rows = JSON.parse(fs.readFileSync(file, "utf8"));
-      rows[0].before[role].preferred = [
+      const rows = historyRows(file) as {
+        id: string;
+        at: string;
+        before: Record<string, { preferred: string[] }>;
+      }[];
+      rows[0]!.before[role]!.preferred = [
         role === "embedding" ? "free/provider-a" : "free/embed",
       ];
-      fs.writeFileSync(file, JSON.stringify(rows), { mode: 0o600 });
+      setHistoryRows(file, rows);
       expect(() => f.service.rollback(id)).toThrow("niet meer beschikbaar");
       expect(f.service.get().roles).toEqual(next);
     },
@@ -198,8 +203,7 @@ describe("model role preferences", () => {
     const originalId = history.revisions[0]!.id;
     expect(history.revisions).toHaveLength(1);
     expect(
-      fs.statSync(path.join(dirs.at(-1)!, "model-roles-history.json")).mode &
-        0o777,
+      dbStat(path.join(dirs.at(-1)!, "model-roles-history.json")).mode & 0o777,
     ).toBe(0o600);
 
     f.service.rollback(originalId);
@@ -218,9 +222,13 @@ describe("model role preferences", () => {
     // The old state is empty and remains safe. Change history to make the attempted restore
     // require a model that has since left the verified free catalogue.
     const file = path.join(dirs.at(-1)!, "model-roles-history.json");
-    const rows = JSON.parse(fs.readFileSync(file, "utf8"));
-    rows[0].before.conversation.preferred = ["free/removed-model"];
-    fs.writeFileSync(file, JSON.stringify(rows), { mode: 0o600 });
+    const rows = historyRows(file) as {
+      id: string;
+      at: string;
+      before: Record<string, { preferred: string[] }>;
+    }[];
+    rows[0]!.before.conversation!.preferred = ["free/removed-model"];
+    setHistoryRows(file, rows);
     expect(() => f.service.rollback(id)).toThrow("niet meer beschikbaar");
   });
 });

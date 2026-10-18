@@ -4,40 +4,27 @@ import fs from "node:fs";
 import path from "node:path";
 import type {
   NativeMemoryHistory,
-  NativeMemoryPrepared,
   NativeMemoryRevision,
   NativeMemoryResult,
 } from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 
 type MemorySettings = Record<string, unknown>;
-type Draft = {
-  sessionId: string;
-  revision: string;
-  enabled: boolean;
-  expiresAt: number;
-  rollbackRevisionId?: string;
-};
 const MAX_REVISIONS = 20;
-const hash = (value: unknown) =>
-  crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const unavailable =
   "Gateway-geheugen is niet beschikbaar. Controleer OmniRoute.";
 
 /** Only controls OmniRoute's global memory switch; it never reads or edits memory contents. */
 @Injectable()
 export class NativeMemorySettingsService {
-  private readonly drafts = new Map<string, Draft>();
   private inFlight = false;
   private readonly historyFile: string;
   constructor(
     config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
   ) {
     this.historyFile = config.dataFile("native-memory-settings-history.json");
@@ -169,177 +156,55 @@ export class NativeMemorySettingsService {
     }
   }
 
-  async prepare(body: unknown): Promise<NativeMemoryPrepared> {
+  /** Sets the global memory switch immediately. */
+  async apply(body: unknown): Promise<NativeMemoryResult> {
     if (!body || typeof body !== "object" || Array.isArray(body))
       throw new ValidationError(["Ongeldige geheugeninstelling."]);
     const input = body as Record<string, unknown>;
     if (
       Object.keys(input).some(
-        (key) =>
-          !["enabled", "acknowledgeGlobal", "rollbackRevisionId"].includes(key),
+        (key) => !["enabled", "rollbackRevisionId"].includes(key),
       ) ||
-      typeof input.enabled !== "boolean" ||
-      input.acknowledgeGlobal !== true
+      typeof input.enabled !== "boolean"
     )
-      throw new ValidationError([
-        "Bevestig dat deze instelling het geheugen voor alle OmniRoute-clients wijzigt.",
-      ]);
+      throw new ValidationError(["Ongeldige geheugeninstelling."]);
     if (
       input.rollbackRevisionId !== undefined &&
       (typeof input.rollbackRevisionId !== "string" ||
         !/^[0-9a-f-]{36}$/i.test(input.rollbackRevisionId))
     )
       throw new ValidationError(["Ongeldige geschiedenisrevisie."]);
-    for (const [id, draft] of this.drafts) {
-      const pending = this.confirmations.peek(draft.sessionId);
-      if (
-        !pending ||
-        pending.confirmationId !== id ||
-        draft.expiresAt <= this.confirmations.now()
-      )
-        this.drafts.delete(id);
-    }
-    if (this.drafts.size >= 20)
-      return {
-        ok: false,
-        error:
-          "Er staan te veel geheugenwijzigingen open. Wacht tot een bevestiging verloopt.",
-      };
-    try {
-      const current = await this.settings();
-      if (typeof current.enabled !== "boolean") throw new Error(unavailable);
-      const revision = hash(current);
-      if (current.enabled === input.enabled)
-        return { ok: false, error: "Gateway-geheugen heeft deze stand al." };
-      const metadata = {
-        enabled: input.enabled,
-        scope: "all_gateway_clients",
-        rollback: typeof input.rollbackRevisionId === "string",
-      };
-      this.audit.record({
-        sessionId: "settings",
-        tool: "native_memory_settings",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: metadata,
-      });
-      const action = this.confirmations.create(
-        `settings-memory:${crypto.randomUUID()}`,
-        "native_memory_settings",
-        {
-          enabled: input.enabled,
-          revision,
-          ...(typeof input.rollbackRevisionId === "string"
-            ? { rollbackRevisionId: input.rollbackRevisionId }
-            : {}),
-        },
-        "DANGEROUS",
-        undefined,
-        false,
-      );
-      this.drafts.set(action.confirmationId, {
-        sessionId: action.sessionId,
-        revision,
-        enabled: input.enabled,
-        expiresAt: action.expiresAt,
-        ...(typeof input.rollbackRevisionId === "string"
-          ? { rollbackRevisionId: input.rollbackRevisionId }
-          : {}),
-      });
-      return { ok: true, enabled: input.enabled, action };
-    } catch {
-      return { ok: false, error: unavailable };
-    }
-  }
-
-  async prepareRollback(
-    revisionId: string,
-    acknowledgeGlobal: boolean,
-  ): Promise<NativeMemoryPrepared> {
-    if (!/^[0-9a-f-]{36}$/i.test(revisionId) || acknowledgeGlobal !== true)
-      throw new ValidationError([
-        "Bevestig de clientbrede geheugenwijziging opnieuw.",
-      ]);
-    const revision = this.revisions().find((item) => item.id === revisionId);
-    if (!revision)
-      throw new ValidationError([
-        "Deze geheugenwijziging staat niet in de geschiedenis.",
-      ]);
-    const current = await this.settings().catch(() => null);
-    if (!current || current.enabled !== revision.after)
-      return {
-        ok: false,
-        error:
-          "Gateway-geheugen is intussen gewijzigd. Laad de status opnieuw.",
-      };
-    return this.prepare({
-      enabled: revision.before,
-      acknowledgeGlobal: true,
-      rollbackRevisionId: revision.id,
-    });
-  }
-
-  async confirm(
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
-  ): Promise<NativeMemoryResult> {
-    if (
-      !/^settings-memory:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const draft = this.drafts.get(confirmationId);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !draft ||
-      draft.sessionId !== sessionId ||
-      pending?.tool !== "native_memory_settings" ||
-      pending.confirmationId !== confirmationId
-    )
-      return {
-        ok: false,
-        error:
-          "Deze bevestiging staat niet meer open. Laad de geheugenstatus opnieuw.",
-      };
-    this.drafts.delete(confirmationId);
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Laad de geheugenstatus opnieuw.",
-      };
+    const enabled = input.enabled;
+    const rollbackRevisionId = input.rollbackRevisionId as string | undefined;
     if (this.inFlight)
       return {
         ok: false,
         error: "Een geheugenwijziging is al bezig. Laad de status opnieuw.",
       };
     this.inFlight = true;
+    const sessionId = "settings";
+    const metadata = { enabled, scope: "all_gateway_clients" };
     try {
       let current: MemorySettings;
       try {
         current = await this.settings();
+        if (typeof current.enabled !== "boolean") throw new Error(unavailable);
       } catch {
         return { ok: false, error: unavailable };
       }
-      if (hash(current) !== draft.revision)
-        return {
-          ok: false,
-          error:
-            "OmniRoute-geheugeninstellingen zijn intussen gewijzigd. Laad de status opnieuw.",
-        };
+      if (current.enabled === enabled)
+        return { ok: false, error: "Gateway-geheugen heeft deze stand al." };
       try {
         this.audit.record({
           sessionId,
           tool: "native_memory_settings",
           risk: "DANGEROUS",
-          confirmation: "confirmed_admin_ui",
+          confirmation: "direct",
           phase: "before_execute",
-          arguments: { enabled: draft.enabled, scope: "all_gateway_clients" },
+          arguments: {
+            ...metadata,
+            rollback: rollbackRevisionId !== undefined,
+          },
         });
       } catch {
         return {
@@ -350,18 +215,14 @@ export class NativeMemorySettingsService {
       try {
         await this.management.request("/api/settings/memory", {
           method: "PUT",
-          body: { enabled: draft.enabled },
+          body: { enabled },
         });
         const after = await this.settings();
-        if (after.enabled !== draft.enabled)
+        if (after.enabled !== enabled)
           throw new Error("Persistence not verified");
         let auditWarning: string | undefined;
         try {
-          this.appendHistory(
-            current.enabled as boolean,
-            draft.enabled,
-            draft.rollbackRevisionId,
-          );
+          this.appendHistory(current.enabled, enabled, rollbackRevisionId);
         } catch {
           auditWarning =
             "Wijziging opgeslagen, maar de lokale geschiedenis kon niet worden bijgewerkt.";
@@ -371,9 +232,9 @@ export class NativeMemorySettingsService {
             sessionId,
             tool: "native_memory_settings",
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "after_execute",
-            arguments: { enabled: draft.enabled, scope: "all_gateway_clients" },
+            arguments: metadata,
             result: { ok: true },
             verification: { persisted: true },
           });
@@ -388,7 +249,7 @@ export class NativeMemorySettingsService {
         return {
           ok: true,
           verified: true,
-          enabled: draft.enabled,
+          enabled,
           ...(auditWarning ? { auditWarning } : {}),
         };
       } catch {
@@ -397,9 +258,9 @@ export class NativeMemorySettingsService {
             sessionId,
             tool: "native_memory_settings",
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "after_execute",
-            arguments: { enabled: draft.enabled, scope: "all_gateway_clients" },
+            arguments: metadata,
             result: { ok: false },
             verification: { persisted: null },
           });
@@ -416,5 +277,27 @@ export class NativeMemorySettingsService {
     } finally {
       this.inFlight = false;
     }
+  }
+
+  /** Restores the memory switch to the state before a history revision. */
+  async rollback(revisionId: string): Promise<NativeMemoryResult> {
+    if (!/^[0-9a-f-]{36}$/i.test(revisionId))
+      throw new ValidationError(["Ongeldige geschiedenisrevisie."]);
+    const revision = this.revisions().find((item) => item.id === revisionId);
+    if (!revision)
+      throw new ValidationError([
+        "Deze geheugenwijziging staat niet in de geschiedenis.",
+      ]);
+    const current = await this.settings().catch(() => null);
+    if (!current || current.enabled !== revision.after)
+      return {
+        ok: false,
+        error:
+          "Gateway-geheugen is intussen gewijzigd. Laad de status opnieuw.",
+      };
+    return this.apply({
+      enabled: revision.before,
+      rollbackRevisionId: revision.id,
+    });
   }
 }

@@ -21,7 +21,6 @@ import {
 import crypto from "node:crypto";
 import type { Response } from "express";
 import { ValidationError } from "../core/errors/validation.error.js";
-import { AppAccessPublic } from "../access/access-public.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { ConversationMilestoneService } from "../memory/conversation-milestone.service.js";
 import { publishableConversation } from "./conversation-events.js";
@@ -249,7 +248,6 @@ export class ChatController {
 
   /** Internal endpoint for fixed scheduled Node-RED flows; read-only tools only. */
   @Post("proactive/ask")
-  @AppAccessPublic()
   async proactiveAsk(
     @Headers("authorization") authorization: string | undefined,
     @Body() body: ChatBody,
@@ -295,7 +293,6 @@ export class ChatController {
       const result = await this.orchestrator.run({
         ...request,
         sessionId,
-        readOnlyOnly: true,
       });
       if (result.unavailable)
         throw new ServiceUnavailableException(

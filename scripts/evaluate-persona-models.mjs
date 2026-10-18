@@ -266,7 +266,7 @@ async function main(args) {
   if (fs.existsSync(options.output)) throw new Error("OUTPUT_EXISTS");
   const runtime = await createEvaluationRuntime(options.models, "conversation");
   const markdown = fs.readFileSync(
-    path.join(ROOT, "docs/persona-evaluation.md"),
+    path.join(ROOT, "docs/evaluation.md"),
     "utf8",
   );
   const cases = parsePersonaCases(markdown),

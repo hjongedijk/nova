@@ -1,11 +1,13 @@
 import {
+  readJsonStateOrEnoent,
+  writeJsonState,
+} from "../core/db/json-state.js";
+import {
   Injectable,
   Logger,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
-import fs from "node:fs";
-import path from "node:path";
 import crypto from "node:crypto";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
@@ -204,9 +206,7 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
 
   private completedWeek(): string | null {
     try {
-      const value = JSON.parse(
-        fs.readFileSync(this.progressFile, "utf8"),
-      ) as Progress;
+      const value = readJsonStateOrEnoent(this.progressFile) as Progress;
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value?.completedWeek ?? "")))
         throw new Error("Invalid weekly overview progress");
       return value.completedWeek as string;
@@ -222,24 +222,7 @@ export class WeeklyOverviewService implements OnModuleInit, OnModuleDestroy {
 
   private saveCompletedWeek(week: string): void {
     try {
-      const temporary = `${this.progressFile}.tmp`;
-      fs.writeFileSync(temporary, JSON.stringify({ completedWeek: week }), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      const descriptor = fs.openSync(temporary, "r");
-      try {
-        fs.fsyncSync(descriptor);
-      } finally {
-        fs.closeSync(descriptor);
-      }
-      fs.renameSync(temporary, this.progressFile);
-      const directory = fs.openSync(path.dirname(this.progressFile), "r");
-      try {
-        fs.fsyncSync(directory);
-      } finally {
-        fs.closeSync(directory);
-      }
+      writeJsonState(this.progressFile, { completedWeek: week });
     } catch {
       this.paused = true;
       this.logger.error(

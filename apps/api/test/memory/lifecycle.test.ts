@@ -241,6 +241,21 @@ describe("memory lifecycle (Qdrant)", () => {
     );
   });
 
+  it("correct() with options stores the replacement as a tagged inferred memory", async () => {
+    const v1 = await memory.write("Onthoud dat mijn hond Bram heet");
+    const v2 = await memory.correct(v1.id!, "mijn hond heet Max", {
+      origin: "inferred",
+      tags: ["learned", "owner-correction"],
+    });
+    expect(v2.ok).toBe(true);
+    expect(v2.memory).toMatchObject({
+      origin: "inferred",
+      tags: expect.arrayContaining(["learned", "owner-correction"]),
+    });
+    expect(v2.memory!.confidence).toBeLessThanOrEqual(0.4);
+    expect(fixture.points.get(v1.id!)!.payload.superseded_by).toBe(v2.id);
+  });
+
   it("does not fabricate: no match returns an empty list", async () => {
     await memory.write("Onthoud dat mijn hond Bram heet");
     expect(await memory.search("hoe laat is het")).toEqual([]);

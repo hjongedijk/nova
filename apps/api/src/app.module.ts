@@ -2,7 +2,6 @@ import { Module } from "@nestjs/common";
 import { ServeStaticModule } from "@nestjs/serve-static";
 import fs from "node:fs";
 import { BridgesModule } from "./bridges/bridges.module.js";
-import { AppAccessModule } from "./access/access.module.js";
 import { ChatModule } from "./chat/chat.module.js";
 import { ChecksModule } from "./checks/checks.module.js";
 import { ConfirmationsModule } from "./confirmations/confirmations.module.js";
@@ -44,7 +43,6 @@ const config = new NovaConfig();
  */
 @Module({
   imports: [
-    AppAccessModule,
     CoreModule,
     HealthModule,
     ToolsModule,

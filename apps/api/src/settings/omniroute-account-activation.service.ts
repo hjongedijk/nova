@@ -1,14 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  OmniRouteAccountActivationPrepared,
-  OmniRouteAccountActivationResult,
-} from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
+import type { OmniRouteAccountActivationResult } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { claimConfirmation } from "./confirmation-step.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
@@ -43,7 +38,6 @@ export class OmniRouteAccountActivation {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
@@ -96,92 +90,14 @@ export class OmniRouteAccountActivation {
     };
   }
 
-  async prepare(
+  async set(
     id: string,
     enabled: unknown,
-    acknowledgeGlobalEffect: unknown,
     expectedCurrentRevision?: string,
-  ): Promise<OmniRouteAccountActivationPrepared> {
-    if (
-      !validId(id) ||
-      typeof enabled !== "boolean" ||
-      acknowledgeGlobalEffect !== true
-    )
-      throw new ValidationError([
-        "Kies een status en bevestig dat dit account voor alle OmniRoute-clients wordt gewijzigd.",
-      ]);
-    try {
-      const route = this.routing.verifyForManagement();
-      // Allow recovery when a disabled account itself has made an otherwise
-      // free-only route unready. No inference is released by this operation
-      // unless the full policy verifies after the write.
-      if (!route.freeOnly) throw new Error(unavailable);
-      const { row, view } = await this.current(id);
-      if (
-        expectedCurrentRevision !== undefined &&
-        revision(row) !== expectedCurrentRevision
-      )
-        return {
-          ok: false,
-          error:
-            "Het account is gewijzigd sinds deze wijzigingsgeschiedenis. Herstel is afgebroken.",
-        };
-      if (view.isActive === enabled)
-        return { ok: false, error: "Dit provideraccount heeft die status al." };
-      const digest = revision(row);
-      this.audit.record({
-        sessionId: "settings",
-        tool: "omniroute_account_activation",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: { id, enabled, revision: digest },
-      });
-      return {
-        ok: true,
-        name: String(sanitize(view.name || view.provider)).slice(0, 200),
-        currentEnabled: view.isActive,
-        enabled,
-        action: this.confirmations.create(
-          `settings-account-activation:${crypto.randomUUID()}`,
-          "omniroute_account_activation",
-          { id, enabled, revision: digest },
-          "DANGEROUS",
-          digest,
-          false,
-        ),
-      };
-    } catch {
-      return { ok: false, error: unavailable };
-    }
-  }
-
-  async confirm(
-    id: string,
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
   ): Promise<OmniRouteAccountActivationResult> {
-    if (
-      !validId(id) ||
-      !/^settings-account-activation:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const claimed = claimConfirmation(
-      this.confirmations,
-      sessionId,
-      confirmationId,
-      approve,
-      {
-        tool: "omniroute_account_activation",
-        arg: { name: "id", value: id },
-        stale:
-          "Deze bevestiging staat niet meer open. Kies het account opnieuw.",
-        expired: "Bevestiging verlopen. Kies het account opnieuw.",
-      },
-    );
-    if ("reply" in claimed) return claimed.reply;
-    const action = claimed.action;
+    if (!validId(id) || typeof enabled !== "boolean")
+      throw new ValidationError(["Kies een geldige accountstatus."]);
+    const tool = "omniroute_account_activation";
     if (this.inFlight.has(id))
       return { ok: false, error: "Dit account wordt al gewijzigd." };
     this.inFlight.add(id);
@@ -198,32 +114,31 @@ export class OmniRouteAccountActivation {
             return { ok: false, error: unavailable };
           before = await this.current(id);
           if (
-            revision(before.row) !== action.args.revision ||
-            typeof action.args.enabled !== "boolean" ||
-            before.view.isActive === action.args.enabled
+            expectedCurrentRevision !== undefined &&
+            revision(before.row) !== expectedCurrentRevision
           )
             return {
               ok: false,
               error:
-                "Het account is ondertussen gewijzigd. Kies de wijziging opnieuw.",
+                "Het account is gewijzigd sinds deze wijzigingsgeschiedenis. Herstel is afgebroken.",
+            };
+          if (before.view.isActive === enabled)
+            return {
+              ok: false,
+              error: "Dit provideraccount heeft die status al.",
             };
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool,
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "before_execute",
-            arguments: {
-              id,
-              enabled: action.args.enabled,
-              revision: action.args.revision,
-            },
+            arguments: { id, enabled, revision: revision(before.row) },
           });
           operation.block("policy_change");
         } catch {
           return { ok: false, error: unavailable };
         }
-        const enabled = action.args.enabled as boolean;
         try {
           await this.management.request(`/api/providers/${id}`, {
             method: "PATCH",
@@ -242,9 +157,9 @@ export class OmniRouteAccountActivation {
           try {
             this.audit.record({
               sessionId: "settings",
-              tool: action.tool,
+              tool,
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
               arguments: { id, enabled },
               result: { ok: false },
@@ -289,9 +204,9 @@ export class OmniRouteAccountActivation {
         try {
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool,
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "after_execute",
             arguments: { id, enabled },
             result: { ok: true },

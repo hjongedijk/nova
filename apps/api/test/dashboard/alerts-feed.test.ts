@@ -8,6 +8,7 @@ import type { SpeechPresenceService } from "../../src/dashboard/speech-presence.
 import type { NtfyPushService } from "../../src/dashboard/ntfy-push.service.js";
 import type { WindowsPcService } from "../../src/integrations/windows/windows-pc.service.js";
 import { AlertsFeed } from "../../src/dashboard/alerts-feed.service.js";
+import { seedState, stateDoc } from "../helpers/nova-db.js";
 
 const event: InfrastructureEvent = {
   topic: "jarvis/alerts",
@@ -204,9 +205,9 @@ describe("AlertsFeed presence delivery", () => {
           new Date(start.getTime() + 60 * 60_000),
         )?.speakAllowed,
       ).toBe(true);
-      const stored = JSON.parse(
-        fs.readFileSync(config.dataFile("spoken-alert-progress.json"), "utf8"),
-      );
+      const stored = stateDoc(
+        config.dataFile("spoken-alert-progress.json"),
+      ) as { spokenAt: number[] };
       expect(stored.spokenAt).toHaveLength(5);
       expect(JSON.stringify(stored)).not.toContain("Melding");
     } finally {
@@ -220,10 +221,7 @@ describe("AlertsFeed presence delivery", () => {
     );
     try {
       const config = { dataFile: (name: string) => path.join(directory, name) };
-      fs.writeFileSync(
-        config.dataFile("spoken-alert-progress.json"),
-        "{broken",
-      );
+      seedState(config.dataFile("spoken-alert-progress.json"), "{broken");
       const feed = new AlertsFeed(
         { onEvent: () => () => undefined } as unknown as PlanningService,
         undefined,

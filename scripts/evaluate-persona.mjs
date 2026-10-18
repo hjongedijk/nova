@@ -14,7 +14,7 @@ import {
 
 const BASELINE = "34aaec142be2944fdfbb77998edc68cfca1a9a95";
 const PROMPT_PATH = "apps/api/src/chat/prompt.ts";
-const EVALUATION_PATH = "docs/persona-evaluation.md";
+const EVALUATION_PATH = "docs/evaluation.md";
 const args = new Set(process.argv.slice(2));
 
 if (args.has("--help")) {
@@ -206,7 +206,7 @@ if (args.has("--preflight")) {
 }
 const client = new OmniRouteClient(config, routing);
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const outputDirectory = path.join(root, "docs/persona-evaluation-runs");
+const outputDirectory = path.join(root, "dev-data/evaluation-runs/persona");
 fs.mkdirSync(outputDirectory, { recursive: true });
 const outputFile = path.join(outputDirectory, `${stamp}.json`);
 const result = {

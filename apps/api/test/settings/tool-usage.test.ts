@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { AuditService } from "../../src/core/audit/audit.service.js";
 import { ToolsService } from "../../src/tools/tools.service.js";
 import { ToolUsageController } from "../../src/settings/tool-usage.controller.js";
-import { createApp } from "./helpers.js";
 
 const first = "2026-10-10T10:00:00.000Z";
 const latest = "2026-10-10T11:00:00.000Z";
@@ -335,61 +334,6 @@ describe("private bounded tool usage", () => {
       expect((error as Error).message).toBe(
         "Toolgebruik is niet beschikbaar. Probeer het later opnieuw.",
       );
-    }
-  });
-});
-
-describe("tool usage API guard", () => {
-  it("requires the PIN before audit access and exposes no usage through public settings", async () => {
-    const nova = await createApp({ env: { NOVA_ADMIN_PIN: "4321" } });
-    const audit = nova.app.get(AuditService);
-    const read = vi.spyOn(audit, "read").mockReturnValue([row() as never]);
-    const execute = vi.spyOn(nova.tools, "execute");
-    try {
-      const route = "/api/settings/tools/usage";
-      expect((await nova.api.get(route)).status).toBe(401);
-      expect(
-        (await nova.api.get(route).set("x-nova-pin", "wrong")).status,
-      ).toBe(401);
-      expect(read).not.toHaveBeenCalled();
-      const report = await nova.api.get(route).set("x-nova-pin", "4321");
-      expect(report.status).toBe(200);
-      expect(report.body).toMatchObject({
-        scannedEntries: 1,
-        entryLimit: 500,
-        logByteLimit: 2_000_000,
-        activityLimit: 50,
-        recentActivity: [
-          {
-            tool: "echo",
-            source: expect.any(String),
-            ok: true,
-          },
-        ],
-      });
-      expect(
-        report.body.tools.find(
-          (entry: { name: string }) => entry.name === "echo",
-        ),
-      ).toMatchObject({ attempts: 1, okResults: 1 });
-      expect(JSON.stringify(report.body)).not.toContain("private");
-      read.mockClear();
-      const publicSettings = await nova.api.get("/api/settings/public");
-      expect(publicSettings.status).toBe(200);
-      expect(publicSettings.body).not.toHaveProperty("usage");
-      expect(JSON.stringify(publicSettings.body)).not.toContain("okResults");
-      expect(read).not.toHaveBeenCalled();
-      expect(execute).not.toHaveBeenCalled();
-      read.mockImplementation(() => {
-        throw new Error("private-log-path");
-      });
-      const failure = await nova.api.get(route).set("x-nova-pin", "4321");
-      expect(failure.status).toBe(503);
-      expect(JSON.stringify(failure.body)).not.toContain("private-log-path");
-    } finally {
-      read.mockRestore();
-      execute.mockRestore();
-      await nova.app.close();
     }
   });
 });

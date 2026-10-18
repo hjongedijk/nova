@@ -2,7 +2,7 @@ import type { McpServerSpec } from "./mcp-config.js";
 
 /**
  * Exact process identities reviewed for this image. Package versions are pinned in the
- * Dockerfile and reviewed in docs/mcp-server-policy.md. A new command or argument set is
+ * Dockerfile and reviewed in docs/integrations.md#mcp-servers. A new command or argument set is
  * rejected until its source and provider behavior are reviewed here.
  */
 const REVIEWED: Record<
@@ -90,8 +90,7 @@ const CATALOG: Record<
   },
   filesystem: {
     description: "Geeft tools toegang tot de ingestelde werkruimte.",
-    rights:
-      "Kan bestanden in /data/workspace lezen en wijzigen na bevestiging.",
+    rights: "Kan bestanden in /data/workspace lezen en wijzigen.",
     risk: "CONFIRM",
   },
   arxiv: {

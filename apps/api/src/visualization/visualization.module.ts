@@ -15,7 +15,7 @@ import { VisualizationSource } from "./visualization.source.js";
 /**
  * The holographic visualisation platform: a registry other modules add providers to, the scene
  * service, the visualisation tools and the REST API of the viewer. Exports the registry and the
- * service. See docs/holographic-engine.md.
+ * service. See docs/architecture.md#holographic-visualization.
  */
 @Module({
   imports: [ProxmoxModule, HomeModule, ChecksModule, DashboardModule],

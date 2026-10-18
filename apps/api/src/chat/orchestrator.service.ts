@@ -490,6 +490,7 @@ export class OrchestratorService {
         toolNames: modelTools.map((tool) => tool.function.name),
         hasAttachments: Boolean(input.attachments?.length),
       },
+      { untrustedTurn: input.readOnlyOnly === true },
     );
     if (responseLanguage)
       messages.splice(1, 0, {

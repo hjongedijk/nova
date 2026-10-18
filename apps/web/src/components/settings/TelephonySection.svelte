@@ -117,10 +117,7 @@
     <p role="status">{message || "Telefoon laden…"}</p>
     <Button onclick={() => void refresh()}>Opnieuw proberen</Button>
   {:else}
-    <SectionCard
-      title="Telefooncentrale"
-      lead="NOVA heeft een eigen telefooncentrale. Je belt NOVA met de app Linphone, en NOVA kan jou bellen."
-    >
+    <SectionCard title="Telefooncentrale" lead="Bel met NOVA via Linphone.">
       <Switch
         label="Telefoon aan"
         hint="Staat standaard uit."
@@ -157,9 +154,10 @@
     </SectionCard>
 
     {#if status.enabled}
-      <SectionCard
+      <Disclosure
         title="Toestellen"
-        lead="Elke telefoon of deurbel die NOVA mag bellen of waar NOVA door gebeld mag worden."
+        hint="Telefoons en deurbellen koppelen."
+        group="settings-section"
       >
         {#if status.extensions.length}
           <ul class="set-list">
@@ -193,10 +191,9 @@
                   <button
                     type="button"
                     disabled={busy}
-                    onclick={() => {
-                      if (confirm(`Toestel ${ext.id} verwijderen?`))
-                        void run(() => removeTelephonyExtension(ext.id));
-                    }}>Verwijderen</button
+                    onclick={() =>
+                      void run(() => removeTelephonyExtension(ext.id))}
+                    >Verwijderen</button
                   >
                 </span>
               </li>
@@ -244,11 +241,12 @@
             >Toevoegen</Button
           >
         </form>
-      </SectionCard>
+      </Disclosure>
 
-      <SectionCard
+      <Disclosure
         title="Deurbel"
-        lead="Kies welke telefoons overgaan als er wordt aangebeld."
+        hint="Kies welke telefoons overgaan."
+        group="settings-section"
       >
         {#each phones as ext (ext.id)}
           <Switch
@@ -265,9 +263,9 @@
           Een deurbelapparaat belt nummer {status.doorbellExtension}. Bellen
           naar nummer {status.novaExtension} geeft een melding bij NOVA.
         </p>
-      </SectionCard>
+      </Disclosure>
 
-      <SectionCard title="Bellen door NOVA">
+      <Disclosure title="Bellen door NOVA" group="settings-section">
         <Switch
           label="NOVA mag mijn eigen toestellen bellen zonder eerst te vragen"
           hint="Externe nummers vragen altijd bevestiging."
@@ -299,7 +297,7 @@
             >
           </select>
         </Field>
-      </SectionCard>
+      </Disclosure>
 
       <Disclosure
         kind="more"

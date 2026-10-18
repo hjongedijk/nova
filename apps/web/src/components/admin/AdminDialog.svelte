@@ -63,10 +63,13 @@
   let view = $state<View>("integrations");
   let message = $state("");
   let loaded = $state<Loaded | null>(null);
+  let auditPage = $state(0);
+  const auditPageSize = 10;
 
   async function load(next: View = view): Promise<void> {
     view = next;
     loaded = null;
+    auditPage = 0;
     message = "Laden…";
     try {
       const result: Loaded =
@@ -265,12 +268,29 @@
           reload={() => load("memories")}
         />
       {:else}
-        {#each loaded.data.entries || [] as item (item.id ?? item.timestamp)}
+        {#each (loaded.data.entries || []).slice(auditPage * auditPageSize, (auditPage + 1) * auditPageSize) as item (item.id ?? item.timestamp)}
           {@render row(
             `${item.tool?.replaceAll("_", " ") || "Actie"} · ${item.risk || ""}`,
             `${item.timestamp} · ${item.confirmation || ""} · ${item.result?.verified === true ? "Gecontroleerd" : item.result?.accepted ? "Geaccepteerd, niet bevestigd" : item.result?.ok ? "Uitgevoerd" : item.result?.error || item.phase || ""}`,
           )}
         {/each}
+        {#if (loaded.data.entries?.length ?? 0) > auditPageSize}
+          <nav class="audit-pagination" aria-label="Actielog doorbladeren">
+            <Button disabled={auditPage === 0} onclick={() => (auditPage -= 1)}
+              >Vorige</Button
+            >
+            <span role="status"
+              >Pagina {auditPage + 1} van {Math.ceil(
+                (loaded.data.entries?.length ?? 0) / auditPageSize,
+              )}</span
+            >
+            <Button
+              disabled={(auditPage + 1) * auditPageSize >=
+                (loaded.data.entries?.length ?? 0)}
+              onclick={() => (auditPage += 1)}>Volgende</Button
+            >
+          </nav>
+        {/if}
         {#if !loaded.data.entries?.length}
           {@render row("Actielog", "Nog geen acties vastgelegd.")}
         {/if}

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ADMIN, createApp, type TestApp } from "./helpers.js";
+import { dbStat, historyText } from "../helpers/nova-db.js";
 
 describe("household profile switch history", () => {
   let nova: TestApp;
@@ -70,10 +71,10 @@ describe("household profile switch history", () => {
       ["id", "at", "beforeProfileId", "afterProfileId"].sort(),
     );
     const historyFile = path.join(directory, "household-profile-history.json");
-    expect(fs.statSync(historyFile).mode & 0o777).toBe(0o600);
-    const historyText = fs.readFileSync(historyFile, "utf8");
-    expect(historyText).not.toContain("Harm-private-label");
-    expect(historyText).not.toContain("Private character text");
+    expect(dbStat(historyFile).mode & 0o777).toBe(0o600);
+    const stored = historyText(historyFile);
+    expect(stored).not.toContain("Harm-private-label");
+    expect(stored).not.toContain("Private character text");
 
     const restored = await nova.api
       .post(`/api/settings/household-profiles/history/${revision.id}/rollback`)
@@ -158,7 +159,7 @@ describe("household profile switch history", () => {
       directory,
       "household-profile-definitions-history.json",
     );
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    expect(dbStat(file).mode & 0o777).toBe(0o600);
 
     const restored = await nova.api
       .post(
@@ -282,10 +283,7 @@ describe("household profile switch history", () => {
       directory,
       "household-profile-definitions-history.json",
     );
-    if (fs.existsSync(file))
-      expect(fs.readFileSync(file, "utf8")).not.toContain(
-        "ABCDEFGHIJKLMNOPQRST",
-      );
+    expect(historyText(file)).not.toContain("ABCDEFGHIJKLMNOPQRST");
   });
 
   it("skips a profile snapshot with credentials in a URL", async () => {
@@ -308,7 +306,6 @@ describe("household profile switch history", () => {
       directory,
       "household-profile-definitions-history.json",
     );
-    if (fs.existsSync(file))
-      expect(fs.readFileSync(file, "utf8")).not.toContain("private-pass");
+    expect(historyText(file)).not.toContain("private-pass");
   });
 });

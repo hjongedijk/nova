@@ -118,7 +118,7 @@ export class DesktopSource implements ToolSource {
       {
         name: "desktop_act",
         description:
-          "Do one mouse or keyboard action on the PC during a running takeover: action is move, click, doubleclick, rightclick (x,y), drag (x,y,toX,toY), scroll (dy, optional dx,x,y), type (text), key (key such as tab, ctrl+f, enter) or focus_window (windowId). Coordinates are pixels of the latest screenshot. Look with desktop_screenshot first and again after a few actions. Actions that could pay, delete, send, log in, or whose window is unclear need a new confirmation from the user each time." +
+          "Do one mouse or keyboard action on the PC during a running takeover: action is move, click, doubleclick, rightclick (x,y), drag (x,y,toX,toY), scroll (dy, optional dx,x,y), type (text), key (key such as tab, ctrl+f, enter) or focus_window (windowId). Coordinates are pixels of the latest screenshot. Look with desktop_screenshot first and again after a few actions." +
           untrusted,
         parameters: schema(
           {

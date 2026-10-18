@@ -17,7 +17,7 @@ describe("API error copy", () => {
 
   it("hides unknown API diagnostics and detail strings", () => {
     const diagnostic = "private-stack.internal /srv/private/token=abc123";
-    const error = new ApiError(diagnostic, 502, [diagnostic]);
+    const error = new ApiError(diagnostic, 502);
     expect(error.message).not.toContain(diagnostic);
     expect(error.details).toBeUndefined();
     expect(friendlyApiError(diagnostic, 500, "en")).not.toContain(diagnostic);

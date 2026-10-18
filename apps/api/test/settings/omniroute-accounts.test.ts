@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
 import { OmniRouteAccountsController } from "../../src/settings/omniroute-accounts.controller.js";
-import { createApp } from "./helpers.js";
 
 const gateway = "http://verified-gateway.invalid/v1";
 const cleanup: (() => void)[] = [];
@@ -536,50 +535,5 @@ describe("private OmniRoute account inventory", () => {
           : { connections: [] };
     });
     expectUnavailable(await controller.report());
-  });
-});
-
-describe("OmniRoute account inventory API guard", () => {
-  it("requires the PIN before management and keeps account metadata out of public settings", async () => {
-    const nova = await createApp({ env: { NOVA_ADMIN_PIN: "4321" } });
-    const management = nova.app.get(OmniRouteManagement);
-    const configured = vi
-      .spyOn(management, "configured", "get")
-      .mockReturnValue(true);
-    const request = vi
-      .spyOn(management, "request")
-      .mockImplementation(
-        async (endpoint) =>
-          (endpoint === "/api/free-models"
-            ? { models: [model] }
-            : endpoint.startsWith("/api/combos")
-              ? { combos: [combo], total: 1 }
-              : { connections: [connection], total: 1 }) as never,
-      );
-    try {
-      const route = "/api/settings/omniroute/accounts";
-      expect((await nova.api.get(route)).status).toBe(401);
-      expect(
-        (await nova.api.get(route).set("x-nova-pin", "wrong")).status,
-      ).toBe(401);
-      expect(request).not.toHaveBeenCalled();
-      const result = await nova.api.get(route).set("x-nova-pin", "4321");
-      expect(result.status).toBe(200);
-      expect(result.body).toMatchObject({
-        available: true,
-        billingVerified: false,
-      });
-      expect(JSON.stringify(result.body)).not.toContain("private");
-      request.mockClear();
-      const publicSettings = await nova.api.get("/api/settings/public");
-      expect(publicSettings.status).toBe(200);
-      expect(JSON.stringify(publicSettings.body)).not.toContain("connection-1");
-      expect(JSON.stringify(publicSettings.body)).not.toContain("provider-1");
-      expect(request).not.toHaveBeenCalled();
-    } finally {
-      configured.mockRestore();
-      request.mockRestore();
-      await nova.app.close();
-    }
   });
 });

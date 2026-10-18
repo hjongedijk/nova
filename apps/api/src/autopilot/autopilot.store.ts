@@ -6,11 +6,14 @@ import { parseClock } from "../objectives/objectives.time.js";
 import {
   AutopilotError,
   DEFAULT_SETTINGS,
+  emptyTuning,
   LIMITS,
   SCAN_NAMES,
   type ActivityEntry,
   type AutopilotFile,
   type AutopilotSettings,
+  type Reaction,
+  type TuningState,
 } from "./autopilot.types.js";
 
 export const emptyFile = (): AutopilotFile => ({
@@ -24,6 +27,7 @@ export const emptyFile = (): AutopilotFile => ({
   homeMisses: {},
   lastFindings: [],
   activity: [],
+  tuning: emptyTuning(),
 });
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -150,6 +154,73 @@ function lenientSettings(raw: unknown): AutopilotSettings {
   return settings;
 }
 
+const REACTIONS: readonly string[] = [
+  "dismissed",
+  "ignored",
+  "acted",
+  "stopped",
+];
+
+function lenientTuning(raw: unknown): TuningState {
+  const tuning = emptyTuning();
+  if (!isObject(raw)) return tuning;
+  const c = raw.ceiling;
+  if (
+    isObject(c) &&
+    typeof c.dailyBudget === "number" &&
+    typeof c.intervalMinutes === "number" &&
+    typeof c.quietStart === "string" &&
+    typeof c.quietEnd === "string"
+  )
+    tuning.ceiling = {
+      dailyBudget: c.dailyBudget,
+      intervalMinutes: c.intervalMinutes,
+      quietStart: c.quietStart,
+      quietEnd: c.quietEnd,
+    };
+  if (isObject(raw.cooldownFactor))
+    for (const [scan, factor] of Object.entries(raw.cooldownFactor))
+      if (
+        (SCAN_NAMES as readonly string[]).includes(scan) &&
+        typeof factor === "number" &&
+        factor >= 1 &&
+        factor <= 8
+      )
+        tuning.cooldownFactor[scan as keyof typeof tuning.cooldownFactor] =
+          factor;
+  if (isObject(raw.mutedKeys))
+    for (const [key, until] of Object.entries(raw.mutedKeys))
+      if (typeof until === "number") tuning.mutedKeys[key] = until;
+  if (Array.isArray(raw.pending))
+    tuning.pending = raw.pending
+      .filter(
+        (p): p is TuningState["pending"][number] =>
+          isObject(p) &&
+          typeof p.id === "string" &&
+          typeof p.key === "string" &&
+          typeof p.at === "number" &&
+          (SCAN_NAMES as readonly string[]).includes(String(p.scan)),
+      )
+      .slice(-LIMITS.pending);
+  if (Array.isArray(raw.reactions))
+    tuning.reactions = raw.reactions
+      .filter(
+        (r): r is TuningState["reactions"][number] =>
+          isObject(r) &&
+          typeof r.at === "number" &&
+          typeof r.minute === "number" &&
+          REACTIONS.includes(String(r.reaction)) &&
+          (SCAN_NAMES as readonly string[]).includes(String(r.scan)),
+      )
+      .slice(-LIMITS.reactions) as {
+      at: number;
+      scan: TuningState["reactions"][number]["scan"];
+      reaction: Reaction;
+      minute: number;
+    }[];
+  return tuning;
+}
+
 const num = (value: unknown, fallback = 0) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
@@ -210,6 +281,7 @@ export class AutopilotStore {
       activity: Array.isArray(parsed.activity)
         ? (parsed.activity as ActivityEntry[]).slice(-LIMITS.activity)
         : [],
+      tuning: lenientTuning(parsed.tuning),
     };
   }
 

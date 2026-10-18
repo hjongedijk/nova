@@ -13,7 +13,6 @@ import { homeSummary } from "../home/home-summary.service.js";
 import { WorldService } from "../integrations/world/world.service.js";
 import { PlanningService } from "../planning/planning.service.js";
 import { ProxmoxService } from "../proxmox/proxmox.service.js";
-import { AppAccessService } from "../access/access.service.js";
 import { CalDavService } from "../planning/caldav.service.js";
 
 const weatherFrom = (entities: HaEntity[]): Omit<WeatherNow, "forecast"> => {
@@ -128,7 +127,6 @@ export class OverviewService {
     private readonly home: HomeAssistantService,
     private readonly world: WorldService,
     private readonly calendar: CalDavService,
-    private readonly appAccess: AppAccessService,
   ) {}
 
   async overview(now = Date.now(), maxAgeMs = 5000): Promise<OverviewResponse> {
@@ -151,8 +149,7 @@ export class OverviewService {
         (value) => value,
         () => null,
       );
-    const calendarAvailable =
-      this.appAccess.privacyProtected && this.calendar.configured;
+    const calendarAvailable = this.calendar.configured;
     const [
       guests,
       storage,
@@ -184,13 +181,11 @@ export class OverviewService {
     const lists = settle(Promise.resolve(this.planning.lists()));
     const alerts = settle(Promise.resolve(this.checks.alerts()));
     const visibleHomeEntities = entities ? this.home.visibleEntities() : null;
-    const calendarStatus = !this.appAccess.privacyProtected
-      ? "protected"
-      : !this.calendar.configured
-        ? "not-configured"
-        : appointments === null
-          ? "error"
-          : "ready";
+    const calendarStatus = !this.calendar.configured
+      ? "not-configured"
+      : appointments === null
+        ? "error"
+        : "ready";
     return sanitize({
       at: new Date().toISOString(),
       proxmox:

@@ -1,6 +1,6 @@
 {
   "identifier": "setup",
-  "description": "Local setup owns pairing, permissions, elevation and signed updates. Remote pages receive none of these commands.",
+  "description": "Local setup owns pairing, the firewall rule and signed updates. Remote pages receive none of these commands.",
   "windows": ["setup"],
   "permissions": [
     "allow-desk-set-url",
@@ -12,8 +12,6 @@
     "allow-agent-update-status",
     "allow-agent-check-update",
     "allow-agent-install-update",
-    "allow-agent-set-automation",
-    "allow-agent-set-elevation",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

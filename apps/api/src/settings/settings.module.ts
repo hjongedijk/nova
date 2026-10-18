@@ -1,4 +1,3 @@
-import { AppAccessModule } from "../access/access.module.js";
 import { NodeRedEditorAccess } from "./node-red-editor-access.service.js";
 import { NodeRedEditorProxy } from "./node-red-editor-proxy.service.js";
 import { NodeRedEditorController } from "./node-red-editor.controller.js";
@@ -53,6 +52,7 @@ import { UpdatesController } from "./updates.controller.js";
 import { RoutingModule } from "../routing/routing.module.js";
 import { ModelMetricsController } from "./model-metrics.controller.js";
 import { ServiceConnectionsController } from "./services/service-connections.controller.js";
+import { RuntimeSettingsController } from "./services/runtime-settings.controller.js";
 import { ServiceConnectionsStore } from "./services/service-connections.store.js";
 import { ServiceConnectionsHistory } from "./services/service-connections-history.service.js";
 import { ServiceConnectionsAdapter } from "./services/service-connections.adapter.js";
@@ -77,7 +77,6 @@ import { SkillAssistantService } from "./ai/skill-assistant.service.js";
 import { PlaybooksService } from "./playbooks.service.js";
 import { PublicConfigService } from "./public-config.service.js";
 import { SettingsController } from "./settings.controller.js";
-import { SettingsGuard } from "./settings.guard.js";
 import { SkillsSource } from "./skills/skills.source.js";
 import { SettingsStoreModule } from "./store/settings-store.module.js";
 import { WidgetDataService } from "./widgets/widget-data.service.js";
@@ -114,7 +113,6 @@ import { HouseholdProfileHistory } from "./household-profile-history.service.js"
  */
 @Module({
   imports: [
-    AppAccessModule,
     SettingsStoreModule,
     NodeRedFlowRevisionsModule,
     RoutingModule,
@@ -135,6 +133,7 @@ import { HouseholdProfileHistory } from "./household-profile-history.service.js"
     ToolUsageController,
     WidgetsController,
     ServiceConnectionsController,
+    RuntimeSettingsController,
     ServiceRestartController,
     ModelMetricsController,
     UpdatesController,
@@ -165,7 +164,6 @@ import { HouseholdProfileHistory } from "./household-profile-history.service.js"
   providers: [
     NodeRedEditorAccess,
     NodeRedEditorProxy,
-    SettingsGuard,
     SettingsMutationsService,
     SettingsBackupService,
     ManagedTargetsAccessHistory,

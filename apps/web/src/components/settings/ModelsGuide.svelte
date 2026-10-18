@@ -63,14 +63,14 @@
       } as const;
     return {
       tone: "ok",
-      text: `NOVA kan nu antwoorden via ${n} gratis ${n === 1 ? "dienst" : "diensten"}.`,
+      text: `${n} ${n === 1 ? "dienst is ingesteld" : "diensten zijn ingesteld"}. De gratis route is bevestigd.`,
     } as const;
   });
 
   function status(item: Connection) {
     if (item.active === true && item.credentialPresent)
       return routeReady
-        ? ({ tone: "ok", label: "Werkt" } as const)
+        ? ({ tone: "ok", label: "Ingesteld" } as const)
         : ({ tone: "warn", label: "Wacht op bevestiging" } as const);
     if (item.active === true)
       return { tone: "warn", label: "Zonder eigen sleutel" } as const;
@@ -132,11 +132,15 @@
 
 {#if notice}<p role="status" class="ds-note">{notice}</p>{/if}
 
-<section class="ds-card" id="verbonden" aria-label="Verbonden diensten">
-  <header class="ds-card-head"><h2>Verbonden diensten</h2></header>
+<Disclosure
+  title="AI-accounts"
+  hint="Ingestelde diensten en accounts toevoegen"
+  id="verbonden"
+  group="settings-section"
+>
   <p class="ds-lead">
-    Dit zijn de diensten waar NOVA haar antwoorden vandaan haalt. Meer diensten
-    betekent dat NOVA ook antwoordt als één dienst even stuk is.
+    Accounts voor AI en spraak. Ingesteld betekent: sleutel aanwezig. Bekijk de
+    metingen voor beschikbaarheid.
   </p>
   {#if loading}
     <p>Diensten ophalen…</p>
@@ -160,7 +164,7 @@
     {#if others.length}
       <button type="button" onclick={() => (showAll = !showAll)}
         >{showAll
-          ? "Toon alleen diensten die werken"
+          ? "Toon alleen ingestelde diensten"
           : `Toon ook ${others.length} andere ${others.length === 1 ? "dienst" : "diensten"}`}</button
       >
     {/if}
@@ -179,7 +183,7 @@
       >
     {/if}
   </div>
-</section>
+</Disclosure>
 
 {#if adding}
   <section
@@ -189,8 +193,7 @@
   >
     <header class="ds-card-head"><h2>Gratis dienst toevoegen</h2></header>
     <p class="ds-lead">
-      In drie stappen: je maakt zelf een gratis account bij een aanbieder en
-      geeft NOVA daarvan de sleutel.
+      Maak een gratis account bij een aanbieder en voeg de sleutel toe.
     </p>
     <OmniRouteAccountCreate done={added} />
   </section>
@@ -208,7 +211,7 @@
 
 <Disclosure
   kind="more"
-  title="Meer uitleg"
+  title="Gratis gebruik en bevestiging"
   hint="Waarom NOVA wil weten of een dienst gratis is"
 >
   <p>
@@ -222,16 +225,16 @@
   </p>
   <p>
     Wil je accounts, routes, metingen of limieten beheren? Dat staat bij
-    <a href="/settings?section=geavanceerd#modellen-expert">Geavanceerd</a>.
+    <a href="/settings?section=modellen#modellen-expert">Geavanceerd</a>.
   </p>
 </Disclosure>
 
 <style>
   .big {
     margin: 0 0 var(--s5);
-    padding: var(--s5);
+    padding: var(--s4);
     border: 1px solid var(--line);
-    border-left: 8px solid var(--line);
+    border-left: 3px solid var(--line);
     border-radius: var(--radius);
     background: var(--surface);
   }
@@ -246,7 +249,7 @@
   }
   .sentence {
     margin: 0 0 var(--s3);
-    font-size: 22px;
+    font-size: 18px;
     line-height: 1.4;
     font-weight: 600;
     max-width: 40ch;

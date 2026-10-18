@@ -66,18 +66,6 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 describe("Linphone encrypted chat bridge contract", () => {
-  it("answers an allowed contact as { reply } with plain text and read-only tools", async () => {
-    const b = boot();
-    expect(await bridge(b)).toEqual({ reply: "Het is 14 graden." });
-    expect(runs[0]).toMatchObject({
-      message: "Wat is het weer?",
-      inputMode: "text",
-      readOnlyOnly: true,
-      sessionId: "sipchat_harm",
-    });
-    expect(JSON.stringify(audits)).not.toContain("weer");
-  });
-
   it("rejects a wrong or missing token with 401 on both endpoints", async () => {
     const b = boot();
     await expect(bridge(b, { token: "nope" })).rejects.toBeInstanceOf(

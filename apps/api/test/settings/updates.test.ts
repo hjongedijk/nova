@@ -53,6 +53,12 @@ describe("explicit release checks", () => {
     expect(updates.request).not.toHaveBeenCalled();
   });
 
+  it("exposes the running version on the public health endpoint", async () => {
+    expect((await nova.api.get("/api/nova/health")).body.version).toBe(
+      "0.1.11",
+    );
+  });
+
   it("uses only the fixed public release URL and bounded, credential-free options", async () => {
     const result = await nova.api
       .post("/api/settings/updates/check")
@@ -211,46 +217,5 @@ describe("explicit release checks", () => {
     expect(JSON.stringify(failed)).not.toContain("network-private-secret");
     expect(await updates.check()).toEqual(failed);
     expect(updates.request).toHaveBeenCalledTimes(2);
-  });
-
-  it("requires the PIN for status and the admin header for explicit checks", async () => {
-    const pinned = await createApp({
-      env: { NOVA_DATA_DIR: directory, NOVA_ADMIN_PIN: "fixture-pin" },
-    });
-    try {
-      const service = pinned.app.get(UpdatesService);
-      vi.spyOn(service, "request").mockResolvedValue(response());
-      expect((await pinned.api.get("/api/settings/updates")).status).toBe(401);
-      expect(
-        (await pinned.api.post("/api/settings/updates/check").set(ADMIN))
-          .status,
-      ).toBe(401);
-      expect(
-        (
-          await pinned.api
-            .get("/api/settings/updates")
-            .set("x-nova-pin", "fixture-pin")
-        ).status,
-      ).toBe(200);
-      expect(
-        (
-          await pinned.api
-            .post("/api/settings/updates/check")
-            .set("x-nova-pin", "fixture-pin")
-        ).status,
-      ).toBe(403);
-      expect(service.request).not.toHaveBeenCalled();
-      expect(
-        (
-          await pinned.api
-            .post("/api/settings/updates/check")
-            .set(ADMIN)
-            .set("x-nova-pin", "fixture-pin")
-        ).status,
-      ).toBe(200);
-      expect(service.request).toHaveBeenCalledTimes(1);
-    } finally {
-      await pinned.app.close();
-    }
   });
 });

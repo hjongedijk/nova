@@ -4,8 +4,7 @@
   import {
     getConnectionHistory,
     getServiceConnections,
-    prepareConnectionRollback,
-    confirmConnectionRollback,
+    rollbackConnection,
   } from "#lib/api/settings.ts";
   import { fail, say } from "./state.svelte.ts";
   let revisions = $state<ServiceConnectionRevision[]>([]);
@@ -40,23 +39,7 @@
   async function undo(id: string) {
     busy = true;
     try {
-      const prepared = await prepareConnectionRollback(id);
-      if (!prepared.ok || !prepared.action)
-        throw new Error(
-          prepared.error ?? "Terugzetten kon niet worden voorbereid.",
-        );
-      const approve = window.confirm(
-        `${prepared.warning ?? "Terugzetten wijzigt een koppeling."}\n\nDit vereist eenmalige gevaarlijke bevestiging. Doorgaan?`,
-      );
-      const result = await confirmConnectionRollback(
-        prepared.action.sessionId,
-        prepared.action.confirmationId,
-        approve,
-      );
-      if (!approve) {
-        say("Terugzetten geannuleerd.");
-        return;
-      }
+      const result = await rollbackConnection(id);
       if (!result.ok)
         throw new Error(result.error ?? "Koppeling niet teruggezet.");
       await load();

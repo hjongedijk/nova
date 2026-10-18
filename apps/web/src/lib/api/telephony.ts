@@ -1,5 +1,4 @@
 import { getJson, sendJson } from "./client.ts";
-import { getPin } from "./pin-session.ts";
 
 export type TelephonyExtension = {
   id: string;
@@ -43,8 +42,7 @@ export type TelephonyStatus = {
 };
 
 function headers(): Record<string, string> {
-  const pin = getPin();
-  return { "x-nova-admin": "1", ...(pin ? { "x-nova-pin": pin } : {}) };
+  return {};
 }
 
 export const getTelephony = () =>

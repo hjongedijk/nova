@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CalendarReminderService } from "../../src/dashboard/calendar-reminder.service.js";
 import type { CalendarEvent } from "../../src/planning/caldav.service.js";
+import { dbStat, stateExists, stateText } from "../helpers/nova-db.js";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -69,7 +70,7 @@ describe("opt-in calendar reminders", () => {
     expect(f.upcoming).not.toHaveBeenCalled();
     expect(f.record).not.toHaveBeenCalled();
     expect(
-      fs.existsSync(path.join(f.dir, "calendar-reminders-progress.json")),
+      stateExists(path.join(f.dir, "calendar-reminders-progress.json")),
     ).toBe(false);
   });
 
@@ -96,8 +97,8 @@ describe("opt-in calendar reminders", () => {
       },
     });
     const progressPath = path.join(f.dir, "calendar-reminders-progress.json");
-    expect(fs.statSync(progressPath).mode & 0o777).toBe(0o600);
-    const progress = fs.readFileSync(progressPath, "utf8");
+    expect(dbStat(progressPath).mode & 0o777).toBe(0o600);
+    const progress = stateText(progressPath);
     expect(progress).not.toContain("Private dentist appointment");
     expect(progress).not.toContain("event-0");
     expect(progress).toMatch(/[a-f0-9]{64}/);

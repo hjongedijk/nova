@@ -14,13 +14,10 @@
     getMcpServerStatus,
     getMcpServerHistory,
     testMcpServerConnection,
-    prepareMcpServerToggle,
-    confirmMcpServerToggle,
-    prepareMcpServerCatalogChange,
-    confirmMcpServerCatalogChange,
-    prepareMcpToolRisk,
-    confirmMcpToolRisk,
-    prepareMcpServerHistoryRollback,
+    setMcpServerEnabled,
+    changeMcpServerCatalog,
+    setMcpToolRisk,
+    rollbackMcpServerHistory,
   } from "#lib/api/settings.ts";
   import { fail, say } from "./state.svelte.ts";
   import Button from "#components/ui/Button.svelte";
@@ -91,39 +88,10 @@
     activityBusy = id;
     error = "";
     try {
-      const prepared = await prepareMcpServerHistoryRollback(id, revisionId);
-      if (!prepared.ok || !prepared.action)
-        throw new Error(
-          prepared.error ?? "Herstel kon niet worden voorbereid.",
-        );
-      const approve = window.confirm(
-        `${prepared.warning ?? "Dit zet de eerdere MCP-stand terug."}\n\nDoorgaan?`,
-      );
       const revision = history[id]?.revisions.find(
         (item) => item.id === revisionId,
       );
-      const result =
-        revision?.change.kind === "tool-risk"
-          ? await confirmMcpToolRisk(
-              prepared.action.sessionId,
-              prepared.action.confirmationId,
-              approve,
-            )
-          : revision?.change.kind === "catalog"
-            ? await confirmMcpServerCatalogChange(
-                prepared.action.sessionId,
-                prepared.action.confirmationId,
-                approve,
-              )
-            : await confirmMcpServerToggle(
-                prepared.action.sessionId,
-                prepared.action.confirmationId,
-                approve,
-              );
-      if (!approve) {
-        say("MCP-herstel geannuleerd.");
-        return;
-      }
+      const result = await rollbackMcpServerHistory(id, revisionId);
       if (!result.ok)
         throw new Error(result.error ?? "MCP-stand is niet hersteld.");
       await Promise.all([load(), loadHistory(id)]);
@@ -172,23 +140,7 @@
     activityBusy = id;
     error = "";
     try {
-      const prepared = await prepareMcpServerToggle(id, enabled);
-      if (!prepared.ok || !prepared.action)
-        throw new Error(
-          prepared.error ?? "MCP-wijziging kon niet worden voorbereid.",
-        );
-      const approve = window.confirm(
-        `${prepared.warning ?? "Dit wijzigt de MCP-server."}\n\nEenmalige gevaarlijke bevestiging vereist. Doorgaan?`,
-      );
-      const result = await confirmMcpServerToggle(
-        prepared.action.sessionId,
-        prepared.action.confirmationId,
-        approve,
-      );
-      if (!approve) {
-        say("MCP-wijziging geannuleerd.");
-        return;
-      }
+      const result = await setMcpServerEnabled(id, enabled);
       if (!result.ok)
         throw new Error(result.error ?? "MCP-stand is niet gewijzigd.");
       await load();
@@ -212,23 +164,7 @@
     activityBusy = id;
     error = "";
     try {
-      const prepared = await prepareMcpServerCatalogChange(id, operation);
-      if (!prepared.ok || !prepared.action)
-        throw new Error(
-          prepared.error ?? "Cataloguswijziging kon niet worden voorbereid.",
-        );
-      const approve = window.confirm(
-        `${prepared.warning ?? "Dit wijzigt de MCP-catalogus."}\n\nEenmalige gevaarlijke bevestiging vereist. Doorgaan?`,
-      );
-      const result = await confirmMcpServerCatalogChange(
-        prepared.action.sessionId,
-        prepared.action.confirmationId,
-        approve,
-      );
-      if (!approve) {
-        say("MCP-cataloguswijziging geannuleerd.");
-        return;
-      }
+      const result = await changeMcpServerCatalog(id, operation);
       if (!result.ok || result.verified !== true)
         throw new Error(
           result.error ?? "Cataloguswijziging kon niet worden gecontroleerd.",
@@ -255,21 +191,7 @@
     activityBusy = server;
     error = "";
     try {
-      const prepared = await prepareMcpToolRisk(server, tool, risk);
-      if (!prepared.ok || !prepared.action)
-        throw new Error(prepared.error ?? "Risico kon niet worden voorbereid.");
-      const approve = window.confirm(
-        `${prepared.warning ?? "Dit wijzigt het gereedschapsrisico."}\n\nNieuw risico: ${risk}. Eenmalige gevaarlijke bevestiging vereist. Doorgaan?`,
-      );
-      const result = await confirmMcpToolRisk(
-        prepared.action.sessionId,
-        prepared.action.confirmationId,
-        approve,
-      );
-      if (!approve) {
-        say("Risicowijziging geannuleerd.");
-        return;
-      }
+      const result = await setMcpToolRisk(server, tool, risk);
       if (!result.ok)
         throw new Error(result.error ?? "Risiconiveau is niet gewijzigd.");
       await load();
@@ -474,7 +396,7 @@
                         <Button
                           onclick={() => rollback(server.id, revision.id)}
                           disabled={busy || activityBusy !== null}
-                          >Herstellen</Button
+                          >Herstel deze stand</Button
                         >
                       {/if}
                     </li>

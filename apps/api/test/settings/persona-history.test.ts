@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SettingsMutationsService } from "../../src/settings/settings-mutations.service.js";
 import { ADMIN, createApp, type TestApp } from "./helpers.js";
+import { auditText, dbStat, historyText } from "../helpers/nova-db.js";
 
 describe("persona change history", () => {
   let nova: TestApp;
@@ -66,11 +67,8 @@ describe("persona change history", () => {
     expect(updated.body.revisions[0].revertedFrom).toBe(revision.id);
 
     const historyFile = path.join(directory, "persona-history.json");
-    expect(fs.statSync(historyFile).mode & 0o777).toBe(0o600);
-    const audit = fs.readFileSync(
-      path.join(directory, "actions.jsonl"),
-      "utf8",
-    );
+    expect(dbStat(historyFile).mode & 0o777).toBe(0o600);
+    const audit = auditText(directory);
     expect(audit).not.toContain("Warm butler");
     expect(audit).not.toContain("Calm butler");
   });
@@ -101,43 +99,8 @@ describe("persona change history", () => {
       .get("/api/settings/persona/history")
       .set(ADMIN);
     expect(history.body.revisions[0].after).toContain("[redacted]");
-    const file = fs.readFileSync(
-      path.join(directory, "persona-history.json"),
-      "utf8",
-    );
+    const file = historyText(path.join(directory, "persona-history.json"));
     expect(file).not.toContain(secret);
     expect(file).not.toContain("hunter2");
-  });
-
-  it("protects history reads with the PIN and rollbacks with the admin header", async () => {
-    const pinnedDirectory = `${directory}-pinned`;
-    const pinned = await createApp({
-      env: { NOVA_DATA_DIR: pinnedDirectory, NOVA_ADMIN_PIN: "fixture-pin" },
-    });
-    try {
-      expect(
-        (await pinned.api.get("/api/settings/persona/history")).status,
-      ).toBe(401);
-      expect(
-        (
-          await pinned.api
-            .get("/api/settings/persona/history")
-            .set("x-nova-pin", "fixture-pin")
-        ).status,
-      ).toBe(200);
-      expect(
-        (
-          await pinned.api
-            .post(
-              "/api/settings/persona/history/11111111-1111-4111-8111-111111111111/rollback",
-            )
-            .set("x-nova-pin", "fixture-pin")
-            .send({})
-        ).status,
-      ).toBe(403);
-    } finally {
-      await pinned.app.close();
-      fs.rmSync(pinnedDirectory, { recursive: true, force: true });
-    }
   });
 });

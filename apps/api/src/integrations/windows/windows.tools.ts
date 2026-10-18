@@ -97,13 +97,13 @@ export class WindowsTools implements ToolSource {
       {
         name: "windows_close_app",
         description:
-          "Politely close all windows of an allow-listed program on the Windows PC. Unsaved work may be lost; requires confirmation.",
+          "Politely close all windows of an allow-listed program on the Windows PC.",
         parameters: schema({ app }),
         risk: "CONFIRM",
       },
       {
         name: "windows_lock",
-        description: "Lock the Windows PC screen. Requires confirmation.",
+        description: "Lock the Windows PC screen.",
         parameters: schema(),
         risk: "CONFIRM",
       },

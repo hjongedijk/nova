@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -17,6 +16,7 @@ import {
 } from "../../src/routing/routing.service.js";
 import { OmniRouteKeyActivation } from "../../src/settings/omniroute-key-activation.service.js";
 import { OmniRouteActivationHistory } from "../../src/settings/omniroute-activation-history.service.js";
+import { dbStat, historyText } from "../helpers/nova-db.js";
 
 const cleanups: (() => void)[] = [];
 const ready: RoutingStatus = {
@@ -80,8 +80,6 @@ function fixture() {
     timestamp: "now",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
-  confirmations.now = () => 1000;
   const routing = new RoutingService(config as NovaConfig);
   vi.spyOn(routing, "verifyForManagement").mockReturnValue(ready);
   const barrier = new RoutingManagementBarrier(config as NovaConfig, routing);
@@ -123,7 +121,6 @@ function fixture() {
   const activation = new OmniRouteKeyActivation(
     config as NovaConfig,
     management,
-    confirmations,
     audit,
     barrier,
     routing,
@@ -140,104 +137,57 @@ function fixture() {
   };
 }
 
-describe("OmniRoute API-key activation", () => {
-  it("protects NOVA's key and requires global impact acknowledgement", async () => {
+describe("OmniRoute API-key activation (single step)", () => {
+  it("protects NOVA's key and rejects an invalid status", async () => {
     const f = fixture();
-    expect(await f.activation.prepare("nova", false, true)).toMatchObject({
+    expect(await f.activation.apply("nova", false)).toMatchObject({
       ok: false,
     });
-    await expect(f.activation.prepare("client", false, false)).rejects.toThrow(
-      "bevestig",
-    );
-    const prepared = await f.activation.prepare("client", false, true);
-    if (!prepared.ok) throw new Error(prepared.error);
-    expect(prepared).toMatchObject({
-      ok: true,
-      name: "Personal client",
-      currentEnabled: true,
-      enabled: false,
-    });
-    expect(prepared.action).toMatchObject({
-      tool: "omniroute_key_activation",
-      risk: "DANGEROUS",
-      allowAlways: false,
-    });
-    expect(JSON.stringify(prepared)).not.toContain("secret-");
-  });
-  it("updates only isActive and verifies local persistence", async () => {
-    const f = fixture();
-    const prepared = await f.activation.prepare("client", false, true);
-    if (!prepared.ok) throw new Error(prepared.error);
-    const action = prepared.action!;
+    await expect(f.activation.apply("client", "off")).rejects.toThrow("status");
     expect(
-      await f.activation.confirm(
-        "client",
-        action.sessionId,
-        action.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: true, verified: true, enabled: false });
+      f.request.mock.calls.some(([, options]) => options?.method === "PATCH"),
+    ).toBe(false);
+  });
+  it("updates only isActive in one call and verifies local persistence", async () => {
+    const f = fixture();
+    const result = await f.activation.apply("client", false);
+    expect(result).toMatchObject({ ok: true, verified: true, enabled: false });
+    expect(JSON.stringify(result)).not.toContain("secret-");
     expect(
       f.db.prepare("SELECT is_active FROM api_keys WHERE id='client'").get(),
     ).toEqual({ is_active: 0 });
-    expect(f.record.mock.calls.map(([item]) => item.phase)).toContain(
-      "before_execute",
-    );
-    expect(f.record.mock.calls.map(([item]) => item.phase)).toContain(
-      "after_execute",
-    );
+    const phases = f.record.mock.calls.map(([item]) => item.phase);
+    expect(phases).toContain("before_execute");
+    expect(phases).toContain("after_execute");
+    expect(JSON.stringify(f.record.mock.calls)).not.toContain("secret-");
     expect(f.history.list("client", "key").revisions).toMatchObject([
       { beforeEnabled: true, afterEnabled: false },
     ]);
-    expect(fs.statSync(f.historyFile).mode & 0o777).toBe(0o600);
-    expect(fs.readFileSync(f.historyFile, "utf8")).not.toContain("secret-");
+    expect(dbStat(f.historyFile).mode & 0o777).toBe(0o600);
+    expect(historyText(f.historyFile)).not.toContain("secret-");
   });
   it("keeps the operation unverified if OmniRoute does not persist the change", async () => {
     const f = fixture();
     f.setPersist(false);
-    const prepared = await f.activation.prepare("client", false, true);
-    if (!prepared.ok) throw new Error(prepared.error);
-    const action = prepared.action!;
-    expect(
-      await f.activation.confirm(
-        "client",
-        action.sessionId,
-        action.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: false, verified: null, routeReady: false });
+    expect(await f.activation.apply("client", false)).toMatchObject({
+      ok: false,
+      verified: null,
+      routeReady: false,
+    });
   });
-  it("restores only the newest key status after fresh global confirmation", async () => {
+  it("restores only the newest key status in one call", async () => {
     const f = fixture();
-    const changed = await f.activation.prepare("client", false, true);
-    if (!changed.ok) throw new Error(changed.error);
-    const changeAction = changed.action!;
-    expect(
-      await f.activation.confirm(
-        "client",
-        changeAction.sessionId,
-        changeAction.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: true, enabled: false });
+    expect(await f.activation.apply("client", false)).toMatchObject({
+      ok: true,
+      enabled: false,
+    });
     const revision = f.history.list("client", "key").revisions[0]!;
     const target = f.history.rollbackTarget("client", revision.id, "key");
-    const rollback = await f.activation.prepare(
-      "client",
-      target.enabled,
-      true,
-      target.expectedCurrentRevision,
-    );
-    if (!rollback.ok) throw new Error(rollback.error);
-    expect(rollback.action?.risk).toBe("DANGEROUS");
-    expect(JSON.stringify(rollback)).not.toContain("secret-");
-    const action = rollback.action!;
     expect(
-      await f.activation.confirm(
+      await f.activation.apply(
         "client",
-        action.sessionId,
-        action.confirmationId,
-        true,
+        target.enabled,
+        target.expectedCurrentRevision,
       ),
     ).toMatchObject({ ok: true, enabled: true, verified: true });
     expect(
@@ -251,15 +201,7 @@ describe("OmniRoute API-key activation", () => {
   });
   it("rejects rollback when key rights changed after recorded status", async () => {
     const f = fixture();
-    const changed = await f.activation.prepare("client", false, true);
-    if (!changed.ok) throw new Error(changed.error);
-    const action = changed.action!;
-    await f.activation.confirm(
-      "client",
-      action.sessionId,
-      action.confirmationId,
-      true,
-    );
+    await f.activation.apply("client", false);
     const revision = f.history.list("client", "key").revisions[0]!;
     const target = f.history.rollbackTarget("client", revision.id, "key");
     f.db
@@ -268,10 +210,9 @@ describe("OmniRoute API-key activation", () => {
       )
       .run();
     expect(
-      await f.activation.prepare(
+      await f.activation.apply(
         "client",
         target.enabled,
-        true,
         target.expectedCurrentRevision,
       ),
     ).toMatchObject({ ok: false });

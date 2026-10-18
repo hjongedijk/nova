@@ -1,11 +1,7 @@
 <script lang="ts">
   import { ApiError } from "#lib/api/client.ts";
-  import type {
-    NodeRedBriefingSchedule,
-    PendingConfirmation,
-  } from "@nova/contracts";
+  import type { NodeRedBriefingSchedule } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
-  import AdminConfirmation from "#components/admin/AdminConfirmation.svelte";
   import { sessionId } from "#components/admin/session.ts";
   import { executeAction } from "#lib/api/admin.ts";
   let {
@@ -18,7 +14,6 @@
   let daily = $state(true);
   let busy = $state(false);
   let message = $state("");
-  let pending = $state<PendingConfirmation | null>(null);
   const label = $derived(
     briefing.kind === "evening_review" ? "Avondoverzicht" : "Ochtendbriefing",
   );
@@ -30,17 +25,13 @@
   async function save() {
     busy = true;
     message = "";
-    pending = null;
     try {
       const result = await executeAction(
         sessionId(),
         "node_red_briefing_schedule",
         { nodeId: briefing.id, time: daily ? time : "", timezone },
       );
-      if ("requiresConfirmation" in result && result.requiresConfirmation) {
-        if (!result.action) throw new Error("Bevestiging niet beschikbaar.");
-        pending = result.action as PendingConfirmation;
-      } else if (!result.ok) {
+      if (!result.ok) {
         if ("accepted" in result && result.accepted === true) await onSaved();
         throw new Error(result.error || "Planning niet gewijzigd.");
       } else {
@@ -71,11 +62,8 @@
       }}
     >
       <label class="daily"
-        ><input
-          type="checkbox"
-          bind:checked={daily}
-          disabled={busy || pending !== null}
-        /> Dagelijks overzicht</label
+        ><input type="checkbox" bind:checked={daily} disabled={busy} /> Dagelijks
+        overzicht</label
       >
       <div class="fields">
         {#if daily}<label
@@ -83,7 +71,7 @@
               type="time"
               bind:value={time}
               required
-              disabled={busy || pending !== null}
+              disabled={busy}
               aria-label={`Tijd voor ${label.toLowerCase()}`}
             /></label
           >{/if}
@@ -93,12 +81,12 @@
             bind:value={timezone}
             maxlength="100"
             required
-            disabled={busy || pending !== null}
+            disabled={busy}
             aria-label={`Tijdzone voor ${label.toLowerCase()}`}
           /></label
         >
-        <Button type="submit" disabled={busy || pending !== null}
-          >{busy ? "Controleren…" : "Planning opslaan"}</Button
+        <Button type="submit" disabled={busy}
+          >{busy ? "Opslaan…" : "Planning opslaan"}</Button
         >
       </div>
       {#if !daily}<small
@@ -106,15 +94,6 @@
         >{/if}
     </form>
   {/if}
-  {#if pending}<AdminConfirmation
-      action={pending}
-      description={`${String(pending.args.label || `${label}: ${daily ? `dagelijks om ${time} (${timezone})` : "alleen gebeurtenissen"}`)}. Bevestiging verloopt na 60 seconden.`}
-      onreply={async (reply) => {
-        pending = null;
-        message = reply;
-        await onSaved();
-      }}
-    />{/if}
   {#if message}<p role="status">{message}</p>{/if}
 </section>
 

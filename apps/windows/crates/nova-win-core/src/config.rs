@@ -22,8 +22,6 @@ pub struct DeskConfig {
     pub positions: BTreeMap<String, Offset>,
     /// Wallpaper style per display (device name); absent = off.
     pub wallpapers: BTreeMap<String, WallpaperStyle>,
-    /// Extra origins the windows may navigate to (a reverse proxy's login page); never given the helper's commands.
-    pub allowed_origins: Vec<String>,
 }
 
 impl Default for DeskConfig {
@@ -36,7 +34,6 @@ impl Default for DeskConfig {
             helper_anchor: Anchor::TopCentre,
             positions: BTreeMap::new(),
             wallpapers: BTreeMap::new(),
-            allowed_origins: Vec::new(),
         }
     }
 }
@@ -78,23 +75,6 @@ pub fn parse(text: &str) -> Result<(DeskConfig, Vec<String>), String> {
             None => warnings.push(format!("mode '{s}' genegeerd")),
         },
         Some(_) => warnings.push("mode genegeerd".into()),
-    }
-    if let Some(list) = root.get("allowedOrigins") {
-        match list.as_array() {
-            Some(items) => {
-                for item in items.iter().take(8) {
-                    match item.as_str().map(normalize_origin) {
-                        Some(Ok(origin)) => {
-                            if !config.allowed_origins.contains(&origin) {
-                                config.allowed_origins.push(origin);
-                            }
-                        }
-                        _ => warnings.push("allowedOrigins: een ongeldig adres genegeerd".into()),
-                    }
-                }
-            }
-            None => warnings.push("allowedOrigins genegeerd: geen lijst".into()),
-        }
     }
     if let Some(helper) = root.get("helper").and_then(Value::as_object) {
         if let Some(Value::String(s)) = helper.get("display") {
@@ -162,9 +142,6 @@ impl DeskConfig {
             root.insert("url".into(), json!(url));
         }
         root.insert("mode".into(), json!(self.mode.as_str()));
-        if !self.allowed_origins.is_empty() {
-            root.insert("allowedOrigins".into(), json!(self.allowed_origins));
-        }
         root.insert("helper".into(), Value::Object(helper));
         root.insert("wallpaper".into(), Value::Object(walls));
         let mut text = serde_json::to_string_pretty(&Value::Object(root)).expect("config serializes");
@@ -279,15 +256,11 @@ mod tests {
     }
 
     #[test]
-    fn allowed_origins_are_normalised_and_bad_ones_dropped() {
-        let (c, w) =
-            parse(r#"{ "allowedOrigins": ["https://Auth.example.nl/", "ftp://x", "https://auth.example.nl", 5] }"#)
-                .unwrap();
-        assert_eq!(c.allowed_origins, vec!["https://auth.example.nl".to_string()]);
-        assert_eq!(w.len(), 2);
-        let (back, _) = parse(&c.to_json()).unwrap();
-        assert_eq!(back.allowed_origins, c.allowed_origins);
-        assert!(parse(r#"{"allowedOrigins": "x"}"#).unwrap().1.len() == 1);
+    fn the_old_allowed_origins_key_is_ignored_and_not_written_back() {
+        let (c, w) = parse(r#"{ "allowedOrigins": ["https://auth.example.nl"] }"#).unwrap();
+        assert!(w.is_empty());
+        assert_eq!(c, DeskConfig::default());
+        assert!(!c.to_json().contains("allowedOrigins"));
     }
 
     #[test]

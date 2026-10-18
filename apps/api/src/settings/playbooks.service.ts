@@ -79,6 +79,6 @@ export class PlaybooksService {
       concise:
         "Gespreksstijl: begin kort en direct; geef extra uitleg wanneer de gebruiker erom vraagt of de taak dat nodig maakt.",
     } as const;
-    return `${instructions[style]} Deze keuze verandert nooit veiligheidsregels, feiten of toolbevestigingen.`;
+    return `${instructions[style]} Deze keuze verandert nooit feiten.`;
   }
 }

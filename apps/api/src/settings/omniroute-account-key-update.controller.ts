@@ -1,36 +1,19 @@
-import { Body, Controller, HttpCode, Post, UseGuards } from "@nestjs/common";
-import { SettingsGuard } from "./settings.guard.js";
+import { Body, Controller, HttpCode, Post } from "@nestjs/common";
 import { OmniRouteAccountKeyUpdate } from "./omniroute-account-key-update.service.js";
-import { assertConfirmation, strictBody } from "./request-input.js";
-
-const input = (body: unknown, keys: string[]) =>
-  strictBody(body, keys, "Ongeldige API-sleutelvervanging.");
+import { strictBody } from "./request-input.js";
 
 @Controller("settings/omniroute/accounts/key-update")
-@UseGuards(SettingsGuard)
 export class OmniRouteAccountKeyUpdateController {
   constructor(private readonly updateKey: OmniRouteAccountKeyUpdate) {}
 
-  @Post("prepare")
+  @Post()
   @HttpCode(200)
-  prepare(@Body() body: unknown) {
-    const value = input(body, ["id", "apiKey", "acknowledgeEffects"]);
-    return this.updateKey.prepare(
-      value.id,
-      value.apiKey,
-      value.acknowledgeEffects,
+  update(@Body() body: unknown) {
+    const value = strictBody(
+      body,
+      ["id", "apiKey"],
+      "Ongeldige API-sleutelvervanging.",
     );
-  }
-
-  @Post("confirm")
-  @HttpCode(200)
-  confirm(@Body() body: unknown) {
-    const value = input(body, ["sessionId", "confirmationId", "approve"]);
-    assertConfirmation(value);
-    return this.updateKey.confirm(
-      value.sessionId,
-      value.confirmationId,
-      value.approve,
-    );
+    return this.updateKey.update(value.id, value.apiKey);
   }
 }

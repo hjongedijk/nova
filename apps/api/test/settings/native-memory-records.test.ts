@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
+import { describe, expect, it, vi } from "vitest";
 import {
   AuditService,
   type AuditRecord,
@@ -34,15 +33,12 @@ function fixture(application = "jarvis") {
     timestamp: "now",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
   const service = new NativeMemoryRecordsService(
     { scope: "nova-owner", request } as unknown as OmniRouteManagement,
-    confirmations,
     audit,
   );
   return {
     service,
-    confirmations,
     request,
     record,
     get row() {
@@ -50,190 +46,93 @@ function fixture(application = "jarvis") {
     },
   };
 }
-afterEach(() => vi.useRealTimers());
 
-describe("NOVA-owned native memory record deletion", () => {
+describe("NOVA-owned native memory record changes (single step)", () => {
   it.each(["jarvis", "nova"])(
-    "checks %s owner and requires fresh delete approval",
+    "checks %s owner and deletes in one call",
     async (application) => {
       const f = fixture(application);
-      const prepared = await f.service.prepare({ id: "owned-record" });
-      expect(prepared.action?.risk).toBe("DANGEROUS");
-      expect(f.row).not.toBeNull();
-      expect(
-        await f.service.confirm(
-          prepared.action!.sessionId,
-          prepared.action!.confirmationId,
-          true,
-        ),
-      ).toEqual({ ok: true, verified: true });
+      expect(await f.service.delete({ id: "owned-record" })).toEqual({
+        ok: true,
+        verified: true,
+      });
       expect(f.row).toBeNull();
+      expect(f.request).toHaveBeenCalledWith("/api/memory/owned-record", {
+        method: "DELETE",
+      });
+      expect(f.record).toHaveBeenCalled();
+      expect(JSON.stringify(f.record.mock.calls)).not.toContain(
+        "private memory",
+      );
     },
   );
 
-  it("bulk deletes only selected unchanged records after one confirmation", async () => {
+  it("bulk deletes the selected records in one call", async () => {
     const f = fixture();
-    const prepared = await f.service.prepareDeleteMany({
-      ids: ["owned-record"],
+    expect(await f.service.deleteMany({ ids: ["owned-record"] })).toEqual({
+      ok: true,
+      verified: true,
     });
-    expect(prepared).toMatchObject({ ok: true, count: 1 });
-    expect(prepared.action?.risk).toBe("DANGEROUS");
-    expect(f.row).not.toBeNull();
-    expect(JSON.stringify(f.record.mock.calls)).not.toContain("private memory");
-    expect(
-      await f.service.confirm(
-        prepared.action!.sessionId,
-        prepared.action!.confirmationId,
-        true,
-      ),
-    ).toEqual({ ok: true, verified: true });
     expect(f.row).toBeNull();
-    expect(f.request).toHaveBeenCalledWith("/api/memory/owned-record", {
-      method: "DELETE",
-    });
   });
 
   it("rejects bulk selections with duplicate, excessive, or unowned IDs", async () => {
     const f = fixture();
     await expect(
-      f.service.prepareDeleteMany({ ids: ["owned-record", "owned-record"] }),
+      f.service.deleteMany({ ids: ["owned-record", "owned-record"] }),
     ).rejects.toThrow();
     await expect(
-      f.service.prepareDeleteMany({
+      f.service.deleteMany({
         ids: Array.from({ length: 26 }, (_, i) => `r${i}`),
       }),
     ).rejects.toThrow();
     expect(
-      await f.service.prepareDeleteMany({ ids: ["another-record"] }),
-    ).toMatchObject({
-      ok: false,
-    });
-  });
-
-  it("requires fresh confirmation, checks owner and revision, then verifies deletion", async () => {
-    const f = fixture();
-    const prepared = await f.service.prepare({ id: "owned-record" });
-    expect(prepared.action?.risk).toBe("DANGEROUS");
-    expect(f.row).not.toBeNull();
-    expect(JSON.stringify(f.record.mock.calls)).not.toContain("private memory");
-    const result = await f.service.confirm(
-      prepared.action!.sessionId,
-      prepared.action!.confirmationId,
-      true,
-    );
-    expect(result).toEqual({ ok: true, verified: true });
-    expect(f.row).toBeNull();
-    expect(f.request).toHaveBeenCalledWith("/api/memory/owned-record", {
-      method: "DELETE",
-    });
+      await f.service.deleteMany({ ids: ["another-record"] }),
+    ).toMatchObject({ ok: false });
   });
 
   it("refuses records owned by another key or app", async () => {
     const f = fixture();
     (f.row as Record<string, unknown>).apiKeyId = "other-owner";
-    expect(await f.service.prepare({ id: "owned-record" })).toMatchObject({
+    expect(await f.service.delete({ id: "owned-record" })).toMatchObject({
+      ok: false,
+    });
+    (f.row as Record<string, unknown>).apiKeyId = "nova-owner";
+    (f.row as Record<string, unknown>).metadata = { application: "other" };
+    expect(await f.service.delete({ id: "owned-record" })).toMatchObject({
       ok: false,
     });
     expect(f.request).not.toHaveBeenCalledWith("/api/memory/owned-record", {
       method: "DELETE",
     });
-    (f.row as Record<string, unknown>).apiKeyId = "nova-owner";
-    (f.row as Record<string, unknown>).metadata = { application: "other" };
-    expect(await f.service.prepare({ id: "owned-record" })).toMatchObject({
-      ok: false,
-    });
   });
 
-  it("refuses a changed record and cancellation never deletes", async () => {
+  it("edits one record in one call without putting its text in the audit log", async () => {
     const f = fixture();
-    const prepared = await f.service.prepare({ id: "owned-record" });
-    (f.row as Record<string, unknown>).content = "changed";
     expect(
-      await f.service.confirm(
-        prepared.action!.sessionId,
-        prepared.action!.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: false });
-    expect(f.row).not.toBeNull();
-    const again = await f.service.prepare({ id: "owned-record" });
-    expect(
-      await f.service.confirm(
-        again.action!.sessionId,
-        again.action!.confirmationId,
-        false,
-      ),
-    ).toEqual({ ok: true });
-    expect(f.row).not.toBeNull();
-  });
-
-  it("edits one record after confirmation without putting its text in audit or action args", async () => {
-    const f = fixture();
-    const prepared = await f.service.prepareUpdate({
-      id: "owned-record",
-      content: "Updated private memory",
-    });
-    expect(prepared.action?.risk).toBe("DANGEROUS");
-    expect(prepared.action?.args).not.toHaveProperty("content");
-    expect(JSON.stringify(f.record.mock.calls)).not.toContain(
-      "Updated private memory",
-    );
-    expect(
-      await f.service.confirm(
-        prepared.action!.sessionId,
-        prepared.action!.confirmationId,
-        true,
-      ),
+      await f.service.update({
+        id: "owned-record",
+        content: "Updated private memory",
+      }),
     ).toEqual({ ok: true, verified: true });
     expect(f.row?.content).toBe("Updated private memory");
     expect(f.request).toHaveBeenCalledWith("/api/memory/owned-record", {
       method: "PUT",
       body: { content: "Updated private memory" },
     });
+    expect(JSON.stringify(f.record.mock.calls)).not.toContain(
+      "Updated private memory",
+    );
   });
 
-  it("rejects unsafe content and refuses edits after a concurrent row change", async () => {
+  it("rejects unsafe content and malformed input", async () => {
     const f = fixture();
     await expect(
-      f.service.prepareUpdate({
-        id: "owned-record",
-        content: "api_key=do-not-keep-this",
-      }),
+      f.service.update({ id: "owned-record", content: "api_key=do-not-keep" }),
     ).rejects.toThrow();
-    const prepared = await f.service.prepareUpdate({
-      id: "owned-record",
-      content: "Updated memory",
-    });
-    (f.row as Record<string, unknown>).content = "changed elsewhere";
-    expect(
-      await f.service.confirm(
-        prepared.action!.sessionId,
-        prepared.action!.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: false });
-    expect(f.request).not.toHaveBeenCalledWith("/api/memory/owned-record", {
-      method: "PUT",
-      body: { content: "Updated memory" },
-    });
-  });
-
-  it("clears unconfirmed proposed text when the 60-second approval expires", async () => {
-    vi.useFakeTimers();
-    const f = fixture();
-    const prepared = await f.service.prepareUpdate({
-      id: "owned-record",
-      content: "Temporary approved memory",
-    });
-    const drafts = (f.service as unknown as { drafts: Map<string, unknown> })
-      .drafts;
-    expect(drafts.size).toBe(1);
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(drafts.size).toBe(0);
-    expect(f.request).not.toHaveBeenCalledWith("/api/memory/owned-record", {
-      method: "PUT",
-      body: { content: "Temporary approved memory" },
-    });
-    expect(prepared.action?.risk).toBe("DANGEROUS");
+    await expect(
+      f.service.update({ id: "owned-record", content: "x", extra: true }),
+    ).rejects.toThrow();
+    expect(f.request).not.toHaveBeenCalled();
   });
 });

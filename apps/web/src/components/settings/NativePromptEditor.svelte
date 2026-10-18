@@ -1,13 +1,8 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
-  import type {
-    NativePromptHistory,
-    NativePromptPrepared,
-  } from "@nova/contracts";
+  import type { NativePromptHistory } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
   import {
-    prepareNativePrompt,
-    confirmNativePrompt,
+    replaceNativePrompt,
     getNativePromptHistory,
   } from "#lib/api/settings.ts";
   let {
@@ -21,14 +16,10 @@
   let enabled = $state(false);
   let prefix = $state("");
   let suffix = $state("");
-  let acknowledged = $state(false);
   let busy = $state(false);
   let error = $state("");
   let notice = $state("");
   let history = $state<NativePromptHistory | null>(null);
-  let pending = $state<NativePromptPrepared | null>(null);
-  let expired = $state(false);
-  let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   function open() {
     enabled = initialEnabled ?? false;
     editing = true;
@@ -51,73 +42,38 @@
     enabled = value.enabled;
     prefix = value.prefixPrompt;
     suffix = value.suffixPrompt;
-    acknowledged = false;
     notice =
-      "Versie als concept geladen. Controleer beide velden en bevestig de vervanging apart.";
+      "Versie als concept geladen. Controleer beide velden en sla ze op.";
   }
-  async function prepare() {
-    if (!acknowledged) return;
+  async function save() {
     busy = true;
     error = "";
     try {
-      const result = await prepareNativePrompt({
+      const result = await replaceNativePrompt({
         enabled,
         prefixPrompt: prefix,
         suffixPrompt: suffix,
-        acknowledgeGlobal: true,
       });
-      if (!result.ok || !result.action) {
-        error = result.error || "De vervanging kon niet worden voorbereid.";
-        return;
-      }
-      pending = result;
-      expired = false;
-      clearTimeout(expiryTimer);
-      expiryTimer = setTimeout(
-        () => {
-          expired = true;
-        },
-        Math.max(0, result.action.expiresAt - Date.now()),
-      );
-    } catch {
-      error =
-        "De vervanging kon niet worden voorbereid. Gebruik geen geheimen en controleer je PIN.";
-    } finally {
-      busy = false;
-    }
-  }
-  async function confirm(approve: boolean) {
-    if (!pending?.action) return;
-    busy = true;
-    error = "";
-    try {
-      const result = await confirmNativePrompt(
-        pending.action.sessionId,
-        pending.action.confirmationId,
-        approve,
-      );
       if (!result.ok)
         error =
           result.error || "De promptwijziging kon niet worden gecontroleerd.";
-      else if (approve && result.verified === true) {
+      else if (result.verified === true) {
         saved(enabled, prefix.length, suffix.length);
         notice = `Gateway-prompt opgeslagen en gecontroleerd.${result.auditWarning ? ` ${result.auditWarning}` : ""}`;
         editing = false;
         prefix = "";
         suffix = "";
         await loadHistory();
-      } else notice = "Promptvervanging geannuleerd.";
+      } else
+        error =
+          "De promptwijziging kon niet worden gecontroleerd. Controleer de gateway-status.";
     } catch {
       error =
-        "Bevestiging kon niet worden afgerond. Controleer de gateway-status voordat je opnieuw vervangt.";
+        "De promptwijziging kon niet worden opgeslagen. Gebruik geen geheimen en controleer de gateway-status.";
     } finally {
-      pending = null;
-      acknowledged = false;
-      clearTimeout(expiryTimer);
       busy = false;
     }
   }
-  onDestroy(() => clearTimeout(expiryTimer));
 </script>
 
 <div class="prompt-editor">
@@ -145,9 +101,7 @@
                 ? "aan"
                 : "uit"} · {revision.after.prefixPrompt.length}+{revision.after
                 .suffixPrompt.length} tekens
-              <Button
-                onclick={() => restore(revision.before)}
-                disabled={busy || !!pending}
+              <Button onclick={() => restore(revision.before)} disabled={busy}
                 >Laad vorige versie als concept</Button
               >
             </li>
@@ -155,7 +109,7 @@
         </ul>
       </details>
     {/if}
-    <fieldset disabled={busy || !!pending}>
+    <fieldset disabled={busy}>
       <label class="check"
         ><input type="checkbox" bind:checked={enabled} /> Extra gateway-prompt inschakelen</label
       >
@@ -173,48 +127,17 @@
           rows="5"
           bind:value={suffix}></textarea></label
       >
-      <label class="check"
-        ><input type="checkbox" bind:checked={acknowledged} /> Ik vervang beide velden
-        voor alle gateway-clients.</label
-      >
       <div class="buttons">
-        <Button onclick={prepare} disabled={!acknowledged}
-          >Promptvervanging voorbereiden</Button
+        <Button onclick={save} disabled={busy}>Gateway-prompt opslaan</Button
         ><Button
           onclick={() => {
             editing = false;
             prefix = "";
             suffix = "";
-            acknowledged = false;
           }}>Sluiten</Button
         >
       </div>
     </fieldset>
-  {/if}
-  {#if pending}
-    <div
-      class="prompt-confirm"
-      role="group"
-      aria-label="Gateway-prompt vervangen bevestigen"
-    >
-      <h3>Bevestig vervanging voor alle gateway-clients</h3>
-      <p>
-        Extra prompt: {enabled ? "aan" : "uit"}. Voorvoegsel: {prefix.length} tekens;
-        achtervoegsel: {suffix.length} tekens.
-      </p>
-      <p>
-        {expired
-          ? "Bevestiging verlopen. Annuleer en bereid de vervanging opnieuw voor."
-          : "Deze risicovolle vervanging vraagt toestemming binnen 60 seconden, één keer geldig."}
-      </p>
-      <div class="buttons">
-        <Button onclick={() => confirm(true)} disabled={busy || expired}
-          >Bevestig gateway-prompt</Button
-        ><Button onclick={() => confirm(false)} disabled={busy}
-          >Annuleer gateway-prompt</Button
-        >
-      </div>
-    </div>
   {/if}
 </div>
 
@@ -260,10 +183,5 @@
   }
   .buttons :global(button) {
     min-height: 44px;
-  }
-  .prompt-confirm {
-    padding: 1rem;
-    border: 1px solid #ff8a4c;
-    margin-top: 1rem;
   }
 </style>

@@ -1,5 +1,4 @@
 import { getJson, sendJson } from "./client.ts";
-import { getPin } from "./pin-session.ts";
 
 export interface DesktopSettings {
   viewEnabled: boolean;
@@ -48,8 +47,7 @@ export interface DesktopOverview {
 }
 
 const headers = (): Record<string, string> => {
-  const pin = getPin();
-  return { "x-nova-admin": "1", ...(pin ? { "x-nova-pin": pin } : {}) };
+  return {};
 };
 
 export const getDesktop = (signal?: AbortSignal) =>

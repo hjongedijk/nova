@@ -1,16 +1,13 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import type {
     OmniRouteAccountRenameHistoryEntry,
-    OmniRouteAccountRenamePrepared,
     OmniRouteAccountRenameResult,
   } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
   import {
-    confirmOmniRouteAccountRename,
     getOmniRouteAccountRenameHistory,
-    prepareOmniRouteAccountRename,
-    prepareOmniRouteAccountRenameRollback,
+    renameOmniRouteAccount,
+    rollbackOmniRouteAccountRename,
   } from "#lib/api/settings.ts";
 
   let {
@@ -28,15 +25,9 @@
   let name = $state("");
   let busy = $state(false);
   let error = $state("");
-  let pending = $state<OmniRouteAccountRenamePrepared | null>(null);
-  let expired = $state(false);
-  let acknowledged = $state(false);
   let history = $state<OmniRouteAccountRenameHistoryEntry[]>([]);
   let historyLoaded = $state(false);
   let historyBusy = $state(false);
-  let isRollback = $state(false);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  onDestroy(() => clearTimeout(timer));
 
   async function loadHistory() {
     historyBusy = true;
@@ -51,74 +42,16 @@
     }
   }
 
-  async function prepare() {
+  async function apply(
+    run: () => Promise<OmniRouteAccountRenameResult>,
+    failure: string,
+  ) {
     busy = true;
     error = "";
     try {
-      const result = await prepareOmniRouteAccountRename(id, name, true);
-      if (!result.ok || !result.action) {
-        error = result.error || "Accountnaam kon niet worden voorbereid.";
-        return;
-      }
-      pending = result;
-      isRollback = false;
-      expired = false;
-      acknowledged = false;
-      timer = setTimeout(
-        () => (expired = true),
-        Math.max(0, result.action.expiresAt - Date.now()),
-      );
-    } catch {
-      error = "Accountnaam kon niet worden voorbereid. Controleer je PIN.";
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function prepareRollback(revisionId: string) {
-    busy = true;
-    error = "";
-    try {
-      const result = await prepareOmniRouteAccountRenameRollback(
-        id,
-        revisionId,
-        true,
-      );
-      if (!result.ok || !result.action) {
-        error = result.error || "Herstel kon niet worden voorbereid.";
-        return;
-      }
-      pending = result;
-      isRollback = true;
-      expired = false;
-      acknowledged = false;
-      timer = setTimeout(
-        () => (expired = true),
-        Math.max(0, result.action.expiresAt - Date.now()),
-      );
-    } catch {
-      error = "Herstel kon niet worden voorbereid. Controleer je PIN.";
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function confirm(approve: boolean) {
-    const action = pending?.action;
-    if (!action) return;
-    busy = true;
-    error = "";
-    try {
-      const result = await confirmOmniRouteAccountRename(
-        action.sessionId,
-        action.confirmationId,
-        approve,
-      );
-      if (!result.ok) error = result.error || "Accountnaam is niet gewijzigd.";
-      else if (!approve) {
-        editing = false;
-        done();
-      } else if (result.verified === true) {
+      const result = await run();
+      if (!result.ok) error = result.error || failure;
+      else if (result.verified === true) {
         editing = false;
         await loadHistory();
         done(result);
@@ -129,37 +62,24 @@
     } catch {
       error = "Uitkomst niet gecontroleerd. Controleer OmniRoute.";
     } finally {
-      pending = null;
-      clearTimeout(timer);
       busy = false;
     }
   }
+  const save = () =>
+    apply(
+      () => renameOmniRouteAccount(id, name),
+      "Accountnaam is niet gewijzigd.",
+    );
+  const rollback = (revisionId: string) =>
+    apply(
+      () => rollbackOmniRouteAccountRename(id, revisionId),
+      "Herstel kon niet worden uitgevoerd.",
+    );
 </script>
 
 <section aria-label={`Accountnaam wijzigen ${provider}`}>
   {#if error}<p role="status">{error}</p>{/if}
-  {#if pending}
-    <p>
-      {isRollback ? "Herstellen:" : "Wijzigen:"}
-      <strong>{pending.oldName}</strong> → <strong>{pending.newName}</strong> · {pending.provider}
-    </p>
-    <p>
-      De naam is zichtbaar voor alle OmniRoute-clients. Als Cloud-sync aanstaat,
-      kan OmniRoute de wijziging ook synchroniseren met OmniRoute Cloud.
-    </p>
-    <label>
-      <input type="checkbox" bind:checked={acknowledged} /> Ik begrijp dat de naamswijziging
-      alle OmniRoute-clients raakt en mogelijk naar OmniRoute Cloud wordt gesynchroniseerd.
-    </label>
-    {#if expired}<p role="status">
-        Bevestiging verlopen. Bereid de wijziging opnieuw voor.
-      </p>{/if}
-    <Button
-      onclick={() => confirm(true)}
-      disabled={busy || expired || !acknowledged}>Naam wijzigen</Button
-    >
-    <Button onclick={() => confirm(false)} disabled={busy}>Annuleren</Button>
-  {:else if editing}
+  {#if editing}
     <label>
       Nieuwe accountnaam
       <input
@@ -169,9 +89,7 @@
         disabled={busy}
       />
     </label>
-    <Button onclick={prepare} disabled={busy || !name.trim()}
-      >Controleren</Button
-    >
+    <Button onclick={save} disabled={busy || !name.trim()}>Naam opslaan</Button>
     <Button
       onclick={() => {
         editing = false;
@@ -201,9 +119,8 @@
                 >{new Date(revision.at).toLocaleString("nl-NL")}</time
               >
               {#if index === 0}
-                <Button
-                  onclick={() => prepareRollback(revision.id)}
-                  disabled={busy}>Nieuwste wijziging herstellen</Button
+                <Button onclick={() => rollback(revision.id)} disabled={busy}
+                  >Herstel deze versie</Button
                 >
               {/if}
             </li>

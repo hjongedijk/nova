@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -15,6 +14,7 @@ import {
   type RoutingStatus,
 } from "../../src/routing/routing.service.js";
 import { OmniRouteKeyModelAccess } from "../../src/settings/omniroute-key-model-access.service.js";
+import { dbStat } from "../helpers/nova-db.js";
 
 const cleanups: (() => void)[] = [];
 const ready: RoutingStatus = {
@@ -75,8 +75,6 @@ function fixture() {
     timestamp: "now",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
-  confirmations.now = () => 1000;
   const routing = new RoutingService(config as NovaConfig);
   vi.spyOn(routing, "verifyForManagement").mockReturnValue(ready);
   const blocked = vi.fn();
@@ -146,7 +144,6 @@ function fixture() {
   const service = new OmniRouteKeyModelAccess(
     config as NovaConfig,
     management,
-    confirmations,
     audit,
     barrier as never,
     routing,
@@ -166,8 +163,8 @@ function fixture() {
   };
 }
 
-describe("OmniRoute key model access", () => {
-  it("restricts non-NOVA keys to selected verified-free models after fresh confirmation", async () => {
+describe("OmniRoute key model access (single step)", () => {
+  it("restricts non-NOVA keys to selected verified-free models in one call", async () => {
     const f = fixture();
     const options = await f.service.options("client");
     expect(options).toMatchObject({
@@ -176,31 +173,14 @@ describe("OmniRoute key model access", () => {
       verifiedFreeModels: ["free/one", "free/two"],
     });
     expect(JSON.stringify(options)).not.toContain("secret-");
-    const prepared = await f.service.prepare(
-      "client",
-      ["free/one"],
-      options.revision,
-      true,
-    );
-    if (!prepared.ok) throw new Error(prepared.error);
-    expect(
-      f.request.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
-    ).toHaveLength(0);
-    const action = prepared.action;
-    expect(JSON.stringify(prepared)).not.toContain("secret-");
-    expect(
-      await f.service.confirm(
-        "client",
-        action.sessionId,
-        action.confirmationId,
-        true,
-      ),
-    ).toMatchObject({
+    const result = await f.service.apply("client", ["free/one"]);
+    expect(result).toMatchObject({
       ok: true,
       verified: true,
       routeReady: true,
       allowedModels: ["free/one"],
     });
+    expect(JSON.stringify(result)).not.toContain("secret-");
     expect(
       f.db
         .prepare(
@@ -221,8 +201,8 @@ describe("OmniRoute key model access", () => {
       },
     ]);
     expect(
-      fs.statSync(path.join(f.dir, "omniroute-key-model-access-history.json"))
-        .mode & 0o777,
+      dbStat(path.join(f.dir, "omniroute-key-model-access-history.json")).mode &
+        0o777,
     ).toBe(0o600);
     expect(
       f.request.mock.calls.find(([, opts]) => opts?.method === "PATCH")?.[1]
@@ -236,19 +216,19 @@ describe("OmniRoute key model access", () => {
     expect(JSON.stringify(f.record.mock.calls)).not.toContain("secret-");
   });
 
-  it("rejects NOVA's key, paid or empty model selections, and stale revisions", async () => {
+  it("rejects NOVA's key and paid, empty or malformed model selections", async () => {
     const f = fixture();
     expect((await f.service.options("nova")).available).toBe(false);
-    const options = await f.service.options("client");
-    expect(
-      await f.service.prepare("client", ["paid/model"], options.revision, true),
-    ).toMatchObject({ ok: false });
-    expect(
-      await f.service.prepare("client", [], options.revision, true),
-    ).toMatchObject({ ok: false });
-    expect(
-      await f.service.prepare("client", ["free/one"], "0".repeat(64), true),
-    ).toMatchObject({ ok: false });
+    expect(await f.service.apply("nova", ["free/one"])).toMatchObject({
+      ok: false,
+    });
+    expect(await f.service.apply("client", ["paid/model"])).toMatchObject({
+      ok: false,
+    });
+    expect(await f.service.apply("client", [])).toMatchObject({ ok: false });
+    expect(await f.service.apply("client", "free/one")).toMatchObject({
+      ok: false,
+    });
     expect(
       f.request.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
     ).toHaveLength(0);
@@ -276,22 +256,7 @@ describe("OmniRoute key model access", () => {
       if (entry.phase === "verified") throw new Error("audit unavailable");
       return { ...entry, id: "audit", timestamp: "now" };
     });
-    const options = await f.service.options("client");
-    const prepared = await f.service.prepare(
-      "client",
-      ["free/one"],
-      options.revision,
-      true,
-    );
-    if (!prepared.ok) throw new Error(prepared.error);
-    expect(
-      await f.service.confirm(
-        "client",
-        prepared.action.sessionId,
-        prepared.action.confirmationId,
-        true,
-      ),
-    ).toMatchObject({
+    expect(await f.service.apply("client", ["free/one"])).toMatchObject({
       ok: true,
       verified: true,
       routeReady: true,
@@ -300,38 +265,14 @@ describe("OmniRoute key model access", () => {
     expect(f.released).toHaveBeenCalledOnce();
   });
 
-  it("restores the latest model-access revision and records a secret-free rollback", async () => {
+  it("restores the latest model-access revision in one call and records a secret-free rollback", async () => {
     const f = fixture();
-    const options = await f.service.options("client");
-    const prepared = await f.service.prepare(
-      "client",
-      ["free/one"],
-      options.revision,
-      true,
-    );
-    if (!prepared.ok) throw new Error(prepared.error);
-    const changed = await f.service.confirm(
-      "client",
-      prepared.action.sessionId,
-      prepared.action.confirmationId,
-      true,
-    );
-    expect(changed).toMatchObject({ ok: true, verified: true });
+    expect(await f.service.apply("client", ["free/one"])).toMatchObject({
+      ok: true,
+      verified: true,
+    });
     const originalRevision = f.service.history("client").revisions[0]!;
-    const rollback = await f.service.prepareRollback(
-      "client",
-      originalRevision.id,
-      true,
-    );
-    expect(rollback).toMatchObject({ ok: true, warning: expect.any(String) });
-    if (!rollback.ok) throw new Error(rollback.error);
-    expect(rollback.action.risk).toBe("DANGEROUS");
-    const result = await f.service.confirm(
-      "client",
-      rollback.action.sessionId,
-      rollback.action.confirmationId,
-      true,
-    );
+    const result = await f.service.rollback("client", originalRevision.id);
     expect(result).toMatchObject({
       ok: true,
       verified: true,
@@ -351,38 +292,20 @@ describe("OmniRoute key model access", () => {
     );
   });
 
-  it("rejects a stale model-access rollback after preparation", async () => {
+  it("refuses a rollback of a revision that is no longer the newest or current", async () => {
     const f = fixture();
-    const options = await f.service.options("client");
-    const prepared = await f.service.prepare(
-      "client",
-      ["free/one"],
-      options.revision,
-      true,
-    );
-    if (!prepared.ok) throw new Error(prepared.error);
-    await f.service.confirm(
-      "client",
-      prepared.action.sessionId,
-      prepared.action.confirmationId,
-      true,
-    );
+    await f.service.apply("client", ["free/one"]);
     const revision = f.service.history("client").revisions[0]!;
-    const rollback = await f.service.prepareRollback(
-      "client",
-      revision.id,
-      true,
-    );
-    if (!rollback.ok) throw new Error(rollback.error);
     f.db
       .prepare("UPDATE api_keys SET allowed_models=? WHERE id='client'")
       .run(JSON.stringify(["free/two"]));
+    expect(await f.service.rollback("client", revision.id)).toMatchObject({
+      ok: false,
+    });
     expect(
-      await f.service.confirm(
+      await f.service.rollback(
         "client",
-        rollback.action.sessionId,
-        rollback.action.confirmationId,
-        true,
+        "00000000-0000-0000-0000-000000000000",
       ),
     ).toMatchObject({ ok: false });
     expect(f.blocked).toHaveBeenCalledTimes(1);
@@ -394,23 +317,11 @@ describe("OmniRoute key model access", () => {
   it("keeps routing blocked when OmniRoute does not persist the restriction", async () => {
     const f = fixture();
     f.setPersist(false);
-    const options = await f.service.options("client");
-    const prepared = await f.service.prepare(
-      "client",
-      ["free/one"],
-      options.revision,
-      true,
-    );
-    if (!prepared.ok) throw new Error(prepared.error);
-    const action = prepared.action;
-    expect(
-      await f.service.confirm(
-        "client",
-        action.sessionId,
-        action.confirmationId,
-        true,
-      ),
-    ).toMatchObject({ ok: false, verified: null, routeReady: false });
+    expect(await f.service.apply("client", ["free/one"])).toMatchObject({
+      ok: false,
+      verified: null,
+      routeReady: false,
+    });
     expect(f.blocked).toHaveBeenCalledWith("policy_change");
     expect(f.released).not.toHaveBeenCalled();
   });

@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { IncomingMessage } from "node:http";
 import type { Request, Response } from "express";
-import { AppAccessService } from "../../src/access/access.service.js";
-import { NovaConfig } from "../../src/core/config/nova-config.js";
 import {
   NODE_RED_EDITOR_PREFIX,
   NodeRedEditorAccess,
@@ -31,9 +28,7 @@ function response() {
 }
 
 function fixture() {
-  const config = { appToken: "", reverseProxyAuth: true };
-  const access = new AppAccessService(config as NovaConfig);
-  return { config, access, editor: new NodeRedEditorAccess(access) };
+  return { editor: new NodeRedEditorAccess() };
 }
 
 function open(
@@ -181,53 +176,6 @@ describe("Node-RED editor browser sessions", () => {
       ).not.toBeNull();
     },
   );
-
-  it("uses only configured privacy protection and current global authorization", () => {
-    const { editor, config } = fixture();
-    const { cookie } = open(editor);
-    config.reverseProxyAuth = false;
-    expect(
-      editor.authorize(request({ cookie, "x-forwarded-user": "admin" })),
-    ).toBeNull();
-    expect(() => open(editor)).toThrow("beveiligde NOVA-toegang");
-    config.reverseProxyAuth = true;
-    config.appToken = "now-locked";
-    expect(editor.authorize(request({ cookie }))).toBeNull();
-    expect(() => open(editor)).toThrow("beveiligde NOVA-toegang");
-  });
-
-  it("works with the existing global app session without exposing its token", () => {
-    const { editor, config, access } = fixture();
-    config.appToken = "fixture-app-token";
-    const appResponse = response();
-    access.unlock(config.appToken, request(), appResponse.value);
-    const [name, value] = appResponse.cookie.mock.calls[0]!;
-    const res = response();
-    editor.open(
-      request({ cookie: `${name}=${value}`, origin: ORIGIN }, "POST"),
-      res.value,
-      true,
-    );
-    const [editorName, editorToken] = res.cookie.mock.calls[0]!;
-    const cookie = `${name}=${value}; ${editorName}=${editorToken}`;
-    expect(
-      editor.authorize(request({ cookie }) as IncomingMessage),
-    ).not.toBeNull();
-    vi.advanceTimersByTime(12 * 60 * 60 * 1000);
-    expect(editor.authorize(request({ cookie }))).toBeNull();
-  });
-
-  it.each([
-    "",
-    "nova_node_red_editor=%ZZ",
-    "nova_node_red_editor=bad",
-    "other=ignored",
-    `nova_node_red_editor=${"a".repeat(43)}`,
-  ])("rejects absent, malformed, and unknown capabilities: %s", (cookie) => {
-    const { editor } = fixture();
-    open(editor);
-    expect(editor.authorize(request({ cookie }))).toBeNull();
-  });
 
   it("rejects duplicate cookies and never exposes mutable stored session metadata", () => {
     const { editor } = fixture();

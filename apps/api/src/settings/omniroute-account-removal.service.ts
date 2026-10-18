@@ -1,16 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  OmniRouteAccountRemovalPrepared,
-  OmniRouteAccountRemovalResult,
-} from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
+import type { OmniRouteAccountRemovalResult } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { claimConfirmation } from "./confirmation-step.js";
 import { ValidationError } from "../core/errors/validation.error.js";
-import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { RoutingManagementBarrier } from "../routing/routing-management-barrier.service.js";
 import { RoutingService } from "../routing/routing.service.js";
@@ -23,8 +16,6 @@ type Account = {
   updated_at: string;
 };
 const validId = (id: string) => /^[a-zA-Z0-9_.-]{1,100}$/.test(id);
-const revision = (row: Account) =>
-  crypto.createHash("sha256").update(JSON.stringify(row)).digest("hex");
 const unavailable =
   "Accountbeheer is niet beschikbaar. Controleer de OmniRoute-koppeling.";
 
@@ -34,7 +25,6 @@ export class OmniRouteAccountRemoval {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
@@ -59,82 +49,19 @@ export class OmniRouteAccountRemoval {
     }
   }
 
-  prepare(
-    id: string,
-    acknowledgeEffects: unknown,
-  ): OmniRouteAccountRemovalPrepared {
-    if (!validId(id) || acknowledgeEffects !== true)
-      throw new ValidationError([
-        "Bevestig dat je dit account en gekoppelde modellen voor alle gateway-clients verwijdert.",
-      ]);
-    try {
-      const account = this.row(id);
-      if (!account)
-        return { ok: false, error: "Dit account bestaat niet meer." };
-      this.audit.record({
-        sessionId: "settings",
-        tool: "omniroute_account_remove",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: { id },
-      });
-      return {
-        ok: true,
-        name: String(sanitize(account.name || account.provider)).slice(0, 200),
-        action: this.confirmations.create(
-          `settings-account:${crypto.randomUUID()}`,
-          "omniroute_account_remove",
-          { id, revision: revision(account) },
-          "DANGEROUS",
-          undefined,
-          false,
-        ),
-      };
-    } catch {
-      return { ok: false, error: unavailable };
-    }
-  }
-
-  async confirm(
-    id: string,
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
-  ): Promise<OmniRouteAccountRemovalResult> {
-    if (
-      !validId(id) ||
-      !/^settings-account:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const claimed = claimConfirmation(
-      this.confirmations,
-      sessionId,
-      confirmationId,
-      approve,
-      {
-        tool: "omniroute_account_remove",
-        arg: { name: "id", value: id },
-        stale:
-          "Deze bevestiging staat niet meer open. Kies het account opnieuw.",
-        expired: "Bevestiging verlopen. Kies het account opnieuw.",
-      },
-    );
-    if ("reply" in claimed) return claimed.reply;
-    const action = claimed.action;
+  async remove(id: string): Promise<OmniRouteAccountRemovalResult> {
+    if (!validId(id)) throw new ValidationError(["Ongeldig account."]);
+    const tool = "omniroute_account_remove";
     try {
       return await this.barrier.run(async (operation) => {
         const before = this.row(id);
-        if (!before || revision(before) !== action.args.revision)
-          return {
-            ok: false,
-            error: "Het account is ondertussen gewijzigd. Kies het opnieuw.",
-          };
+        if (!before)
+          return { ok: false, error: "Dit account bestaat niet meer." };
         this.audit.record({
           sessionId: "settings",
-          tool: action.tool,
+          tool,
           risk: "DANGEROUS",
-          confirmation: "confirmed_admin_ui",
+          confirmation: "direct",
           phase: "before_execute",
           arguments: { id },
         });
@@ -149,9 +76,9 @@ export class OmniRouteAccountRemoval {
           try {
             this.audit.record({
               sessionId: "settings",
-              tool: action.tool,
+              tool,
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
               arguments: { id },
               result: { ok: false },
@@ -184,9 +111,9 @@ export class OmniRouteAccountRemoval {
         try {
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool,
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "after_execute",
             arguments: { id },
             result: { ok: true },

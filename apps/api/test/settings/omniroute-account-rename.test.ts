@@ -1,9 +1,9 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -11,6 +11,7 @@ import {
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
 import { OmniRouteAccountRename } from "../../src/settings/omniroute-account-rename.service.js";
+import { dbStat } from "../helpers/nova-db.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -49,7 +50,6 @@ function fixture() {
     timestamp: "now",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
   let persist = true;
   const request = vi.fn(
     async (
@@ -95,7 +95,6 @@ function fixture() {
   const rename = new OmniRouteAccountRename(
     config as NovaConfig,
     management,
-    confirmations,
     audit,
   );
   return {
@@ -108,54 +107,37 @@ function fixture() {
   };
 }
 
-describe("OmniRoute provider account rename", () => {
+describe("OmniRoute provider account rename (single step)", () => {
   it("does not expose diagnostics that contain a known validation phrase", async () => {
     const f = fixture();
     const diagnostic = "bestaat al /private/omniroute token=marker";
     f.request.mockRejectedValueOnce(new Error(diagnostic));
-    const result = await f.rename.prepare("account-1", "Home Mistral", true);
+    const result = await f.rename.rename("account-1", "Home Mistral");
     expect(result).toMatchObject({ ok: false });
     expect(JSON.stringify(result)).not.toContain(diagnostic);
   });
 
-  it("requires explicit all-client acknowledgement and checks complete provider inventory", async () => {
+  it("rejects invalid input without any gateway call", async () => {
     const f = fixture();
-    await expect(
-      f.rename.prepare("account-1", "Home Mistral", false),
-    ).rejects.toThrow("bevestig");
+    await expect(f.rename.rename("account-1", "  ")).rejects.toThrow(
+      "accountnaam",
+    );
+    await expect(f.rename.rename("../x", "Name")).rejects.toThrow(
+      "accountnaam",
+    );
     expect(f.request).not.toHaveBeenCalled();
-
-    const prepared = await f.rename.prepare("account-1", "Home Mistral", true);
-    expect(prepared).toMatchObject({
-      ok: true,
-      id: "account-1",
-      provider: "mistral",
-      oldName: "Personal",
-      newName: "Home Mistral",
-    });
-    expect(JSON.stringify(prepared)).not.toMatch(/fixture-key|apiKey/);
-    expect(prepared.action).toMatchObject({
-      tool: "omniroute_account_rename",
-      risk: "DANGEROUS",
-      allowAlways: false,
-    });
   });
 
-  it("updates only the name and verifies OmniRoute against SQLite", async () => {
+  it("updates only the name in one call and verifies OmniRoute against SQLite", async () => {
     const f = fixture();
-    const prepared = await f.rename.prepare("account-1", "Home Mistral", true);
-    const action = prepared.action!;
-    const result = await f.rename.confirm(
-      action.sessionId,
-      action.confirmationId,
-      true,
-    );
+    const result = await f.rename.rename("account-1", "Home Mistral");
     expect(result).toMatchObject({
       ok: true,
       verified: true,
       id: "account-1",
       name: "Home Mistral",
     });
+    expect(JSON.stringify(result)).not.toMatch(/fixture-key|apiKey/);
     expect(f.request).toHaveBeenCalledWith("/api/providers/account-1", {
       method: "PUT",
       body: { name: "Home Mistral" },
@@ -165,20 +147,20 @@ describe("OmniRoute provider account rename", () => {
         .prepare("SELECT name FROM provider_connections WHERE id='account-1'")
         .get(),
     ).toEqual({ name: "Home Mistral" });
+    expect(
+      f.record.mock.calls.every(([r]) => r.confirmation === "direct"),
+    ).toBe(true);
     expect(JSON.stringify(f.record.mock.calls)).not.toMatch(
       /fixture-key|apiKey|credential/i,
     );
   });
 
-  it("stores bounded private name history and restores only the latest change", async () => {
+  it("stores bounded private name history and restores only the latest change in one step", async () => {
     const f = fixture();
-    const changed = await f.rename.prepare("account-1", "Home Mistral", true);
-    const changedResult = await f.rename.confirm(
-      changed.action!.sessionId,
-      changed.action!.confirmationId,
-      true,
-    );
-    expect(changedResult).toMatchObject({ ok: true, verified: true });
+    expect(await f.rename.rename("account-1", "Home Mistral")).toMatchObject({
+      ok: true,
+      verified: true,
+    });
     const listed = f.rename.listHistory("account-1");
     expect(listed.revisions).toHaveLength(1);
     const original = listed.revisions[0]!;
@@ -187,22 +169,8 @@ describe("OmniRoute provider account rename", () => {
       beforeName: "Personal",
       afterName: "Home Mistral",
     });
-    expect(fs.statSync(f.historyFile).mode & 0o777).toBe(0o600);
-    const rollback = await f.rename.prepareRollback(
-      "account-1",
-      original.id,
-      true,
-    );
-    expect(rollback).toMatchObject({
-      ok: true,
-      oldName: "Home Mistral",
-      newName: "Personal",
-    });
-    const result = await f.rename.confirm(
-      rollback.action!.sessionId,
-      rollback.action!.confirmationId,
-      true,
-    );
+    expect(dbStat(f.historyFile).mode & 0o777).toBe(0o600);
+    const result = await f.rename.rollback("account-1", original.id);
     expect(result).toMatchObject({
       ok: true,
       verified: true,
@@ -216,7 +184,7 @@ describe("OmniRoute provider account rename", () => {
       revertedFrom: original.id,
     });
     await expect(
-      f.rename.prepareRollback("account-1", original.id, true),
+      f.rename.rollback("account-1", original.id),
     ).resolves.toMatchObject({
       ok: false,
       error: expect.stringContaining("later gewijzigd"),
@@ -225,15 +193,9 @@ describe("OmniRoute provider account rename", () => {
 
   it("does not store names that the secret sanitizer would redact", async () => {
     const f = fixture();
-    const prepared = await f.rename.prepare(
+    const result = await f.rename.rename(
       "account-1",
       "Bearer fixture-secret-value",
-      true,
-    );
-    const result = await f.rename.confirm(
-      prepared.action!.sessionId,
-      prepared.action!.confirmationId,
-      true,
     );
     expect(result).toMatchObject({
       ok: true,
@@ -243,20 +205,10 @@ describe("OmniRoute provider account rename", () => {
     expect(f.rename.listHistory("account-1").revisions).toEqual([]);
   });
 
-  it("refuses rollback when the account changes after its fresh confirmation is prepared", async () => {
+  it("refuses rollback when the account was renamed elsewhere", async () => {
     const f = fixture();
-    const changed = await f.rename.prepare("account-1", "Home Mistral", true);
-    await f.rename.confirm(
-      changed.action!.sessionId,
-      changed.action!.confirmationId,
-      true,
-    );
+    await f.rename.rename("account-1", "Home Mistral");
     const revision = f.rename.listHistory("account-1").revisions[0]!;
-    const rollback = await f.rename.prepareRollback(
-      "account-1",
-      revision.id,
-      true,
-    );
     const writesBefore = f.request.mock.calls.filter(
       ([, options]) => options?.method === "PUT",
     ).length;
@@ -265,14 +217,10 @@ describe("OmniRoute provider account rename", () => {
         "UPDATE provider_connections SET name='Changed elsewhere' WHERE id=?",
       )
       .run("account-1");
-    const result = await f.rename.confirm(
-      rollback.action!.sessionId,
-      rollback.action!.confirmationId,
-      true,
-    );
+    const result = await f.rename.rollback("account-1", revision.id);
     expect(result).toMatchObject({
       ok: false,
-      error: expect.stringContaining("gewijzigd sinds voorbereiding"),
+      error: expect.stringContaining("gewijzigd sinds de geschiedenis"),
     });
     expect(
       f.request.mock.calls.filter(([, options]) => options?.method === "PUT"),
@@ -284,99 +232,46 @@ describe("OmniRoute provider account rename", () => {
     ).toEqual({ name: "Changed elsewhere" });
   });
 
-  it("hides unexpected errors while preparing a rollback", async () => {
+  it("hides unexpected errors during a rollback and rejects a missing revision", async () => {
     const f = fixture();
-    const changed = await f.rename.prepare("account-1", "Home Mistral", true);
-    await f.rename.confirm(
-      changed.action!.sessionId,
-      changed.action!.confirmationId,
-      true,
-    );
+    await f.rename.rename("account-1", "Home Mistral");
     const revision = f.rename.listHistory("account-1").revisions[0]!;
-    await expect(
-      f.rename.prepareRollback("account-1", revision.id, false),
-    ).rejects.toThrow("bevestig");
     const diagnostic = "private-host.local /private/omniroute token=marker";
-    vi.spyOn(f.rename, "prepare").mockRejectedValueOnce(new Error(diagnostic));
-    const result = await f.rename.prepareRollback(
-      "account-1",
-      revision.id,
-      true,
-    );
+    vi.spyOn(f.rename, "rename").mockRejectedValueOnce(new Error(diagnostic));
+    const result = await f.rename.rollback("account-1", revision.id);
     expect(result).toEqual({ ok: false, error: "Herstel niet beschikbaar." });
     expect(JSON.stringify(result)).not.toContain(diagnostic);
+    expect(
+      await f.rename.rollback("account-1", crypto.randomUUID()),
+    ).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("bestaat niet"),
+    });
   });
 
-  it("rejects duplicate names and changed accounts before writing", async () => {
+  it("rejects duplicate names before writing", async () => {
     const duplicate = fixture();
     duplicate.db
       .prepare("INSERT INTO provider_connections VALUES(?,?,?,?,?)")
       .run("account-2", "mistral", "HOME MISTRAL", 1, "rev-1");
     await expect(
-      duplicate.rename.prepare("account-1", "Home Mistral", true),
+      duplicate.rename.rename("account-1", "Home Mistral"),
     ).resolves.toMatchObject({
       ok: false,
       error: expect.stringContaining("bestaat al"),
     });
-
-    const stale = fixture();
-    const prepared = await stale.rename.prepare(
-      "account-1",
-      "Home Mistral",
-      true,
-    );
-    stale.db
-      .prepare(
-        "UPDATE provider_connections SET name='Changed elsewhere' WHERE id=?",
-      )
-      .run("account-1");
-    const result = await stale.rename.confirm(
-      prepared.action!.sessionId,
-      prepared.action!.confirmationId,
-      true,
-    );
-    expect(result).toMatchObject({
-      ok: false,
-      error: expect.stringContaining("gewijzigd"),
-    });
     expect(
-      stale.request.mock.calls.some(([, options]) => options?.method === "PUT"),
-    ).toBe(false);
-  });
-
-  it("cancels cleanly and reports uncertain persistence without claiming success", async () => {
-    const cancelled = fixture();
-    const prepared = await cancelled.rename.prepare(
-      "account-1",
-      "Home Mistral",
-      true,
-    );
-    await expect(
-      cancelled.rename.confirm(
-        prepared.action!.sessionId,
-        prepared.action!.confirmationId,
-        false,
-      ),
-    ).resolves.toEqual({ ok: true });
-    expect(
-      cancelled.request.mock.calls.some(
+      duplicate.request.mock.calls.some(
         ([, options]) => options?.method === "PUT",
       ),
     ).toBe(false);
+  });
 
+  it("reports uncertain persistence without claiming success", async () => {
     const uncertain = fixture();
     uncertain.setPersist(false);
-    const pending = await uncertain.rename.prepare(
-      "account-1",
-      "Home Mistral",
-      true,
-    );
     await expect(
-      uncertain.rename.confirm(
-        pending.action!.sessionId,
-        pending.action!.confirmationId,
-        true,
-      ),
+      uncertain.rename.rename("account-1", "Home Mistral"),
     ).resolves.toMatchObject({ ok: false, verified: null });
   });
 });

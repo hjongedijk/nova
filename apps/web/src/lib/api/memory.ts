@@ -82,7 +82,7 @@ export const correctMemory = (id: string, text: string, sessionId: string) =>
     { text, sessionId },
   );
 
-/** Asks to forget one memory; the API answers with a confirmation card (CONFIRM tool). */
+/** Forgets one memory immediately. */
 export const forgetMemoryRecord = (
   id: string,
   sessionId: string,

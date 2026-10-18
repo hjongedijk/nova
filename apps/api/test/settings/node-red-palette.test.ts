@@ -2,7 +2,6 @@ import http from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NodeRedManagement } from "../../src/settings/node-red-management.service.js";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
-import { ADMIN, createApp } from "./helpers.js";
 
 const servers: http.Server[] = [];
 afterEach(async () => {
@@ -698,111 +697,5 @@ describe("Node-RED palette management", () => {
     await expect(fixture.management.paletteState()).rejects.not.toThrow(
       fixture.leak,
     );
-  });
-
-  it("requires SettingsGuard and fresh DANGEROUS confirmation", async () => {
-    const app = await createApp({
-      env: {
-        NOVA_ADMIN_PIN: "fixture-pin",
-        NODE_RED_PALETTE_ALLOWLIST: '["node-red-node-suncalc"]',
-        NODE_RED_ADMIN_TOKEN: "fixture-admin-token-01234567890123456789",
-      },
-    });
-    const management = app.app.get(NodeRedManagement);
-    const state = {
-      revision: "a".repeat(64),
-      modules: [
-        {
-          name: "node-red-node-suncalc",
-          installed: false,
-          version: null,
-          targetVersion: null,
-          pendingVersion: null,
-          restartRequired: false,
-        },
-      ],
-    };
-    const snapshot = vi
-      .spyOn(management, "paletteState")
-      .mockResolvedValue(state);
-    const change = vi.spyOn(management, "changePalette").mockResolvedValue({
-      revision: "b".repeat(64),
-      modules: [
-        {
-          name: "node-red-node-suncalc",
-          installed: true,
-          version: "1.2.3",
-          targetVersion: null,
-          pendingVersion: null,
-          restartRequired: false,
-        },
-      ],
-    });
-    const pin = { ...ADMIN, "x-nova-pin": "fixture-pin" };
-    const prepare = "/api/settings/node-red/palette/prepare";
-    const confirm = "/api/settings/node-red/palette/confirm";
-    const args = {
-      module: "node-red-node-suncalc",
-      install: true,
-      revision: state.revision,
-    };
-    try {
-      expect(
-        (await app.api.get("/api/settings/node-red/palette").set(ADMIN)).status,
-      ).toBe(401);
-      expect(
-        (
-          await app.api
-            .post(prepare)
-            .set({ "x-nova-pin": "fixture-pin" })
-            .send(args)
-        ).status,
-      ).toBe(403);
-      expect(
-        (
-          await app.api
-            .post(prepare)
-            .set(pin)
-            .send({ ...args, module: "node-red-node-other" })
-        ).status,
-      ).toBeGreaterThanOrEqual(400);
-      const staged = await app.api.post(prepare).set(pin).send(args);
-      expect(staged.status).toBe(200);
-      expect(staged.body.action.risk).toBe("DANGEROUS");
-      const action = staged.body.action;
-      expect(
-        (
-          await app.api
-            .post(confirm)
-            .set(pin)
-            .send({
-              sessionId: action.sessionId,
-              confirmationId: "0".repeat(36),
-              approve: true,
-            })
-        ).body.ok,
-      ).toBe(false);
-      expect(change).not.toHaveBeenCalled();
-      const accepted = await app.api.post(confirm).set(pin).send({
-        sessionId: action.sessionId,
-        confirmationId: action.confirmationId,
-        approve: true,
-      });
-      expect(accepted.body.state.modules[0].installed).toBe(true);
-      expect(change).toHaveBeenCalledWith(args.module, true, state.revision);
-      expect(
-        (
-          await app.api.post(confirm).set(pin).send({
-            sessionId: action.sessionId,
-            confirmationId: action.confirmationId,
-            approve: true,
-          })
-        ).body.ok,
-      ).toBe(false);
-      expect(snapshot).toHaveBeenCalled();
-      expect(JSON.stringify(app.audits)).not.toContain("fixture-admin-token");
-    } finally {
-      await app.app.close();
-    }
   });
 });

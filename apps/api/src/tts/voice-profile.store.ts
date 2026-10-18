@@ -16,7 +16,8 @@ const clamp = (value: unknown, min: number, max: number, fallback: number) =>
   typeof value === "number" && Number.isFinite(value)
     ? Math.round(Math.max(min, Math.min(max, value)))
     : fallback;
-const VOICE_ID = /^[A-Za-z]{2,3}-[A-Za-z0-9-]{2,40}$/;
+// Edge ids ("nl-NL-MaartenNeural") and the Piper voice ("jarvis-en-GB-piper"), whose prefix is longer than a locale.
+const VOICE_ID = /^[A-Za-z]{2,6}-[A-Za-z0-9-]{2,40}$/;
 
 /**
  * The voice NOVA uses on the phone and in spoken conversations. The browser keeps its own copy in local storage, so the

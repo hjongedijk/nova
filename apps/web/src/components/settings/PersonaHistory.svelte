@@ -30,12 +30,6 @@
   }
 
   async function rollback(revision: PersonaRevision) {
-    if (
-      !window.confirm(
-        "Herstel deze eigen regels? Latere wijzigingen worden beschermd tegen overschrijven.",
-      )
-    )
-      return;
     busy = true;
     message = "";
     try {

@@ -25,42 +25,15 @@ const services = [
 
 describe("StackControlService", () => {
   let audit: { record: ReturnType<typeof vi.fn> };
-  let confirmations: {
-    create: ReturnType<typeof vi.fn>;
-    peek: ReturnType<typeof vi.fn>;
-    take: ReturnType<typeof vi.fn>;
-  };
-  let pending: Record<string, unknown> | null;
   let service: StackControlService;
 
   beforeEach(() => {
     audit = { record: vi.fn() };
-    pending = null;
-    confirmations = {
-      create: vi.fn((sessionId, tool, args, risk, schemaFingerprint) => {
-        pending = {
-          sessionId,
-          tool,
-          args,
-          risk,
-          schemaFingerprint,
-          confirmationId: "c".repeat(36),
-        };
-        return pending;
-      }),
-      peek: vi.fn(() => pending),
-      take: vi.fn(() => {
-        const value = pending;
-        pending = null;
-        return value;
-      }),
-    };
     service = new StackControlService(
       {
         stackControlUrl: "http://stack-control:8090",
         stackControlToken: token,
       } as NovaConfig,
-      confirmations as never,
       audit as never,
     );
     vi.stubGlobal(
@@ -85,7 +58,7 @@ describe("StackControlService", () => {
     });
   });
 
-  it("shows an absent optional voice service and prepares its restart only when running", async () => {
+  it("shows an absent optional voice service and restarts it only when running", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       Response.json({
         services: services.map((row) =>
@@ -106,14 +79,8 @@ describe("StackControlService", () => {
         ),
       }),
     );
-    expect(await service.prepareRestart("piper")).toMatchObject({ ok: false });
-    expect(confirmations.create).not.toHaveBeenCalled();
-    const prepared = await service.prepareRestart("piper");
-    expect(prepared).toMatchObject({
-      ok: true,
-      service: "piper",
-      label: "Lokale stem",
-    });
+    expect(await service.restart("piper")).toMatchObject({ ok: false });
+    expect(fetch).toHaveBeenCalledTimes(2); // two read-only status calls, no restart
   });
 
   it("projects validated MCP worker counts without Docker secrets", async () => {
@@ -140,26 +107,8 @@ describe("StackControlService", () => {
     expect(JSON.stringify(status)).not.toContain("PRIVATE_TOKEN");
   });
 
-  it("prepares a one-time DANGEROUS action and executes only after approval", async () => {
-    const prepared = await service.prepareRestart("qdrant");
-    expect(prepared).toMatchObject({
-      ok: true,
-      service: "qdrant",
-      label: "Qdrant",
-    });
-    expect(confirmations.create).toHaveBeenCalledWith(
-      expect.stringMatching(/^settings-stack-restart:/),
-      "settings_stack_service_restart",
-      { service: "qdrant", revision },
-      "DANGEROUS",
-      revision,
-      false,
-    );
-    const response = await service.confirmRestart(
-      String(pending?.sessionId),
-      "c".repeat(36),
-      true,
-    );
+  it("restarts a running service in one step and audits the outcome", async () => {
+    const response = await service.restart("qdrant");
     expect(response).toEqual({ ok: true, service: "qdrant" });
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledWith(
@@ -179,41 +128,21 @@ describe("StackControlService", () => {
     );
   });
 
-  it("does not call the broker when the user declines confirmation", async () => {
-    await service.prepareRestart("mqtt");
-    const response = await service.confirmRestart(
-      String(pending?.sessionId),
-      "c".repeat(36),
-      false,
-    );
-    expect(response).toMatchObject({
-      ok: false,
-      error: "Herstart geannuleerd.",
-    });
-    expect(fetch).toHaveBeenCalledTimes(1); // the read-only prepare status only
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({ confirmation: "rejected_admin_ui" }),
-    );
-  });
-
   it("refuses unknown service IDs before reading or writing the broker", async () => {
-    await expect(service.prepareRestart("docker" as never)).rejects.toThrow();
-    await expect(service.prepareRestart("stack-control")).rejects.toThrow();
+    await expect(service.restart("docker" as never)).rejects.toThrow();
+    await expect(service.restart("stack-control")).rejects.toThrow();
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("reports a stale broker conflict and audits that no restart ran", async () => {
-    await service.prepareRestart("mqtt");
-    vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ error: "service state changed" }), {
-        status: 409,
-      }),
-    );
-    const response = await service.confirmRestart(
-      String(pending?.sessionId),
-      "c".repeat(36),
-      true,
-    );
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({ services }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "service state changed" }), {
+          status: 409,
+        }),
+      );
+    const response = await service.restart("mqtt");
     expect(response.ok).toBe(false);
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({

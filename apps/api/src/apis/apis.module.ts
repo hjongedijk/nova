@@ -6,10 +6,12 @@ import { ApiRegistry } from "./api-registry.js";
 import { ApiVault } from "./api-vault.js";
 import { ApiSource } from "./api.source.js";
 import { ApisController } from "./apis.controller.js";
+import { LanDiscoveryService } from "./lan-discovery.service.js";
+import { LanDiscoverySource } from "./lan-discovery.source.js";
 
 /**
  * Universal API integration engine: discovers an API, learns a declarative spec, registers tools for it, keeps it healthy.
- * No learned or downloaded code ever runs; see docs/api-engine.md.
+ * No learned or downloaded code ever runs; see docs/integrations.md#your-own-http-apis.
  */
 @Global()
 @Module({
@@ -21,7 +23,9 @@ import { ApisController } from "./apis.controller.js";
     ApiEngine,
     ApiSource,
     ApiMaintenanceService,
+    LanDiscoveryService,
+    LanDiscoverySource,
   ],
-  exports: [ApiEngine, ApiVault],
+  exports: [ApiEngine, ApiVault, LanDiscoveryService],
 })
 export class ApisModule {}

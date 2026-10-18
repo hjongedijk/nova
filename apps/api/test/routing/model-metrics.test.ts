@@ -1,15 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StateService } from "../../src/core/state/state.service.js";
 import { NovaConfig } from "../../src/core/config/nova-config.js";
 import { OmniRouteClient } from "../../src/chat/omniroute-client.service.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
 import { ModelMetricsService } from "../../src/routing/model-metrics.service.js";
 import { RoutingService } from "../../src/routing/routing.service.js";
-import { createApp } from "../settings/helpers.js";
-import { Test } from "@nestjs/testing";
-import request from "supertest";
-import { AppModule } from "../../src/app.module.js";
-import { IntegrationsHealth } from "../../src/dashboard/integrations-health.service.js";
 
 let config: NovaConfig;
 let management: OmniRouteManagement;
@@ -161,27 +155,6 @@ describe("private model measurements", () => {
     expect((await metrics.report()).available).toBe(false);
     expect(request).not.toHaveBeenCalled();
   });
-  it("protects model measurements with the settings PIN", async () => {
-    vi.spyOn(management, "request").mockResolvedValue({ entries: [] });
-    const nova = await createApp({ env: { NOVA_ADMIN_PIN: "fixture-pin" } });
-    try {
-      vi.spyOn(nova.app.get(ModelMetricsService), "report").mockResolvedValue(
-        await metrics.report(),
-      );
-      expect((await nova.api.get("/api/settings/models/metrics")).status).toBe(
-        401,
-      );
-      expect(
-        (
-          await nova.api
-            .get("/api/settings/models/metrics")
-            .set("x-nova-pin", "fixture-pin")
-        ).status,
-      ).toBe(200);
-    } finally {
-      await nova.app.close();
-    }
-  });
   it.each([false, true])(
     "captures a completed NOVA model answer (stream=%s) without messages",
     async (stream) => {
@@ -304,61 +277,5 @@ describe("private model measurements", () => {
     expect(fetcher).not.toHaveBeenCalled();
     vi.spyOn(management, "request").mockResolvedValue({ entries: [] });
     expect((await metrics.report()).lastResponse?.model).toBe("previous");
-  });
-  it("keeps the last response behind PIN and out of public health/component state", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation(
-        async () =>
-          new Response(
-            JSON.stringify({
-              model: "private-response:free",
-              provider: "private-provider",
-              choices: [
-                { message: { role: "assistant", content: "private-content" } },
-              ],
-            }),
-          ),
-      ),
-    );
-    const module = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(NovaConfig)
-      .useValue(Object.assign(config, { adminPin: "fixture-pin" }))
-      .compile();
-    const app = module.createNestApplication();
-    app.setGlobalPrefix("api");
-    vi.spyOn(app.get(RoutingService), "status").mockReturnValue({
-      freeOnly: true,
-      ready: true,
-      status: "OK",
-    });
-    vi.spyOn(app.get(IntegrationsHealth), "report").mockResolvedValue(
-      {} as Awaited<ReturnType<IntegrationsHealth["report"]>>,
-    );
-    vi.spyOn(app.get(OmniRouteManagement), "request").mockResolvedValue({
-      entries: [],
-    });
-    try {
-      await app.init();
-      await app
-        .get(OmniRouteClient)
-        .call([{ role: "user", content: "private-input" }]);
-      const api = request(app.getHttpServer());
-      expect((await api.get("/api/settings/models/metrics")).status).toBe(401);
-      const privateReport = await api
-        .get("/api/settings/models/metrics")
-        .set("x-nova-pin", "fixture-pin");
-      expect(privateReport.body.lastResponse.model).toBe(
-        "private-response:free",
-      );
-      const health = await api.get("/api/health");
-      expect(health.status).toBe(200);
-      expect(JSON.stringify(health.body)).not.toContain("private-");
-      expect(JSON.stringify(app.get(StateService).all())).not.toContain(
-        "private-",
-      );
-    } finally {
-      await app.close();
-    }
   });
 });

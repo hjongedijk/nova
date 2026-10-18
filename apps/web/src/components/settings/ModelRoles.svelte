@@ -194,7 +194,8 @@
   }
   fieldset {
     margin-block: 1rem;
-    border: 1px solid #30465a;
+    min-width: 0;
+    border: 1px solid var(--line);
     padding: 1rem;
   }
   li {
@@ -211,6 +212,8 @@
     overflow-wrap: anywhere;
   }
   select {
+    min-width: 0;
+    flex: 1;
     min-height: 44px;
     margin-left: 0.5rem;
     max-width: 100%;

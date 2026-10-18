@@ -6,16 +6,13 @@ import {
   HttpCode,
   Post,
   Put,
-  UseGuards,
 } from "@nestjs/common";
 import { ValidationError } from "../core/errors/validation.error.js";
-import { SettingsGuard } from "../settings/settings.guard.js";
 import { ConversationService } from "./conversation.service.js";
 import { ConversationSettingsStore } from "./conversation.settings.js";
 
 /** Settings > Gesprekken: switch, language, greeting, limits, status and a hang-up button. Behind the settings PIN. */
 @Controller("settings/conversation")
-@UseGuards(SettingsGuard)
 export class ConversationController {
   constructor(
     private readonly conversation: ConversationService,

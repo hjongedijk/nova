@@ -6,10 +6,8 @@ import type {
   OmniRouteKeyModelAccessOptions,
   OmniRouteKeyModelAccessResult,
 } from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { claimConfirmation } from "./confirmation-step.js";
 import { HistoryFile, revertedFromField } from "./history-file.js";
 import { REVISION_ID } from "./request-input.js";
 import { sanitize } from "../core/security/sanitize.js";
@@ -64,7 +62,6 @@ export class OmniRouteKeyModelAccess {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
@@ -292,7 +289,6 @@ export class OmniRouteKeyModelAccess {
             ? (stored ?? []).filter((item) => allowed.has(item))
             : models,
         verifiedFreeModels: models,
-        revision: digest(row),
       };
     } catch {
       return {
@@ -301,30 +297,22 @@ export class OmniRouteKeyModelAccess {
         accessMode: "unknown",
         allowedModels: [],
         verifiedFreeModels: [],
-        revision: null,
       };
     }
   }
 
-  async prepare(
+  async apply(
     id: string,
     allowedModels: unknown,
-    revision: unknown,
-    acknowledgeGlobalEffect: unknown,
-  ) {
+  ): Promise<OmniRouteKeyModelAccessResult> {
     if (
       !safeId(id) ||
-      typeof revision !== "string" ||
-      !/^[a-f0-9]{64}$/.test(revision) ||
-      acknowledgeGlobalEffect !== true ||
       !Array.isArray(allowedModels) ||
       allowedModels.length > 100 ||
       allowedModels.some((item) => typeof item !== "string")
     )
-      return {
-        ok: false as const,
-        error: "Controleer modelkeuze en bevestig de clientbrede impact.",
-      };
+      return { ok: false, error: "Controleer de modelkeuze." };
+    let selected: string[];
     try {
       const models = this.eligibleModels();
       if (
@@ -333,193 +321,79 @@ export class OmniRouteKeyModelAccess {
         allowedModels.some((item) => !models.includes(item as string))
       )
         return {
-          ok: false as const,
+          ok: false,
           error: "Kies alleen actuele, geverifieerde gratis modellen.",
         };
-      const current = await this.current(id);
-      if (digest(current.row) !== revision)
-        return {
-          ok: false as const,
-          error: "Sleutelrechten zijn intussen gewijzigd. Laad ze opnieuw.",
-        };
-      const selected = [...(allowedModels as string[])].sort();
-      const sessionId = `settings-key-model-access:${crypto.randomUUID()}`;
-      const args = { id, revision, mode: "restricted", models: selected };
-      const action = this.confirmations.create(
-        sessionId,
-        "omniroute_key_model_access",
-        args,
-        "DANGEROUS",
-        revision,
-        false,
-      );
-      this.audit.record({
-        sessionId,
-        tool: action.tool,
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: { id, modelCount: selected.length, revision },
-      });
-      return {
-        ok: true as const,
-        name: current.name,
-        modelCount: selected.length,
-        action,
-      };
+      selected = [...(allowedModels as string[])].sort();
     } catch {
-      return { ok: false as const, error: fail };
+      return { ok: false, error: fail };
     }
+    return this.execute(id, "restricted", selected);
   }
 
-  async prepareRollback(
+  async rollback(
     id: string,
     revisionId: string,
-    acknowledgeGlobalEffect: unknown,
-  ) {
-    if (
-      !safeId(id) ||
-      !/^[0-9a-f-]{36}$/i.test(revisionId) ||
-      acknowledgeGlobalEffect !== true
-    )
-      return {
-        ok: false as const,
-        error: "Bevestig de clientbrede impact van dit herstel.",
-      };
+  ): Promise<OmniRouteKeyModelAccessResult> {
+    if (!safeId(id) || !/^[0-9a-f-]{36}$/i.test(revisionId))
+      return { ok: false, error: "Ongeldige modelrechtenwijziging." };
     const revisions = this.revisions.all().filter((row) => row.keyId === id);
     const entry = revisions.find((row) => row.id === revisionId);
     if (!entry)
       return {
-        ok: false as const,
+        ok: false,
         error: "Deze modelrechtenwijziging bestaat niet meer.",
       };
     if (revisions.at(-1)?.id !== entry.id)
       return {
-        ok: false as const,
+        ok: false,
         error: "Herstel alleen de nieuwste modelrechtenwijziging.",
       };
-    try {
-      const current = await this.current(id);
-      if (digest(current.row) !== entry.afterRevision)
-        return {
-          ok: false as const,
-          error:
-            "Modelrechten zijn intussen gewijzigd. Laad de geschiedenis opnieuw.",
-        };
-      if (entry.beforeMode === "restricted") {
-        const eligible = new Set(this.eligibleModels());
-        if (entry.beforeModels.some((model) => !eligible.has(model)))
-          return {
-            ok: false as const,
-            error:
-              "Oudere modellen zijn niet meer toegestaan volgens de gratis route.",
-          };
-      }
-      const sessionId = `settings-key-model-access:${crypto.randomUUID()}`;
-      const args = {
-        id,
-        revision: digest(current.row),
-        mode: entry.beforeMode,
-        models: entry.beforeModels,
-        historyRevision: entry.id,
-      };
-      const action = this.confirmations.create(
-        sessionId,
-        "omniroute_key_model_access",
-        args,
-        "DANGEROUS",
-        args.revision,
-        false,
-      );
-      this.audit.record({
-        sessionId,
-        tool: action.tool,
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: {
-          id,
-          modelCount: args.models.length,
-          revision: args.revision,
-        },
-      });
-      return {
-        ok: true as const,
-        name: current.name,
-        modelCount: args.models.length,
-        warning:
-          args.mode === "all"
-            ? "Dit herstelt onbeperkte modeltoegang voor alle OmniRoute-clients met deze sleutel."
-            : "Dit herstelt eerdere modeltoegang voor alle OmniRoute-clients met deze sleutel.",
-        action,
-      };
-    } catch {
-      return { ok: false as const, error: fail };
-    }
+    return this.execute(
+      id,
+      entry.beforeMode,
+      entry.beforeModels,
+      entry.id,
+      entry.afterRevision,
+    );
   }
 
-  async confirm(
+  private async execute(
     id: string,
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
+    mode: "restricted" | "all",
+    models: string[],
+    historyRevision?: string,
+    expectedRevision?: string,
   ): Promise<OmniRouteKeyModelAccessResult> {
-    if (
-      !safeId(id) ||
-      !/^settings-key-model-access:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      return { ok: false, error: "Ongeldige bevestiging." };
-    const claimed = claimConfirmation(
-      this.confirmations,
-      sessionId,
-      confirmationId,
-      approve,
-      {
-        tool: "omniroute_key_model_access",
-        arg: { name: "id", value: id },
-        stale:
-          "Deze bevestiging staat niet meer open. Laad de sleutelrechten opnieuw.",
-        expired: "Bevestiging verlopen. Laad de sleutelrechten opnieuw.",
-        cancelled: { ok: true, cancelled: true },
-      },
-    );
-    if ("reply" in claimed) return claimed.reply;
-    const action = claimed.action;
     if (this.inFlight.has(id))
       return { ok: false, error: "Deze sleutel wordt al gewijzigd." };
     this.inFlight.add(id);
     try {
       return await this.barrier.run(async (operation) => {
-        const revision = action.args.revision;
-        const models = action.args.models;
-        const mode = action.args.mode;
-        if (
-          typeof revision !== "string" ||
-          !Array.isArray(models) ||
-          models.some((item) => typeof item !== "string") ||
-          (mode !== "restricted" && mode !== "all")
-        )
-          return { ok: false, error: "Ongeldige sleutelwijziging." };
         let before: Awaited<ReturnType<OmniRouteKeyModelAccess["current"]>>;
         try {
           const allowedNow =
             mode === "restricted" ? new Set(this.eligibleModels()) : null;
           before = await this.current(id);
-          if (
-            digest(before.row) !== revision ||
-            (allowedNow && models.some((item) => !allowedNow.has(item)))
-          )
+          if (expectedRevision && digest(before.row) !== expectedRevision)
             return {
               ok: false,
               error:
-                "Sleutelrechten of gratis modellijst zijn intussen gewijzigd.",
+                "Modelrechten zijn intussen gewijzigd. Laad de geschiedenis opnieuw.",
+            };
+          if (allowedNow && models.some((item) => !allowedNow.has(item)))
+            return {
+              ok: false,
+              error:
+                "Oudere modellen zijn niet meer toegestaan volgens de gratis route.",
             };
           this.audit.record({
-            sessionId,
-            tool: action.tool,
+            sessionId: "settings",
+            tool: "omniroute_key_model_access",
             risk: "DANGEROUS",
-            confirmation: "approved_admin_ui",
+            confirmation: "direct",
             phase: "before_execute",
-            arguments: { id, modelCount: models.length, mode, revision },
+            arguments: { id, modelCount: models.length, mode },
           });
           operation.block("policy_change");
         } catch {
@@ -549,9 +423,7 @@ export class OmniRouteKeyModelAccess {
             after.name,
             before.row,
             after.row,
-            typeof action.args.historyRevision === "string"
-              ? action.args.historyRevision
-              : undefined,
+            historyRevision,
           );
           const result: OmniRouteKeyModelAccessResult = {
             ok: true,
@@ -563,10 +435,10 @@ export class OmniRouteKeyModelAccess {
           };
           try {
             this.audit.record({
-              sessionId,
-              tool: action.tool,
+              sessionId: "settings",
+              tool: "omniroute_key_model_access",
               risk: "DANGEROUS",
-              confirmation: "approved_admin_ui",
+              confirmation: "direct",
               phase: "verified",
               arguments: { id, modelCount: models.length, mode },
               result: { ok: true, routeReady: route.ready },

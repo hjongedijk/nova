@@ -3,12 +3,13 @@
 use crate::state::Shared;
 use crate::{log, win};
 use nova_win_core::desktop::{decide, Decision};
+use nova_win_core::forward::{pointer_script, route, PointerKind, Target};
 use nova_win_core::geometry::{
     fullscreen_rect, monitor_for_rect, offset_from_position, place, resolve_display, taskbar_px, virtual_origin,
     wallpaper_child_rect, window_size, MonitorInfo, Rect,
 };
 use nova_win_core::mode::WallpaperSpec;
-use nova_win_core::nav::{app_url, browser_args, classify_allowing, helper_url, wallpaper_url, Navigation};
+use nova_win_core::nav::{app_url, browser_args, classify, helper_url, wallpaper_url, Navigation};
 use std::time::{Duration, Instant};
 use tauri::ipc::CapabilityBuilder;
 use tauri::webview::NewWindowResponse;
@@ -16,6 +17,56 @@ use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, Webv
 use tauri_plugin_opener::OpenerExt;
 
 pub const HELPER: &str = "helper";
+
+/// Wallpaper windows that want the mouse, and the thread that replays it into their pages. The wallpaper sits behind
+/// the icon layer, so Windows delivers no clicks to it (see `nova_win_core::forward`).
+static FORWARD_TARGETS: std::sync::Mutex<Vec<Target>> = std::sync::Mutex::new(Vec::new());
+static FORWARD_TX: std::sync::OnceLock<std::sync::mpsc::Sender<(String, String)>> = std::sync::OnceLock::new();
+static LAST_MOVE: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+
+fn forward_targets() -> std::sync::MutexGuard<'static, Vec<Target>> {
+    FORWARD_TARGETS.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Starts forwarding (once): the mouse hook plus the worker that evals the events in the wallpaper pages.
+pub fn start_forwarding(app: &AppHandle) {
+    let (tx, rx) = std::sync::mpsc::channel::<(String, String)>();
+    if FORWARD_TX.set(tx).is_err() {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        for (label, script) in rx {
+            if let Some(window) = app.get_webview_window(&label) {
+                let _ = window.eval(script);
+            }
+        }
+    });
+    win::watch_mouse(on_mouse);
+}
+
+/// Called from the mouse hook: must stay fast and never block.
+fn on_mouse(kind: PointerKind, point: (i32, i32)) {
+    let hit = {
+        let targets = forward_targets();
+        if targets.is_empty() || !targets.iter().any(|t| t.bounds.contains(point.0, point.1)) {
+            return;
+        }
+        if kind == PointerKind::Move {
+            let Ok(mut last) = LAST_MOVE.try_lock() else { return };
+            let now = Instant::now();
+            if last.is_some_and(|t| now.duration_since(t) < Duration::from_millis(16)) {
+                return;
+            }
+            *last = Some(now);
+        }
+        // The window under the cursor is only looked up for a point inside a wallpaper.
+        route(point, win::over_desktop(point.0, point.1), &targets)
+    };
+    if let (Some(hit), Some(tx)) = (hit, FORWARD_TX.get()) {
+        let _ = tx.send((hit.label, pointer_script(kind, hit.x, hit.y)));
+    }
+}
 
 /// Runs inside every NOVA page before it loads: marks it as a desk window, so the page is transparent from the first
 /// paint (no flash of a rectangular background).
@@ -65,7 +116,7 @@ pub fn fingerprint(monitors: &[MonitorInfo]) -> String {
         .join(";")
 }
 
-/// Gives the helper window of this NOVA origin the few commands it needs; no other window and no other origin.
+/// Wires the helper window of this NOVA origin to the few window commands it needs (drag, view, display).
 pub fn grant_origin(app: &AppHandle, origin: &str) {
     let shared = app.state::<Shared>();
     let number = {
@@ -90,9 +141,9 @@ pub fn grant_origin(app: &AppHandle, origin: &str) {
     }
 }
 
-fn guard(app: &AppHandle, origin: String, extra: Vec<String>) -> impl Fn(&url::Url) -> bool + Send + 'static {
+fn guard(app: &AppHandle, origin: String) -> impl Fn(&url::Url) -> bool + Send + 'static {
     let app = app.clone();
-    move |target| match classify_allowing(target, &origin, &extra) {
+    move |target| match classify(target, &origin) {
         Navigation::Allow => true,
         Navigation::External => {
             open_external(&app, target.as_str());
@@ -108,12 +159,11 @@ fn guard(app: &AppHandle, origin: String, extra: Vec<String>) -> impl Fn(&url::U
 fn new_window_guard(
     app: &AppHandle,
     origin: String,
-    extra: Vec<String>,
 ) -> impl Fn(url::Url, tauri::webview::NewWindowFeatures) -> NewWindowResponse<tauri::Wry> + Send + 'static {
     let app = app.clone();
     move |target, _features| {
         // Links that want their own window (target="_blank") open in the default browser, never inside NOVA Desk.
-        match classify_allowing(&target, &origin, &extra) {
+        match classify(&target, &origin) {
             Navigation::Allow | Navigation::External => open_external(&app, target.as_str()),
             Navigation::Block => log!("blocked a new window for a {} address", target.scheme()),
         }
@@ -129,7 +179,6 @@ fn builder<'a>(
     profile: std::path::PathBuf,
 ) -> Option<WebviewWindowBuilder<'a, tauri::Wry, AppHandle>> {
     let parsed: url::Url = url.parse().ok()?;
-    let extra = app.state::<Shared>().lock().config.allowed_origins.clone();
     Some(
         WebviewWindowBuilder::new(app, label, WebviewUrl::External(parsed))
             .decorations(false)
@@ -142,8 +191,8 @@ fn builder<'a>(
             .additional_browser_args(&browser_args(origin))
             .disable_drag_drop_handler()
             .initialization_script(DESK_SCRIPT)
-            .on_navigation(guard(app, origin.to_string(), extra.clone()))
-            .on_new_window(new_window_guard(app, origin.to_string(), extra)),
+            .on_navigation(guard(app, origin.to_string()))
+            .on_new_window(new_window_guard(app, origin.to_string())),
     )
 }
 
@@ -333,6 +382,7 @@ pub fn close_wallpaper(app: &AppHandle, monitor: &str) {
     if let Some(window) = app.get_webview_window(&label_for(monitor)) {
         let _ = window.destroy();
     }
+    forward_targets().retain(|t| t.label != label_for(monitor));
     app.state::<Shared>().lock().wallpapers.remove(monitor);
 }
 
@@ -381,6 +431,7 @@ pub fn create_wallpaper(app: &AppHandle, monitor: &str, spec: WallpaperSpec) {
     let rect = wallpaper_child_rect(&info.bounds, origin_point);
     let app = app.clone();
     let monitor = monitor.to_string();
+    let label = label.clone();
     // The desktop may still be building its layers right after login: try for up to 30 seconds, like the agent.
     std::thread::spawn(move || {
         let mut last = None;
@@ -390,6 +441,13 @@ pub fn create_wallpaper(app: &AppHandle, monitor: &str, spec: WallpaperSpec) {
                 Decision::Place { parent, after, .. } => match win::place(handle, parent, after, rect) {
                     Ok(()) => {
                         win::keep_behind_icons(handle);
+                        forward_targets().retain(|t| t.label != label);
+                        forward_targets().push(Target {
+                            label: label.clone(),
+                            bounds: info.bounds,
+                            scale: info.scale,
+                        });
+                        start_forwarding(&app);
                         log!("wallpaper on {monitor} placed behind the icons");
                         return;
                     }

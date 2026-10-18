@@ -111,8 +111,8 @@ export class ObjectiveError extends Error {}
 export const LIMITS = {
   titleMin: 3,
   titleMax: 120,
-  maxActive: 5,
-  maxTotal: 20,
+  maxActive: 100,
+  maxTotal: 1000,
   minInterval: 5,
   maxInterval: 1440,
   defaultCooldown: 30,

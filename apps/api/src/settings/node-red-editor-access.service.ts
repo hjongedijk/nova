@@ -2,7 +2,6 @@ import { ForbiddenException, Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { Request, Response } from "express";
-import { AppAccessService } from "../access/access.service.js";
 
 export const NODE_RED_EDITOR_PREFIX = "/api/node-red-editor/";
 export type Session = {
@@ -72,15 +71,6 @@ function requestOrigin(request: IncomingMessage): string | null {
 export class NodeRedEditorAccess {
   private readonly sessions = new Map<string, Session>();
 
-  constructor(private readonly access: AppAccessService) {}
-
-  private protectedAccess(request: IncomingMessage): boolean {
-    return (
-      this.access.privacyProtected &&
-      this.access.isAuthorized(request as Request)
-    );
-  }
-
   private prune(): void {
     const now = Date.now();
     for (const [key, session] of this.sessions) {
@@ -93,10 +83,6 @@ export class NodeRedEditorAccess {
     response: Response,
     upstreamAuth: boolean,
   ): { url: string; expiresAt: string } {
-    if (!this.protectedAccess(request))
-      throw new ForbiddenException(
-        "Node-RED-editor vereist beveiligde NOVA-toegang.",
-      );
     const origin = requestOrigin(request);
     if (!origin)
       throw new ForbiddenException("Ongeldige oorsprong voor Node-RED-editor.");
@@ -124,7 +110,6 @@ export class NodeRedEditorAccess {
 
   authorize(request: IncomingMessage, requireOrigin = false): Session | null {
     this.prune();
-    if (!this.protectedAccess(request)) return null;
     const token = cookieToken(request);
     const session = token ? this.sessions.get(keyOf(token)) : null;
     if (!session || new URL(session.origin).host !== request.headers.host)
@@ -148,10 +133,6 @@ export class NodeRedEditorAccess {
   }
 
   close(request: Request, response: Response): void {
-    if (!this.protectedAccess(request))
-      throw new ForbiddenException(
-        "Node-RED-editor vereist beveiligde NOVA-toegang.",
-      );
     const origin = requestOrigin(request);
     if (!origin)
       throw new ForbiddenException("Ongeldige oorsprong voor Node-RED-editor.");

@@ -2342,6 +2342,7 @@ version = "0.1.0"
 dependencies = [
  "nova-win-agent",
  "nova-win-core",
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "sysinfo",

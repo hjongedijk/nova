@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -54,8 +53,6 @@ function fixture() {
     timestamp: "now",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
-  confirmations.now = () => Date.now();
   const routing = new RoutingService(config as NovaConfig);
   vi.spyOn(routing, "verifyForManagement").mockReturnValue(ready);
   const barrier = new RoutingManagementBarrier(config as NovaConfig, routing);
@@ -122,7 +119,6 @@ function fixture() {
   const service = new OmniRouteAccountCreate(
     config as NovaConfig,
     management,
-    confirmations,
     audit,
     barrier,
     routing,
@@ -139,18 +135,18 @@ function fixture() {
   };
 }
 
-describe("OmniRoute provider account creation", () => {
-  it("requires explicit acknowledgement and rejects invalid or duplicate account details", async () => {
+describe("OmniRoute provider account creation (single step)", () => {
+  it("rejects invalid or duplicate account details", async () => {
     const f = fixture();
+    await expect(f.service.create("mistral", "Personal", "")).rejects.toThrow(
+      "provider-ID",
+    );
     await expect(
-      f.service.prepare("mistral", "Personal", secret, false),
-    ).rejects.toThrow("bevestig");
-    await expect(
-      f.service.prepare("mistral/../custom", "Personal", secret, true),
+      f.service.create("mistral/../custom", "Personal", secret),
     ).rejects.toThrow("provider-ID");
     f.setDuplicate(true);
     await expect(
-      f.service.prepare("mistral", "Personal", secret, true),
+      f.service.create("mistral", "Personal", secret),
     ).resolves.toMatchObject({
       ok: false,
       error: expect.stringContaining("al een account"),
@@ -161,36 +157,9 @@ describe("OmniRoute provider account creation", () => {
     );
   });
 
-  it("keeps the key out of confirmation and audit, then verifies API and SQLite", async () => {
+  it("creates in one call, keeps the key out of the result and audit, then verifies API and SQLite", async () => {
     const f = fixture();
-    const prepared = await f.service.prepare(
-      "mistral",
-      "Personal",
-      secret,
-      true,
-    );
-    expect(prepared).toMatchObject({
-      ok: true,
-      provider: "mistral",
-      name: "Personal",
-      action: { risk: "DANGEROUS" },
-    });
-    expect(JSON.stringify(prepared)).not.toContain(secret);
-    expect(JSON.stringify(f.record.mock.calls)).not.toContain(secret);
-    expect(JSON.stringify(prepared.action?.args)).not.toContain(
-      "secretFingerprint",
-    );
-    expect(f.request).not.toHaveBeenCalledWith(
-      "/api/providers",
-      expect.objectContaining({ method: "POST" }),
-    );
-
-    const action = prepared.action!;
-    const result = await f.service.confirm(
-      action.sessionId,
-      action.confirmationId,
-      true,
-    );
+    const result = await f.service.create("mistral", "Personal", secret);
     expect(result).toMatchObject({
       ok: true,
       verified: true,
@@ -199,6 +168,7 @@ describe("OmniRoute provider account creation", () => {
       routeReady: true,
     });
     expect(JSON.stringify(result)).not.toContain(secret);
+    expect(f.record).toHaveBeenCalled();
     expect(JSON.stringify(f.record.mock.calls)).not.toContain(secret);
     expect(
       f.db
@@ -214,24 +184,14 @@ describe("OmniRoute provider account creation", () => {
   it("keeps routing blocked if upstream creation cannot be verified in SQLite", async () => {
     const f = fixture();
     f.setPersist(false);
-    const prepared = await f.service.prepare(
-      "mistral",
-      "Personal",
-      secret,
-      true,
-    );
-    const action = prepared.action!;
-    const result = await f.service.confirm(
-      action.sessionId,
-      action.confirmationId,
-      true,
-    );
+    const result = await f.service.create("mistral", "Personal", secret);
     expect(result).toMatchObject({
       ok: false,
       verified: null,
       routeReady: false,
     });
     expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify(f.record.mock.calls)).not.toContain(secret);
     expect(f.routing.status().ready).toBe(false);
   });
 
@@ -239,14 +199,7 @@ describe("OmniRoute provider account creation", () => {
     const run = async (storedValue: string) => {
       const f = fixture();
       f.setStored(storedValue);
-      const prepared = await f.service.prepare(
-        "mistral",
-        "Personal",
-        secret,
-        true,
-      );
-      const action = prepared.action!;
-      return f.service.confirm(action.sessionId, action.confirmationId, true);
+      return f.service.create("mistral", "Personal", secret);
     };
     // an encrypted envelope is longer than and different from the plain key
     expect(await run(`enc:v1:${"A".repeat(secret.length + 40)}`)).toMatchObject(

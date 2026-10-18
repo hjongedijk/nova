@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AlertsFeed } from "../../src/dashboard/alerts-feed.service.js";
 import { SmallSurprisesService } from "../../src/dashboard/small-surprises.service.js";
 import { ConversationMilestoneService } from "../../src/memory/conversation-milestone.service.js";
+import { failStateWrites } from "../helpers/nova-db.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -154,13 +155,17 @@ describe("durable opt-in conversation milestone delivery", () => {
       const f = fixture();
       f.reach100();
       const rename = fs.renameSync;
-      const failure = vi
-        .spyOn(fs, "renameSync")
-        .mockImplementation((from, to) => {
-          if (String(to) === path.join(f.dir, target))
-            throw new Error("synthetic storage failure");
-          return rename(from, to);
-        });
+      const failure =
+        target === "small-surprises-progress.json"
+          ? failStateWrites(
+              path.join(f.dir, target),
+              "synthetic storage failure",
+            )
+          : vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+              if (String(to) === path.join(f.dir, target))
+                throw new Error("synthetic storage failure");
+              return rename(from, to);
+            });
       f.service.checkSchedule(now);
       expect(f.feed.recent().events).toHaveLength(1);
       expect(f.counter.pending()).toBe(true);

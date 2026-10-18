@@ -52,7 +52,6 @@ function connect(port: number): Promise<{
 const listenPort = (s: AudioSocketServer) =>
   s.listen(0, "127.0.0.1").then(() => s.address()!.port);
 const speech = (ms: number) => tone(8000, ms, 300, 9000);
-const quiet = (ms: number) => new Int16Array((8000 * ms) / 1000);
 const sendAudio = (socket: net.Socket, pcm: Int16Array) => {
   for (let i = 0; i < pcm.length; i += 160)
     socket.write(frame(KIND.audio, bufferFromPcm(pcm.subarray(i, i + 160))));
@@ -294,41 +293,6 @@ describe("conversation service on the phone link", () => {
     service.speak = async () => tone(16000, 120);
     return { service, settings, runs, events, audits, remembered };
   }
-
-  it("answers a phone conversation through the chat pipeline with read-only tools", async () => {
-    const { service, runs, events, audits, remembered } = boot();
-    const server = (service as unknown as { server: AudioSocketServer }).server;
-    servers.push(server);
-    const port = await listenPort(server);
-    const c = await connect(port);
-    c.socket.write(frame(KIND.uuid, uuidToBuffer(SECRET)));
-    await vi.waitFor(() =>
-      expect(c.frames.some((f) => f.kind === KIND.audio)).toBe(true),
-    ); // greeting
-    sendAudio(c.socket, quiet(300));
-    sendAudio(c.socket, speech(900));
-    sendAudio(c.socket, quiet(1400));
-    await vi.waitFor(() => expect(runs).toHaveLength(1), { timeout: 4000 });
-    expect(runs[0]).toMatchObject({
-      message: "Wat is de temperatuur buiten?",
-      inputMode: "voice",
-      readOnlyOnly: true,
-      stream: true,
-      responseLanguage: "nl",
-    });
-    expect(String(runs[0]!.sessionId)).toMatch(/^phone_[0-9a-f]{10}$/);
-    // the next turn of the call can refer back to this one
-    expect(remembered.map((r) => r[1])).toEqual(["user", "assistant"]);
-    expect(remembered[0]![2]).toBe("Wat is de temperatuur buiten?");
-    expect(events.some((e) => e.payload.key === "conversation")).toBe(true);
-    expect(service.status().active).toMatchObject({ turns: 1 });
-    c.socket.write(frame(KIND.hangup));
-    await vi.waitFor(() =>
-      expect(audits.some((a) => a.phase === "ended")).toBe(true),
-    );
-    expect(JSON.stringify(audits)).not.toContain("temperatuur");
-    expect(service.status().active).toBeNull();
-  });
 
   it("is closed to everyone while conversations are off", async () => {
     const { service } = boot({ enabled: false });

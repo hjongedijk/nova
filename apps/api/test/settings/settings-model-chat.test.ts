@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars -- fixtures left from the removed confirmation flow */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import { OmniRouteManagement } from "../../src/routing/omniroute-management.service.js";
@@ -19,7 +20,7 @@ const modelArgs = {
 beforeAll(async () => {
   nova = await createApp({
     env: {
-      JARVIS_ENABLE_ACTIONS: "true",
+      JARVIS_ENABLE_ACTIONS: "false",
       JARVIS_EXTENSIONS: "true",
       OMNIROUTE_ADMIN_PASSWORD: "fixture-only",
     },
@@ -72,7 +73,7 @@ beforeEach(() => {
 });
 
 describe("OmniRoute model visibility through chat", () => {
-  it("only offers the model tool when actions and OmniRoute admin are configured", () => {
+  it("offers model management with OmniRoute admin even when the legacy action flag is false", () => {
     expect(nova.tools.list()).toContainEqual(
       expect.objectContaining({
         name: "settings_model_visibility",
@@ -109,96 +110,7 @@ describe("OmniRoute model visibility through chat", () => {
     });
   });
 
-  it("can restore a hidden model that has left the live catalog", async () => {
-    hidden = true;
-    hiddenModelId = "gpt-retired";
-    const id = session();
-    const first = await nova.tools.execute(
-      "settings_model_visibility",
-      { provider: "openai", modelId: "gpt-retired", hidden: false },
-      id,
-    );
-    expect(first).toMatchObject({
-      requiresConfirmation: true,
-      action: {
-        risk: "DANGEROUS",
-        args: { provider: "openai", modelId: "gpt-retired", hidden: false },
-      },
-    });
-    const approval = confirmations.take(id, first.action!.confirmationId)!;
-    const result = await nova.tools.execute(
-      "settings_model_visibility",
-      approval.args,
-      id,
-      approval,
-      true,
-    );
-    expect(result).toMatchObject({
-      ok: true,
-      verified: true,
-      result: { modelId: "gpt-retired", hidden: false },
-    });
-    expect(patches).toBe(1);
-  });
-
-  it("always requires fresh DANGEROUS confirmation and verifies the catalog update", async () => {
-    const id = session();
-    const first = await nova.tools.execute(
-      "settings_model_visibility",
-      modelArgs,
-      id,
-    );
-    expect(first).toMatchObject({
-      ok: false,
-      requiresConfirmation: true,
-      action: {
-        tool: "settings_model_visibility",
-        risk: "DANGEROUS",
-        allowAlways: false,
-        args: { provider: "openai", modelId: "gpt-fixture", hidden: true },
-      },
-    });
-    expect(patches).toBe(0);
-    const approval = confirmations.take(id, first.action!.confirmationId)!;
-    expect(approval).not.toBeNull();
-    const result = await nova.tools.execute(
-      "settings_model_visibility",
-      approval.args,
-      id,
-      approval,
-      true,
-    );
-    expect(result).toMatchObject({
-      ok: true,
-      verified: true,
-      result: {
-        provider: "openai",
-        modelId: "gpt-fixture",
-        hidden: true,
-        catalogOnly: true,
-        aliasesMayChange: true,
-      },
-    });
-    expect(patches).toBe(1);
-    hidden = false;
-    const renewed = await nova.tools.execute(
-      "settings_model_visibility",
-      modelArgs,
-      id,
-    );
-    expect(renewed).toMatchObject({
-      requiresConfirmation: true,
-      action: { risk: "DANGEROUS", allowAlways: false },
-    });
-    expect(renewed.action!.confirmationId).not.toBe(
-      first.action!.confirmationId,
-    );
-    expect(
-      nova.audits.some((row) => row.tool === "settings_model_visibility"),
-    ).toBe(true);
-  });
-
-  it("rejects unknown models before preparing a confirmation", async () => {
+  it("rejects unknown models without writing changes", async () => {
     const result = await nova.tools.execute(
       "settings_model_visibility",
       { provider: "openai", modelId: "not-in-catalog", hidden: true },

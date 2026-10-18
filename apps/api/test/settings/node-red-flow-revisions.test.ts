@@ -55,9 +55,7 @@ describe("private Node-RED flow revisions", () => {
         return { ok: true, revision: "rev-3" };
       },
     };
-    const prepared = store.prepareRestore(first.id, live);
-    expect(prepared).toMatch(/^[0-9a-f]{64}$/);
-    const restored = await store.restore(first.id, prepared, management);
+    const restored = await store.restore(first.id, management);
     expect(live.flows).toEqual(snapshot("rev-1", "Before").flows);
     expect(restored).toMatchObject({ nodeCount: 1 });
     expect(store.list().revisions[0]?.id).toBe(restored.id);
@@ -68,9 +66,8 @@ describe("private Node-RED flow revisions", () => {
     const first = store.record(snapshot("rev-1", "Before"));
     store.record(snapshot("rev-2", "After"));
     let writes = 0;
-    const prepared = store.prepareRestore(first.id, snapshot("rev-2", "After"));
     await expect(
-      store.restore(first.id, prepared, {
+      store.restore(first.id, {
         flowSnapshot: async () => snapshot("external-rev", "Changed"),
         writeFlowSnapshot: async () => {
           writes++;
@@ -90,29 +87,20 @@ describe("private Node-RED flow revisions", () => {
     expect(store.list().revisions).toHaveLength(2);
   });
 
-  it("rejects a changed target after preparation without a write", async () => {
-    const { store, file } = fixture();
-    const first = store.record(snapshot("rev-1", "Before"));
-    store.record(snapshot("rev-2", "After"));
-    const fingerprint = store.prepareRestore(
-      first.id,
-      snapshot("rev-2", "After"),
-    );
-    const rows = JSON.parse(fs.readFileSync(file, "utf8")) as {
-      snapshot: NodeRedFlowSnapshot;
-    }[];
-    rows[0]!.snapshot.flows[0]!.label = "Changed privately";
-    fs.writeFileSync(file, JSON.stringify(rows), { mode: 0o600 });
+  it("rejects restoring a revision that is already live without a write", async () => {
+    const { store } = fixture();
+    store.record(snapshot("rev-1", "Before"));
+    const second = store.record(snapshot("rev-2", "After"));
     let writes = 0;
     await expect(
-      store.restore(first.id, fingerprint, {
+      store.restore(second.id, {
         flowSnapshot: async () => snapshot("rev-2", "After"),
         writeFlowSnapshot: async () => {
           writes++;
           return { ok: true, revision: "rev-3" };
         },
       }),
-    ).rejects.toThrow("na voorbereiding gewijzigd");
+    ).rejects.toThrow("al actief");
     expect(writes).toBe(0);
   });
 
@@ -120,12 +108,8 @@ describe("private Node-RED flow revisions", () => {
     const { store } = fixture();
     const first = store.record(snapshot("rev-1", "Before"));
     store.record(snapshot("rev-2", "After"));
-    const fingerprint = store.prepareRestore(
-      first.id,
-      snapshot("rev-2", "After"),
-    );
     let reads = 0;
-    const result = await store.restore(first.id, fingerprint, {
+    const result = await store.restore(first.id, {
       flowSnapshot: async () => {
         if (++reads === 1) return snapshot("rev-2", "After");
         throw new Error("private upstream failure");

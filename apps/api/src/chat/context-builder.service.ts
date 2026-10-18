@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { StateService } from "../core/state/state.service.js";
@@ -15,6 +15,7 @@ import {
   topicHint,
 } from "./conversation-style.js";
 import type { CommunicationPreference, ModelRoleId } from "@nova/contracts";
+import { CorrectionLearner } from "./correction-learner.service.js";
 import { socialTimeContext } from "./social-time.js";
 import { sanitize } from "../core/security/sanitize.js";
 import type { StoredMessage } from "../memory/session-memory.service.js";
@@ -105,6 +106,7 @@ export class ContextBuilder {
     private readonly home: HomeAssistantService,
     private readonly state: StateService,
     private readonly audit: AuditService,
+    @Optional() private readonly learner?: CorrectionLearner,
   ) {}
 
   async build(
@@ -113,9 +115,22 @@ export class ContextBuilder {
     role: ModelRoleId = "conversation",
     communicationPreferences: CommunicationPreference[] = [],
     promptContext?: Omit<PromptContext, "message">,
+    options: { untrustedTurn?: boolean } = {},
   ): Promise<ModelMessage[]> {
     message = sanitize(message);
     const recent = this.session.recent(sessionId, 12);
+    if (role === "conversation" && this.learner)
+      await this.learner
+        .learn({
+          sessionId,
+          message,
+          previousAssistant: recent
+            .filter((item) => item.role === "assistant")
+            .at(-1)?.content,
+          untrusted:
+            options.untrustedTurn || Boolean(promptContext?.hasAttachments),
+        })
+        .catch(() => null);
     const turn = classifyTurn(message, recent);
     const messages: ModelMessage[] = [
       {

@@ -5,12 +5,10 @@ import { randomUUID } from "node:crypto";
 import crypto from "node:crypto";
 import type {
   WorkspaceProjectSelectionHistory,
-  WorkspaceProjectSelectionPrepared,
   WorkspaceProjectSelectionResult,
 } from "@nova/contracts";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { ValidationError } from "../core/errors/validation.error.js";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 
 interface ProjectRecord {
@@ -40,15 +38,6 @@ type SelectionRevision = {
   beforeRevision: string;
   afterRevision: string;
 };
-type SelectionDraft = {
-  sessionId: string;
-  revision: string;
-  kind: "selection" | "created";
-  projectId?: string;
-  beforeId: string | null;
-  afterId: string | null;
-  expiresAt: number;
-};
 const catalogDigest = (catalog: Catalog) =>
   crypto.createHash("sha256").update(JSON.stringify(catalog)).digest("hex");
 
@@ -58,12 +47,10 @@ export class WorkspaceProjects {
   private readonly root: string;
   private readonly catalogFile: string;
   private readonly historyFile: string;
-  private readonly drafts = new Map<string, SelectionDraft>();
   private inFlight = false;
 
   constructor(
     config: NovaConfig,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
   ) {
     this.root = path.join(config.dataDir, "workspace");
@@ -378,7 +365,8 @@ export class WorkspaceProjects {
     return { ...catalog, ...(historyWarning ? { historyWarning } : {}) };
   }
 
-  prepareRollback(revisionId: string): WorkspaceProjectSelectionPrepared {
+  /** Restores the newest project selection (or removes the project it created) in one step. */
+  rollback(revisionId: string): WorkspaceProjectSelectionResult {
     if (!/^[0-9a-f-]{36}$/i.test(revisionId))
       throw new ValidationError(["Ongeldige projectwijziging."]);
     const revisions = this.readHistory();
@@ -386,140 +374,22 @@ export class WorkspaceProjects {
     const latest = revisions.at(-1);
     if (!revision || latest?.id !== revision.id)
       return { ok: false, error: "Herstel alleen de nieuwste projectkeuze." };
-    const current = this.read();
-    if (
-      current.activeId !== revision.afterId ||
-      catalogDigest(current) !== revision.afterRevision
-    )
-      return {
-        ok: false,
-        error:
-          "Projectkeuze is intussen gewijzigd. Laad de geschiedenis opnieuw.",
-      };
-    if (revision.kind === "created") {
-      const created = current.projects.find(
-        (item) => item.id === revision.projectId,
-      );
-      if (!created || current.activeId !== created.id)
-        return {
-          ok: false,
-          error: "Het aangemaakte project is intussen gewijzigd.",
-        };
-      if (!this.projectDirectoryIsEmpty(created.id))
-        return {
-          ok: false,
-          error:
-            "Het project bevat bestanden of de projectmap is ongeldig; terugzetten is geweigerd.",
-        };
-    }
-    if (
-      revision.beforeId &&
-      !current.projects.some((item) => item.id === revision.beforeId)
-    )
-      return { ok: false, error: "Het vorige project bestaat niet meer." };
-    const target = revision.beforeId
-      ? current.projects.find((item) => item.id === revision.beforeId)!
-      : undefined;
-    if (target) {
-      try {
-        this.projectDirectory(target.id);
-      } catch {
-        return { ok: false, error: "De vorige projectmap is ongeldig." };
-      }
-    }
-    const args = {
-      revisionId,
+    const draft = {
       kind: revision.kind,
       projectId: revision.projectId,
       beforeId: revision.beforeId,
       afterId: revision.afterId,
-      revision: revision.afterRevision,
     };
-    this.audit.record({
-      sessionId: "settings",
-      tool: "workspace_project_selection_rollback",
-      risk: "DANGEROUS",
-      confirmation: "pending_admin_ui",
-      arguments: {
-        revisionId,
-        beforeId: revision.beforeId,
-        afterId: revision.afterId,
-      },
-    });
-    const action = this.confirmations.create(
-      `settings-workspace-project:${randomUUID()}`,
-      "workspace_project_selection_rollback",
-      args,
-      "DANGEROUS",
-      revision.afterRevision,
-      false,
-    );
-    this.drafts.set(action.confirmationId, {
-      sessionId: action.sessionId,
-      revision: revision.afterRevision,
-      kind: revision.kind,
-      projectId: revision.projectId,
-      beforeId: revision.beforeId,
-      afterId: revision.afterId,
-      expiresAt: action.expiresAt,
-    });
-    return {
-      ok: true,
-      fromName: current.projects.find((item) => item.id === current.activeId)
-        ?.name,
-      toName:
-        revision.kind === "created"
-          ? "Project verwijderen"
-          : (target?.name ?? "Geen actief project"),
-      action,
-    };
-  }
-
-  confirmRollback(
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
-  ): WorkspaceProjectSelectionResult {
-    if (
-      !/^settings-workspace-project:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige projectbevestiging."]);
-    const draft = this.drafts.get(confirmationId);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !draft ||
-      draft.sessionId !== sessionId ||
-      pending?.tool !== "workspace_project_selection_rollback" ||
-      pending.confirmationId !== confirmationId
-    )
-      return {
-        ok: false,
-        error: "Deze projectbevestiging staat niet meer open.",
-      };
-    this.drafts.delete(confirmationId);
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true };
-    }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Laad de projectgeschiedenis opnieuw.",
-      };
+    const sessionId = "settings";
+    const action = { tool: "workspace_project_selection_rollback" };
     if (this.inFlight)
       return { ok: false, error: "Er wordt al een projectkeuze teruggezet." };
     this.inFlight = true;
     try {
       const current = this.read();
       if (
-        catalogDigest(current) !== draft.revision ||
-        current.activeId !== draft.afterId ||
-        action.args.revision !== draft.revision ||
-        action.args.beforeId !== draft.beforeId ||
-        action.args.kind !== draft.kind ||
-        action.args.projectId !== draft.projectId
+        catalogDigest(current) !== revision.afterRevision ||
+        current.activeId !== draft.afterId
       )
         return {
           ok: false,
@@ -563,10 +433,10 @@ export class WorkspaceProjects {
           sessionId,
           tool: action.tool,
           risk: "DANGEROUS",
-          confirmation: "confirmed_admin_ui",
+          confirmation: "direct",
           phase: "before_execute",
           arguments: {
-            revisionId: action.args.revisionId,
+            revisionId,
             beforeId: draft.beforeId,
             afterId: draft.afterId,
           },
@@ -617,7 +487,7 @@ export class WorkspaceProjects {
           sessionId,
           tool: action.tool,
           risk: "DANGEROUS",
-          confirmation: "confirmed_admin_ui",
+          confirmation: "direct",
           phase: "after_execute",
           arguments: { beforeId: draft.afterId, afterId: draft.beforeId },
           result: { ok: true },

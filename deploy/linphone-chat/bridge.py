@@ -1,4 +1,4 @@
-"""NOVA <-> Linphone end-to-end encrypted chat bridge (UNTESTED against a real account, see docs/linphone-encrypted-chat.md).
+"""NOVA <-> Linphone end-to-end encrypted chat bridge (UNTESTED against a real account, see docs/integrations.md#encrypted-linphone-chat-bridge).
 
 Design: the bridge logs in with the SAME Linphone account that Asterisk registers with (the NOVA trunk). Flexisip forks to
 every registration of an account, so this process must be a polite second device:

@@ -1,7 +1,5 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { ApiError } from "#lib/api/client.ts";
-  import { getPin, setPin } from "#lib/api/pin-session.ts";
   import {
     getDesktop,
     getDesktopFrame,
@@ -18,10 +16,6 @@
   let capturedAt = $state("");
   let error = $state("");
   let stopping = $state(false);
-  let locked = $state(false);
-  let pin = $state("");
-  let unlocking = $state(false);
-  let unlockController: AbortController | undefined;
   let statusDue = 0;
   let seenSession = "";
 
@@ -32,7 +26,6 @@
 
   function acceptOverview(value: DesktopOverview, autoOpen = false) {
     overview = value;
-    locked = false;
     const session = value.session?.id ?? "";
     if (autoOpen && session && session !== seenSession) show();
     if (session) seenSession = session;
@@ -52,39 +45,7 @@
 
   function failed(cause: unknown, fallback: string) {
     clearImage();
-    if (
-      cause instanceof ApiError &&
-      cause.status === 401 &&
-      cause.pinRequired
-    ) {
-      setPin("");
-      locked = true;
-      pin = "";
-    }
     error = cause instanceof Error ? cause.message : fallback;
-  }
-
-  async function unlock(event: SubmitEvent) {
-    event.preventDefault();
-    if (unlocking || !pin) return;
-    unlocking = true;
-    unlockController = new AbortController();
-    setPin(pin);
-    pin = "";
-    try {
-      const value = await getDesktop(unlockController.signal);
-      if (unlockController.signal.aborted) return;
-      error = "";
-      statusDue = 0;
-      acceptOverview(value);
-    } catch (cause) {
-      if (unlockController.signal.aborted) return;
-      setPin("");
-      locked = true;
-      failed(cause, "Ontgrendelen mislukt.");
-    } finally {
-      unlocking = false;
-    }
   }
 
   async function stop() {
@@ -110,12 +71,7 @@
     let timer: ReturnType<typeof setTimeout> | undefined;
     async function checkSession() {
       try {
-        if (
-          !document.hidden &&
-          (!open || minimized || locked) &&
-          (!locked || getPin()) &&
-          !unlocking
-        ) {
+        if (!document.hidden && (!open || minimized)) {
           const value = await getDesktop(controller.signal);
           if (!controller.signal.aborted) acceptOverview(value, true);
         }
@@ -130,7 +86,6 @@
     void checkSession();
     return () => {
       controller.abort();
-      unlockController?.abort();
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", visibility);
       clearImage();
@@ -138,7 +93,7 @@
   });
 
   $effect(() => {
-    const active = open && !minimized && visible && !locked;
+    const active = open && !minimized && visible;
     const selected = display;
     if (!active) {
       untrack(clearImage);
@@ -167,7 +122,7 @@
           clearImage();
           error =
             overview?.agentError ??
-            "Meekijken staat uit. Zet het aan in de bureaubladinstellingen en op de pc.";
+            "Meekijken staat uit. Zet het aan bij Instellingen → Windows-pc en op de pc.";
         } else {
           const frame = await getDesktopFrame(selected, controller.signal);
           if (controller.signal.aborted) return;
@@ -206,10 +161,10 @@
   });
 </script>
 
-{#if overview?.configured || locked}
+{#if overview?.configured}
   {#if !open}
     <button class="desktop-launch" type="button" onclick={show}
-      >{locked ? "Pc bekijken · ontgrendelen" : "Pc bekijken"}</button
+      >Pc bekijken</button
     >
   {:else}
     <aside class="desktop-live" aria-label="Live meekijken op de pc">
@@ -233,71 +188,49 @@
       </header>
       {#if !minimized}
         <div class="desktop-content">
-          {#if locked}
-            <form onsubmit={unlock}>
-              <p>Ontgrendel het schermbeeld met je instellingen-PIN.</p>
-              <label
-                >Instellingen-PIN
-                <input
-                  type="password"
-                  autocomplete="off"
-                  bind:value={pin}
-                  disabled={unlocking}
-                  required
-                />
-              </label>
-              <button type="submit" disabled={unlocking || !pin}
-                >{unlocking ? "Ontgrendelen…" : "Ontgrendelen"}</button
-              >
-              {#if error}<p class="error" role="status">{error}</p>{/if}
-            </form>
-          {:else}
-            {#if displays.length > 1}
-              <label
-                >Beeldscherm
-                <select bind:value={display} aria-label="Beeldscherm">
-                  {#each displays as monitor (monitor.index)}
-                    <option value={monitor.index}
-                      >Scherm {monitor.index}{monitor.primary
-                        ? " · primair"
-                        : ""} ·
-                      {monitor.width}×{monitor.height}</option
-                    >
-                  {/each}
-                </select>
-              </label>
-            {/if}
-            <div class="screen">
-              {#if image}<img
-                  src={image}
-                  alt="Actueel beeld van het geselecteerde pc-scherm"
-                />
-              {:else}<p>{error || "Schermbeeld ophalen…"}</p>{/if}
-            </div>
-            {#if image && capturedAt}<small
-                >Bijgewerkt {new Date(capturedAt).toLocaleTimeString(
-                  "nl-NL",
-                )}</small
-              >{/if}
-            {#if error}<p class="error" role="status">{error}</p>{/if}
-            <p class="activity">
-              {overview?.session
-                ? overview.session.goal
-                : "Er loopt geen overname."}
-            </p>
-            {#if recent}<small
-                >Laatste actie: {String(
-                  recent.arguments?.action ?? "pc bedienen",
-                )}</small
-              >{/if}
-            <button
-              class="stop"
-              type="button"
-              disabled={stopping ||
-                (!overview?.session && !overview?.disarmPending)}
-              onclick={stop}>{stopping ? "Stoppen…" : "Stop overname"}</button
-            >
+          {#if displays.length > 1}
+            <label
+              >Beeldscherm
+              <select bind:value={display} aria-label="Beeldscherm">
+                {#each displays as monitor (monitor.index)}
+                  <option value={monitor.index}
+                    >Scherm {monitor.index}{monitor.primary ? " · primair" : ""} ·
+                    {monitor.width}×{monitor.height}</option
+                  >
+                {/each}
+              </select>
+            </label>
           {/if}
+          <div class="screen">
+            {#if image}<img
+                src={image}
+                alt="Actueel beeld van het geselecteerde pc-scherm"
+              />
+            {:else}<p>{error || "Schermbeeld ophalen…"}</p>{/if}
+          </div>
+          {#if image && capturedAt}<small
+              >Bijgewerkt {new Date(capturedAt).toLocaleTimeString(
+                "nl-NL",
+              )}</small
+            >{/if}
+          {#if error}<p class="error" role="status">{error}</p>{/if}
+          <p class="activity">
+            {overview?.session
+              ? overview.session.goal
+              : "Er loopt geen overname."}
+          </p>
+          {#if recent}<small
+              >Laatste actie: {String(
+                recent.arguments?.action ?? "pc bedienen",
+              )}</small
+            >{/if}
+          <button
+            class="stop"
+            type="button"
+            disabled={stopping ||
+              (!overview?.session && !overview?.disarmPending)}
+            onclick={stop}>{stopping ? "Stoppen…" : "Stop overname"}</button
+          >
         </div>
       {/if}
     </aside>
@@ -359,25 +292,6 @@
     display: grid;
     gap: 4px;
     font-size: 13px;
-  }
-  form {
-    display: grid;
-    gap: 10px;
-  }
-  input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 8px;
-    border: 1px solid #415264;
-    border-radius: 6px;
-    background: #111c27;
-    color: inherit;
-  }
-  form button {
-    border: 1px solid #415264;
-    border-radius: 6px;
-    padding: 8px;
-    background: #203343;
   }
   select {
     background: #111c27;

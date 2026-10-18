@@ -8,6 +8,7 @@ import { SidebarHistory } from "../../src/settings/sidebar-history.service.js";
 import { resolveSidebar } from "../../src/settings/settings-validation.js";
 import type { AuditService } from "../../src/core/audit/audit.service.js";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
+import { dbStat, historyText } from "../helpers/nova-db.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -36,10 +37,8 @@ describe("sidebar history", () => {
     f.history.record(before, after);
     expect(f.history.list().revisions[0]).toMatchObject({ before, after });
     const file = path.join(f.dir, "sidebar-history.json");
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
-    expect(fs.readFileSync(file, "utf8")).not.toMatch(
-      /prompt|source|url|headers/i,
-    );
+    expect(dbStat(file).mode & 0o777).toBe(0o600);
+    expect(historyText(file)).not.toMatch(/prompt|source|url|headers/i);
   });
 
   it("rolls back only while effective layout still matches", () => {

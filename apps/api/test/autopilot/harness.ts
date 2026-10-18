@@ -241,7 +241,6 @@ export function rig(
       } as never,
       objectives as never,
       agent as never,
-      { get: () => world.level } as never,
       { record: vi.fn() } as never,
       config,
       telephony as never,

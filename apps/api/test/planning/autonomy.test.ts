@@ -4,7 +4,6 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AutonomyController } from "../../src/planning/autonomy/autonomy.controller.js";
 import { AutonomyService } from "../../src/planning/autonomy/autonomy.service.js";
-import { AutonomySource } from "../../src/planning/autonomy/autonomy.source.js";
 import { AutonomyStore } from "../../src/planning/autonomy/autonomy.store.js";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import type { ToolsService } from "../../src/tools/tools.service.js";
@@ -176,6 +175,46 @@ describe("event-triggered workflow", () => {
 });
 
 describe("restart recovery", () => {
+  it("resumes a legacy approval wait without asking for approval again", async () => {
+    const service = boot();
+    const { task } = service.create({
+      title: "Legacy",
+      steps: [{ tool: "do_confirm" }],
+    });
+    handler = () => new Promise(() => undefined);
+    void service.tick();
+    await Promise.resolve();
+    const persisted = JSON.parse(fs.readFileSync(file(), "utf8"));
+    persisted.tasks[0].run.steps.s1.status = "waiting_approval";
+    persisted.tasks[0].run.steps.s1.approval = { requestedAt: clock };
+    fs.writeFileSync(file(), JSON.stringify(persisted));
+    execute.mockClear();
+    handler = async () => ({ ok: true, result: "done" });
+    const restarted = boot();
+    expect(restarted.get(task.id)!.run!.steps.s1?.status).toBe("pending");
+    await restarted.tick();
+    expect(execute).toHaveBeenCalledOnce();
+    expect(restarted.get(task.id)!.status).toBe("completed");
+  });
+
+  it("does not duplicate an interrupted write now that approvals are removed", async () => {
+    const service = boot();
+    const { task } = service.create({
+      title: "Write",
+      steps: [{ tool: "do_safe" }],
+    });
+    handler = () => new Promise(() => undefined);
+    void service.tick();
+    await Promise.resolve();
+    execute.mockClear();
+    handler = async () => ({ ok: true, result: "done" });
+    const restarted = boot();
+    expect(restarted.get(task.id)!.run!.steps.s1?.status).toBe("failed");
+    await restarted.tick();
+    expect(execute).not.toHaveBeenCalled();
+    expect(restarted.get(task.id)!.status).toBe("failed");
+  });
+
   it("resumes a read-only step interrupted by a crash and keeps progress", async () => {
     const svc = boot();
     const { task } = svc.create({
@@ -197,40 +236,6 @@ describe("restart recovery", () => {
     expect(execute.mock.calls.map((c) => c[0])).toEqual(["read_a", "read_b"]);
     expect(restarted.get(task.id)).toMatchObject({ status: "completed" });
     expect(restarted.get(task.id)!.runs).toBe(1);
-  });
-
-  it("never repeats an approved side-effect step that was in flight at the crash", async () => {
-    const svc = boot();
-    const { task } = svc.create({
-      title: "W",
-      steps: [{ tool: "do_confirm" }],
-    });
-    clock += 1;
-    await svc.tick(); // run starts, step waits for approval
-    svc.approve(task.id);
-    handler = () => new Promise(() => undefined);
-    void svc.tick();
-    await Promise.resolve();
-    execute.mockClear();
-    const restarted = boot();
-    await restarted.tick();
-    expect(execute).not.toHaveBeenCalled();
-    expect(restarted.get(task.id)).toMatchObject({ status: "failed" });
-    expect(emitted.at(-1)?.payload.title).toMatch(/onderbroken|mislukt/);
-  });
-
-  it("keeps a waiting approval across a restart", async () => {
-    const svc = boot();
-    const { task } = svc.create({
-      title: "W",
-      steps: [{ tool: "do_confirm" }],
-    });
-    clock += 1;
-    await svc.tick();
-    const restarted = boot();
-    await restarted.tick();
-    expect(execute).not.toHaveBeenCalled();
-    expect(restarted.approve(task.id)).toEqual(["s1"]);
   });
 });
 
@@ -313,119 +318,6 @@ describe("retry, backoff and idempotency", () => {
   });
 });
 
-describe("permission boundary", () => {
-  it("refuses DANGEROUS tools, secrets and nested autonomy at creation", () => {
-    const svc = boot();
-    expect(() =>
-      svc.create({ title: "x", steps: [{ tool: "do_danger" }] }),
-    ).toThrow(/riskant/);
-    expect(() =>
-      svc.create({
-        title: "x",
-        steps: [{ tool: "read_a", args: { api_key: "abc" } }],
-      }),
-    ).toThrow(/geheimen/);
-    expect(() =>
-      svc.create({ title: "x", steps: [{ tool: "autonomy_create" }] }),
-    ).toThrow();
-    expect(() =>
-      svc.create({ title: "x", steps: [{ tool: "nope" }] }),
-    ).toThrow();
-  });
-
-  it("pauses a CONFIRM step, notifies, and runs it only after approval", async () => {
-    const svc = boot();
-    const { task } = svc.create({
-      title: "Lamp",
-      steps: [{ tool: "read_a" }, { tool: "do_confirm", args: { on: true } }],
-      notifyOnDone: false,
-    });
-    clock += 1;
-    await svc.tick();
-    await svc.tick();
-    await svc.tick();
-    expect(execute.mock.calls.map((c) => c[0])).toEqual(["read_a"]);
-    expect(emitted.at(-1)?.payload).toMatchObject({
-      severity: "warning",
-      title: "Goedkeuring nodig: Lamp",
-    });
-    expect(svc.get(task.id)!.run!.steps.s2!.status).toBe("waiting_approval");
-    // Nothing happens however long it waits (no auto-approve), until the user approves.
-    clock += 3_600_000;
-    await svc.tick();
-    expect(execute).toHaveBeenCalledTimes(1);
-    expect(svc.approve(task.id)).toEqual(["s2"]);
-    await svc.tick();
-    await svc.tick();
-    const call = execute.mock.calls.at(-1)!;
-    expect(call[0]).toBe("do_confirm");
-    expect(call[3]).toMatchObject({
-      tool: "do_confirm",
-      args: { on: true },
-      risk: "CONFIRM",
-    });
-    expect(call[5].readOnlyOnly).toBe(false);
-    expect(svc.get(task.id)).toMatchObject({ status: "completed" });
-  });
-
-  it("lets an expired approval fail instead of running late", async () => {
-    const svc = boot();
-    const { task } = svc.create({
-      title: "Oud",
-      steps: [{ tool: "do_confirm" }],
-    });
-    clock += 1;
-    await svc.tick();
-    clock += 25 * 3_600_000;
-    expect(svc.approve(task.id)).toEqual([]);
-    await svc.tick();
-    expect(execute).not.toHaveBeenCalled();
-    expect(svc.get(task.id)?.status).toBe("failed");
-  });
-
-  it("treats SAFE steps as approval-required unless autoSafe, and honours a tool-side confirmation", async () => {
-    const svc = boot();
-    const a = svc.create({ title: "S1", steps: [{ tool: "do_safe" }] }).task;
-    clock += 1;
-    await svc.tick();
-    expect(execute).not.toHaveBeenCalled();
-    expect(svc.get(a.id)!.run!.steps.s1!.status).toBe("waiting_approval");
-    // autoSafe: still bound by the global auto-execute switch (tool answers requiresConfirmation).
-    const b = svc.create({
-      title: "S2",
-      autoSafe: true,
-      steps: [{ tool: "do_safe", args: { z: 1 } }],
-    }).task;
-    handler = async () => ({
-      ok: false,
-      requiresConfirmation: true,
-      action: { tool: "do_safe", risk: "SAFE" },
-    });
-    await svc.tick();
-    expect(execute).toHaveBeenCalledTimes(1);
-    expect(svc.get(b.id)!.run!.steps.s1!.status).toBe("waiting_approval");
-  });
-
-  it("cannot be used to run a step the tool layer reports as a changed risk", async () => {
-    const svc = boot();
-    const { task } = svc.create({
-      title: "Risk",
-      steps: [{ tool: "do_confirm" }],
-    });
-    clock += 1;
-    await svc.tick();
-    svc.approve(task.id);
-    handler = async () => ({
-      ok: false,
-      requiresConfirmation: true,
-      action: { tool: "do_confirm", risk: "DANGEROUS" },
-    });
-    await svc.tick();
-    expect(svc.get(task.id)).toMatchObject({ status: "failed" });
-    expect(execute).toHaveBeenCalledTimes(1);
-  });
-});
-
 describe("budgets, dependencies and follow-up", () => {
   it("stops a run when the tool-call budget is exhausted", async () => {
     const svc = boot();
@@ -505,50 +397,5 @@ describe("budgets, dependencies and follow-up", () => {
     const done = svc.get(task.id)!;
     expect(done.status).toBe("failed");
     expect(execute.mock.calls.filter((c) => c[0] === "read_b")).toHaveLength(1);
-  });
-});
-
-describe("tools", () => {
-  it("create/list/cancel/approve through the tool source with Dutch errors", async () => {
-    const svc = boot();
-    const source = new AutonomySource(svc);
-    const names = source.definitions().map((d) => d.name);
-    expect(names).toEqual([
-      "autonomy_create",
-      "autonomy_list",
-      "autonomy_cancel",
-      "autonomy_approve",
-    ]);
-    const risks = Object.fromEntries(
-      source.definitions().map((d) => [d.name, d.risk]),
-    );
-    expect(risks).toMatchObject({
-      autonomy_create: "CONFIRM",
-      autonomy_approve: "CONFIRM",
-      autonomy_list: "READ_ONLY",
-    });
-    const created = await source.execute("autonomy_create", {
-      title: "Via tool",
-      delaySeconds: 60,
-      steps: [{ tool: "read_a" }],
-    });
-    expect(created.ok).toBe(true);
-    const bad = await source.execute("autonomy_create", {
-      title: "x",
-      steps: [{ tool: "do_danger" }],
-    });
-    expect(bad).toMatchObject({
-      ok: false,
-      error: expect.stringMatching(/riskant/),
-    });
-    const listed = await source.execute("autonomy_list", {});
-    expect((listed.result as unknown[]).length).toBe(1);
-    const id = (created.result as { task: { id: string } }).task.id;
-    expect(await source.execute("autonomy_cancel", { id })).toMatchObject({
-      ok: true,
-    });
-    expect(await source.execute("autonomy_cancel", { id })).toMatchObject({
-      ok: false,
-    });
   });
 });

@@ -1,11 +1,13 @@
 import {
+  readJsonStateOrEnoent,
+  writeJsonState,
+} from "../core/db/json-state.js";
+import {
   Injectable,
   Logger,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
-import fs from "node:fs";
-import path from "node:path";
 import crypto from "node:crypto";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
@@ -200,7 +202,7 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
 
   private completedDay(): string | null {
     try {
-      const value = JSON.parse(fs.readFileSync(this.progressFile, "utf8")) as {
+      const value = readJsonStateOrEnoent(this.progressFile) as {
         completedDay?: unknown;
       };
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value?.completedDay ?? "")))
@@ -216,24 +218,7 @@ export class DailyHighlightService implements OnModuleInit, OnModuleDestroy {
 
   private saveCompletedDay(day: string): void {
     try {
-      const temporary = `${this.progressFile}.tmp`;
-      fs.writeFileSync(temporary, JSON.stringify({ completedDay: day }), {
-        mode: 0o600,
-      });
-      fs.chmodSync(temporary, 0o600);
-      const descriptor = fs.openSync(temporary, "r");
-      try {
-        fs.fsyncSync(descriptor);
-      } finally {
-        fs.closeSync(descriptor);
-      }
-      fs.renameSync(temporary, this.progressFile);
-      const directory = fs.openSync(path.dirname(this.progressFile), "r");
-      try {
-        fs.fsyncSync(directory);
-      } finally {
-        fs.closeSync(directory);
-      }
+      writeJsonState(this.progressFile, { completedDay: day });
     } catch {
       this.paused = true;
       this.logger.error(

@@ -260,7 +260,6 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
             message,
             inputMode: "text",
             responseLanguage: "nl",
-            readOnlyOnly: run.readOnly === true,
             signal: AbortSignal.any([
               controller.signal,
               AbortSignal.timeout(120_000),

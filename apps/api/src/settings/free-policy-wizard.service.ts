@@ -1,14 +1,9 @@
-import { Injectable, type OnModuleDestroy } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  FreePolicyOptions,
-  FreePolicyPrepared,
-  FreePolicyResult,
-} from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
+import type { FreePolicyOptions, FreePolicyResult } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { sanitize } from "../core/security/sanitize.js";
@@ -68,12 +63,6 @@ type VerifiedPlan = Omit<FreePolicyPlan, "catalog"> & {
   catalog: (Omit<FreePolicyPlan["catalog"][number], "nativeAutoEligible"> & {
     nativeAutoEligible: true;
   })[];
-};
-type Draft = {
-  plan: FreePolicyPlan;
-  binding: string;
-  sessionId: string;
-  expiresAt: number;
 };
 type PolicyState = {
   settings: Record<string, unknown>;
@@ -135,25 +124,13 @@ export function withCurrentlyEnabled(
 }
 
 @Injectable()
-export class FreePolicyWizard implements OnModuleDestroy {
-  private readonly inventorySecret = crypto.randomBytes(32);
-  private readonly drafts = new Map<string, Draft>();
-  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+export class FreePolicyWizard {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
   ) {}
-  private drop(id: string): void {
-    this.drafts.delete(id);
-    clearTimeout(this.timers.get(id));
-    this.timers.delete(id);
-  }
-  onModuleDestroy(): void {
-    for (const id of this.drafts.keys()) this.drop(id);
-  }
   private assertGateway(): void {
     if (
       this.config.omniUrl !== this.config.verifiedOmniUrl ||
@@ -615,28 +592,6 @@ export class FreePolicyWizard implements OnModuleDestroy {
       ];
     });
   }
-  private inventoryToken(snapshot: Snapshot, expiresAt: number): string {
-    const signature = crypto
-      .createHmac("sha256", this.inventorySecret)
-      .update(JSON.stringify({ snapshot, expiresAt }))
-      .digest("hex");
-    return `${expiresAt}.${signature}`;
-  }
-  private verifyInventory(token: unknown, snapshot: Snapshot): void {
-    if (typeof token !== "string" || !/^\d{1,16}\.[a-f0-9]{64}$/.test(token))
-      throw new Error("Inventory acknowledgement missing");
-    const expiresAt = Number(token.split(".")[0]);
-    const now = this.confirmations.now();
-    if (
-      !Number.isSafeInteger(expiresAt) ||
-      expiresAt <= now ||
-      expiresAt > now + 600_000
-    )
-      throw new Error("Inventory acknowledgement expired");
-    const expected = this.inventoryToken(snapshot, expiresAt);
-    if (!crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected)))
-      throw new Error("Inventory changed; renew account attestations");
-  }
   async options(): Promise<FreePolicyOptions> {
     try {
       const snapshot = this.snapshot();
@@ -646,10 +601,6 @@ export class FreePolicyWizard implements OnModuleDestroy {
       );
       return {
         available: true,
-        inventoryToken: this.inventoryToken(
-          snapshot,
-          this.confirmations.now() + 600_000,
-        ),
         accounts: snapshot.accounts
           .filter(
             (account) =>
@@ -677,111 +628,33 @@ export class FreePolicyWizard implements OnModuleDestroy {
       };
     }
   }
-  async prepare(input: unknown): Promise<FreePolicyPrepared> {
+  private async plan(input: unknown): Promise<FreePolicyPlan> {
     const value = object(input);
+    const snapshot = this.snapshot();
+    const models = withCurrentlyEnabled(
+      await this.models(),
+      this.safePolicy() ?? {},
+    );
+    const knownProviders = [
+      ...snapshot.accounts.map((account) => account.provider),
+      ...(Array.isArray(snapshot.settings.blockedProviders)
+        ? snapshot.settings.blockedProviders.filter(
+            (provider): provider is string => typeof provider === "string",
+          )
+        : []),
+    ]
+      .map(identifier)
+      .filter(Boolean);
+    const plan = this.keepEmbeddings(
+      buildFreePolicyPlan(value, snapshot.accounts, models, knownProviders),
+    );
     if (
-      ![
-        "acknowledgeBillingDisabled",
-        "acknowledgeHardStop",
-        "acknowledgeTerms",
-        "acknowledgeAllClients",
-        "acknowledgeQuotaRefresh",
-      ].every((key) => value[key] === true)
+      snapshot.overrides.some((id) => plan.verifiedConnectionIds.includes(id))
     )
-      throw new ValidationError([
-        "Controleer en bevestig facturering, harde limieten, voorwaarden en de gevolgen voor alle clients.",
-      ]);
-    for (const [id, draft] of this.drafts)
-      if (
-        draft.expiresAt <= this.confirmations.now() ||
-        !this.confirmations.has(draft.sessionId)
-      )
-        this.drop(id);
-    if (this.drafts.size >= 20)
-      return {
-        ok: false,
-        error:
-          "Er staan te veel beleidswijzigingen open. Annuleer of wacht tot ze verlopen.",
-      };
-    try {
-      const snapshot = this.snapshot();
-      this.verifyInventory(value.inventoryToken, snapshot);
-      const { inventoryToken: _token, ...planInput } = value;
-      void _token;
-      const models = withCurrentlyEnabled(
-        await this.models(),
-        this.safePolicy() ?? {},
+      throw new PolicyStageError(
+        "Een gekozen account is uitgesloten voor NOVA. Verwijder die uitsluiting in OmniRoute voordat je beleid maakt.",
       );
-      const knownProviders = [
-        ...snapshot.accounts.map((account) => account.provider),
-        ...(Array.isArray(snapshot.settings.blockedProviders)
-          ? snapshot.settings.blockedProviders.filter(
-              (provider): provider is string => typeof provider === "string",
-            )
-          : []),
-      ]
-        .map(identifier)
-        .filter(Boolean);
-      const plan = this.keepEmbeddings(
-        buildFreePolicyPlan(
-          planInput,
-          snapshot.accounts,
-          models,
-          knownProviders,
-        ),
-      );
-      if (
-        snapshot.overrides.some((id) => plan.verifiedConnectionIds.includes(id))
-      )
-        return {
-          ok: false,
-          error:
-            "Een gekozen account is uitgesloten voor NOVA. Verwijder die uitsluiting in OmniRoute voordat je beleid maakt.",
-        };
-      const metadata = {
-        models: plan.enabledModels,
-        accounts: plan.verifiedConnectionIds.length,
-        evidenceSource: "operator-account",
-        nativeQuotaVerified: false,
-      };
-      this.audit.record({
-        sessionId: "settings",
-        tool: "free_policy_replace",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: metadata,
-      });
-      if (this.drafts.size >= 20)
-        return {
-          ok: false,
-          error:
-            "Er staan te veel beleidswijzigingen open. Annuleer of wacht tot ze verlopen.",
-        };
-      const action = this.confirmations.create(
-        `settings-policy:${crypto.randomUUID()}`,
-        "free_policy_replace",
-        metadata,
-        "DANGEROUS",
-        undefined,
-        false,
-      );
-      this.drafts.set(action.confirmationId, {
-        plan,
-        binding: digest(snapshot),
-        sessionId: action.sessionId,
-        expiresAt: action.expiresAt,
-      });
-      const timer = setTimeout(
-        () => this.drop(action.confirmationId),
-        Math.max(0, action.expiresAt - this.confirmations.now()),
-      );
-      timer.unref();
-      this.timers.set(action.confirmationId, timer);
-      return { ok: true, action };
-    } catch (error) {
-      if (error instanceof ValidationError) throw error;
-      return { ok: false, error: unavailable };
-    }
+    return plan;
   }
   private verifyWrites(snapshot: Snapshot, plan: FreePolicyPlan): void {
     const settings = snapshot.settings;
@@ -960,51 +833,22 @@ export class FreePolicyWizard implements OnModuleDestroy {
       fs.rmSync(temporary, { force: true });
     }
   }
-  async confirm(
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
-  ): Promise<FreePolicyResult> {
-    if (
-      !/^settings-policy:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !uuid(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const draft = this.drafts.get(confirmationId);
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      !draft ||
-      draft.sessionId !== sessionId ||
-      !pending ||
-      pending.tool !== "free_policy_replace" ||
-      pending.confirmationId !== confirmationId
-    )
+  /** Builds the policy from the selection and applies it immediately. */
+  async apply(input: unknown): Promise<FreePolicyResult> {
+    let plan: FreePolicyPlan;
+    try {
+      plan = await this.plan(input);
+    } catch (error) {
+      if (error instanceof ValidationError) throw error;
       return {
         ok: false,
-        error:
-          "Dit concept staat niet meer open. Bereid het beleid opnieuw voor.",
+        error: error instanceof PolicyStageError ? error.message : unavailable,
       };
-    this.drop(confirmationId);
-    if (!approve) {
-      this.confirmations.cancel(sessionId, "rejected_admin_ui");
-      return { ok: true };
     }
-    const action = this.confirmations.take(sessionId, confirmationId);
-    if (!action)
-      return {
-        ok: false,
-        error: "Bevestiging verlopen. Bereid het beleid opnieuw voor.",
-      };
+    const action = { tool: "free_policy_replace" };
     try {
       return await this.barrier.run(async (operation) => {
         const before = this.snapshot();
-        if (digest(before) !== draft.binding)
-          return {
-            ok: false,
-            error:
-              "Accounts, gateway-instellingen of beleid zijn ondertussen gewijzigd. Bereid het beleid opnieuw voor.",
-          };
-        const plan = draft.plan;
         const beforeSummary = this.stateSummary(before);
         const metadata = {
           models: plan.enabledModels,
@@ -1016,7 +860,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
           sessionId: "settings",
           tool: action.tool,
           risk: "DANGEROUS",
-          confirmation: "confirmed_admin_ui",
+          confirmation: "direct",
           phase: "before_execute",
           arguments: metadata,
         });
@@ -1084,7 +928,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
           const history = this.readHistory();
           history.push({
             id: crypto.randomUUID(),
-            at: this.confirmations.now(),
+            at: Date.now(),
             before: beforeSummary,
             after: this.stateSummary(this.snapshot()),
           });
@@ -1102,7 +946,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
               sessionId: "settings",
               tool: action.tool,
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
               arguments: metadata,
               result: { ok: true },
@@ -1121,7 +965,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
               sessionId: "settings",
               tool: action.tool,
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
               arguments: metadata,
               result: { ok: false, stage: diagnostic },
@@ -1136,7 +980,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
             routeReady: false,
             diagnostic,
             error:
-              "Beleid is niet volledig geverifieerd. Gateway-instellingen kunnen al gewijzigd zijn. AI blijft geblokkeerd. Accountbinding en opgeslagen instellingen moeten overeenkomen; native quota is niet als kostenbewijs gebruikt. Controleer OmniRoute en bereid het beleid opnieuw voor.",
+              "Beleid is niet volledig geverifieerd. Gateway-instellingen kunnen al gewijzigd zijn. AI blijft geblokkeerd. Accountbinding en opgeslagen instellingen moeten overeenkomen; native quota is niet als kostenbewijs gebruikt. Controleer OmniRoute en pas het beleid opnieuw toe.",
           };
         }
       });
@@ -1144,7 +988,7 @@ export class FreePolicyWizard implements OnModuleDestroy {
       return {
         ok: false,
         error:
-          "Beleidswijziging kon niet starten. Controleer de koppeling en probeer opnieuw met verse toestemming.",
+          "Beleidswijziging kon niet starten. Controleer de koppeling en probeer opnieuw.",
       };
     }
   }

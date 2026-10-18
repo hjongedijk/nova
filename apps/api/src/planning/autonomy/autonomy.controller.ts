@@ -14,7 +14,6 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { AppAccessPublic } from "../../access/access-public.js";
 import { NovaConfig } from "../../core/config/nova-config.js";
 import { matchesNodeRedToken } from "../../dashboard/node-red-token.js";
 import { AutonomyService } from "./autonomy.service.js";
@@ -55,7 +54,6 @@ export class AutonomyController {
 
   /** Node-RED forwards an event name; tasks that listen for it start a run. Bounded and idempotent per eventId. */
   @Post("integrations/node-red/trigger")
-  @AppAccessPublic()
   @HttpCode(202)
   trigger(
     @Headers("authorization") authorization: string | undefined,

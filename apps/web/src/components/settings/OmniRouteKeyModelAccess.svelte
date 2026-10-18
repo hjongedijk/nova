@@ -3,16 +3,14 @@
   import type {
     OmniRouteKeyModelAccessOptions,
     OmniRouteKeyModelAccessHistory,
-    OmniRouteKeyModelAccessPrepareResult,
     OmniRouteKeyModelAccessResult,
   } from "@nova/contracts";
   import Button from "#components/ui/Button.svelte";
   import {
-    confirmOmniRouteKeyModelAccess,
     getOmniRouteKeyModelAccess,
     getOmniRouteKeyModelAccessHistory,
-    prepareOmniRouteKeyModelAccess,
-    prepareOmniRouteKeyModelAccessRollback,
+    setOmniRouteKeyModelAccess,
+    rollbackOmniRouteKeyModelAccess,
   } from "#lib/api/settings.ts";
 
   let {
@@ -23,11 +21,6 @@
   let report = $state<OmniRouteKeyModelAccessOptions | null>(null);
   let history = $state<OmniRouteKeyModelAccessHistory | null>(null);
   let selected = $state<string[]>([]);
-  let pending = $state<Extract<
-    OmniRouteKeyModelAccessPrepareResult,
-    { ok: true }
-  > | null>(null);
-  let acknowledged = $state(false);
   let busy = $state(false);
   let error = $state("");
 
@@ -49,28 +42,6 @@
     }
   }
 
-  async function prepare() {
-    if (!report?.revision || !acknowledged) return;
-    busy = true;
-    error = "";
-    try {
-      const result = await prepareOmniRouteKeyModelAccess(
-        id,
-        selected,
-        report.revision,
-      );
-      if (!result.ok) throw new Error(result.error);
-      pending = result;
-    } catch (cause) {
-      error =
-        cause instanceof ApiError
-          ? cause.message
-          : "Modelrechten konden niet worden voorbereid.";
-    } finally {
-      busy = false;
-    }
-  }
-
   async function loadHistory() {
     busy = true;
     error = "";
@@ -86,77 +57,56 @@
     }
   }
 
-  async function prepareRollback(revisionId: string) {
-    if (!acknowledged) return;
+  async function run(
+    action: () => Promise<OmniRouteKeyModelAccessResult>,
+    failure: string,
+  ) {
     busy = true;
     error = "";
     try {
-      const result = await prepareOmniRouteKeyModelAccessRollback(
-        id,
-        revisionId,
-      );
-      if (!result.ok) throw new Error(result.error);
-      pending = result;
-    } catch (cause) {
-      error =
-        cause instanceof ApiError
-          ? cause.message
-          : "Modelrechtenherstel kon niet worden voorbereid.";
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function confirm(approve: boolean) {
-    const action = pending?.action;
-    if (!action) return;
-    busy = true;
-    error = "";
-    try {
-      const result = await confirmOmniRouteKeyModelAccess(
-        id,
-        action.sessionId,
-        action.confirmationId,
-        approve,
-      );
+      const result = await action();
       if (!result.ok) {
-        pending = null;
         report = null;
-        throw new Error(
-          result.error ?? "Modelrechten konden niet worden gecontroleerd.",
-        );
+        throw new Error(result.error ?? failure);
       }
-      pending = null;
       if (result.verified) {
         report = null;
         done(result);
         await load();
         await loadHistory();
-      } else if (!approve) {
-        error = "Wijziging geannuleerd.";
       } else {
         error = result.error ?? "Uitkomst onbekend. AI blijft geblokkeerd.";
       }
     } catch (cause) {
       error =
-        cause instanceof ApiError
+        cause instanceof ApiError || cause instanceof Error
           ? cause.message
-          : "Modelrechten konden niet worden bevestigd.";
+          : failure;
     } finally {
       busy = false;
     }
   }
+  const save = () =>
+    run(
+      () => setOmniRouteKeyModelAccess(id, selected),
+      "Modelrechten konden niet worden opgeslagen.",
+    );
+  const rollback = (revisionId: string) =>
+    run(
+      () => rollbackOmniRouteKeyModelAccess(id, revisionId),
+      "Modelrechtenherstel is niet gelukt.",
+    );
 </script>
 
 <div>
-  {#if !report && !pending}
+  {#if !report}
     <Button onclick={load} disabled={busy}
       >{busy ? "Laden…" : "Modelrechten instellen"}</Button
     >
   {/if}
   {#if error}<p role="status">{error}</p>{/if}
   {#if report}
-    <fieldset disabled={busy || !!pending}>
+    <fieldset disabled={busy}>
       <legend>Toegestane geverifieerde gratis modellen</legend>
       <p>
         Huidige toegang: {report.accessMode}. Opslaan beperkt deze sleutel tot
@@ -176,15 +126,8 @@
           {model}
         </label>
       {/each}
-      <label>
-        <input type="checkbox" bind:checked={acknowledged} />
-        Ik begrijp dat dit modeltoegang wijzigt voor alle OmniRoute-clients die deze
-        sleutel gebruiken.
-      </label>
-      <Button
-        onclick={prepare}
-        disabled={busy || !acknowledged || selected.length === 0}
-        >Wijziging voorbereiden</Button
+      <Button onclick={save} disabled={busy || selected.length === 0}
+        >Modelrechten opslaan</Button
       >
     </fieldset>
     <Button onclick={loadHistory} disabled={busy}>Wijzigingsgeschiedenis</Button
@@ -210,9 +153,8 @@
                 : revision.afterModels.join(", ")}
               {#if revision.revertedFrom}<span> (herstel)</span>{/if}
               {#if index === 0}
-                <Button
-                  onclick={() => prepareRollback(revision.id)}
-                  disabled={busy || !acknowledged}>Herstellen</Button
+                <Button onclick={() => rollback(revision.id)} disabled={busy}
+                  >Herstel deze versie</Button
                 >
               {/if}
             </li>
@@ -222,14 +164,5 @@
         <p>Geen modelrechtenwijzigingen opgeslagen.</p>
       {/if}
     </section>
-  {/if}
-  {#if pending}
-    <p role="alert">
-      {pending.warning ??
-        `Wijzig toegang voor ${pending.name} naar ${pending.modelCount} geverifieerde gratis modellen? Dit geldt voor alle clients met deze sleutel.`}
-      NOVA voert de wijziging alleen na bevestiging uit.
-    </p>
-    <Button onclick={() => confirm(true)} disabled={busy}>Bevestigen</Button>
-    <Button onclick={() => confirm(false)} disabled={busy}>Annuleren</Button>
   {/if}
 </div>

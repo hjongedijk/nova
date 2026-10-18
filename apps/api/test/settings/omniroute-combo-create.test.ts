@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -59,8 +58,6 @@ function fixture() {
     timestamp: "now",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
-  confirmations.now = () => 1000;
   const routing = new RoutingService(config as NovaConfig);
   vi.spyOn(routing, "verifyForManagement").mockReturnValue(ready);
   const barrier = new RoutingManagementBarrier(config as NovaConfig, routing);
@@ -123,7 +120,6 @@ function fixture() {
   const service = new OmniRouteComboCreate(
     config as NovaConfig,
     management,
-    confirmations,
     audit,
     barrier,
     routing,
@@ -138,16 +134,14 @@ function fixture() {
   };
 }
 
-describe("OmniRoute combo creation", () => {
+describe("OmniRoute combo creation (single step)", () => {
   it("does not expose diagnostics that contain a duplicate-name phrase", async () => {
     const f = fixture();
     const diagnostic = "al een combo /private/omniroute token=marker";
     f.request.mockRejectedValueOnce(new Error(diagnostic));
-    const result = await f.service.prepare(
-      "My route",
-      ["provider-1/free-model"],
-      true,
-    );
+    const result = await f.service.create("My route", [
+      "provider-1/free-model",
+    ]);
     expect(result).toEqual({
       ok: false,
       error:
@@ -156,45 +150,38 @@ describe("OmniRoute combo creation", () => {
     expect(JSON.stringify(result)).not.toContain(diagnostic);
   });
 
-  it("requires global-impact acknowledgement and restricts models to active free-catalog entries", async () => {
+  it("rejects invalid input and models outside the active free catalog without writing", async () => {
     const f = fixture();
     await expect(
-      f.service.prepare("My route", ["provider-1/free-model"], false),
-    ).rejects.toThrow("bevestig");
-    const result = await f.service.prepare(
-      "My route",
-      ["provider-1/free-model"],
-      true,
-    );
-    if (!result.ok) throw new Error(result.error);
-    expect(result.models).toEqual(["provider-1/free-model"]);
-    expect(result.action).toMatchObject({
-      tool: "omniroute_combo_create",
-      risk: "DANGEROUS",
-      allowAlways: false,
-    });
-    expect(JSON.stringify(result)).not.toMatch(/private|secret|system_message/);
+      f.service.create("", ["provider-1/free-model"]),
+    ).rejects.toThrow("naam");
+    await expect(f.service.create("My route", [])).rejects.toThrow("naam");
     await expect(
-      f.service.prepare("Bad route", ["provider-1/missing-model"], true),
+      f.service.create("Bad route", ["provider-1/missing-model"]),
     ).resolves.toMatchObject({ ok: false });
-  });
-  it("creates only name and models, then verifies the combo in SQLite under the route barrier", async () => {
-    const f = fixture();
-    const prepared = await f.service.prepare(
-      "My route",
-      ["provider-1/free-model"],
-      true,
-    );
-    if (!prepared.ok) throw new Error(prepared.error);
-    const action = prepared.action;
+    await expect(
+      f.service.create("existing", ["provider-1/free-model"]),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: "Er bestaat al een combo met deze naam.",
+    });
     expect(
-      await f.service.confirm(action.sessionId, action.confirmationId, true),
-    ).toMatchObject({
+      f.request.mock.calls.some(([, options]) => options?.method === "POST"),
+    ).toBe(false);
+  });
+
+  it("creates only name and models in one call, then verifies the combo in SQLite under the route barrier", async () => {
+    const f = fixture();
+    const result = await f.service.create("My route", [
+      "provider-1/free-model",
+    ]);
+    expect(result).toMatchObject({
       ok: true,
       verified: true,
       id: "created",
       routeReady: true,
     });
+    expect(JSON.stringify(result)).not.toMatch(/private|secret|system_message/);
     expect(
       f.db.prepare("SELECT id,name FROM combos WHERE id='created'").get(),
     ).toEqual({ id: "created", name: "My route" });
@@ -202,27 +189,17 @@ describe("OmniRoute combo creation", () => {
       method: "POST",
       body: { name: "My route", models: ["provider-1/free-model"] },
     });
-    expect(f.record.mock.calls.map(([record]) => record.phase)).toContain(
-      "before_execute",
-    );
-    expect(f.record.mock.calls.map(([record]) => record.phase)).toContain(
-      "after_execute",
-    );
+    const phases = f.record.mock.calls.map(([record]) => record.phase);
+    expect(phases).toContain("before_execute");
+    expect(phases).toContain("after_execute");
   });
+
   it("retains the blocked route if the create response is not persisted", async () => {
     const f = fixture();
     f.setPersist(false);
-    const prepared = await f.service.prepare(
-      "My route",
-      ["provider-1/free-model"],
-      true,
-    );
-    if (!prepared.ok) throw new Error(prepared.error);
-    const result = await f.service.confirm(
-      prepared.action.sessionId,
-      prepared.action.confirmationId,
-      true,
-    );
+    const result = await f.service.create("My route", [
+      "provider-1/free-model",
+    ]);
     expect(result).toMatchObject({
       ok: false,
       verified: null,

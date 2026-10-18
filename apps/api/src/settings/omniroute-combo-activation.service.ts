@@ -1,14 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type {
-  OmniRouteComboActivationPrepared,
-  OmniRouteComboActivationResult,
-} from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
+import type { OmniRouteComboActivationResult } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { claimConfirmation } from "./confirmation-step.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
@@ -20,8 +15,6 @@ import { object } from "./request-input.js";
 type ComboRow = { id: string; name: string; data: string; sort_order: number };
 type ComboView = { id: string; name: string; isActive: boolean };
 const validId = (id: string) => /^[a-zA-Z0-9_.-]{1,100}$/.test(id);
-const hash = (row: ComboRow) =>
-  crypto.createHash("sha256").update(JSON.stringify(row)).digest("hex");
 const configRevision = (row: ComboRow) => {
   const data = JSON.parse(row.data) as Record<string, unknown>;
   delete data.isActive;
@@ -47,7 +40,6 @@ export class OmniRouteComboActivation {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
     private readonly barrier: RoutingManagementBarrier,
     private readonly routing: RoutingService,
@@ -116,89 +108,13 @@ export class OmniRouteComboActivation {
     return { row, view };
   }
 
-  async prepare(
+  async apply(
     id: string,
     enabled: unknown,
-    acknowledgeGlobalEffect: unknown,
     expectedCurrentRevision?: string,
-  ): Promise<OmniRouteComboActivationPrepared> {
-    if (
-      !validId(id) ||
-      typeof enabled !== "boolean" ||
-      acknowledgeGlobalEffect !== true
-    )
-      throw new ValidationError([
-        "Kies een status en bevestig dat deze wijziging alle OmniRoute-clients kan raken.",
-      ]);
-    try {
-      const route = this.routing.verifyForManagement();
-      if (!route.ready || !route.policyVerified || !route.freeOnly)
-        throw new Error(unavailable);
-      const { row, view } = await this.current(id);
-      if (
-        expectedCurrentRevision !== undefined &&
-        statusRevision(row) !== expectedCurrentRevision
-      )
-        return {
-          ok: false,
-          error:
-            "De combo is gewijzigd sinds deze wijzigingsgeschiedenis. Herstel is afgebroken.",
-        };
-      if (view.isActive === enabled)
-        return { ok: false, error: "Deze combo heeft die status al." };
-      const revision = hash(row);
-      this.audit.record({
-        sessionId: "settings",
-        tool: "omniroute_combo_activation",
-        risk: "DANGEROUS",
-        confirmation: "pending_admin_ui",
-        arguments: { id, enabled, revision },
-      });
-      return {
-        ok: true,
-        name: String(sanitize(view.name)).slice(0, 200),
-        currentEnabled: view.isActive,
-        enabled,
-        action: this.confirmations.create(
-          `settings-combo:${crypto.randomUUID()}`,
-          "omniroute_combo_activation",
-          { id, enabled, revision },
-          "DANGEROUS",
-          revision,
-          false,
-        ),
-      };
-    } catch {
-      return { ok: false, error: unavailable };
-    }
-  }
-
-  async confirm(
-    id: string,
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
   ): Promise<OmniRouteComboActivationResult> {
-    if (
-      !validId(id) ||
-      !/^settings-combo:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const claimed = claimConfirmation(
-      this.confirmations,
-      sessionId,
-      confirmationId,
-      approve,
-      {
-        tool: "omniroute_combo_activation",
-        arg: { name: "id", value: id },
-        stale: "Deze bevestiging staat niet meer open. Kies de combo opnieuw.",
-        expired: "Bevestiging verlopen. Kies de combo opnieuw.",
-      },
-    );
-    if ("reply" in claimed) return claimed.reply;
-    const action = claimed.action;
+    if (!validId(id) || typeof enabled !== "boolean")
+      throw new ValidationError(["Kies een geldige status voor de combo."]);
     if (this.inFlight.has(id))
       return { ok: false, error: "Deze combo wordt al gewijzigd." };
     this.inFlight.add(id);
@@ -207,34 +123,33 @@ export class OmniRouteComboActivation {
         let before: { row: ComboRow; view: ComboView };
         let afterRow: ComboRow;
         try {
+          const route = this.routing.verifyForManagement();
+          if (!route.ready || !route.policyVerified || !route.freeOnly)
+            throw new Error(unavailable);
           before = await this.current(id);
           if (
-            hash(before.row) !== action.args.revision ||
-            typeof action.args.enabled !== "boolean" ||
-            before.view.isActive === action.args.enabled
+            expectedCurrentRevision !== undefined &&
+            statusRevision(before.row) !== expectedCurrentRevision
           )
             return {
               ok: false,
               error:
-                "De combo is ondertussen gewijzigd. Kies de wijziging opnieuw.",
+                "De combo is gewijzigd sinds deze wijzigingsgeschiedenis. Herstel is afgebroken.",
             };
+          if (before.view.isActive === enabled)
+            return { ok: false, error: "Deze combo heeft die status al." };
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool: "omniroute_combo_activation",
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "before_execute",
-            arguments: {
-              id,
-              enabled: action.args.enabled,
-              revision: action.args.revision,
-            },
+            arguments: { id, enabled },
           });
           operation.block("policy_change");
         } catch {
           return { ok: false, error: unavailable };
         }
-        const enabled = action.args.enabled as boolean;
         try {
           await this.management.request(`/api/combos/${id}`, {
             method: "PATCH",
@@ -258,9 +173,9 @@ export class OmniRouteComboActivation {
           try {
             this.audit.record({
               sessionId: "settings",
-              tool: action.tool,
+              tool: "omniroute_combo_activation",
               risk: "DANGEROUS",
-              confirmation: "confirmed_admin_ui",
+              confirmation: "direct",
               phase: "after_execute",
               arguments: { id, enabled },
               result: { ok: false },
@@ -303,9 +218,9 @@ export class OmniRouteComboActivation {
         try {
           this.audit.record({
             sessionId: "settings",
-            tool: action.tool,
+            tool: "omniroute_combo_activation",
             risk: "DANGEROUS",
-            confirmation: "confirmed_admin_ui",
+            confirmation: "direct",
             phase: "after_execute",
             arguments: { id, enabled },
             result: { ok: true },

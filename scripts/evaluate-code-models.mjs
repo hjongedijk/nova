@@ -233,7 +233,7 @@ async function main(args) {
     sanitize,
   } = await createEvaluationRuntime(options.models);
   const markdown = fs.readFileSync(
-    path.join(ROOT, "docs/code-evaluation.md"),
+    path.join(ROOT, "docs/evaluation.md"),
     "utf8",
   );
   const cases = parseCases(markdown);

@@ -37,7 +37,6 @@ export class SettingsSource implements ToolSource {
 
   private get modelManagementAvailable(): boolean {
     return (
-      this.config.actionsEnabled &&
       this.config.extensionsEnabled &&
       this.config.omniUrl === this.config.verifiedOmniUrl &&
       this.management.configured
@@ -67,7 +66,7 @@ export class SettingsSource implements ToolSource {
       {
         name: "settings_persona_set",
         description:
-          "Replace the user's personal conversation rules with the explicit requested text; empty text clears them. Always asks for fresh confirmation. Never changes system safety rules or credentials.",
+          "Replace the user's personal conversation rules with the explicit requested text; empty text clears them. Never changes system safety rules or credentials.",
         parameters: schema({ text: { type: "string", maxLength: 2000 } }),
         risk: "CONFIRM",
         allowStandingApproval: false,
@@ -76,7 +75,7 @@ export class SettingsSource implements ToolSource {
       {
         name: "settings_instruction_create",
         description:
-          "Create a personal instruction playbook using existing tools, after fresh confirmation. Cannot add executable code, HTTP bindings, secrets or permissions.",
+          "Cannot add executable code, HTTP bindings, secrets or permissions.",
         parameters: schema(
           {
             name: { type: "string", minLength: 2, maxLength: 60 },
@@ -97,7 +96,7 @@ export class SettingsSource implements ToolSource {
       {
         name: "settings_skill_toggle",
         description:
-          "Enable or disable an existing personal instruction skill by ID, after fresh confirmation. Webhook bindings can only be managed on the settings screen.",
+          "Webhook bindings can only be managed on the settings screen.",
         parameters: schema({
           id: { type: "string", minLength: 1, maxLength: 80 },
           enabled: { type: "boolean" },
@@ -109,7 +108,7 @@ export class SettingsSource implements ToolSource {
       {
         name: "settings_helper_preference_set",
         description:
-          "Change helper contrast, autohide, or whether sound cues are suppressed during the existing quiet-hours schedule. This does not change the schedule, volume, speech, device access, integrations, credentials or security settings. Always asks for fresh confirmation.",
+          "Change helper contrast, autohide, or whether sound cues are suppressed during the existing quiet-hours schedule. This does not change the schedule, volume, speech, device access, integrations, credentials or security settings.",
         parameters: schema({
           setting: {
             type: "string",
@@ -126,7 +125,7 @@ export class SettingsSource implements ToolSource {
       definitions.push({
         name: "settings_model_visibility",
         description:
-          "Read whether a known OmniRoute provider model is hidden from the catalog, or hide/show it after fresh DANGEROUS confirmation. This changes catalog visibility only, not whether direct requests are authorized; hiding can remove model aliases for that provider.",
+          "This changes catalog visibility only, not whether direct requests are authorized; hiding can remove model aliases for that provider.",
         parameters: schema(
           {
             provider: { type: "string", minLength: 1, maxLength: 80 },

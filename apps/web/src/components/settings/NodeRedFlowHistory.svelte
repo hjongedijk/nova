@@ -1,12 +1,10 @@
 <script lang="ts">
   import { ApiError } from "#lib/api/client.ts";
-  import { onDestroy } from "svelte";
   import {
     captureNodeRedFlowRevision,
-    confirmNodeRedFlowRestore,
     exportNodeRedFlows,
     getNodeRedFlowRevisions,
-    prepareNodeRedFlowRestore,
+    restoreNodeRedFlowRevision,
     type NodeRedFlowRevision,
   } from "#lib/api/settings.ts";
   import Button from "#components/ui/Button.svelte";
@@ -16,15 +14,6 @@
   let loaded = $state(false);
   let busy = $state(false);
   let message = $state("");
-  let pending = $state<{
-    id: string;
-    at: string | null;
-    warning: string;
-    action: Awaited<ReturnType<typeof prepareNodeRedFlowRestore>>["action"];
-  } | null>(null);
-  let expired = $state(false);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  onDestroy(() => clearTimeout(timer));
 
   async function load(): Promise<void> {
     busy = true;
@@ -88,49 +77,12 @@
     }
   }
 
-  async function prepareRestore(id: string): Promise<void> {
+  async function restore(id: string): Promise<void> {
     busy = true;
     message = "";
     try {
-      const prepared = await prepareNodeRedFlowRestore(id);
-      pending = {
-        id,
-        at: revisions.find((row) => row.id === id)?.at ?? null,
-        warning: prepared.warning,
-        action: prepared.action,
-      };
-      expired = false;
-      clearTimeout(timer);
-      timer = setTimeout(
-        () => (expired = true),
-        Math.max(0, prepared.action.expiresAt - Date.now()),
-      );
-    } catch (error) {
-      message =
-        error instanceof ApiError ? error.message : "Herstel niet beschikbaar.";
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function confirmRestore(approve: boolean): Promise<void> {
-    const selected = pending;
-    if (!selected) return;
-    busy = true;
-    try {
-      const result = await confirmNodeRedFlowRestore(
-        selected.id,
-        selected.action.sessionId,
-        selected.action.confirmationId,
-        approve,
-      );
+      const result = await restoreNodeRedFlowRevision(id);
       if (!result.ok) throw new Error(result.error);
-      pending = null;
-      clearTimeout(timer);
-      if (!approve || "cancelled" in result) {
-        message = "Flowherstel geannuleerd.";
-        return;
-      }
       await load();
       message =
         result.revision.historyWarning ??
@@ -138,8 +90,6 @@
     } catch (error) {
       message =
         error instanceof ApiError ? error.message : "Flowherstel is mislukt.";
-      pending = null;
-      clearTimeout(timer);
     } finally {
       busy = false;
     }
@@ -167,10 +117,8 @@
             >
             · {revision.nodeCount} nodes
             {#if index > 0}
-              <Button
-                disabled={busy || pending !== null}
-                onclick={() => prepareRestore(revision.id)}
-                >Deze versie herstellen</Button
+              <Button disabled={busy} onclick={() => restore(revision.id)}
+                >Herstel deze versie</Button
               >
             {/if}
           </li>
@@ -178,26 +126,6 @@
       </ul>
       {#if truncated}<small>Alleen de tien recentste versies getoond.</small
         >{/if}
-      {#if pending}
-        <div role="group" aria-label="Flowherstel bevestigen">
-          <p>{pending.warning}</p>
-          <p>
-            De huidige flows worden vervangen door de versie van {pending.at
-              ? new Date(pending.at).toLocaleString("nl-NL")
-              : "eerder"}.
-          </p>
-          {#if expired}<p role="status">
-              Bevestiging verlopen. Kies opnieuw.
-            </p>{/if}
-          <Button
-            disabled={busy || expired}
-            onclick={() => confirmRestore(true)}>Herstel bevestigen</Button
-          >
-          <Button disabled={busy} onclick={() => confirmRestore(false)}
-            >Annuleren</Button
-          >
-        </div>
-      {/if}
     {:else}<p>Nog geen flowversies opgeslagen.</p>{/if}
   {/if}
 </section>

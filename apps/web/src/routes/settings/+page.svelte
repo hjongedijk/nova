@@ -8,14 +8,15 @@
   import AutonomySection from "#components/settings/AutonomySection.svelte";
   import BackupSection from "#components/settings/BackupSection.svelte";
   import BehaviorTab from "#components/settings/BehaviorTab.svelte";
-  import ConnectionsSection from "#components/settings/ConnectionsSection.svelte";
   import ConversationSection from "#components/settings/ConversationSection.svelte";
-  import DesktopSection from "#components/settings/DesktopSection.svelte";
   import DevicesSection from "#components/settings/DevicesSection.svelte";
   import DocumentsLibrary from "#components/settings/DocumentsLibrary.svelte";
   import GettingStarted from "#components/settings/GettingStarted.svelte";
   import MemorySection from "#components/settings/MemorySection.svelte";
   import ModelsGuide from "#components/settings/ModelsGuide.svelte";
+  import ModelDetails from "#components/settings/ModelDetails.svelte";
+  import WindowsSettings from "#components/settings/WindowsSettings.svelte";
+  import IntegrationsPage from "#components/settings/IntegrationsPage.svelte";
   import ObjectivesSection from "#components/settings/ObjectivesSection.svelte";
   import QuickActionsEditor from "#components/settings/QuickActionsEditor.svelte";
   import SoundSection from "#components/settings/SoundSection.svelte";
@@ -27,10 +28,10 @@
     resetState,
     say,
     settings,
-    unlock,
   } from "#components/settings/state.svelte.ts";
   import {
     MAIN_PAGES,
+    TOPICS,
     pageInfo,
     resolveSettingsTarget,
     searchSettings,
@@ -38,14 +39,13 @@
     type SettingsTopic,
   } from "#components/settings/sections.ts";
   import { partStatus, type PartStatus } from "#components/settings/status.ts";
+  import Disclosure from "#components/settings/ui/Disclosure.svelte";
   import StatusPill from "#components/settings/ui/StatusPill.svelte";
-  import { getPin, setPin } from "#lib/api/settings.ts";
   import "#lib/chat/ask.ts";
   import "#components/settings/settings.css";
   import "./settings-page.css";
 
   let query = $state("");
-  let pin = $state("");
   const requested = $derived(page.url.searchParams.get("section"));
   const target = $derived(resolveSettingsTarget(requested, page.url.hash));
   const section = $derived(target.page);
@@ -56,6 +56,7 @@
   /** The one topic whose state is worth a pill next to the page title. */
   const STATUS_TOPIC: Partial<Record<string, SettingsTopic>> = {
     huis: "connections",
+    windows: "desktop",
     telefoon: "telephony",
     zelf: "autonomy",
   };
@@ -105,12 +106,13 @@
     if (!id) return;
     let target = document.getElementById(id);
     if (!target) {
-      const holder = [
+      const holders = [
         ...document.querySelectorAll("details[data-anchors]"),
-      ].find((node) =>
+      ].filter((node) =>
         node.getAttribute("data-anchors")?.split(" ").includes(id),
       );
-      if (holder instanceof HTMLDetailsElement) holder.open = true;
+      for (const holder of holders)
+        if (holder instanceof HTMLDetailsElement) holder.open = true;
       target = document.getElementById(id);
     }
     if (!target) return;
@@ -129,14 +131,7 @@
 
   onMount(() => {
     void reload();
-    const timeout = setInterval(() => {
-      if (settings.data?.pinRequired && !settings.needPin && !getPin()) {
-        settings.data = null;
-        void reload();
-      }
-    }, 1000);
     return () => {
-      clearInterval(timeout);
       stopMicTest();
       resetState();
     };
@@ -214,6 +209,13 @@
         {#if status}<StatusPill tone={status.tone} label={status.label} />{/if}
       </div>
       <p class="settings-intro">{current.detail}</p>
+      {#if settings.data && section !== "geavanceerd"}
+        <nav class="settings-parts" aria-label="Op deze pagina">
+          {#each TOPICS.filter((topic) => topic.page === section && topic.anchor) as topic (topic.id)}
+            <a href={topicHref(topic)}>{topic.name}</a>
+          {/each}
+        </nav>
+      {/if}
       <div
         id="settingsMessage"
         role="status"
@@ -225,89 +227,111 @@
             {#each message.details as detail (detail)}<li>{detail}</li>{/each}
           </ul>{/if}
       </div>
-      {#if settings.data?.pinRequired && !settings.needPin}
-        <button
-          type="button"
-          class="settings-lock"
-          onclick={() => {
-            setPin("");
-            settings.data = null;
-            void reload();
-          }}>Instellingen vergrendelen</button
-        >
-      {/if}
-      {#if settings.needPin}
-        <form
-          class="settings-unlock"
-          onsubmit={(event) => {
-            event.preventDefault();
-            void unlock(pin).then(() => (pin = ""));
-          }}
-        >
-          <label for="pinInput">PIN om instellingen te openen</label>
-          <input
-            id="pinInput"
-            type="password"
-            autocomplete="off"
-            bind:value={pin}
-          />
-          <button type="submit">Ontgrendelen</button>
-        </form>
-      {:else if settings.data}
+      {#if settings.data}
         {#key section}
           {#if section === "gesprek"}
-            <GettingStarted />
-            <div id="stem">
-              <h2>Stem en geluid</h2>
-              <SoundSection />
-            </div>
-            <div id="gesprekken"><ConversationSection /></div>
-            <div id="persoonlijkheid"><BehaviorTab part="persona" /></div>
-            <div id="snelle-opdrachten">
-              <h2>Snelle opdrachten</h2>
-              <QuickActionsEditor />
-            </div>
+            <Disclosure
+              title="Stem en geluid"
+              hint="Stem, volume en microfoon"
+              id="stem"
+              group="settings-section"><SoundSection /></Disclosure
+            >
+            <Disclosure
+              title="Praten met NOVA"
+              hint="Luisteren, reageren en onderbreken"
+              id="gesprekken"
+              group="settings-section"><ConversationSection /></Disclosure
+            >
+            <Disclosure
+              title="Persoonlijkheid"
+              hint="Naam, toon en huishoudprofielen"
+              id="persoonlijkheid"
+              anchors="persona-history"
+              group="settings-section"
+              ><BehaviorTab part="persona" /></Disclosure
+            >
+            <Disclosure
+              title="Snelle opdrachten"
+              hint="Knoppen op het beginscherm"
+              id="snelle-opdrachten"
+              group="settings-section"><QuickActionsEditor /></Disclosure
+            >
+            <Disclosure
+              title="App installeren"
+              hint="NOVA openen op dit apparaat"
+              id="app-installeren"
+              group="settings-section"><DevicesSection part="app" /></Disclosure
+            >
+            <Disclosure
+              title="Aan de slag"
+              hint="Hulp bij je eerste instellingen"
+              group="settings-section"><GettingStarted /></Disclosure
+            >
           {:else if section === "huis"}
-            <div id="home-assistant">
-              <h2>Home Assistant</h2>
-              <p class="hint">
-                Met Home Assistant kan NOVA lampen, schakelaars en de
-                thermostaat in je huis bedienen. Open hieronder het blok en vul
-                het adres en de toegangssleutel (token) van Home Assistant in.
-              </p>
-              <ConnectionsSection ids={["home-assistant"]} />
-            </div>
-            <div id="pc">
-              <h2>Je Windows-pc</h2>
-              <p class="hint">
-                Een klein programma op je pc (de NOVA-agent) laat NOVA je
-                achtergrond, helper en scherm gebruiken. Vul hieronder het adres
-                in waarop die agent draait.
-              </p>
-              <ConnectionsSection ids={["windows"]} showHelp={false} />
-              <DevicesSection />
-            </div>
-            <div id="pc-bedienen"><DesktopSection /></div>
+            <IntegrationsPage />
+          {:else if section === "windows"}
+            <WindowsSettings />
           {:else if section === "telefoon"}
             <TelephonySection />
           {:else if section === "modellen"}
             <ModelsGuide />
+            <ModelDetails />
           {:else if section === "zelf"}
-            <div id="taken"><AutonomySection /></div>
-            <div id="wat-mag">
-              <h2>Wat NOVA mag gebruiken</h2>
-              <AbilitiesTab
+            <Disclosure
+              title="Zelfstandigheid"
+              hint="Lopende en geplande taken"
+              id="taken"
+              group="settings-section"><AutonomySection /></Disclosure
+            >
+            <Disclosure
+              title="Functies"
+              hint="Functies aan- of uitzetten"
+              id="wat-mag"
+              group="settings-section"
+              ><AbilitiesTab
                 close={() => {
                   void goto("/");
                 }}
-              />
-            </div>
-            <div id="toestemmingen"><BehaviorTab part="approvals" /></div>
-            <div id="doelen"><ObjectivesSection /></div>
+              /></Disclosure
+            >
+            <Disclosure
+              title="Uitvoering en actielog"
+              hint="NOVA handelt direct en registreert acties"
+              id="toestemmingen"
+              group="settings-section"
+            >
+              <p>
+                NOVA voert acties direct uit en rapporteert achteraf. Je kunt
+                een taak stoppen of een functie uitzetten.
+              </p>
+              <a href="/settings?section=geavanceerd#actielog"
+                >Actielog bekijken</a
+              >
+            </Disclosure>
+            <Disclosure
+              title="Doelen"
+              hint="Waar NOVA op moet letten"
+              id="doelen"
+              group="settings-section"><ObjectivesSection /></Disclosure
+            >
           {:else if section === "geheugen"}
-            <MemorySection />
-            <div id="documenten"><DocumentsLibrary /></div>
-            <div id="backup"><BackupSection /></div>
+            <Disclosure
+              title="Geheugen en privacy"
+              hint="Onthouden, zoeken en verwijderen"
+              group="settings-section"><MemorySection /></Disclosure
+            >
+            <Disclosure
+              title="Documenten"
+              hint="Bestanden die NOVA mag gebruiken"
+              id="documenten"
+              group="settings-section"><DocumentsLibrary /></Disclosure
+            >
+            <Disclosure
+              title="Back-up en herstel"
+              hint="Instellingen bewaren en terugzetten"
+              id="backup"
+              group="settings-section"><BackupSection /></Disclosure
+            >
           {:else if section === "geavanceerd"}
             <AdvancedPage />
           {/if}

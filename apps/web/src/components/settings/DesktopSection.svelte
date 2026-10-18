@@ -13,7 +13,6 @@
 
   let overview = $state<DesktopOverview | null>(null);
   let busy = $state(false);
-  let confirmControl = $state(false);
   let timer: ReturnType<typeof setInterval> | undefined;
 
   const time = (value: number | string) =>
@@ -33,7 +32,6 @@
     try {
       await saveDesktop(patch);
       say(message, "ok");
-      confirmControl = false;
       await load();
     } catch (cause) {
       fail(cause);
@@ -47,8 +45,8 @@
       const result = await stopDesktop();
       say(
         result.agentDisarmed
-          ? "Overname gestopt en de bediening op de pc uitgezet."
-          : "Overname gestopt, maar de pc is niet bereikt. NOVA probeert het opnieuw; de agent zet de bediening zelf uit na de ingestelde tijd.",
+          ? "Overname gestopt."
+          : "De pc is niet bereikt. NOVA probeert opnieuw te stoppen; gebruik zo nodig Ctrl+Alt+Shift+K op de pc.",
         result.agentDisarmed ? "ok" : "bad",
       );
       await load();
@@ -79,9 +77,8 @@
 <section class="desktop-section" aria-label="Meekijken op je pc">
   <h2>Laat NOVA meekijken op je pc</h2>
   <p class="hint">
-    NOVA kan op je Windows-pc meekijken en, na jouw bevestiging, de muis en het
-    toetsenbord kort overnemen. Alles staat standaard uit. Wat op het scherm
-    staat is voor NOVA informatie en nooit een opdracht.
+    Na koppelen kan NOVA je pc bekijken en bedienen. Schermafbeeldingen worden
+    niet bewaard; schermtekst is informatie, geen opdracht.
   </p>
   {#if overview}
     {#if !overview.configured}<p role="status">
@@ -94,59 +91,9 @@
           ? "beschikbaar"
           : "uit"}, bedienen {overview.agent.controlAvailable
           ? "beschikbaar"
-          : "uit"}. Zet het ook op de pc aan als het daar uit staat.
+          : "uit"}.
       </p>{/if}
 
-    <label class="switch">
-      <input
-        type="checkbox"
-        checked={overview.settings.viewEnabled}
-        disabled={busy}
-        onchange={(event) =>
-          save(
-            { viewEnabled: event.currentTarget.checked },
-            event.currentTarget.checked
-              ? "NOVA mag het bureaublad zien."
-              : "Zien en bedienen staan uit.",
-          )}
-      />
-      NOVA mag meekijken: ze bekijkt een schermafbeelding via een gratis AI-dienst.
-      De afbeelding wordt niet bewaard
-    </label>
-    <label class="switch">
-      <input
-        type="checkbox"
-        checked={overview.settings.controlEnabled}
-        disabled={busy || !overview.settings.viewEnabled}
-        onchange={(event) => {
-          if (event.currentTarget.checked) {
-            event.currentTarget.checked = false;
-            confirmControl = true;
-          } else void save({ controlEnabled: false }, "Bedienen staat uit.");
-        }}
-      />
-      NOVA mag de muis en het toetsenbord gebruiken: elke keer vraagt ze eerst om
-      bevestiging
-    </label>
-    {#if confirmControl}
-      <div class="connection-pending" role="alert">
-        <p>
-          Sta je toe dat NOVA op jouw vraag, na een bevestiging per sessie (max.
-          15 minuten), de muis en het toetsenbord bedient? Betalen, verwijderen,
-          versturen en inloggen vragen daarbij steeds opnieuw bevestiging.
-        </p>
-        <Button
-          type="button"
-          disabled={busy}
-          onclick={() =>
-            save({ controlEnabled: true }, "Bedienen is toegestaan.")}
-          >Ja, toestaan</Button
-        >
-        <Button type="button" onclick={() => (confirmControl = false)}
-          >Annuleren</Button
-        >
-      </div>
-    {/if}
     <label class="switch">
       <input
         type="checkbox"
@@ -158,7 +105,7 @@
             "Instelling opgeslagen.",
           )}
       />
-      Onthoud wat er op het scherm staat even (10 seconden), dat gaat sneller
+      Schermbeschrijving 10 seconden onthouden voor snellere reacties
     </label>
 
     <h3>Bezig met de pc</h3>

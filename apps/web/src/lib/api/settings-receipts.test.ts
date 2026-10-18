@@ -36,11 +36,7 @@ describe("settings write receipts", () => {
     ["PUT", "/services/private", "Serviceverbindingen"],
     ["POST", "/services/windows/pair", "Serviceverbindingen"],
     ["POST", "/import", "Instellingen herstellen"],
-    [
-      "POST",
-      "/node-red/flow-revisions/private/confirm-restore",
-      "Node-RED-flows",
-    ],
+    ["POST", "/node-red/flow-revisions/private/restore", "Node-RED-flows"],
   ])(
     "records successful %s %s with a fixed family label",
     (method, path, family) => {
@@ -53,19 +49,14 @@ describe("settings write receipts", () => {
   );
 
   it.each([
-    ["/omniroute/native/memory/confirm", "AI-geheugen"],
-    ["/omniroute/native/memories/delete-many/confirm", "AI-geheugen"],
-    ["/omniroute/native/prompt/confirm", "AI-instructies"],
-    ["/omniroute/native/skills/private/confirm", "AI-vaardigheden"],
-    ["/omniroute/native/skills/private/remove/confirm", "AI-vaardigheden"],
-    ["/omniroute/accounts/create/confirm", "AI-accounts"],
-    ["/omniroute/accounts/private/activation/confirm", "AI-accounts"],
-    ["/omniroute/accounts/keys/private/model-access/confirm", "AI-sleutels"],
-    ["/omniroute/combos/private/update/confirm", "AI-modelcombinaties"],
-    ["/omniroute/policy/confirm", "Gratis AI-routering"],
-    ["/mcp/servers/confirm-catalog", "MCP-instellingen"],
-    ["/node-red/palette/confirm", "Node-RED-palette"],
-    ["/workspace/projects/history/confirm-rollback", "Werkruimte"],
+    ["/omniroute/accounts/create", "AI-accounts"],
+    ["/omniroute/accounts/rename", "AI-accounts"],
+    ["/omniroute/accounts/private/removal", "AI-accounts"],
+    ["/omniroute/accounts/private/activation", "AI-accounts"],
+    [
+      "/omniroute/accounts/private/activation/history/rev/rollback",
+      "AI-accounts",
+    ],
   ])(
     "uses explicit verification only for known confirmation %s",
     (path, family) => {
@@ -88,6 +79,50 @@ describe("settings write receipts", () => {
     },
   );
 
+  it.each([
+    ["/mcp/servers/private/catalog", "MCP-instellingen"],
+    ["/node-red/palette/change", "Node-RED-palette"],
+    ["/omniroute/native/memory", "AI-geheugen"],
+    ["/omniroute/native/memory/rollback", "AI-geheugen"],
+    ["/omniroute/native/memories/delete-many", "AI-geheugen"],
+    ["/omniroute/native/memories/update", "AI-geheugen"],
+    ["/omniroute/native/prompt", "AI-instructies"],
+    ["/omniroute/native/skills/private", "AI-vaardigheden"],
+    ["/omniroute/native/skills/private/rollback", "AI-vaardigheden"],
+    ["/omniroute/native/skills/private/remove", "AI-vaardigheden"],
+    ["/omniroute/policy", "Gratis AI-routering"],
+    ["/omniroute/accounts/keys/private/model-access", "AI-sleutels"],
+    ["/omniroute/combos/private/update", "AI-modelcombinaties"],
+    ["/workspace/projects/history/private/rollback", "Werkruimte"],
+  ])(
+    "uses explicit verification only for known direct change %s",
+    (path, family) => {
+      const verified = card("POST", path, { ok: true, verified: true }, {});
+      expect(verified?.verification).toBe(
+        "De API heeft het resultaat gecontroleerd en bevestigd.",
+      );
+      expect(verified?.requested).toBe(`${family} aanpassen`);
+      expect(card("POST", path, { ok: true }, {})?.verification).toContain(
+        "niet apart gecontroleerd",
+      );
+      expect(card("POST", path, { ok: false, error: "x" }, {})).toBeNull();
+    },
+  );
+
+  it.each([
+    ["/stack-control/restart", "Services herstarten"],
+    ["/mcp/servers/private/toggle", "MCP-instellingen"],
+    ["/mcp/servers/private/tools/private/risk", "MCP-instellingen"],
+    ["/mcp/servers/private/history/private/rollback", "MCP-instellingen"],
+    ["/home-assistant/access/history/private/rollback", "Apparaattoegang"],
+    ["/managed-targets/access/history/private/rollback", "Apparaattoegang"],
+    ["/services/history/private/rollback", "Serviceverbindingen"],
+  ])("records one-step %s", (path, family) => {
+    const receipt = card("POST", path, { ok: true }, {});
+    expect(receipt?.requested).toBe(`${family} aanpassen`);
+    expect(JSON.stringify(receipt)).not.toContain("private");
+  });
+
   it("distinguishes queued restart, staged palette upgrade and unverified acceptance", () => {
     const scheduled = card("POST", "/services/restart", {
       ok: true,
@@ -96,18 +131,24 @@ describe("settings write receipts", () => {
     });
     expect(scheduled?.performed).toContain("aangevraagd");
     expect(scheduled?.verification).toContain("niet apart gecontroleerd");
-    const staged = card("POST", "/node-red/palette/confirm", {
-      ok: true,
-      verified: true,
-      pendingRestart: true,
-    });
+    const staged = card(
+      "POST",
+      "/node-red/palette/change",
+      { ok: true, verified: true, pendingRestart: true },
+      {},
+    );
     expect(staged?.performed).toContain("klaargezet; herstart nodig");
     expect(staged?.verification).toContain("niet apart gecontroleerd");
-    const accepted = card("POST", "/omniroute/native/prompt/confirm", {
-      ok: true,
-      accepted: true,
-      verified: null,
-    });
+    const accepted = card(
+      "POST",
+      "/omniroute/native/prompt",
+      {
+        ok: true,
+        accepted: true,
+        verified: null,
+      },
+      {},
+    );
     expect(accepted?.performed).toContain("aangevraagd");
     expect(accepted?.verification).toContain("niet apart gecontroleerd");
   });
@@ -321,7 +362,7 @@ describe("settings write receipts", () => {
       ts.forEachChild(node, visit);
     };
     visit(source);
-    expect(routes).toHaveLength(130);
+    expect(routes).toHaveLength(100);
     for (const route of routes)
       expect(
         classifySettingsWrite(route.method, route.path),

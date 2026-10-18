@@ -37,7 +37,7 @@ export class DocumentsSource implements ToolSource {
       {
         name: "documents_forget",
         description:
-          "Delete one document and all its indexed chunks by exact document ID. Use only when the user explicitly asks to remove it; requires fresh confirmation.",
+          "Delete one document and all its indexed chunks by exact document ID.",
         parameters: schema({ id: text(36) }),
         risk: "CONFIRM",
         allowStandingApproval: false,

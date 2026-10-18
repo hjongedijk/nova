@@ -15,7 +15,7 @@ test("manifest points to the versioned installer and preserves its exact signatu
   assert.deepEqual(manifest.platforms, {
     "windows-x86_64": {
       signature,
-      url: "https://github.com/hjongedijk/nova/releases/download/v0.1.74/NOVA-Setup-0.1.74.exe",
+      url: "https://github.com/hjongedijk/nova/releases/download/windows-v0.1.74/NOVA-Setup-0.1.74.exe",
     },
   });
 });

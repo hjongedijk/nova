@@ -1,7 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { PendingConfirmation } from "@nova/contracts";
-  import AdminConfirmation from "#components/admin/AdminConfirmation.svelte";
   import AdminDialog from "#components/admin/AdminDialog.svelte";
   import { sessionId } from "#components/admin/session.ts";
   import {
@@ -34,9 +32,6 @@
   let revealed = $state<Record<string, boolean>>({});
   let editing = $state<string | null>(null);
   let draft = $state("");
-  let forgetting = $state<string | null>(null);
-  let withHistory = $state(false);
-  let cards = $state<Record<string, PendingConfirmation>>({});
   let busy = $state(false);
   let version = 0;
 
@@ -75,7 +70,6 @@
   function startEdit(item: MemoryItem) {
     editing = item.id;
     draft = item.text;
-    forgetting = null;
   }
 
   async function saveEdit(item: MemoryItem) {
@@ -98,7 +92,7 @@
     }
   }
 
-  async function askForget(item: MemoryItem) {
+  async function forget(item: MemoryItem, withHistory: boolean) {
     busy = true;
     try {
       const result = await forgetMemoryRecord(
@@ -106,13 +100,9 @@
         sessionId(),
         withHistory,
       );
-      if (result.requiresConfirmation && result.action) {
-        cards[item.id] = result.action;
-        forgetting = null;
-      } else if (!result.ok) say(result.error || "Niet verwijderd.", "bad");
+      if (!result.ok) say(result.error || "Niet verwijderd.", "bad");
       else {
         say("Vergeten.", "ok");
-        forgetting = null;
         await load();
       }
     } catch (cause) {
@@ -122,18 +112,12 @@
     }
   }
 
-  function forgotten(id: string, reply: string) {
-    say(reply, "ok");
-    delete cards[id];
-    void load();
-  }
-
   onMount(() => void load());
 </script>
 
 <SectionCard
   title="Wat NOVA onthoudt"
-  lead="Zoek in je herinneringen, corrigeer wat niet klopt of laat NOVA iets vergeten. Gevoelige herinneringen blijven verborgen tot je ze opent."
+  lead="Zoek, corrigeer of verwijder herinneringen. Gevoelige inhoud blijft verborgen tot je die opent."
 >
   <form class="filters" role="search" onsubmit={search}>
     <Field label="Zoeken" id="memory-search">
@@ -235,38 +219,19 @@
                 type="button"
                 disabled={busy}
                 onclick={() => {
-                  forgetting = item.id;
-                  withHistory = false;
                   editing = null;
+                  void forget(item, false);
                 }}>Vergeten</button
               >
+              <button
+                type="button"
+                disabled={busy}
+                onclick={() => {
+                  editing = null;
+                  void forget(item, true);
+                }}>Vergeten, ook eerdere versies</button
+              >
             </div>
-          {/if}
-
-          {#if forgetting === item.id}
-            <div class="forget" role="group" aria-label="Vergeten bevestigen">
-              <p>Deze herinnering vergeten?</p>
-              <label class="check">
-                <input type="checkbox" bind:checked={withHistory} />
-                ook eerdere versies verwijderen
-              </label>
-              <div class="actions">
-                <button
-                  type="button"
-                  disabled={busy}
-                  onclick={() => askForget(item)}>Verder</button
-                >
-                <button type="button" onclick={() => (forgetting = null)}
-                  >Annuleren</button
-                >
-              </div>
-            </div>
-          {/if}
-          {#if cards[item.id]}
-            <AdminConfirmation
-              action={cards[item.id] as PendingConfirmation}
-              onreply={(reply) => forgotten(item.id, reply)}
-            />
           {/if}
         </li>
       {/each}
@@ -344,11 +309,6 @@
     flex-wrap: wrap;
     gap: 0.5rem;
     margin: 0.5rem 0;
-  }
-  .forget {
-    border-top: 1px solid var(--line);
-    margin-top: 0.5rem;
-    padding-top: 0.5rem;
   }
   .hint {
     font-size: 16px;

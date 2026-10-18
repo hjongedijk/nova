@@ -6,14 +6,11 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   NativeSkillMode,
   NativeSkillModeHistory,
-  NativeSkillModePrepared,
   NativeSkillModeRevision,
   NativeSkillModeResult,
 } from "@nova/contracts";
-import { ConfirmationsService } from "../confirmations/confirmations.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
-import { claimConfirmation } from "./confirmation-step.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { OmniRouteManagement } from "../routing/omniroute-management.service.js";
 import { ValidationError } from "../core/errors/validation.error.js";
@@ -56,7 +53,6 @@ export class NativeSkillModesService {
   constructor(
     private readonly config: NovaConfig,
     private readonly management: OmniRouteManagement,
-    private readonly confirmations: ConfirmationsService,
     private readonly audit: AuditService,
   ) {
     this.historyFile = config.dataFile("native-skill-mode-history.json");
@@ -211,167 +207,45 @@ export class NativeSkillModesService {
     }
   }
 
-  prepare(
+  /** Changes a skill mode immediately. */
+  async setMode(
     id: string,
     mode: unknown,
-    acknowledgeGlobal = false,
     rollbackRevisionId?: string,
-  ): NativeSkillModePrepared {
+  ): Promise<NativeSkillModeResult> {
     if (!validId(id) || !validMode(mode))
       throw new ValidationError(["Kies een geldige skill en modus."]);
-    try {
-      const row = this.row(id);
-      const scope =
-        row.api_key_id === this.management.scope ? "nova" : "global";
-      if (scope === "global" && !acknowledgeGlobal)
-        return {
-          ok: false,
-          error: "Bevestig eerst dat de wijziging alle gateway-clients raakt.",
-        };
-      const risk =
-        scope === "global"
-          ? "DANGEROUS"
-          : mode === "off"
-            ? "CONFIRM"
-            : "DANGEROUS";
-      this.audit.record({
-        sessionId: "settings",
-        tool: "native_skill_mode",
-        risk,
-        confirmation: "pending_admin_ui",
-        arguments: { id, mode },
-      });
-      const action = this.confirmations.create(
-        `settings-native:${crypto.randomUUID()}`,
-        "native_skill_mode",
-        {
-          id,
-          mode,
-          revision: revision(row),
-          ...(rollbackRevisionId ? { rollbackRevisionId } : {}),
-        },
-        risk,
-        binding(row),
-        false,
-      );
-      return {
-        ok: true,
-        name: String(sanitize(row.name)).slice(0, 200),
-        scope,
-        action,
-      };
-    } catch {
-      return { ok: false, error: unavailable };
-    }
-  }
-
-  prepareRollback(
-    id: string,
-    revisionId: string,
-    acknowledgeGlobal = false,
-  ): NativeSkillModePrepared {
-    if (!/^[0-9a-f-]{36}$/i.test(revisionId))
-      throw new ValidationError(["Ongeldige skillgeschiedenis."]);
-    try {
-      const entries = this.readHistory().filter((item) => item.skillId === id);
-      const latest = entries.at(-1);
-      if (!latest || latest.id !== revisionId)
-        return {
-          ok: false,
-          error: "Herstel alleen de nieuwste skillwijziging.",
-        };
-      const current = this.row(id);
-      if (
-        revision(current) !== latest.afterRevision ||
-        current.mode !== latest.after
-      )
-        return {
-          ok: false,
-          error:
-            "De skill is ondertussen gewijzigd. Laad de geschiedenis opnieuw.",
-        };
-      return this.prepare(id, latest.before, acknowledgeGlobal, latest.id);
-    } catch {
-      return { ok: false, error: unavailable };
-    }
-  }
-
-  async confirm(
-    id: string,
-    sessionId: string,
-    confirmationId: string,
-    approve: boolean,
-  ): Promise<NativeSkillModeResult> {
-    if (
-      !validId(id) ||
-      !/^settings-native:[0-9a-f-]{36}$/i.test(sessionId) ||
-      !/^[0-9a-f-]{36}$/i.test(confirmationId)
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const claimed = claimConfirmation(
-      this.confirmations,
-      sessionId,
-      confirmationId,
-      approve,
-      {
-        tool: "native_skill_mode",
-        arg: { name: "id", value: id },
-        stale:
-          "Deze bevestiging staat niet meer open. Kies de wijziging opnieuw.",
-        expired: "Bevestiging verlopen. Kies de wijziging opnieuw.",
-      },
-    );
-    if ("reply" in claimed) return claimed.reply;
-    const action = claimed.action;
     if (this.inFlight.has(id))
       return {
         ok: false,
         error:
-          "Deze skill wordt al gewijzigd. Kies de wijziging opnieuw zodra die klaar is.",
+          "Deze skill wordt al gewijzigd. Probeer opnieuw zodra die klaar is.",
       };
     this.inFlight.add(id);
     try {
       let before: Row;
+      let risk: "DANGEROUS" | "CONFIRM";
       try {
         before = this.row(id);
-        if (
-          revision(before) !== action.args.revision ||
-          !validMode(action.args.mode)
-        )
-          return {
-            ok: false,
-            error:
-              "De skill is ondertussen gewijzigd. Kies de wijziging opnieuw.",
-          };
-        const rollbackRevisionId = action.args.rollbackRevisionId;
-        if (rollbackRevisionId !== undefined) {
-          const latest = this.readHistory()
-            .filter((item) => item.skillId === id)
-            .at(-1);
-          if (
-            typeof rollbackRevisionId !== "string" ||
-            latest?.id !== rollbackRevisionId ||
-            latest.afterRevision !== revision(before) ||
-            latest.after !== before.mode
-          )
-            return {
-              ok: false,
-              error:
-                "De skillgeschiedenis is gewijzigd. Laad de geschiedenis opnieuw.",
-            };
-        }
+        const scope =
+          before.api_key_id === this.management.scope ? "nova" : "global";
+        risk =
+          scope === "global"
+            ? "DANGEROUS"
+            : mode === "off"
+              ? "CONFIRM"
+              : "DANGEROUS";
         this.audit.record({
           sessionId: "settings",
           tool: "native_skill_mode",
-          risk: action.risk,
-          confirmation: "confirmed_admin_ui",
+          risk,
+          confirmation: "direct",
           phase: "before_execute",
-          arguments: { id, mode: action.args.mode },
+          arguments: { id, mode },
         });
       } catch {
         return { ok: false, error: unavailable };
       }
-      const mode = action.args.mode as NativeSkillMode;
       try {
         await this.management.request(`/api/skills/${id}`, {
           method: "PUT",
@@ -389,6 +263,9 @@ export class NativeSkillModesService {
           verified: true,
           mode,
           enabled: after.enabled === 1,
+          name: String(sanitize(before.name)).slice(0, 200),
+          scope:
+            before.api_key_id === this.management.scope ? "nova" : "global",
         };
         try {
           this.appendHistory(
@@ -396,9 +273,7 @@ export class NativeSkillModesService {
             before.api_key_id === this.management.scope ? "nova" : "global",
             before,
             after,
-            typeof action.args.rollbackRevisionId === "string"
-              ? action.args.rollbackRevisionId
-              : undefined,
+            rollbackRevisionId,
           );
         } catch {
           result.historyWarning =
@@ -408,8 +283,8 @@ export class NativeSkillModesService {
           this.audit.record({
             sessionId: "settings",
             tool: "native_skill_mode",
-            risk: action.risk,
-            confirmation: "confirmed_admin_ui",
+            risk,
+            confirmation: "direct",
             phase: "after_execute",
             arguments: { id, mode },
             result: { ok: true },
@@ -425,8 +300,8 @@ export class NativeSkillModesService {
           this.audit.record({
             sessionId: "settings",
             tool: "native_skill_mode",
-            risk: action.risk,
-            confirmation: "confirmed_admin_ui",
+            risk,
+            confirmation: "direct",
             phase: "after_execute",
             arguments: { id, mode },
             result: { ok: false },
@@ -445,5 +320,38 @@ export class NativeSkillModesService {
     } finally {
       this.inFlight.delete(id);
     }
+  }
+
+  /** Restores the newest mode change of a skill. */
+  async rollback(
+    id: string,
+    revisionId: string,
+  ): Promise<NativeSkillModeResult> {
+    if (!/^[0-9a-f-]{36}$/i.test(revisionId))
+      throw new ValidationError(["Ongeldige skillgeschiedenis."]);
+    let latest: StoredRevision | undefined;
+    try {
+      latest = this.readHistory()
+        .filter((item) => item.skillId === id)
+        .at(-1);
+      if (!latest || latest.id !== revisionId)
+        return {
+          ok: false,
+          error: "Herstel alleen de nieuwste skillwijziging.",
+        };
+      const current = this.row(id);
+      if (
+        revision(current) !== latest.afterRevision ||
+        current.mode !== latest.after
+      )
+        return {
+          ok: false,
+          error:
+            "De skill is ondertussen gewijzigd. Laad de geschiedenis opnieuw.",
+        };
+    } catch {
+      return { ok: false, error: unavailable };
+    }
+    return this.setMode(id, latest.before, latest.id);
   }
 }

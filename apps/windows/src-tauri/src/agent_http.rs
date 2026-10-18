@@ -104,8 +104,13 @@ fn route(app: &AppHandle, path: &str, method: &Method, body: Value) -> Outcome {
             result["uptimeHours"] = json!(sysinfo::System::uptime() as f64 / 3600.0);
             result["features"] = json!(["wallpaper", "helper", "desktop", "browser"]);
             result["agent"] = json!(VERSION);
+            result["appVersion"] = json!(env!("CARGO_PKG_VERSION"));
             result["helperWarnings"] = json!(inner.hotkey_warnings);
             result["agentPaused"] = json!(inner.paused);
+            // Everything is always allowed; only the owner's pause (agentPaused) can stop NOVA.
+            result["permissions"] = json!({"view": true, "control": true, "browser": true});
+            result["elevated"] = json!(platform::is_elevated());
+            result["runElevated"] = json!(inner.agent.run_elevated);
             result["helperOpen"] = json!(app
                 .get_webview_window(windows_ops::HELPER)
                 .and_then(|w| w.is_visible().ok())
@@ -214,52 +219,39 @@ fn route(app: &AppHandle, path: &str, method: &Method, body: Value) -> Outcome {
             Ok(json!({"ok":true,"preferences":crate::controls::preferences(app)}))
         }
         "/v1/open-app" | "/v1/close-app" => {
+            // A name from the app list maps to its program; any other name is tried as a program or document as is.
+            let name = body["app"].as_str().ok_or_else(|| bad("App ontbreekt"))?;
+            if name.is_empty() || name.contains(['\0', '\r', '\n']) {
+                return Err(bad("Ongeldige app"));
+            }
             let entry = {
                 let shared = app.state::<Shared>();
                 let inner = shared.lock();
-                inner
-                    .agent
-                    .apps
-                    .get(body["app"].as_str().ok_or_else(|| bad("App ontbreekt"))?)
-                    .cloned()
-                    .ok_or_else(|| (403, "App staat niet in de lijst met toegestane apps".into()))?
+                inner.agent.apps.get(name).cloned()
             };
             if path == "/v1/open-app" {
-                platform::open(&entry.path).map_err(|e| (500, e))?;
+                let target = entry.as_ref().map(|e| e.path.as_str()).unwrap_or(name);
+                platform::open(target).map_err(|e| (500, e))?;
                 Ok(json!({"ok":true}))
             } else {
-                let closed = platform::close_app(
-                    entry
-                        .process
-                        .as_deref()
-                        .ok_or_else(|| bad("Deze app kan niet worden gesloten"))?,
-                )
-                .map_err(|e| (500, e))?;
+                let process = match &entry {
+                    Some(e) => e.process.as_deref(),
+                    None => Some(name.trim_end_matches(".exe")),
+                }
+                .ok_or_else(|| bad("Deze app kan niet worden gesloten"))?;
+                let closed = platform::close_app(process).map_err(|e| (500, e))?;
                 Ok(json!({"ok":true,"closed":closed}))
             }
         }
         "/v1/open-url" => {
             let raw = body["url"].as_str().ok_or_else(|| bad("URL ontbreekt"))?;
             let url = url::Url::parse(raw).map_err(|_| bad("Ongeldige URL"))?;
-            if !matches!(url.scheme(), "http" | "https")
-                || url.host_str().is_none()
-                || !url.username().is_empty()
-                || url.password().is_some()
-            {
-                return Err(bad("Alleen HTTP(S)-adressen zonder inloggegevens toegestaan"));
-            }
             platform::open(url.as_str()).map_err(|e| (500, e))?;
             Ok(json!({"ok":true}))
         }
         "/v1/lock" => {
             platform::lock().map_err(|e| (500, e))?;
             Ok(json!({"ok":true}))
-        }
-        "/v1/desktop/status" => {
-            Ok(json!({"ok":true,"enabled":false,"control":false,"paused":false,"version":VERSION,"displays":[]}))
-        }
-        "/v1/browser/status" => {
-            Ok(json!({"ok":true,"enabled":false,"running":false,"browser":"edge","headless":false,"tabs":[]}))
         }
         _ if path.starts_with("/v1/desktop/")
             || path.starts_with("/v1/browser/")

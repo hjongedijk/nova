@@ -6,6 +6,7 @@ import type { AuditService } from "../../src/core/audit/audit.service.js";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import { SettingsStore } from "../../src/settings/store/settings.store.js";
 import { ToolSwitchHistory } from "../../src/settings/tool-switch-history.service.js";
+import { dbStat } from "../helpers/nova-db.js";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -51,7 +52,7 @@ describe("tool switch history", () => {
     });
     expect(JSON.stringify(listed)).not.toContain("Private description");
     expect(
-      fs.statSync(path.join(f.dir, "tool-switch-history.json")).mode & 0o777,
+      dbStat(path.join(f.dir, "tool-switch-history.json")).mode & 0o777,
     ).toBe(0o600);
   });
 

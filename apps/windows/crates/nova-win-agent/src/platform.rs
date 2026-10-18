@@ -136,10 +136,7 @@ pub fn protect_config_dir(dir: &std::path::Path) -> Result<(), String> {
 
 /// Called only by the elevated copy of this same executable. All arguments are validated before spawning.
 #[cfg(windows)]
-pub fn configure_network(port: u16, source: &str) -> Result<(), String> {
-    source
-        .parse::<std::net::IpAddr>()
-        .map_err(|_| "Ongeldig NOVA-serveradres")?;
+pub fn configure_network(port: u16) -> Result<(), String> {
     let _ = system_command("netsh.exe")
         .args(["advfirewall", "firewall", "delete", "rule", "name=NOVA native agent"])
         .output();
@@ -154,8 +151,8 @@ pub fn configure_network(port: u16, source: &str) -> Result<(), String> {
             "action=allow",
             "protocol=TCP",
             &format!("localport={port}"),
-            &format!("remoteip={source}"),
-            "profile=private,domain",
+            "remoteip=any",
+            "profile=any",
         ])
         .output()
         .map_err(|e| e.to_string())?;
@@ -172,7 +169,7 @@ pub fn configure_network(port: u16, source: &str) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-pub fn request_network(port: u16, source: &str) -> Result<(), String> {
+pub fn request_network(port: u16) -> Result<(), String> {
     use windows::{
         core::{w, PCWSTR},
         Win32::{
@@ -184,9 +181,6 @@ pub fn request_network(port: u16, source: &str) -> Result<(), String> {
             },
         },
     };
-    source
-        .parse::<std::net::IpAddr>()
-        .map_err(|_| "Ongeldig NOVA-serveradres")?;
     let exe: Vec<u16> = std::env::current_exe()
         .map_err(|e| e.to_string())?
         .as_os_str()
@@ -194,7 +188,7 @@ pub fn request_network(port: u16, source: &str) -> Result<(), String> {
         .encode_utf16()
         .chain(Some(0))
         .collect();
-    let parameters: Vec<u16> = format!("--configure-network {port} {source}")
+    let parameters: Vec<u16> = format!("--configure-network {port}")
         .encode_utf16()
         .chain(Some(0))
         .collect();
@@ -307,7 +301,7 @@ pub fn protect_config_dir(_: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 #[cfg(not(windows))]
-pub fn request_network(_: u16, _: &str) -> Result<(), String> {
+pub fn request_network(_: u16) -> Result<(), String> {
     Err("Alleen beschikbaar op Windows".into())
 }
 #[cfg(not(windows))]

@@ -12,10 +12,7 @@ import {
 } from "./evaluate-code-models.mjs";
 
 const cases = parseCases(
-  fs.readFileSync(
-    new URL("../docs/code-evaluation.md", import.meta.url),
-    "utf8",
-  ),
+  fs.readFileSync(new URL("../docs/evaluation.md", import.meta.url), "utf8"),
 );
 const answer = (model, content = "fixture answer") => ({
   model,

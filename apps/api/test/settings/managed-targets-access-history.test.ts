@@ -8,6 +8,7 @@ import { ManagedTargetsAccessStore } from "../../src/settings/managed-targets-ac
 import { HomeAssistantService } from "../../src/home/home-assistant.service.js";
 import { HomeAssistantAccessHistory } from "../../src/settings/home-assistant-access-history.service.js";
 import { createApp, type TestApp } from "./helpers.js";
+import { dbStat } from "../helpers/nova-db.js";
 
 let nova: TestApp;
 let directory: string;
@@ -77,7 +78,7 @@ describe("managed target access history", () => {
     }
   });
 
-  it("stores private bounded changes and restores only after fresh dangerous confirmation", async () => {
+  it("stores private bounded changes and restores in one rollback step", async () => {
     const changed = await nova.api
       .put("/api/settings/managed-targets/access")
       .set(admin)
@@ -95,58 +96,24 @@ describe("managed target access history", () => {
     });
     const config = nova.app.get(NovaConfig);
     expect(
-      fs.statSync(config.dataFile("managed-targets-access-history.json")).mode &
+      dbStat(config.dataFile("managed-targets-access-history.json")).mode &
         0o777,
     ).toBe(0o600);
 
-    const prepared = await nova.api
-      .post(
-        `/api/settings/managed-targets/access/history/${revision.id}/prepare-rollback`,
-      )
-      .set(admin)
-      .send({});
-    expect(prepared.status).toBe(200);
-    expect(prepared.body).toMatchObject({
-      ok: true,
-      action: {
-        risk: "DANGEROUS",
-        allowAlways: false,
-        tool: "managed_targets_access_rollback",
-      },
-    });
-    const denied = await nova.api
-      .post("/api/settings/managed-targets/access/history/confirm-rollback")
-      .set(admin)
-      .send({
-        sessionId: prepared.body.action.sessionId,
-        confirmationId: prepared.body.action.confirmationId,
-        approve: false,
-      });
-    expect(denied.body.ok).toBe(true);
-    expect(nova.app.get(ManagedTargetsAccessStore).get().mode).toBe(
-      "allowlist",
-    );
-
-    const second = await nova.api
-      .post(
-        `/api/settings/managed-targets/access/history/${revision.id}/prepare-rollback`,
-      )
-      .set(admin)
-      .send({});
     const confirmed = await nova.api
-      .post("/api/settings/managed-targets/access/history/confirm-rollback")
+      .post(
+        `/api/settings/managed-targets/access/history/${revision.id}/rollback`,
+      )
       .set(admin)
-      .send({
-        sessionId: second.body.action.sessionId,
-        confirmationId: second.body.action.confirmationId,
-        approve: true,
-      });
+      .send({});
+    expect(confirmed.status).toBe(200);
     expect(confirmed.body).toMatchObject({ ok: true, policy: { mode: "all" } });
+    expect(nova.app.get(ManagedTargetsAccessStore).get().mode).toBe("all");
     expect(
       nova.audits.some(
         (row) =>
           row.tool === "managed_targets_access_rollback" &&
-          row.confirmation === "confirmed_admin_ui",
+          row.phase === "verified",
       ),
     ).toBe(true);
   });
@@ -167,16 +134,16 @@ describe("managed target access history", () => {
       .put("/api/settings/managed-targets/access")
       .set(admin)
       .send({ ...allowlist, mode: "all" });
-    const prepared = await nova.api
+    const rolled = await nova.api
       .post(
-        `/api/settings/managed-targets/access/history/${original.id}/prepare-rollback`,
+        `/api/settings/managed-targets/access/history/${original.id}/rollback`,
       )
       .set(admin)
       .send({});
-    expect(prepared.status).toBe(404);
+    expect(rolled.status).toBe(404);
   });
 
-  it("does not change access when the approval audit cannot be written", async () => {
+  it("does not change access when the attempt audit cannot be written", async () => {
     await nova.api
       .put("/api/settings/managed-targets/access")
       .set(admin)
@@ -185,12 +152,6 @@ describe("managed target access history", () => {
       .get("/api/settings/managed-targets/access/history")
       .set(admin);
     const revision = history.body.revisions.at(-1);
-    const prepared = await nova.api
-      .post(
-        `/api/settings/managed-targets/access/history/${revision.id}/prepare-rollback`,
-      )
-      .set(admin)
-      .send({});
     const audit = nova.app.get(AuditService);
     const record = audit.record.bind(audit);
     audit.record = (() => {
@@ -198,13 +159,11 @@ describe("managed target access history", () => {
     }) as typeof audit.record;
     try {
       const result = await nova.api
-        .post("/api/settings/managed-targets/access/history/confirm-rollback")
+        .post(
+          `/api/settings/managed-targets/access/history/${revision.id}/rollback`,
+        )
         .set(admin)
-        .send({
-          sessionId: prepared.body.action.sessionId,
-          confirmationId: prepared.body.action.confirmationId,
-          approve: true,
-        });
+        .send({});
       expect(result.body).toMatchObject({ ok: false });
       expect(nova.app.get(ManagedTargetsAccessStore).get().mode).toBe(
         "allowlist",
@@ -223,12 +182,6 @@ describe("managed target access history", () => {
       .get("/api/settings/managed-targets/access/history")
       .set(admin);
     const revision = history.body.revisions.at(-1);
-    const prepared = await nova.api
-      .post(
-        `/api/settings/managed-targets/access/history/${revision.id}/prepare-rollback`,
-      )
-      .set(admin)
-      .send({});
     const audit = nova.app.get(AuditService);
     const record = audit.record.bind(audit);
     let calls = 0;
@@ -239,13 +192,11 @@ describe("managed target access history", () => {
     }) as typeof audit.record;
     try {
       const result = await nova.api
-        .post("/api/settings/managed-targets/access/history/confirm-rollback")
+        .post(
+          `/api/settings/managed-targets/access/history/${revision.id}/rollback`,
+        )
         .set(admin)
-        .send({
-          sessionId: prepared.body.action.sessionId,
-          confirmationId: prepared.body.action.confirmationId,
-          approve: true,
-        });
+        .send({});
       expect(result.body).toMatchObject({
         ok: true,
         policy: { mode: "all" },
@@ -257,7 +208,7 @@ describe("managed target access history", () => {
     }
   });
 
-  it("keeps private Home Assistant access history and rolls back after live validation and confirmation", async () => {
+  it("keeps private Home Assistant access history and rolls back in one step after live validation", async () => {
     const home = nova.app.get(HomeAssistantService);
     home.areas = [{ area_id: "office", name: "Office" }];
     home.devices = [];
@@ -287,29 +238,16 @@ describe("managed target access history", () => {
       expect(history.body.revisions).toHaveLength(1);
       const config = nova.app.get(NovaConfig);
       expect(
-        fs.statSync(config.dataFile("home-assistant-access-history.json"))
-          .mode & 0o777,
+        dbStat(config.dataFile("home-assistant-access-history.json")).mode &
+          0o777,
       ).toBe(0o600);
       const revision = history.body.revisions[0];
-      const prepared = await nova.api
+      const restored = await nova.api
         .post(
-          `/api/settings/home-assistant/access/history/${revision.id}/prepare-rollback`,
+          `/api/settings/home-assistant/access/history/${revision.id}/rollback`,
         )
         .set(admin)
         .send({});
-      expect(prepared.body.action).toMatchObject({
-        risk: "DANGEROUS",
-        allowAlways: false,
-        tool: "home_assistant_access_rollback",
-      });
-      const restored = await nova.api
-        .post("/api/settings/home-assistant/access/history/confirm-rollback")
-        .set(admin)
-        .send({
-          sessionId: prepared.body.action.sessionId,
-          confirmationId: prepared.body.action.confirmationId,
-          approve: true,
-        });
       expect(restored.body).toMatchObject({
         ok: true,
         policy: { mode: "all" },
@@ -318,7 +256,7 @@ describe("managed target access history", () => {
         nova.audits.some(
           (row) =>
             row.tool === "home_assistant_access_rollback" &&
-            row.confirmation === "approved_admin_ui",
+            row.phase === "verified",
         ),
       ).toBe(true);
     } finally {
@@ -358,7 +296,6 @@ describe("managed target access history", () => {
         .set(admin);
       const revision = history.body.revisions[0];
       const historyService = nova.app.get(HomeAssistantAccessHistory);
-      const prepared = historyService.prepareRollback(revision.id);
       let signalSync!: () => void;
       const syncStarted = new Promise<void>(
         (resolve) => (signalSync = resolve),
@@ -369,11 +306,7 @@ describe("managed target access history", () => {
         await syncGate;
         return home.entities;
       };
-      const responsePromise = historyService.confirm(
-        prepared.action!.sessionId,
-        prepared.action!.confirmationId,
-        true,
-      );
+      const responsePromise = historyService.rollback(revision.id);
       await syncStarted;
       home.setAccessPolicy({
         mode: "allowlist",

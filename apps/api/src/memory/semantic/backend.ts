@@ -15,6 +15,12 @@ export type MemoryWriteOutcome = MemoryWriteResult & {
   unchanged?: boolean;
 };
 
+/** A correction NOVA learned by itself is stored as an inferred memory with provenance tags. */
+export interface CorrectionOptions {
+  origin?: "inferred";
+  tags?: string[];
+}
+
 /** What a long-term memory store can do; Qdrant and OmniRoute's native memory both do it. */
 export interface SemanticBackend {
   readonly configured: boolean;
@@ -35,7 +41,11 @@ export interface SemanticBackend {
     options?: { history?: boolean },
   ): Promise<{ ok: true; removed?: number }>;
   /** Replace a record's text, keeping the old one as history. Optional per backend. */
-  correct?(id: string, text: unknown): Promise<MemoryWriteOutcome>;
+  correct?(
+    id: string,
+    text: unknown,
+    options?: CorrectionOptions,
+  ): Promise<MemoryWriteOutcome>;
   maintain(): Promise<Record<string, unknown>>;
   health(): Promise<MemoryHealth>;
 }

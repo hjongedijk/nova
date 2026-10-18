@@ -1,11 +1,14 @@
 import {
+  readJsonStateOrEnoent,
+  writeJsonState,
+} from "../core/db/json-state.js";
+import {
   Injectable,
   Logger,
   Optional,
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
-import fs from "node:fs";
 import type {
   AlertsResponse,
   FeedEvent,
@@ -536,7 +539,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
 
   private loadFocus(): void {
     try {
-      const data = JSON.parse(fs.readFileSync(this.focusFile!, "utf8")) as {
+      const data = readJsonStateOrEnoent(this.focusFile!) as {
         until?: unknown;
         count?: unknown;
         workBlock?: unknown;
@@ -567,15 +570,8 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     value: { until: number; count: number; workBlock: boolean } | null,
   ): void {
     if (!this.focusFile) return;
-    const temporary = `${this.focusFile}.tmp`;
     try {
-      fs.writeFileSync(
-        temporary,
-        JSON.stringify(value ?? { until: 0, count: 0 }),
-        { mode: 0o600 },
-      );
-      fs.chmodSync(temporary, 0o600);
-      fs.renameSync(temporary, this.focusFile);
+      writeJsonState(this.focusFile, value ?? { until: 0, count: 0 });
     } catch {
       this.focusUnreadable = true;
       this.logger.error(
@@ -587,9 +583,9 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
 
   private loadSpeechProgress(): void {
     try {
-      const value = JSON.parse(
-        fs.readFileSync(this.speechProgressFile!, "utf8"),
-      ) as { spokenAt?: unknown };
+      const value = readJsonStateOrEnoent(this.speechProgressFile!) as {
+        spokenAt?: unknown;
+      };
       const times = value?.spokenAt;
       if (
         !Array.isArray(times) ||
@@ -621,12 +617,7 @@ export class AlertsFeed implements OnModuleInit, OnModuleDestroy {
     const next = [...recent, timestamp].sort((a, b) => a - b);
     if (this.speechProgressFile) {
       try {
-        const temporary = `${this.speechProgressFile}.tmp`;
-        fs.writeFileSync(temporary, JSON.stringify({ spokenAt: next }), {
-          mode: 0o600,
-        });
-        fs.chmodSync(temporary, 0o600);
-        fs.renameSync(temporary, this.speechProgressFile);
+        writeJsonState(this.speechProgressFile, { spokenAt: next });
       } catch {
         this.speechProgressUnavailable = true;
         this.logger.error(

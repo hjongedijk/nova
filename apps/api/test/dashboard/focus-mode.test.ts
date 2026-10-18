@@ -7,6 +7,7 @@ import type { PlanningService } from "../../src/planning/planning.service.js";
 import type { WindowsPcService } from "../../src/integrations/windows/windows-pc.service.js";
 import type { NtfyPushService } from "../../src/dashboard/ntfy-push.service.js";
 import { AlertsFeed } from "../../src/dashboard/alerts-feed.service.js";
+import { dbStat, seedState, stateText } from "../helpers/nova-db.js";
 
 const planning = {
   onEvent: () => () => undefined,
@@ -79,8 +80,8 @@ describe("focus mode", () => {
       first.startFocus(5, now);
       first.record(warning("Private title"), now);
       const file = config.dataFile("focus-mode.json");
-      expect(fs.statSync(file).mode & 0o777).toBe(0o600);
-      expect(fs.readFileSync(file, "utf8")).not.toContain("Private");
+      expect(dbStat(file).mode & 0o777).toBe(0o600);
+      expect(stateText(file)).not.toContain("Private");
 
       const restarted = new AlertsFeed(
         planning,
@@ -203,7 +204,7 @@ describe("focus mode", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nova-focus-"));
     try {
       const config = { dataFile: (name: string) => path.join(directory, name) };
-      fs.writeFileSync(config.dataFile("focus-mode.json"), "{broken");
+      seedState(config.dataFile("focus-mode.json"), "{broken");
       const feed = new AlertsFeed(
         planning,
         undefined,

@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '../..')
 Push-Location (Join-Path $root 'apps/windows')
 try {
-  $releaseVersion = if ($Version) { $Version.TrimStart('v') } else { '0.1.0' }
+  $releaseVersion = if ($Version) { ($Version -replace '^windows-','').TrimStart('v') } else { (Get-Content 'VERSION' -Raw).Trim() }
   if ($releaseVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version' }
   $override = Join-Path (Get-Location) 'release-config.json'
   $signedRelease = [bool]$Version

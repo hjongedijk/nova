@@ -6,11 +6,9 @@ import {
   Param,
   Optional,
   Post,
-  UseGuards,
 } from "@nestjs/common";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { McpHub } from "../integrations/mcp/mcp.hub.js";
-import { SettingsGuard } from "./settings.guard.js";
 import { McpManagement } from "./mcp-management.service.js";
 import { RISKS } from "../integrations/mcp/mcp-config.js";
 import { McpSecretsStore } from "../integrations/mcp/mcp-secrets.store.js";
@@ -19,7 +17,6 @@ import type { Risk } from "@nova/contracts";
 
 /** PIN-protected status only; never projects MCP commands, arguments, variables or process errors. */
 @Controller("settings/mcp")
-@UseGuards(SettingsGuard)
 export class McpStatusController {
   constructor(
     private readonly hub: McpHub,
@@ -77,9 +74,9 @@ export class McpStatusController {
     return this.management.catalog();
   }
 
-  @Post("servers/:id/prepare-catalog")
+  @Post("servers/:id/catalog")
   @HttpCode(200)
-  prepareCatalog(@Param("id") id: string, @Body() body: unknown) {
+  changeCatalog(@Param("id") id: string, @Body() body: unknown) {
     if (
       !body ||
       typeof body !== "object" ||
@@ -90,33 +87,9 @@ export class McpStatusController {
       )
     )
       throw new ValidationError(["Ongeldige MCP-cataloguswijziging."]);
-    return this.management.prepareCatalog(
+    return this.management.changeCatalog(
       id,
       (body as { operation: "add" | "remove" }).operation,
-    );
-  }
-
-  @Post("servers/confirm-catalog")
-  @HttpCode(200)
-  confirmCatalog(@Body() body: unknown) {
-    if (!body || typeof body !== "object" || Array.isArray(body))
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const value = body as Record<string, unknown>;
-    if (
-      Object.keys(value).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      ) ||
-      typeof value.sessionId !== "string" ||
-      !/^settings-mcp-catalog:[0-9a-f-]{36}$/i.test(value.sessionId) ||
-      typeof value.confirmationId !== "string" ||
-      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
-      typeof value.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    return this.management.confirmCatalog(
-      value.sessionId,
-      value.confirmationId,
-      value.approve,
     );
   }
 
@@ -132,13 +105,10 @@ export class McpStatusController {
     return this.management.history(id);
   }
 
-  @Post("servers/:id/history/:revisionId/prepare-rollback")
+  @Post("servers/:id/history/:revisionId/rollback")
   @HttpCode(200)
-  prepareRollback(
-    @Param("id") id: string,
-    @Param("revisionId") revisionId: string,
-  ) {
-    return this.management.prepareRollback(id, revisionId);
+  rollback(@Param("id") id: string, @Param("revisionId") revisionId: string) {
+    return this.management.rollback(id, revisionId);
   }
 
   @Post("servers/:id/test")
@@ -149,9 +119,9 @@ export class McpStatusController {
     return this.hub.test(id);
   }
 
-  @Post("servers/:id/prepare-toggle")
+  @Post("servers/:id/toggle")
   @HttpCode(200)
-  prepareToggle(@Param("id") id: string, @Body() body: unknown) {
+  toggle(@Param("id") id: string, @Body() body: unknown) {
     if (
       !body ||
       typeof body !== "object" ||
@@ -160,12 +130,15 @@ export class McpStatusController {
       typeof (body as Record<string, unknown>).enabled !== "boolean"
     )
       throw new ValidationError(["Ongeldige MCP-wijziging."]);
-    return this.management.prepare(id, (body as { enabled: boolean }).enabled);
+    return this.management.setEnabled(
+      id,
+      (body as { enabled: boolean }).enabled,
+    );
   }
 
-  @Post("servers/:id/tools/:tool/prepare-risk")
+  @Post("servers/:id/tools/:tool/risk")
   @HttpCode(200)
-  prepareToolRisk(
+  setToolRisk(
     @Param("id") id: string,
     @Param("tool") tool: string,
     @Body() body: unknown,
@@ -179,58 +152,6 @@ export class McpStatusController {
       !RISKS.includes((body as { risk: Risk }).risk)
     )
       throw new ValidationError(["Ongeldig MCP-risiconiveau."]);
-    return this.management.prepareToolRisk(
-      id,
-      tool,
-      (body as { risk: Risk }).risk,
-    );
-  }
-
-  @Post("servers/confirm-toggle")
-  @HttpCode(200)
-  confirmToggle(@Body() body: unknown) {
-    if (!body || typeof body !== "object" || Array.isArray(body))
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const value = body as Record<string, unknown>;
-    if (
-      Object.keys(value).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      ) ||
-      typeof value.sessionId !== "string" ||
-      !/^settings-mcp:[0-9a-f-]{36}$/i.test(value.sessionId) ||
-      typeof value.confirmationId !== "string" ||
-      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
-      typeof value.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    return this.management.confirm(
-      value.sessionId,
-      value.confirmationId,
-      value.approve,
-    );
-  }
-
-  @Post("servers/confirm-tool-risk")
-  @HttpCode(200)
-  confirmToolRisk(@Body() body: unknown) {
-    if (!body || typeof body !== "object" || Array.isArray(body))
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    const value = body as Record<string, unknown>;
-    if (
-      Object.keys(value).some(
-        (key) => !["sessionId", "confirmationId", "approve"].includes(key),
-      ) ||
-      typeof value.sessionId !== "string" ||
-      !/^settings-mcp:[0-9a-f-]{36}$/i.test(value.sessionId) ||
-      typeof value.confirmationId !== "string" ||
-      !/^[0-9a-f-]{36}$/i.test(value.confirmationId) ||
-      typeof value.approve !== "boolean"
-    )
-      throw new ValidationError(["Ongeldige bevestiging."]);
-    return this.management.confirmToolRisk(
-      value.sessionId,
-      value.confirmationId,
-      value.approve,
-    );
+    return this.management.setToolRisk(id, tool, (body as { risk: Risk }).risk);
   }
 }

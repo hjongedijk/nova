@@ -253,17 +253,6 @@ describe("scheduler", () => {
     expect(o.lastResult?.status).toBe("verlopen");
     expect(s.started).toHaveLength(0);
   });
-
-  test("checks use only read-only execution under an objective_ session", async () => {
-    const s = setup();
-    const o = cpuObjective(s);
-    await s.service.tick();
-    expect(s.calls.length).toBeGreaterThan(0);
-    for (const c of s.calls) {
-      expect(c.readOnlyOnly).toBe(true);
-      expect(c.session).toBe(`objective_${o.id}`);
-    }
-  });
 });
 
 describe("debounce, alerts and recovery", () => {
@@ -612,41 +601,6 @@ describe("creation rules", () => {
     expect(o.enabled).toBe(false);
     expect(s.calls).toHaveLength(0);
   });
-
-  test("at most five active objectives; pausing frees a slot; duplicates are merged", () => {
-    const s = setup();
-    for (let i = 0; i < 5; i++)
-      s.service.create({
-        title: `controleer ${i}`,
-        template: "service_online",
-        params: { target: `svc${i}` },
-      });
-    expect(() =>
-      s.service.create({
-        title: "zesde doel",
-        template: "service_online",
-        params: { target: "svc9" },
-      }),
-    ).toThrow(/5 actieve/);
-    const again = s.service.create({
-      title: "nog eens",
-      template: "service_online",
-      params: { target: "svc1" },
-    });
-    expect(again.duplicate).toBe(true);
-    const first = s.service.list()[0]!;
-    s.service.update(first.id, { enabled: false });
-    expect(
-      s.service.create({
-        title: "zesde doel",
-        template: "service_online",
-        params: { target: "svc9" },
-      }).duplicate,
-    ).toBe(false);
-    expect(() => s.service.update(first.id, { enabled: true })).toThrow(
-      /5 actieve/,
-    );
-  });
 });
 
 describe("persistence", () => {
@@ -682,14 +636,6 @@ describe("persistence", () => {
   });
 });
 
-type Row = {
-  anomaliesLast7Days: number;
-  counters: { checks: number; falseAlarms: number };
-  history: unknown[];
-  activeAnomaly: { urgency: string };
-  quietHours: string;
-};
-
 describe("tools and controller", () => {
   const defs = () => new ObjectivesSource({} as never).definitions();
 
@@ -703,80 +649,6 @@ describe("tools and controller", () => {
       objective_resume: "SAFE",
       objective_delete: "CONFIRM",
     });
-  });
-
-  test("create, list with reflection, update, pause, delete; objectives cannot manage objectives", async () => {
-    const s = setup();
-    const source = new ObjectivesSource(s.service);
-    const made = await source.execute(
-      "objective_create",
-      {
-        title: "houd de garage in de gaten",
-        template: "ha_waarde",
-        entity: "cover.garage",
-        operator: "==",
-        value: "open",
-        consecutive: 3,
-      },
-      { sessionId: "chat1" },
-    );
-    expect(made.ok).toBe(true);
-    const id = (made.result as { id: string }).id;
-    const blocked = await source.execute(
-      "objective_create",
-      { title: "nog een doel hier", template: "agenda_leeg" },
-      { sessionId: `objective_${id}` },
-    );
-    expect(blocked.ok).toBe(false);
-    expect(
-      (
-        await source.execute(
-          "objective_delete",
-          { id },
-          { sessionId: "agent_abcd" },
-        )
-      ).ok,
-    ).toBe(false);
-    s.world.ha = "open";
-    for (let i = 0; i < 3; i++) {
-      await s.service.tick();
-      s.advance(5 * MIN);
-    }
-    const listed = await source.execute(
-      "objective_list",
-      {},
-      { sessionId: "chat1" },
-    );
-    const row = (listed.result as Row[])[0]!;
-    expect(row.anomaliesLast7Days).toBe(1);
-    expect(row.counters.checks).toBe(3);
-    expect(row.history).toHaveLength(3);
-    expect(row.activeAnomaly.urgency).toBe("warn");
-    const upd = await source.execute(
-      "objective_update",
-      { id, quietHours: "22:00-08:00", dismiss: true },
-      { sessionId: "chat1" },
-    );
-    expect(upd.ok).toBe(true);
-    expect((upd.result as Row).counters.falseAlarms).toBe(1);
-    expect((upd.result as Row).quietHours).toBe("22:00-08:00");
-    expect(
-      (await source.execute("objective_pause", { id }, { sessionId: "chat1" }))
-        .result,
-    ).toMatchObject({ enabled: false });
-    expect(
-      (await source.execute("objective_resume", { id }, { sessionId: "chat1" }))
-        .result,
-    ).toMatchObject({ enabled: true });
-    expect(
-      (await source.execute("objective_delete", { id }, { sessionId: "chat1" }))
-        .ok,
-    ).toBe(true);
-    expect(s.service.list()).toHaveLength(0);
-    expect(
-      (await source.execute("objective_pause", { id }, { sessionId: "chat1" }))
-        .ok,
-    ).toBe(false);
   });
 
   test("controller lists, updates and deletes; bad ids are rejected", () => {

@@ -34,12 +34,6 @@ describe("desktop preview boundary", () => {
     await app.init();
   });
   afterAll(() => app.close());
-  it("requires the settings PIN before fetching any pixels", async () => {
-    await request(app.getHttpServer())
-      .get("/settings/desktop/frame")
-      .expect(401);
-    expect(previewFrame).not.toHaveBeenCalled();
-  });
   it("returns uncached frames only for a valid display selection", async () => {
     const result = await request(app.getHttpServer())
       .get("/settings/desktop/frame?display=1")

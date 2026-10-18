@@ -5,6 +5,7 @@ import path from "node:path";
 import type { WindowsAgentStatus } from "@nova/contracts";
 import type { WallpaperPort } from "../../src/settings/wallpaper.port.js";
 import { ADMIN, createApp, type TestApp } from "./helpers.js";
+import { dbStat } from "../helpers/nova-db.js";
 
 const apps: TestApp[] = [];
 const tempDirs: string[] = [];
@@ -46,58 +47,6 @@ function port(): WallpaperPort {
 }
 
 describe("private Windows settings endpoints", () => {
-  it("requires the PIN before probing and exposes the provided status", async () => {
-    const wallpaper = port();
-    const app = await createApp({
-      env: { NOVA_ADMIN_PIN: "4321" },
-      wallpaper,
-    });
-    apps.push(app);
-    expect((await app.api.get("/api/settings/windows/status")).status).toBe(
-      401,
-    );
-    expect(
-      (await app.api.get("/api/settings/windows/status").set(ADMIN)).status,
-    ).toBe(401);
-    expect(
-      (
-        await app.api
-          .get("/api/settings/windows/status")
-          .set("x-nova-pin", "wrong")
-      ).status,
-    ).toBe(401);
-    expect(wallpaper.agentStatus).not.toHaveBeenCalled();
-    const reply = await app.api
-      .get("/api/settings/windows/status")
-      .set("x-nova-pin", "4321");
-    expect(reply.status).toBe(200);
-    expect(reply.body).toEqual(status);
-    expect(wallpaper.agentStatus).toHaveBeenCalledOnce();
-  });
-
-  it("PIN-gates the read-only live helper measurement", async () => {
-    const wallpaper = port();
-    const app = await createApp({
-      env: { NOVA_ADMIN_PIN: "4321" },
-      wallpaper,
-    });
-    apps.push(app);
-    expect(
-      (await app.api.get("/api/settings/windows/helper-debug")).status,
-    ).toBe(401);
-    expect(wallpaper.helperDebug).not.toHaveBeenCalled();
-    const reply = await app.api
-      .get("/api/settings/windows/helper-debug")
-      .set("x-nova-pin", "4321");
-    expect(reply.status).toBe(200);
-    expect(reply.body).toMatchObject({
-      available: true,
-      helper: "window=0,0,640,340 topmost=True",
-      display: 0,
-    });
-    expect(wallpaper.helperDebug).toHaveBeenCalledOnce();
-  });
-
   it("degrades cleanly without an agent or with a legacy port", async () => {
     const legacy = port();
     delete legacy.agentStatus;
@@ -116,39 +65,6 @@ describe("private Windows settings endpoints", () => {
         error: "Er is geen Windows-agent ingesteld.",
       });
     }
-  });
-
-  it("guards hotkey changes and rejects invalid input before reaching the agent", async () => {
-    const wallpaper = port();
-    const app = await createApp({
-      env: { NOVA_ADMIN_PIN: "4321" },
-      wallpaper,
-    });
-    apps.push(app);
-    const hotkeys = {
-      open: "Ctrl+Alt+N",
-      speak: "Ctrl+Alt+S",
-      mute: "Ctrl+Alt+M",
-      desktop: "Ctrl+Alt+D",
-    };
-    const save = (headers: Record<string, string>, body: object) =>
-      app.api.put("/api/settings/helper/hotkeys").set(headers).send(body);
-    expect((await save(ADMIN, { hotkeys })).status).toBe(401);
-    expect((await save({ "x-nova-pin": "4321" }, { hotkeys })).status).toBe(
-      403,
-    );
-    const headers = { ...ADMIN, "x-nova-pin": "4321" };
-    for (const invalid of [
-      {},
-      { hotkeys: [] },
-      { hotkeys: { ...hotkeys, open: 2 } },
-      { hotkeys: { ...hotkeys, open: "x".repeat(81) } },
-    ])
-      expect((await save(headers, invalid)).status).toBe(400);
-    expect(wallpaper.helperPreferences).not.toHaveBeenCalled();
-    expect((await save(headers, { hotkeys })).status).toBe(200);
-    expect(wallpaper.helperPreferences).toHaveBeenCalledTimes(2);
-    expect(wallpaper.helperPreferences).toHaveBeenLastCalledWith(hotkeys);
   });
 
   it("stores private hotkey history and restores only when the agent state matches", async () => {
@@ -182,9 +98,6 @@ describe("private Windows settings endpoints", () => {
     });
     apps.push(app);
     const headers = { ...ADMIN, "x-nova-pin": "4321" };
-    expect(
-      (await app.api.get("/api/settings/helper/hotkeys/history")).status,
-    ).toBe(401);
     const changed = { ...original, open: "Ctrl+Alt+Q" };
     const save = await app.api
       .put("/api/settings/helper/hotkeys")
@@ -207,7 +120,7 @@ describe("private Windows settings endpoints", () => {
     expect(rollback.status).toBe(201);
     expect(rollback.body).toMatchObject({ ok: true, hotkeys: original });
     expect(current).toEqual(original);
-    const stat = fs.statSync(path.join(dir, "helper-hotkey-history.json"));
+    const stat = dbStat(path.join(dir, "helper-hotkey-history.json"));
     expect(stat.mode & 0o777).toBe(0o600);
     expect(JSON.stringify(app.audits)).not.toContain("Ctrl+Alt+Q");
   });

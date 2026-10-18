@@ -1,6 +1,10 @@
 import { storage } from "#lib/util/storage.ts";
 import type { AssistantMood } from "#lib/stores/chat.svelte.ts";
-import { pushVoiceProfile } from "#lib/api/voice-profile.ts";
+import {
+  pushVoiceProfile,
+  reconcileVoiceProfile,
+  type VoiceProfileSync,
+} from "#lib/api/voice-profile.ts";
 import { publishLocalPreferenceReceipt } from "#lib/util/local-preference-receipts.ts";
 
 export const TTS_VOICES = [
@@ -72,6 +76,20 @@ export function saveTtsVoice(voice: string): TtsVoiceId {
 export function syncVoiceProfile(): void {
   const { rate, pitch } = ttsProsody();
   void pushVoiceProfile({ voice: ttsVoiceForSpeech(), rate, pitch });
+}
+
+/**
+ * On app start: hand a voice the user already chose in this browser to the server (once, only when it differs), so
+ * phone calls use it too. Nothing stored locally means nothing to push, so a server profile is never reset to defaults.
+ * The outcome is returned (never swallowed) so the caller decides how to surface a failure.
+ */
+export async function syncStoredVoiceProfile(): Promise<VoiceProfileSync> {
+  const stored = [KEY, RATE_KEY, PITCH_KEY].some(
+    (key) => storage.get(key, "") !== "",
+  );
+  if (!stored) return { status: "unchanged" };
+  const { rate, pitch } = ttsProsody();
+  return reconcileVoiceProfile({ voice: ttsVoiceForSpeech(), rate, pitch });
 }
 
 function localeOf(voice: TtsVoiceId): string {

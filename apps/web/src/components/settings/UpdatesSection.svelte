@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Button from "#components/ui/Button.svelte";
   import type { UpdateReport } from "@nova/contracts";
+  import { novaVersionLabel } from "#lib/util/version.ts";
   import { getUpdates, checkUpdates } from "#lib/api/settings.ts";
   let report = $state<UpdateReport | null>(null);
   let busy = $state(false);
@@ -27,9 +28,7 @@
 <section class="updates" aria-label="Versie en updates">
   <h2>Versie en updates</h2>
   {#if report}<p>
-      Deze NOVA draait: <strong
-        >{report.running === "dev" ? "ontwikkelbuild" : report.running}</strong
-      >.
+      Deze NOVA draait: <strong>{novaVersionLabel(report.running)}</strong>.
     </p>{/if}
   <Button disabled={busy} onclick={check}
     >{busy ? "Controleren…" : "Controleer op nieuwe release"}</Button

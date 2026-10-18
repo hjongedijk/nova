@@ -1,8 +1,6 @@
-import { Controller, Get, HttpCode, Post, UseGuards } from "@nestjs/common";
+import { Controller, Get, HttpCode, Post } from "@nestjs/common";
 import { UpdatesService } from "./updates.service.js";
-import { SettingsGuard } from "./settings.guard.js";
 @Controller("settings/updates")
-@UseGuards(SettingsGuard)
 export class UpdatesController {
   constructor(private readonly updates: UpdatesService) {}
   @Get() status() {

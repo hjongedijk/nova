@@ -9,6 +9,7 @@
   <body>
     <main>
       <h1>NOVA voor Windows</h1>
+      <p id="app-version" class="note">NOVA</p>
       <p>Eén app voor je helper, achtergrond en verbinding met NOVA.</p>
       <section id="updates" aria-labelledby="updates-title">
         <h2 id="updates-title">Updates</h2>
@@ -43,18 +44,10 @@
         <button type="submit">Opslaan en openen</button>
       </form>
       <form id="network">
-        <label for="source">IP-adres van de NOVA-server</label>
-        <input
-          id="source"
-          required
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="192.168.1.10"
-        />
         <button type="submit">Verbinding toestaan in Windows</button>
         <p class="note">
-          Windows vraagt toestemming. Alleen deze server krijgt toegang, op
-          privé- en bedrijfsnetwerken.
+          Windows vraagt toestemming om de poort van NOVA in de firewall te
+          openen, zodat NOVA deze pc kan bereiken.
         </p>
       </form>
       <form id="pair">
@@ -70,45 +63,19 @@
         />
         <button id="copy" type="button">Code kopiëren</button>
         <p class="note">
-          Plak deze code in NOVA → Instellingen → Koppelingen → Windows-agent.
-          De code geeft toegang tot deze pc.
+          Plak deze code in NOVA → Instellingen → Windows-pc. De code is de
+          enige koppeling tussen NOVA en deze pc: bewaar hem als een wachtwoord.
         </p>
       </form>
-      <form id="automation">
-        <h2>Toegang tot deze pc</h2>
-        <label
-          ><input id="allow-view" type="checkbox" /> NOVA mag beeldschermen
-          bekijken</label
-        >
-        <label
-          ><input id="allow-control" type="checkbox" /> NOVA mag muis en
-          toetsenbord bedienen na sessiebevestiging</label
-        >
-        <label
-          ><input id="allow-browser" type="checkbox" /> NOVA mag een eigen
-          zichtbaar browservenster bedienen</label
-        >
-        <button type="submit">Toegang opslaan</button>
+      <section id="access" aria-labelledby="access-title">
+        <h2 id="access-title">NOVA op deze pc</h2>
         <p class="note">
-          Ctrl+Alt+Shift+K pauzeert NOVA en stopt pc-bediening direct. Hervat
-          via het systeemvak. Zet meekijken en bedienen ook in NOVA's
-          bureaubladinstellingen aan.
+          Met de koppelcode heeft NOVA volledige toegang tot deze pc: meekijken,
+          muis en toetsenbord, browser en programma's, zonder verdere
+          instellingen. Ctrl+Alt+Shift+K is de noodstop: die pauzeert NOVA
+          direct. Hervatten kan alleen via het systeemvak.
         </p>
-      </form>
-      <form id="elevation">
-        <h2>Windows-beheerrechten</h2>
-        <label
-          ><input id="run-elevated" type="checkbox" /> NOVA starten als
-          beheerder</label
-        >
-        <p id="elevation-status" role="status"></p>
-        <p class="note">
-          Windows vraagt toestemming bij het starten. Nodig om verhoogde
-          programma's te bedienen. UAC's beveiligde scherm en Windows-aanmelding
-          blijven handmatig. Alleen lokale instellingen kunnen dit inschakelen.
-        </p>
-        <button type="submit">Toepassen</button>
-      </form>
+      </section>
       <details>
         <summary>Oude agent vervangen</summary>
         <form id="legacy">

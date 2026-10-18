@@ -1,14 +1,8 @@
-import {
-  Controller,
-  Get,
-  ServiceUnavailableException,
-  UseGuards,
-} from "@nestjs/common";
+import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
 import type { Risk, ToolUsageReport } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { sanitize } from "../core/security/sanitize.js";
 import { ToolsService } from "../tools/tools.service.js";
-import { SettingsGuard } from "./settings.guard.js";
 import { object } from "./request-input.js";
 
 const ENTRY_LIMIT = 500;
@@ -62,7 +56,6 @@ function errorType(
 
 /** Bounded private usage counts. Successful results do not imply verified physical effects. */
 @Controller("settings/tools/usage")
-@UseGuards(SettingsGuard)
 export class ToolUsageController {
   constructor(
     private readonly audit: AuditService,

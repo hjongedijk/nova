@@ -34,7 +34,6 @@ export type NodeRedFlowRevisionMetadata = {
 @Injectable()
 export class NodeRedFlowRevisions {
   private readonly file: string;
-  private readonly fingerprintKey = crypto.randomBytes(32);
 
   constructor(@Inject(NovaConfig) config: Pick<NovaConfig, "dataFile">) {
     this.file = config.dataFile("node-red-flow-revisions.json");
@@ -157,38 +156,9 @@ export class NodeRedFlowRevisions {
     this.record({ revision: after.revision, flows: afterFlows });
   }
 
-  /** A content-bound confirmation token without exposing saved flow nodes. */
-  prepareRestore(id: string, live: NodeRedFlowSnapshot): string {
-    const rows = this.read();
-    const target = rows.find((row) => row.id === id);
-    if (!target) throw new NotFoundException("Flowversie niet beschikbaar.");
-    if (live.revision !== rows.at(-1)?.snapshot.revision)
-      throw new ConflictException("Node-RED-flows zijn later gewijzigd.");
-    if (isDeepStrictEqual(live.flows, target.snapshot.flows))
-      throw new ConflictException("Deze flowversie is al actief.");
-    return this.restoreFingerprint(target, live.revision);
-  }
-
-  private restoreFingerprint(
-    target: StoredRevision,
-    liveRevision: string,
-  ): string {
-    return crypto
-      .createHmac("sha256", this.fingerprintKey)
-      .update(
-        JSON.stringify({
-          id: target.id,
-          liveRevision,
-          flows: target.snapshot.flows,
-        }),
-      )
-      .digest("hex");
-  }
-
   /** Restore only while the current live revision matches the last recorded one. */
   async restore(
     id: string,
-    expectedFingerprint: string,
     management: Pick<NodeRedManagement, "flowSnapshot" | "writeFlowSnapshot">,
   ): Promise<NodeRedFlowRevisionMetadata & { historyWarning?: string }> {
     const rows = this.read();
@@ -197,11 +167,8 @@ export class NodeRedFlowRevisions {
     const live = await management.flowSnapshot();
     if (live.revision !== rows.at(-1)?.snapshot.revision)
       throw new ConflictException("Node-RED-flows zijn later gewijzigd.");
-    if (
-      !/^[0-9a-f]{64}$/.test(expectedFingerprint) ||
-      this.restoreFingerprint(target, live.revision) !== expectedFingerprint
-    )
-      throw new ConflictException("Flowversie is na voorbereiding gewijzigd.");
+    if (isDeepStrictEqual(live.flows, target.snapshot.flows))
+      throw new ConflictException("Deze flowversie is al actief.");
     const result = await management.writeFlowSnapshot(
       live.revision,
       target.snapshot.flows,

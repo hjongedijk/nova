@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import {
   AuditService,
   type AuditRecord,
@@ -65,8 +64,6 @@ function fixture() {
     timestamp: "now",
   }));
   const audit = { record } as unknown as AuditService;
-  const confirmations = new ConfirmationsService(audit);
-  confirmations.now = () => Date.now();
   const routing = new RoutingService(config as NovaConfig);
   vi.spyOn(routing, "verifyForManagement").mockReturnValue(ready);
   const barrier = new RoutingManagementBarrier(config as NovaConfig, routing);
@@ -114,7 +111,6 @@ function fixture() {
   const service = new OmniRouteAccountKeyUpdate(
     config as NovaConfig,
     management,
-    confirmations,
     audit,
     barrier,
     routing,
@@ -130,40 +126,32 @@ function fixture() {
   };
 }
 
-describe("OmniRoute API key rotation", () => {
-  it("requires an eligible API-key account and explicit global-effect acknowledgement", async () => {
+describe("OmniRoute API key rotation (single step)", () => {
+  it("rejects invalid input and ineligible (non API-key) accounts without writing", async () => {
     const { service, setAuthType, request } = fixture();
-    await expect(service.prepare("account-1", newKey, false)).rejects.toThrow(
-      "bevestig de clientbrede wijziging",
+    await expect(service.update("account-1", "")).rejects.toThrow(
+      "nieuwe sleutel",
+    );
+    await expect(service.update("../x", newKey)).rejects.toThrow(
+      "nieuwe sleutel",
     );
     setAuthType("oauth");
-    expect(await service.prepare("account-1", newKey, true)).toMatchObject({
+    expect(await service.update("account-1", newKey)).toMatchObject({
       ok: false,
     });
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it("replaces the key after confirmation and excludes both keys from audit", async () => {
+  it("replaces the key in one call and excludes both keys from result and audit", async () => {
     const { service, db, record, request, routing } = fixture();
-    const prepared = await service.prepare("account-1", newKey, true);
-    expect(prepared).toMatchObject({
-      ok: true,
-      provider: "mistral",
-      name: "Personal",
-    });
-    const action = prepared.action!;
-    expect(JSON.stringify(action.args)).not.toContain(oldKey);
-    expect(JSON.stringify(action.args)).not.toContain(newKey);
-    const result = await service.confirm(
-      action.sessionId,
-      action.confirmationId,
-      true,
-    );
+    const result = await service.update("account-1", newKey);
     expect(result).toMatchObject({
       ok: true,
       verified: true,
       routeReady: true,
     });
+    expect(JSON.stringify(result)).not.toContain(oldKey);
+    expect(JSON.stringify(result)).not.toContain(newKey);
     expect(
       db
         .prepare("SELECT api_key FROM provider_connections WHERE id=?")
@@ -176,20 +164,32 @@ describe("OmniRoute API key rotation", () => {
           JSON.stringify(options.body).includes(newKey),
       ),
     ).toBe(true);
+    expect(record).toHaveBeenCalled();
     expect(JSON.stringify(record.mock.calls)).not.toContain(oldKey);
     expect(JSON.stringify(record.mock.calls)).not.toContain(newKey);
     expect(JSON.stringify(record.mock.calls)).not.toMatch(/[a-f0-9]{64}/);
     expect(routing.status().ready).toBe(true);
   });
 
+  it("refuses a replacement equal to the current key", async () => {
+    const { service, request } = fixture();
+    expect(await service.update("account-1", oldKey)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("gelijk"),
+    });
+    expect(
+      request.mock.calls.some(([, options]) => options?.method === "PUT"),
+    ).toBe(false);
+  });
+
   it("keeps routing blocked when OmniRoute cannot verify persistence", async () => {
     const { service, setPersist, routing } = fixture();
     setPersist(false);
-    const prepared = await service.prepare("account-1", newKey, true);
-    const action = prepared.action!;
-    expect(
-      await service.confirm(action.sessionId, action.confirmationId, true),
-    ).toMatchObject({ ok: false, verified: null, routeReady: false });
+    expect(await service.update("account-1", newKey)).toMatchObject({
+      ok: false,
+      verified: null,
+      routeReady: false,
+    });
     expect(routing.status()).toMatchObject({
       ready: false,
       status: "POLICY_CHANGE_PENDING",

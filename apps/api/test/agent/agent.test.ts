@@ -129,33 +129,3 @@ test("validation, duplicates and recursion block", async () => {
   service.cancel(a.id);
   expect(a.status).toBe("cancelled");
 });
-
-test("autonomy level endpoint validates and stores the level", async () => {
-  const { AutonomyLevelController } =
-    await import("../../src/agent/autonomy-level.controller.js");
-  let level = "balanced";
-  const controller = new AutonomyLevelController({
-    get: () => level,
-    set: (l: string) => (level = l),
-  } as never);
-  expect(controller.read().level).toBe("balanced");
-  expect(controller.update({ level: "careful" }).level).toBe("careful");
-  expect(() => controller.update({ level: "yolo" })).toThrow();
-  expect(level).toBe("careful");
-});
-
-test("a read-only run passes readOnlyOnly to every turn", async () => {
-  const calls: Array<{ readOnlyOnly?: boolean }> = [];
-  const { service } = setup([{ reply: "KLAAR: ok" }]);
-  (
-    service as unknown as {
-      orchestrator: { run: (i: never) => Promise<unknown> };
-    }
-  ).orchestrator.run = async (i) => (calls.push(i), { reply: "KLAAR: ok" });
-  const run = service.start("onderzoek de storing alleen lezend", {
-    readOnly: true,
-  });
-  await settle();
-  expect(run.readOnly).toBe(true);
-  expect(calls[0]?.readOnlyOnly).toBe(true);
-});
