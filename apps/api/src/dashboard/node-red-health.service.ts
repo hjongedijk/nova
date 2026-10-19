@@ -26,7 +26,10 @@ export class NodeRedHealth {
     null;
   private runtimeError: string | null = null;
   private runtimeErrorFlowId: string | null = null;
-  private previousAvailability: boolean | null = null;
+  private previousAvailability = true;
+  private failedChecks = 0;
+  private failedSince: number | null = null;
+  private inFlight: Promise<NodeRedHealthReport> | null = null;
   constructor(
     private readonly config: NovaConfig,
     private readonly alerts?: AlertsFeed,
@@ -36,10 +39,20 @@ export class NodeRedHealth {
     report: NodeRedHealthReport,
     ttlMs: number,
   ): NodeRedHealthReport {
-    if (
-      this.previousAvailability !== null &&
-      this.previousAvailability !== report.online
-    ) {
+    const now = Date.now();
+    if (report.online) {
+      this.failedChecks = 0;
+      this.failedSince = null;
+    } else {
+      this.failedChecks += 1;
+      this.failedSince ??= now;
+    }
+    // One slow inventory read is not an outage. Announce recovery only after
+    // an outage was actually announced, including failures during startup.
+    const confirmed =
+      report.online ||
+      (this.failedChecks >= 3 && now - this.failedSince! >= 30_000);
+    if (confirmed && this.previousAvailability !== report.online) {
       this.alerts?.recordNodeRedAlert({
         title: report.online
           ? "Node-RED weer bereikbaar"
@@ -50,7 +63,7 @@ export class NodeRedHealth {
         severity: report.online ? "info" : "critical",
       });
     }
-    this.previousAvailability = report.online;
+    if (confirmed) this.previousAvailability = report.online;
     this.cached = { report, expiresAt: Date.now() + ttlMs };
     return report;
   }
@@ -73,6 +86,13 @@ export class NodeRedHealth {
   async report(): Promise<NodeRedHealthReport> {
     if (this.cached && this.cached.expiresAt > Date.now())
       return this.cached.report;
+    this.inFlight ??= this.probe().finally(() => {
+      this.inFlight = null;
+    });
+    return this.inFlight;
+  }
+
+  private async probe(): Promise<NodeRedHealthReport> {
     try {
       const base = new URL(this.config.nodeRedUrl);
       const allowedHosts = new Set(["node-red", "localhost", "127.0.0.1"]);

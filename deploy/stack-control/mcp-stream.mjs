@@ -3,7 +3,6 @@ import { networkMcpSpec } from "./mcp-network-credentials.mjs";
 
 const MAX_BYTES = 1024 * 1024;
 const PREPARE_TIMEOUT_MS = 75_000;
-const SESSION_TIMEOUT_MS = 30 * 60_000;
 const SERVERS = new Set([
   "sequential-thinking",
   "filesystem",
@@ -140,7 +139,6 @@ export function createMcpUpgradeHandler({
     let containerId;
     let dockerSocket;
     let prepareTimer;
-    let sessionTimer;
     let cleanupPromise;
     let cleanupSucceeded = false;
     let initialized = false;
@@ -178,7 +176,6 @@ export function createMcpUpgradeHandler({
       if (stopped) return;
       stopped = true;
       clearTimeout(prepareTimer);
-      clearTimeout(sessionTimer);
       dockerSocket?.destroy();
       if (status && !upgraded) reject(socket, status);
       else socket.destroy();
@@ -276,8 +273,8 @@ export function createMcpUpgradeHandler({
       );
       if (stopped) return;
       clearTimeout(prepareTimer);
-      sessionTimer = setTimeout(() => stop(), SESSION_TIMEOUT_MS);
-      sessionTimer.unref();
+      // Healthy MCP sessions are persistent. Disconnects and broker shutdown
+      // own cleanup; the sandbox caps concurrent workers and their resources.
       upgraded = true;
       const ready = socket.write(
         "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: nova-mcp\r\n\r\n",

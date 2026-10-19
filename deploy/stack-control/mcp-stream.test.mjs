@@ -344,14 +344,19 @@ test("75-second preparation timeout closes the request and cleans a late contain
   assert.deepEqual(f.calls, [["close", "timeout-id"]]);
 });
 
-test("30-minute lifetime closes active streams and cleans the sandbox", async (t) => {
+test("healthy streams survive 30 minutes and are cleaned on disconnect", async (t) => {
   const f = await fixture(t);
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const client = await f.connect();
-  const closed = once(client.socket, "close");
-  t.mock.timers.tick(30 * 60_000);
-  await closed;
+  t.mock.timers.tick(31 * 60_000);
+  assert.equal(client.socket.destroyed, false);
+  assert.equal(f.stream.destroyed, false);
+  assert.equal(
+    f.calls.some(([call]) => call === "close"),
+    false,
+  );
   t.mock.timers.reset();
+  client.socket.destroy();
   await until(() => f.calls.some(([call]) => call === "close"));
   assert.equal(f.stream.destroyed, true);
 });

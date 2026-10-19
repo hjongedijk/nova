@@ -5,6 +5,7 @@ import {
   createStackControlServer,
   STATUS_SERVICES,
   summarizeMcpWorkers,
+  reapAbandonedMcpWorkers,
 } from "./server.mjs";
 
 const token = "a".repeat(64);
@@ -213,4 +214,37 @@ test("Node-RED logs require authentication and reject caller options before Dock
     truncated: false,
   });
   assert.equal(calls, 1);
+});
+
+test("startup reaps only old never-started recognized MCP workers", async () => {
+  const now = Date.now();
+  const make = (n, changes = {}) => ({
+    Id: String(n).repeat(64),
+    Name: `/nova-mcp-${"a".repeat(36)}`,
+    Created: new Date(now - 600_000).toISOString(),
+    State: { Status: "created", Running: false },
+    Config: { User: "1000:1000", Cmd: ["mcp-server-sequential-thinking"] },
+    HostConfig: { NetworkMode: "none", ReadonlyRootfs: true, AutoRemove: true },
+    ...changes,
+  });
+  const details = [
+    make(1),
+    make(2, { State: { Status: "running", Running: true } }),
+    make(3, { Created: new Date(now).toISOString() }),
+    make(4, { Config: { User: "1000:1000", Cmd: ["unrelated"] } }),
+    make(5, { Name: "/unrelated" }),
+  ];
+  const removed = [];
+  const docker = async (path, method) => {
+    if (path.startsWith("/containers/json?"))
+      return details.map((d) => ({ Id: d.Id, Names: [d.Name] }));
+    const d = details.find((d) => path.includes(d.Id));
+    if (method === "DELETE") {
+      removed.push(d.Id);
+      return;
+    }
+    return d;
+  };
+  assert.equal(await reapAbandonedMcpWorkers(docker, now), 1);
+  assert.deepEqual(removed, [details[0].Id]);
 });

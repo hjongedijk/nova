@@ -117,6 +117,70 @@ describe("Node-RED health summary", () => {
     expect(JSON.stringify(await health.report())).not.toContain("secret-value");
   });
 
+  it("shares concurrent checks and does not announce a transient failure or its recovery", async () => {
+    let online = true;
+    let reads = 0;
+    const { url } = await serve((_request, response) => {
+      reads++;
+      response.writeHead(online ? 200 : 503, {
+        "content-type": "application/json",
+      });
+      response.end(online ? "[]" : "offline");
+    });
+    let now = 1000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const recordNodeRedAlert = vi.fn();
+    const health = new NodeRedHealth(
+      { nodeRedUrl: url } as NovaConfig,
+      { recordNodeRedAlert } as unknown as AlertsFeed,
+    );
+    await Promise.all(Array.from({ length: 10 }, () => health.report()));
+    expect(reads).toBe(1);
+    now += 30_001;
+    online = false;
+    await Promise.all(Array.from({ length: 10 }, () => health.report()));
+    expect(reads).toBe(2);
+    now += 5_001;
+    online = true;
+    await health.report();
+    expect(recordNodeRedAlert).not.toHaveBeenCalled();
+  });
+
+  it("announces persistent startup failure once and resets the failure window after recovery", async () => {
+    let online = false;
+    const { url } = await serve((_request, response) => {
+      response.writeHead(online ? 200 : 503, {
+        "content-type": "application/json",
+      });
+      response.end(online ? "[]" : "offline");
+    });
+    let now = 1000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const recordNodeRedAlert = vi.fn();
+    const health = new NodeRedHealth(
+      { nodeRedUrl: url } as NovaConfig,
+      { recordNodeRedAlert } as unknown as AlertsFeed,
+    );
+    await health.report();
+    now += 15_001;
+    await health.report();
+    expect(recordNodeRedAlert).not.toHaveBeenCalled();
+    now += 15_001;
+    await health.report();
+    expect(recordNodeRedAlert).toHaveBeenCalledTimes(1);
+    now += 5_001;
+    await health.report();
+    expect(recordNodeRedAlert).toHaveBeenCalledTimes(1);
+    online = true;
+    now += 5_001;
+    await health.report();
+    expect(recordNodeRedAlert).toHaveBeenCalledTimes(2);
+    online = false;
+    now += 30_001;
+    await health.report();
+    expect(recordNodeRedAlert).toHaveBeenCalledTimes(2);
+  });
+
   it("alerts once when Node-RED becomes unavailable and again when it recovers", async () => {
     let online = true;
     const { url } = await serve((_request, response) => {
@@ -140,6 +204,12 @@ describe("Node-RED health summary", () => {
     now += 30_001;
     online = false;
     expect((await health.report()).online).toBe(false);
+    expect(recordNodeRedAlert).not.toHaveBeenCalled();
+    now += 15_001;
+    await health.report();
+    expect(recordNodeRedAlert).not.toHaveBeenCalled();
+    now += 15_001;
+    await health.report();
     expect(recordNodeRedAlert).toHaveBeenLastCalledWith(
       expect.objectContaining({
         title: "Node-RED reageert niet",

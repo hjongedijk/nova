@@ -415,9 +415,11 @@ A missing or unavailable broker leaves these tools unavailable rather than start
 process. Git tool arguments are fixed to the selected project's path inside the container.
 
 The authenticated upgrade stream forwards stdout JSON lines and discards stderr. Both directions
-have message limits; sessions expire after 30 minutes and reconnect through the normal MCP lifecycle.
+have message limits; healthy sessions remain connected until a peer disconnects or the broker stops.
 Disconnects remove the owned container. Cleanup retries are bounded, and graceful broker shutdown
 closes active streams and waits for cleanup. Failed removals retain their runner capacity reservation.
+At startup the broker also removes recognized offline MCP workers that have remained in the
+never-started `created` state for at least five minutes; active workers are preserved.
 
 Run `npm run test:mcp-sandbox` for policy and lifecycle tests. Run
 `npm run test:mcp-sandbox:runtime` to use the already cached image of the running `nova` container,

@@ -148,6 +148,39 @@ export function summarizeMcpWorkers(details) {
   });
 }
 
+/** Reap never-started workers left by a previous broker crash, before admission. */
+export async function reapAbandonedMcpWorkers(
+  docker = dockerRequest,
+  now = Date.now(),
+) {
+  const filters = encodeURIComponent(
+    JSON.stringify({ name: ["nova-mcp-"], status: ["created"] }),
+  );
+  const rows = await docker(`/containers/json?all=1&filters=${filters}`);
+  let removed = 0;
+  for (const row of (Array.isArray(rows) ? rows : []).slice(0, 64)) {
+    if (
+      !/^[a-f0-9]{64}$/.test(row?.Id ?? "") ||
+      !row.Names?.some((name) => /^\/nova-mcp-[a-f0-9-]{36}$/.test(name))
+    )
+      continue;
+    const detail = await docker(`/containers/${row.Id}/json`);
+    const created = Date.parse(detail.Created);
+    if (
+      detail.State?.Status !== "created" ||
+      detail.State.Running !== false ||
+      !Number.isFinite(created) ||
+      now - created < 5 * 60_000 ||
+      detail.HostConfig?.AutoRemove !== true ||
+      !summarizeMcpWorkers([detail]).some((group) => group.workerCount === 1)
+    )
+      continue;
+    await docker(`/containers/${row.Id}?force=1&v=1`, "DELETE");
+    removed += 1;
+  }
+  return removed;
+}
+
 export function createStackControlServer({
   token = process.env.STACK_CONTROL_TOKEN ?? "",
   docker = dockerRequest,
@@ -357,6 +390,11 @@ export function createStackControlServer({
 }
 
 if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
+  // Created containers cannot auto-remove themselves: their process never ran.
+  // A failed sweep must not prevent the broker from serving healthy workers.
+  await reapAbandonedMcpWorkers().catch(() => {
+    console.warn("Abandoned MCP worker cleanup failed");
+  });
   const server = createStackControlServer();
   const shutdown = () => {
     void server
