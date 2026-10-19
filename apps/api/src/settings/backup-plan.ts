@@ -206,7 +206,7 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
   exactKeys(
     body,
     ["autohide", "contrast", "shape", "cues"],
-    ["wardrobe", "notifications", "rituals"],
+    ["wardrobe", "notifications", "rituals", "avatar"],
   );
   const cues = object(body.cues);
   exactKeys(cues, ["enabled", "volume", "theme", "quiet"], ["cues"]);
@@ -276,6 +276,7 @@ function helperPreferences(value: unknown): NovaSettings["helperPreferences"] {
     autohide: body.autohide,
     contrast: body.contrast,
     shape: body.shape,
+    ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
     ...(notifications ? { notifications } : {}),
     ...(rituals ? { rituals } : {}),
     cues: {

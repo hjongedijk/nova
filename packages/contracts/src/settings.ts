@@ -685,6 +685,7 @@ export interface NotificationModes {
   timer: NotificationMode;
 }
 export interface HelperPreferences {
+  avatar?: "face" | "orb";
   wardrobe?: {
     theme: "nova" | "violet" | "gold";
     seasonal: boolean;

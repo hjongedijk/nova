@@ -8,9 +8,11 @@
   let {
     state: mood = "ready",
     compact = false,
-  }: { state?: string; compact?: boolean } = $props();
-  let canvas: HTMLCanvasElement;
-  let orb: OrbHandle | undefined;
+    large = false,
+  }: { state?: string; compact?: boolean; large?: boolean } = $props();
+  let stage: HTMLDivElement;
+  let avatar: OrbHandle | undefined;
+  let refreshAppearance: (() => void) | undefined;
 
   function currentState(): UiState {
     if (mood === "idle" || mood === "ready") return "ready";
@@ -18,64 +20,120 @@
       return mood;
     return chat.uiState;
   }
-
   onMount(() => {
-    let visible = false;
-    function updateVisibility() {
-      if (visible && !document.hidden) {
-        orb ??= startOrb({
-          canvas,
-          portrait: true,
-          state: currentState,
-          shape: () => helper.shape,
-          hue: helperHue,
-          night: () => cueQuiet(helper.cues),
-          intensity: () => chat.confirmations.length + attentionCount(),
-          // The existing helper orb owns sound cues. This is the same visual
-          // renderer, without broadcasting a second copy of its reactions.
-        });
-      } else {
-        orb?.stop();
-        orb = undefined;
-      }
+    let visible = false,
+      disposed = false,
+      starting = false,
+      revision = 0;
+    function fallback() {
+      const canvas = document.createElement("canvas");
+      canvas.className = "companion-helmet";
+      canvas.dataset.renderer = "orb";
+      // eslint-disable-next-line svelte/no-dom-manipulating -- This empty mount has no Svelte children; the renderer owns its canvases.
+      stage.replaceChildren(canvas);
+      avatar = startOrb({
+        canvas,
+        state: currentState,
+        shape: () => helper.shape,
+        hue: helperHue,
+        night: () => cueQuiet(helper.cues),
+        intensity: () => chat.confirmations.length + attentionCount(),
+      });
     }
+    function updateVisibility() {
+      if (!visible || document.hidden || disposed) {
+        revision++;
+        avatar?.stop();
+        avatar = undefined;
+        // eslint-disable-next-line svelte/no-dom-manipulating -- Remove only canvases owned by the renderer in this empty mount.
+        stage.replaceChildren();
+        return;
+      }
+      if (avatar || starting) return;
+      if (compact || helper.avatar === "orb") {
+        fallback();
+        return;
+      }
+      const attempt = ++revision;
+      starting = true;
+      const cancelled = () => disposed || attempt !== revision;
+      void import("#lib/entity/talking-portrait.ts")
+        .then(async ({ startTalkingPortrait }) => {
+          if (cancelled()) return;
+          const result = await startTalkingPortrait(stage, {
+            state: currentState,
+            cancelled,
+          });
+          if (cancelled()) result.stop();
+          else avatar = result;
+        })
+        .catch(() => {
+          if (!cancelled()) fallback();
+        })
+        .finally(() => {
+          starting = false;
+          if (!disposed && !avatar && visible && !document.hidden)
+            updateVisibility();
+        });
+    }
+    refreshAppearance = () => {
+      revision++;
+      avatar?.stop();
+      avatar = undefined;
+      updateVisibility();
+    };
     const observer = new IntersectionObserver(([entry]) => {
       visible = !!entry?.isIntersecting;
       updateVisibility();
     });
-    observer.observe(canvas);
+    observer.observe(stage);
     document.addEventListener("visibilitychange", updateVisibility);
     return () => {
+      disposed = true;
+      refreshAppearance = undefined;
+      revision++;
       observer.disconnect();
       document.removeEventListener("visibilitychange", updateVisibility);
-      orb?.stop();
-      orb = undefined;
+      avatar?.stop();
+      avatar = undefined;
     };
   });
-
   $effect(() => {
-    void helper.eventId;
-    orb?.trigger(helper.event);
+    void helper.avatar;
+    refreshAppearance?.();
   });
   $effect(() => {
-    if (mood === "error") orb?.trigger("error");
+    void helper.eventId;
+    avatar?.trigger(helper.event);
+  });
+  $effect(() => {
+    if (mood === "error") avatar?.trigger("error");
   });
 </script>
 
-<div class="nova-companion" class:compact data-state={mood} aria-hidden="true">
-  <canvas class="companion-helmet" bind:this={canvas}></canvas>
-</div>
+<div
+  class="nova-companion"
+  class:compact
+  class:large
+  data-state={mood}
+  aria-hidden="true"
+  bind:this={stage}
+></div>
 
 <style>
   .nova-companion {
     flex: none;
-    width: 144px;
-    height: 124px;
+    width: 160px;
+    height: 136px;
     max-width: 100%;
     pointer-events: none;
   }
-  canvas {
+  .nova-companion :global(canvas) {
     display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .large {
     width: 100%;
     height: 100%;
   }

@@ -237,6 +237,7 @@ describe("bounded private settings backup plan", () => {
     const state = current();
     const preferences = {
       ...state.helperPreferences,
+      avatar: "orb",
       shape: "mist",
       wardrobe: { theme: "gold", seasonal: true, birthday: "12-25" },
       cues: {

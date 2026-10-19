@@ -88,6 +88,7 @@
       await persistHelperPreferences({
         autohide,
         contrast,
+        avatar: helper.avatar,
         shape: helper.shape,
         notifications: helper.notifications,
         rituals: helper.rituals,
@@ -670,6 +671,7 @@
         if (disposed) return;
         autohide = prefs.autohide;
         contrast = prefs.contrast;
+        helper.avatar = prefs.avatar ?? "face";
         helper.shape = prefs.shape;
         if (prefs.notifications)
           helper.notifications = {
@@ -1210,6 +1212,13 @@
             /></label
           >
           <label
+            >Avatar <select data-helper-live bind:value={helper.avatar}>
+              <option value="face">Gezicht</option><option value="orb"
+                >Originele orb</option
+              >
+            </select></label
+          >
+          <label
             >Orb <select data-helper-live bind:value={helper.shape}
               ><option value="orb">Bol</option><option value="ring">Ring</option
               ><option value="mist">Mist</option></select
@@ -1465,6 +1474,7 @@
                 const result = await persistHelperPreferences({
                   autohide,
                   contrast,
+                  avatar: helper.avatar,
                   shape: helper.shape,
                   notifications: helper.notifications,
                   rituals: helper.rituals,

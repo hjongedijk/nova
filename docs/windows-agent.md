@@ -193,6 +193,8 @@ The home page offers **Pc bekijken** with monitor selection, the current session
 
 ### Helper design
 
+In NOVA's **Settings → Windows → Helper en achtergrond**, choose **Gezicht** or **Originele orb**. The same choice is available in the helper's appearance controls. NOVA stores and synchronizes it across the helper and wallpaper; the inactive renderer stops. The full face uses a local rigged model with animated eyes and blinking. Compact toolbar icons remain small orbs. The standard website keeps its existing central orb.
+
 The helper is a small top-edge command panel with a calm navy surface, sharp rectangular controls and the particle orb. Controls stay square; mini-orbs stay circular because they show integration state. Warning and critical colors appear only when the data warrants it.
 
 | Token          | Value     | Purpose                                       |

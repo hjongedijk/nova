@@ -50,5 +50,10 @@
     "prettier-plugin-svelte": "^4.1.1",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.71.0"
+  },
+  "overrides": {
+    "@met4citizen/talkinghead": {
+      "three": "0.186.1"
+    }
   }
 }

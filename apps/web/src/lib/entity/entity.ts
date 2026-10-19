@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck -- the frame loop indexes typed arrays in hot loops; noUncheckedIndexedAccess would need `!` on every access.
-import { PORTRAIT_COLUMNS, PORTRAIT_ROWS, portraitPoint } from "./portrait.ts";
 import type { UiState } from "#lib/stores/chat.svelte.ts";
 import { dashboard, guests } from "#lib/stores/dashboard.svelte.ts";
 import { audioLevel as voiceLevel } from "#lib/stores/audio-level.svelte.ts";
@@ -32,8 +31,6 @@ export interface EntityHost {
   compact?: { life: Life };
   /** Keep the desktop entity clear of the header and composer on scaled 1080p screens. */
   wallpaper?: boolean;
-  /** Humanoid particle contours, with the same state, light and audio engine. */
-  portrait?: boolean;
 }
 
 /** Extra movement for the compact orb, in units of the orb's radius, on top of the state's own look. */
@@ -140,14 +137,7 @@ export function startEntity(host: EntityHost): () => void {
   const watch = compact ? new ResizeObserver(resize) : null;
   watch?.observe(cv);
 
-  const portrait = host.portrait === true;
-  const N = portrait
-    ? PORTRAIT_ROWS * PORTRAIT_COLUMNS
-    : compact
-      ? 560
-      : W < 700
-        ? 750
-        : 1300;
+  const N = compact ? 560 : W < 700 ? 750 : 1300;
   const px = new Float32Array(N);
   const py = new Float32Array(N);
   const pz = new Float32Array(N);
@@ -158,16 +148,7 @@ export function startEntity(host: EntityHost): () => void {
   const sy = new Float32Array(N);
   const sz = new Float32Array(N);
 
-  if (portrait) {
-    for (let i = 0; i < N; i++) {
-      const row = Math.floor(i / PORTRAIT_COLUMNS);
-      const column = i % PORTRAIT_COLUMNS;
-      [px[i], py[i], pz[i]] = portraitPoint(row, column);
-      seed[i] = Math.random();
-      nb1[i] = row * PORTRAIT_COLUMNS + ((column + 1) % PORTRAIT_COLUMNS);
-      nb2[i] = row + 1 < PORTRAIT_ROWS ? i + PORTRAIT_COLUMNS : i;
-    }
-  } else {
+  {
     /* A volumetric cloud: a loose skin plus a denser, dimmer interior,
      * jittered so no lattice shows. */
     const golden = Math.PI * (3 - Math.sqrt(5));
@@ -205,7 +186,7 @@ export function startEntity(host: EntityHost): () => void {
     }
   }
 
-  const DUST = portrait ? 24 : compact ? 0 : W < 700 ? 70 : 150;
+  const DUST = compact ? 0 : W < 700 ? 70 : 150;
   const dust = Array.from({ length: DUST }, () => ({
     x: Math.random(),
     y: Math.random(),
@@ -343,15 +324,13 @@ export function startEntity(host: EntityHost): () => void {
     const squashX = mod ? mod.sx : 1;
     const squashY = mod ? mod.sy : 1;
     const dim = mod ? mod.dim : 1;
-    const yaw = portrait
-      ? gx * 0.18 + Math.sin(t * 0.2) * 0.07 * MOTION
-      : t * cur.spin * MOTION + gx * 0.55;
-    const pitch = portrait ? -0.03 + gy * 0.08 : 0.25 + gy * 0.3;
+    const yaw = t * cur.spin * MOTION + gx * 0.55;
+    const pitch = 0.25 + gy * 0.3;
     const cY = Math.cos(yaw);
     const sY = Math.sin(yaw);
     const cP = Math.cos(pitch);
     const sP = Math.sin(pitch);
-    const amp = cur.amp * MOTION * (portrait ? 0.35 : 1);
+    const amp = cur.amp * MOTION;
     const scatter = (1 - birth) * 3.2;
 
     g.clearRect(0, 0, W, H);
@@ -390,7 +369,7 @@ export function startEntity(host: EntityHost): () => void {
     }
 
     /* HUD rings, the instrument around the entity */
-    const hudA = portrait ? 0 : cur.hud * birth;
+    const hudA = cur.hud * birth;
     const wide = W >= 1340;
     const fullRadius = Math.max(
       R * 1.7,
@@ -562,10 +541,10 @@ export function startEntity(host: EntityHost): () => void {
     }
 
     /* rings: sound leaves it while speaking, attention flows in while listening */
-    if (!portrait && speaking && audioLevel > 0.2 && t - lastRing > 0.4) {
+    if (speaking && audioLevel > 0.2 && t - lastRing > 0.4) {
       rings.push({ t0: t, dir: 1 });
       lastRing = t;
-    } else if (!portrait && uiState === "listening" && t - lastRing > 1.3) {
+    } else if (uiState === "listening" && t - lastRing > 1.3) {
       rings.push({ t0: t, dir: -1 });
       lastRing = t;
     }
@@ -597,7 +576,7 @@ export function startEntity(host: EntityHost): () => void {
     }
 
     /* orbits: scanning arcs while it works */
-    if (!portrait && cur.orb > 0.02) {
+    if (cur.orb > 0.02) {
       for (let k = 0; k < 2; k++) {
         g.save();
         g.translate(cx, cy);
@@ -674,7 +653,7 @@ export function startEntity(host: EntityHost): () => void {
       sx[i] = cx + x1 * d * R * persp * squashX;
       sy[i] = cy + y1 * d * R * persp * squashY;
       sz[i] = z2;
-      if (!portrait && mod?.shape) {
+      if (mod?.shape) {
         const mix = Math.max(0, Math.min(1, mod.shapeMix ?? 0));
         const [targetX, targetY] = particleShapePoint(mod.shape, i / N);
         const thickness = (sd - 0.5) * (mod.shape === "mist" ? 0.8 : 0.13);
@@ -693,7 +672,7 @@ export function startEntity(host: EntityHost): () => void {
 
     /* filaments */
     g.lineWidth = compact ? 0.6 : 0.7;
-    g.strokeStyle = `hsla(${hue},${cur.s}%,${portrait ? 60 : cur.l}%,${(0.05 + 0.09 * cur.glow) * (compact ? 2.4 : 1) * birth})`;
+    g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(0.05 + 0.09 * cur.glow) * (compact ? 2.4 : 1) * birth})`;
     g.beginPath();
     for (let i = 0; i < N; i++) {
       if (sz[i] < -0.15) continue;
@@ -719,14 +698,13 @@ export function startEntity(host: EntityHost): () => void {
         (0.6 + 1.7 * depth) *
         (1 + audioLevel * 0.6) *
         (compact ? Math.max(0.35, Math.min(W, H) / 80) * 0.42 : 1);
-      g.fillStyle = `hsla(${hue + depth * 24 + seed[i] * 26 - 13},${cur.s}%,${portrait ? 54 + depth * 10 : cur.l - 6 + depth * 10}%,${alpha})`;
+      g.fillStyle = `hsla(${hue + depth * 24 + seed[i] * 26 - 13},${cur.s}%,${cur.l - 6 + depth * 10}%,${alpha})`;
       g.fillRect(sx[i] - size / 2, sy[i] - size / 2, size, size);
     }
 
     /* nucleus: it looks where you look */
     const nx = cx + gx * R * 0.14;
-    const ny = cy + gy * R * 0.14 - (portrait ? R * 0.35 : 0);
-    const nucleusHue = portrait ? 32 : hue;
+    const ny = cy + gy * R * 0.14;
     const nr =
       R *
       ((compact ? 0.3 : 0.2) + 0.1 * audioLevel + 0.025 * Math.sin(t * 1.7)) *
@@ -734,13 +712,13 @@ export function startEntity(host: EntityHost): () => void {
     const nuc = g.createRadialGradient(nx, ny, 0, nx, ny, nr * 2.6);
     nuc.addColorStop(
       0,
-      `hsla(${nucleusHue},${portrait ? 100 : Math.max(30, cur.s - 40)}%,${portrait ? 82 : 96}%,${0.85 * birth * dim})`,
+      `hsla(${hue},${Math.max(30, cur.s - 40)}%,96%,${0.85 * birth * dim})`,
     );
     nuc.addColorStop(
       0.25,
-      `hsla(${nucleusHue},${portrait ? 100 : cur.s}%,${portrait ? 55 : cur.l}%,${(portrait ? 0.7 : 0.45) * birth * dim})`,
+      `hsla(${hue},${cur.s}%,${cur.l}%,${0.45 * birth * dim})`,
     );
-    nuc.addColorStop(1, `hsla(${nucleusHue},${cur.s}%,${cur.l}%,0)`);
+    nuc.addColorStop(1, `hsla(${hue},${cur.s}%,${cur.l}%,0)`);
     g.fillStyle = nuc;
     g.beginPath();
     g.arc(nx, ny, nr * 2.6, 0, Math.PI * 2);

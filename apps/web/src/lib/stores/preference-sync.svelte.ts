@@ -113,6 +113,7 @@ export function startPreferenceSync(): () => void {
           helperRevision === helperPreferenceWrites.revision &&
           !document.activeElement?.closest("[data-helper-live]")
         ) {
+          helper.avatar = prefs.avatar ?? "face";
           helper.shape = prefs.shape;
           helper.cues = prefs.cues;
           if (prefs.notifications) helper.notifications = prefs.notifications;

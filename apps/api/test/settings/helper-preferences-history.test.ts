@@ -31,6 +31,16 @@ function fixture() {
 }
 
 describe("helper preference history", () => {
+  it("preserves the avatar choice and accepts legacy preferences without it", () => {
+    const preferences = fixture().settings.get().helperPreferences;
+    expect(normalize(preferences).avatar).toBeUndefined();
+    expect(normalize({ ...preferences, avatar: "face" }).avatar).toBe("face");
+    expect(normalize({ ...preferences, avatar: "orb" }).avatar).toBe("orb");
+    expect(() =>
+      normalize({ ...preferences, avatar: "unknown" as never }),
+    ).toThrow("Kies Gezicht of Originele orb.");
+  });
+
   it("keeps legacy delivery defaults and rejects unknown notification modes", () => {
     const f = fixture();
     const preferences = normalize(f.settings.get().helperPreferences);
