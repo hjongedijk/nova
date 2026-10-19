@@ -11,7 +11,7 @@
 
   let canvas = $state<HTMLCanvasElement>();
   let core = $state<HTMLButtonElement>();
-  const showFace = $derived(wallpaper && helper.avatar === "face");
+  const showFace = $derived(helper.avatar === "face");
 
   onMount(() => {
     return startLightSync();

@@ -31,7 +31,7 @@
       await persistHelperPreferences({ ...prefs, avatar: value });
       helper.avatar = value;
       saveHelperPreferences();
-      message = "Opgeslagen voor wallpaper en helper.";
+      message = "Opgeslagen voor alle schermen.";
     } catch {
       helper.avatar = previous;
       selected = previous;
@@ -46,7 +46,7 @@
 </script>
 
 <label class="avatar-choice">
-  <span>Avatar voor wallpaper en helper</span>
+  <span>Avatar voor website, wallpaper en helper</span>
   <select
     data-helper-live
     bind:value={selected}
