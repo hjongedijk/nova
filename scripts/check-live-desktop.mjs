@@ -10,6 +10,11 @@ let checkedPage;
 try {
   const page = await browser.newPage({ ignoreHTTPSErrors: true });
   checkedPage = page;
+  const fixtureImage = await page.evaluate(() => {
+    const canvas = globalThis.document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    return canvas.toDataURL("image/png").split(",")[1];
+  });
   let frames = 0,
     stops = 0;
   let armed = false;
@@ -75,8 +80,7 @@ try {
               capturedAt: new Date().toISOString(),
               screenshot: {
                 mimeType: "image/png",
-                base64:
-                  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+                base64: fixtureImage,
                 width: 960,
                 height: 540,
                 display: Number(url.searchParams.get("display")),
@@ -164,6 +168,12 @@ try {
   await page
     .getByAltText("Actueel beeld van het geselecteerde pc-scherm")
     .waitFor();
+  const beforeRefresh = frames;
+  await page.waitForTimeout(1200);
+  assert.ok(
+    frames - beforeRefresh >= 4,
+    "visible viewer must refresh several times per second",
+  );
   await Promise.all([
     page.waitForResponse((r) =>
       r.url().includes("/settings/desktop/frame?display=2"),

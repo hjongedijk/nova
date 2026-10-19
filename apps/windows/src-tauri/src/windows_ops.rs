@@ -5,8 +5,8 @@ use crate::{log, win};
 use nova_win_core::desktop::{decide, Decision};
 use nova_win_core::forward::{PointerForwarder, PointerInput, PointerKind, Target};
 use nova_win_core::geometry::{
-    fullscreen_rect, monitor_for_rect, offset_from_position, place, resolve_display, taskbar_px, virtual_origin,
-    wallpaper_child_rect, window_size, MonitorInfo, Rect,
+    fullscreen_rect, monitor_for_rect, offset_from_position, place, resolve_display, taskbar_px, window_size, Anchor,
+    MonitorInfo, Offset, Rect,
 };
 use nova_win_core::mode::WallpaperSpec;
 use nova_win_core::nav::{app_url, browser_args, classify, helper_url, wallpaper_url, Navigation};
@@ -177,8 +177,7 @@ pub fn grant_origin(app: &AppHandle, origin: &str) {
         .permission("allow-desk-set-display")
         .permission("allow-desk-set-view")
         .permission("allow-desk-hide-helper")
-        .permission("allow-desk-set-fullscreen")
-        .permission("core:window:allow-start-dragging");
+        .permission("allow-desk-set-fullscreen");
     if let Err(error) = app.add_capability(capability) {
         log!("could not grant the helper its commands: {error}");
     }
@@ -358,11 +357,10 @@ pub fn apply_layout(app: &AppHandle) {
             (index, (r.w, r.h), (r.x, r.y))
         } else {
             let size = window_size(inner.view, inner.hidden, monitor.scale, &monitor.work);
-            let offset = inner.config.positions.get(&monitor.name).copied().unwrap_or_default();
             (
                 index,
                 size,
-                place(inner.config.helper_anchor, offset, size, &monitor.work, monitor.scale),
+                place(Anchor::TopCentre, Offset::default(), size, &monitor.work, monitor.scale),
             )
         }
     };
@@ -481,77 +479,95 @@ pub fn create_wallpaper(app: &AppHandle, monitor: &str, spec: WallpaperSpec) {
         }
     };
     let label = label_for(monitor);
-    if app.get_webview_window(&label).is_some() {
+    if app.get_webview_window(&label).is_some() || shared.lock().wallpapers.contains_key(monitor) {
         return;
     }
-    let url = wallpaper_url(&origin, spec.style, spec.quiet, taskbar_px(&info.bounds, &info.work));
-    let Some(prepared) = builder(app, &label, &url, &origin, profile) else {
-        return;
-    };
-    let window = match prepared.title("NOVA wallpaper").build() {
-        Ok(window) => window,
-        Err(error) => {
-            log!("could not open the wallpaper window: {error}");
-            return;
-        }
-    };
+    // Reserve this monitor while Explorer creates its host. Closing or changing
+    // modes removes the reservation and cancels the queued creation below.
     shared.lock().wallpapers.insert(monitor.to_string(), spec);
-    window.on_window_event(|event| {
-        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            api.prevent_close();
-        }
-    });
-    let Ok(raw) = window.hwnd() else {
-        log!("no window handle for the wallpaper window; closing it");
-        let _ = window.destroy();
-        shared.lock().wallpapers.remove(monitor);
-        return;
-    };
-    let handle = raw.0 as isize;
-    let origin_point = virtual_origin(&list);
-    let rect = wallpaper_child_rect(&info.bounds, origin_point);
     let app = app.clone();
     let monitor = monitor.to_string();
-    let label = label.clone();
-    // The desktop may still be building its layers right after login: try for up to 30 seconds, like the agent.
     std::thread::spawn(move || {
-        let mut last = None;
         for _ in 0..30 {
-            let snapshot = win::snapshot();
-            match decide(&snapshot) {
-                Decision::Place { parent, after, .. } => match win::place(handle, parent, after, rect) {
-                    Ok(()) => {
-                        win::keep_behind_icons(handle);
-                        forward_targets().retain(|t| t.label != label);
-                        forward_targets().push(Target {
-                            label: label.clone(),
-                            native_handle: handle,
-                            bounds: info.bounds,
-                            scale: info.scale,
-                        });
-                        start_forwarding(&app);
-                        log!("wallpaper on {monitor} placed behind the icons");
+            if app.state::<Shared>().lock().wallpapers.get(&monitor) != Some(&spec) {
+                return;
+            }
+            if let Decision::Place { parent, after, .. } = decide(&win::snapshot()) {
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    if handle.get_webview_window(&label).is_some() {
                         return;
                     }
-                    Err(error) => {
-                        log!("placing the wallpaper window failed: {error}");
-                        last = Some(error);
-                        break;
+                    let shared = handle.state::<Shared>();
+                    let current = shared.lock();
+                    if current.wallpapers.get(&monitor) != Some(&spec) || current.config.url.as_deref() != Some(&origin)
+                    {
+                        return;
                     }
-                },
-                Decision::Unrecognised(reason) => {
-                    last = Some(format!("{reason:?}: {snapshot:?}"));
-                    std::thread::sleep(Duration::from_secs(1));
-                }
+                    drop(current);
+                    let url = wallpaper_url(&origin, spec.style, spec.quiet, taskbar_px(&info.bounds, &info.work));
+                    let Some(prepared) = builder(&handle, &label, &url, &origin, profile) else {
+                        close_wallpaper(&handle, &monitor);
+                        return;
+                    };
+                    #[cfg(windows)]
+                    let prepared = prepared.parent_raw(windows_webview::Win32::Foundation::HWND(
+                        parent as usize as *mut core::ffi::c_void,
+                    ));
+                    // Tao must know this is a child before construction, just as
+                    // for the helper. Late SetParent alone leaves stale popup/DPI state.
+                    let window = match prepared.title("NOVA wallpaper").zoom_hotkeys_enabled(false).build() {
+                        Ok(window) => window,
+                        Err(error) => {
+                            log!("could not open the wallpaper window: {error}");
+                            close_wallpaper(&handle, &monitor);
+                            return;
+                        }
+                    };
+                    window.on_window_event(|event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            api.prevent_close();
+                        }
+                    });
+                    let placed = window.hwnd().map_err(|error| error.to_string()).and_then(|raw| {
+                        let native = raw.0 as isize;
+                        win::place(native, parent, after, info.bounds)?;
+                        window
+                            .set_size(PhysicalSize::new(info.bounds.w as u32, info.bounds.h as u32))
+                            .map_err(|error| error.to_string())?;
+                        window.set_zoom(1.0).map_err(|error| error.to_string())?;
+                        let position = window.inner_position().map_err(|error| error.to_string())?;
+                        let size = window.inner_size().map_err(|error| error.to_string())?;
+                        let scale = window.scale_factor().map_err(|error| error.to_string())?;
+                        win::keep_behind_icons(native);
+                        forward_targets().retain(|target| target.label != label);
+                        forward_targets().push(Target {
+                            label: label.clone(),
+                            native_handle: native,
+                            bounds: Rect::new(position.x, position.y, size.width as i32, size.height as i32),
+                            scale,
+                        });
+                        start_forwarding(&handle);
+                        Ok(())
+                    });
+                    if let Err(error) = placed {
+                        log!("placing the wallpaper window failed: {error}");
+                        close_wallpaper(&handle, &monitor);
+                    } else {
+                        log!("wallpaper on {monitor} placed behind the icons");
+                    }
+                });
+                return;
             }
+            std::thread::sleep(Duration::from_secs(1));
         }
-        // Never guess: a window that is not behind the icons would cover the screen, so it is closed again.
-        log!(
-            "the desktop layout of this Windows was not recognised ({}); the wallpaper window is closed",
-            last.unwrap_or_default()
-        );
-        let app2 = app.clone();
-        let _ = app.run_on_main_thread(move || close_wallpaper(&app2, &monitor));
+        log!("the desktop layout was not recognised; no wallpaper window was opened");
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if handle.get_webview_window(&label_for(&monitor)).is_none() {
+                close_wallpaper(&handle, &monitor);
+            }
+        });
     });
 }
 

@@ -132,29 +132,6 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let mode_refs: Vec<&dyn IsMenuItem<tauri::Wry>> = modes.iter().map(|i| i as &dyn IsMenuItem<tauri::Wry>).collect();
     let mode_menu = Submenu::with_items(app, "Wat toon ik", true, &mode_refs)?;
 
-    let anchors: Vec<CheckMenuItem<tauri::Wry>> = [
-        (Anchor::TopCentre, "Boven in het midden"),
-        (Anchor::TopLeft, "Linksboven"),
-        (Anchor::TopRight, "Rechtsboven"),
-    ]
-    .iter()
-    .map(|(anchor, text)| {
-        CheckMenuItem::with_id(
-            app,
-            format!("anchor:{}", anchor.as_str()),
-            text,
-            true,
-            config.helper_anchor == *anchor,
-            None::<&str>,
-        )
-    })
-    .collect::<tauri::Result<_>>()?;
-    let reset = MenuItem::with_id(app, "position_reset", "Positie herstellen", true, None::<&str>)?;
-    let mut anchor_refs: Vec<&dyn IsMenuItem<tauri::Wry>> =
-        anchors.iter().map(|i| i as &dyn IsMenuItem<tauri::Wry>).collect();
-    anchor_refs.push(&reset);
-    let anchor_menu = Submenu::with_items(app, "Positie van de helper", true, &anchor_refs)?;
-
     let login = MenuItem::with_id(
         app,
         "login",
@@ -209,7 +186,6 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &pause,
             &stop,
             &screen_menu,
-            &anchor_menu,
             &separator_a,
             &mode_menu,
             &wall_menu,

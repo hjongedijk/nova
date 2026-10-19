@@ -61,7 +61,7 @@ const OFF_VIEW = fail(
 );
 const NO_AGENT = fail("Er is geen Windows-agent ingesteld.");
 const NO_SESSION = fail(
-  "Er loopt geen overname. Start er een met desktop_takeover_start; de gebruiker moet dat bevestigen.",
+  "Er loopt geen overname. Start er een met desktop_takeover_start voor de gevraagde opdracht.",
 );
 
 /**
@@ -76,7 +76,10 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
   now: () => number = Date.now;
   private session: Session | null = null;
   private disarmPending = false;
-  private previewPending = false;
+  private previewPending: {
+    display: number;
+    result: ReturnType<DesktopService["capturePreviewFrame"]>;
+  } | null = null;
   private timer: NodeJS.Timeout | null = null;
   private readonly cache = new Map<
     string,
@@ -262,10 +265,10 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
     const cached = this.cache.get(key);
     if (
       settings.cacheEnabled &&
+      !session &&
       cached &&
       this.now() - cached.at < L.cacheTtlMs
     ) {
-      if (session) session.lastActivityAt = this.now();
       return { ok: true, ...cached.value, cached: true };
     }
 
@@ -328,12 +331,25 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
       return fail("Ongeldig beeldscherm.");
     if (!this.settings().viewEnabled) return OFF_VIEW;
     if (!this.port.configured) return NO_AGENT;
-    if (this.previewPending) return fail("Een schermbeeld wordt al opgehaald.");
-    this.previewPending = true;
+    if (signal?.aborted) return fail("Schermbeeld ophalen geannuleerd.");
+    if (this.previewPending)
+      return this.previewPending.display === display
+        ? this.previewPending.result
+        : fail("Een schermbeeld wordt al opgehaald.");
+    // Multiple viewers of one monitor share one in-flight capture. A viewer
+    // closing must not cancel a frame another viewer is still waiting for.
+    const result = this.capturePreviewFrame(display).finally(() => {
+      this.previewPending = null;
+    });
+    this.previewPending = { display, result };
+    return result;
+  }
+
+  private async capturePreviewFrame(display: number) {
     try {
       const result = await this.port.screenshot(
         { display, maxWidth: 960 },
-        signal,
+        AbortSignal.timeout(8000),
       );
       if (!result.ok) return result;
       if (!this.settings().viewEnabled) return OFF_VIEW;
@@ -357,8 +373,6 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
       };
     } catch {
       return fail("Het schermbeeld is niet beschikbaar.");
-    } finally {
-      this.previewPending = false;
     }
   }
 

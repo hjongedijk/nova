@@ -29,6 +29,8 @@ export interface EntityHost {
    * HUD instrument, dust and the lift for the stage. `life` adds the character's movement on top, per frame.
    */
   compact?: { life: Life };
+  /** Keep the desktop entity clear of the header and composer on scaled 1080p screens. */
+  wallpaper?: boolean;
 }
 
 /** Extra movement for the compact orb, in units of the orb's radius, on top of the state's own look. */
@@ -287,9 +289,11 @@ export function startEntity(host: EntityHost): () => void {
     // Compact: the radius is a fixed share of the canvas, so the ready look fills it the way the big one fills the screen.
     const span = compact
       ? Math.min(W, H) * 1.6
-      : W < 700
-        ? W * 1.5
-        : Math.min(W, H * 1.15);
+      : host.wallpaper
+        ? Math.min(W * 0.75, H * 0.78)
+        : W < 700
+          ? W * 1.5
+          : Math.min(W, H * 1.15);
     const heartbeat =
       intensity > 0 ? 1 + 0.045 * Math.pow(Math.sin(t * 4.2), 2) : 1;
     const breath = 1 + 0.018 * Math.sin(t * 0.9) * MOTION;
@@ -367,9 +371,15 @@ export function startEntity(host: EntityHost): () => void {
     /* HUD rings, the instrument around the entity */
     const hudA = cur.hud * birth;
     const wide = W >= 1340;
+    const fullRadius = Math.max(
+      R * 1.7,
+      Math.min(R * 2.3, W / 2 - (wide ? 300 : 20)),
+    );
     const ro = compact
       ? Math.min(R * 1.55, Math.min(W, H) * 0.4)
-      : Math.max(R * 1.7, Math.min(R * 2.3, W / 2 - (wide ? 300 : 20)));
+      : host.wallpaper
+        ? Math.min(fullRadius, H * 0.34)
+        : fullRadius;
     const spinK = 0.04 + cur.spin * 0.15;
     g.lineCap = "butt";
 

@@ -4,7 +4,15 @@ import { Test } from "@nestjs/testing";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import { AuditService } from "../../src/core/audit/audit.service.js";
 import { CoreModule } from "../../src/core/core.module.js";
@@ -312,6 +320,22 @@ describe("desktop control", () => {
       expect(JSON.stringify(audit.read(20))).not.toContain("iVBORw0KGgo=");
     });
 
+    it("shares concurrent viewers of one display without duplicating capture", async () => {
+      const capture = vi.spyOn(port, "screenshot");
+      try {
+        const results = await Promise.all(
+          Array.from({ length: 8 }, () => desktop.previewFrame(0)),
+        );
+        expect(results.every((result) => result.ok)).toBe(true);
+        expect(capture).toHaveBeenCalledTimes(1);
+        expect(visionLog).toHaveLength(0);
+        expect((await desktop.previewFrame(0)).ok).toBe(true);
+        expect(capture).toHaveBeenCalledTimes(2);
+      } finally {
+        capture.mockRestore();
+      }
+    });
+
     it("previews even when window enumeration is unavailable", async () => {
       fake.failWindows = true;
       expect((await desktop.previewFrame(0)).ok).toBe(true);
@@ -375,6 +399,31 @@ describe("desktop control", () => {
       await look(sessionId);
       await look(sessionId);
       expect(fake.screenshots).toBe(4);
+    });
+
+    it("looks afresh after starting takeover even when a pre-session screenshot was cached", async () => {
+      const session = sid();
+      expect((await look(session)).ok).toBe(true);
+      expect(fake.screenshots).toBe(1);
+      expect(
+        (
+          await run(
+            "desktop_takeover_start",
+            { goal: "Test cursor routing", ttlSeconds: 60 },
+            session,
+          )
+        ).ok,
+      ).toBe(true);
+      const observation = await look(session);
+      expect(observation.cached).toBe(false);
+      expect(desktop.info()?.observations).toBe(1);
+      expect(
+        (await run("desktop_act", { action: "move", x: 10, y: 10 }, session))
+          .ok,
+      ).toBe(true);
+      expect(fake.inputs).toHaveLength(1);
+      expect((await look(session)).cached).toBe(false);
+      expect((await look(session)).cached).toBe(false);
     });
 
     it("fails closed without a free vision model", async () => {

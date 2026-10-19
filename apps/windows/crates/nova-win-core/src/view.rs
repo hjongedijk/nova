@@ -42,9 +42,9 @@ impl View {
     pub fn css_size(self) -> (u32, u32) {
         match self {
             View::Compact => (360, 44),
-            View::Chat => (960, 420),
-            View::Confirmation => (960, 200),
-            View::Overview | View::Notifications | View::Weather | View::Lists => (960, 280),
+            View::Chat => (640, 440),
+            View::Confirmation => (640, 220),
+            View::Overview | View::Notifications | View::Weather | View::Lists => (640, 360),
         }
     }
 
@@ -60,11 +60,11 @@ mod tests {
 
     #[test]
     fn sizes_match_the_documented_table() {
-        assert_eq!(View::Overview.css_size(), (960, 280));
-        assert_eq!(View::Chat.css_size(), (960, 420));
-        assert_eq!(View::Confirmation.css_size(), (960, 200));
+        assert_eq!(View::Overview.css_size(), (640, 360));
+        assert_eq!(View::Chat.css_size(), (640, 440));
+        assert_eq!(View::Confirmation.css_size(), (640, 220));
         assert_eq!(View::Compact.css_size(), (360, 44));
-        assert_eq!(View::Weather.css_size(), (960, 280));
+        assert_eq!(View::Weather.css_size(), (640, 360));
     }
 
     #[test]

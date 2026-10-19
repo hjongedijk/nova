@@ -104,6 +104,8 @@
     statusDue = 0;
 
     async function poll() {
+      const startedAt = performance.now();
+      let retryMs = 125;
       try {
         if (Date.now() >= statusDue) {
           const value = await getDesktop(controller.signal);
@@ -139,6 +141,20 @@
           const next = URL.createObjectURL(
             new Blob([bytes], { type: shot.mimeType }),
           );
+          // Decode before replacing the visible frame: revoking the old image
+          // first causes a blank flash on each refresh.
+          const decoded = new Image();
+          decoded.src = next;
+          try {
+            await decoded.decode();
+          } catch (cause) {
+            URL.revokeObjectURL(next);
+            throw cause;
+          }
+          if (controller.signal.aborted) {
+            URL.revokeObjectURL(next);
+            return;
+          }
           clearImage();
           image = next;
           capturedAt = frame.capturedAt;
@@ -146,10 +162,15 @@
         }
       } catch (cause) {
         if (controller.signal.aborted) return;
-        failed(cause, "De pc is niet bereikbaar.");
+        retryMs = 1000;
+        error =
+          cause instanceof Error ? cause.message : "De pc is niet bereikbaar.";
       } finally {
         if (!controller.signal.aborted)
-          timer = setTimeout(() => void poll(), 1000);
+          timer = setTimeout(
+            () => void poll(),
+            Math.max(0, retryMs - (performance.now() - startedAt)),
+          );
       }
     }
     void poll();

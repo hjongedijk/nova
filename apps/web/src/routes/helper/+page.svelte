@@ -928,7 +928,7 @@
       select(Array.from(event.dataTransfer?.files ?? []));
   }}
 >
-  <header class="hp-bar" data-tauri-drag-region>
+  <header class="hp-bar">
     <button
       class="hp-core"
       aria-label="Spreek met NOVA"
@@ -946,7 +946,7 @@
       ></button
     >
     {#if expanded && !waiting}
-      <nav class="hp-tabs" aria-label="Helperweergaven" data-tauri-drag-region>
+      <nav class="hp-tabs" aria-label="Helperweergaven">
         {#each tabs as tab (tab.id)}<HelperUi
             variant="tab"
             aria-current={view === tab.id ? "page" : undefined}

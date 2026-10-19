@@ -14,6 +14,11 @@ pub enum PointerKind {
     Move,
     Down,
     Up,
+    /// Browser wheel deltas in CSS pixels; positive values scroll right/down.
+    Wheel {
+        delta_x: i32,
+        delta_y: i32,
+    },
 }
 
 /// A wallpaper window as the forwarder knows it: its label, its monitor in physical screen pixels, and the scale.
@@ -75,16 +80,22 @@ impl PointerInput {
             PointerKind::Move => "mouseMoved",
             PointerKind::Down => "mousePressed",
             PointerKind::Up => "mouseReleased",
+            PointerKind::Wheel { .. } => "mouseWheel",
         };
-        serde_json::json!({
+        let wheel = matches!(self.kind, PointerKind::Wheel { .. });
+        let mut params = serde_json::json!({
             "type": event_type,
             "x": finite(self.hit.x),
             "y": finite(self.hit.y),
-            "button": if self.kind == PointerKind::Move && self.buttons == 0 { "none" } else { "left" },
+            "button": if wheel || self.kind == PointerKind::Move && self.buttons == 0 { "none" } else { "left" },
             "buttons": self.buttons,
-            "clickCount": if self.kind == PointerKind::Move { 0 } else { 1 },
-        })
-        .to_string()
+            "clickCount": if wheel || self.kind == PointerKind::Move { 0 } else { 1 },
+        });
+        if let PointerKind::Wheel { delta_x, delta_y } = self.kind {
+            params["deltaX"] = delta_x.into();
+            params["deltaY"] = delta_y.into();
+        }
+        params.to_string()
     }
 }
 
@@ -177,6 +188,26 @@ mod tests {
                 scale: 2.0,
             },
         ]
+    }
+
+    #[test]
+    fn wheel_routes_without_focusing_and_preserves_horizontal_and_vertical_delta() {
+        let mut forwarder = PointerForwarder::new();
+        let kind = PointerKind::Wheel {
+            delta_x: 40,
+            delta_y: -120,
+        };
+        let input = forwarder.event(kind, (2020, 0), true, &targets()).unwrap();
+        assert!(!input.focus);
+        let params: serde_json::Value = serde_json::from_str(&input.params()).unwrap();
+        assert_eq!(params["type"], "mouseWheel");
+        assert_eq!(params["button"], "none");
+        assert_eq!(params["x"], 50.0);
+        assert_eq!(params["y"], 100.0);
+        assert_eq!(params["deltaX"], 40);
+        assert_eq!(params["deltaY"], -120);
+        assert!(forwarder.event(kind, (100, 50), false, &targets()).is_none());
+        assert!(forwarder.event(PointerKind::Up, (100, 50), true, &targets()).is_none());
     }
 
     #[test]

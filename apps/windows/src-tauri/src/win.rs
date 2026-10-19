@@ -22,7 +22,8 @@ mod imp {
         CallNextHookEx, EnumWindows, FindWindowExW, FindWindowW, GetAncestor, GetClassNameW, GetMessageW, GetParent,
         GetWindow, IsWindow, SendMessageTimeoutW, SetParent, SetWindowLongW, SetWindowPos, SetWindowsHookExW,
         WindowFromPoint, GA_ROOT, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HWND_BOTTOM, MSG, MSLLHOOKSTRUCT,
-        SET_WINDOW_POS_FLAGS, SMTO_NORMAL, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+        SET_WINDOW_POS_FLAGS, SMTO_NORMAL, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE,
+        WM_MOUSEWHEEL,
     };
 
     fn hwnd(value: u64) -> HWND {
@@ -92,13 +93,19 @@ mod imp {
             InsertAfter::Bottom => HWND_BOTTOM,
         };
         unsafe {
+            // Hosts differ between Windows releases and may not start at the
+            // virtual desktop origin. Convert actual screen pixels to this host.
+            let mut position = POINT { x: rect.x, y: rect.y };
+            if !windows::Win32::Graphics::Gdi::ScreenToClient(parent_handle, &mut position).as_bool() {
+                return Err("Could not translate the wallpaper's desktop position".into());
+            }
             SetWindowLongW(h, GWL_STYLE, CHILD_STYLE as i32);
             SetParent(h, Some(parent_handle)).map_err(|e| format!("SetParent: {e}"))?;
             SetWindowPos(
                 h,
                 Some(insert_after),
-                rect.x,
-                rect.y,
+                position.x,
+                position.y,
                 rect.w,
                 rect.h,
                 SET_WINDOW_POS_FLAGS(SHOW_FLAGS),
@@ -267,14 +274,23 @@ mod imp {
 
     unsafe extern "system" fn mouse_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
         if code >= 0 {
+            let info = &*(l.0 as *const MSLLHOOKSTRUCT);
+            let delta = (info.mouseData >> 16) as i16 as i32;
             let kind = match w.0 as u32 {
                 WM_MOUSEMOVE => Some(PointerKind::Move),
                 WM_LBUTTONDOWN => Some(PointerKind::Down),
                 WM_LBUTTONUP => Some(PointerKind::Up),
+                WM_MOUSEWHEEL => Some(PointerKind::Wheel {
+                    delta_x: 0,
+                    delta_y: -delta,
+                }),
+                WM_MOUSEHWHEEL => Some(PointerKind::Wheel {
+                    delta_x: delta,
+                    delta_y: 0,
+                }),
                 _ => None,
             };
             if let (Some(kind), Some(sink)) = (kind, SINK.get()) {
-                let info = &*(l.0 as *const MSLLHOOKSTRUCT);
                 // Never block the mouse: the sink decides quickly and hands the work to another thread.
                 sink(kind, (info.pt.x, info.pt.y));
             }

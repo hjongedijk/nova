@@ -221,27 +221,27 @@ mod tests {
     #[test]
     fn window_size_adds_the_margin_and_scales() {
         let w = work(0, 0, 1920, 1032);
-        assert_eq!(window_size(View::Overview, false, 1.0, &w), (984, 304));
-        assert_eq!(window_size(View::Overview, false, 1.5, &w), (1476, 456));
+        assert_eq!(window_size(View::Overview, false, 1.0, &w), (664, 384));
+        assert_eq!(window_size(View::Overview, false, 1.5, &w), (996, 576));
         assert_eq!(window_size(View::Compact, false, 1.25, &w), (480, 85));
         assert_eq!(
             window_size(View::Chat, false, 2.0, &work(0, 0, 3840, 2100)),
-            (1968, 888)
+            (1328, 928)
         );
     }
 
     #[test]
     fn hidden_is_a_thin_strip_and_never_taller_than_the_view() {
         let w = work(0, 0, 1920, 1032);
-        assert_eq!(window_size(View::Overview, true, 1.0, &w), (984, 27));
+        assert_eq!(window_size(View::Overview, true, 1.0, &w), (664, 27));
         assert_eq!(window_size(View::Overview, true, 2.0, &w).1, 54);
     }
 
     #[test]
     fn window_never_exceeds_a_small_work_area() {
         let w = work(0, 0, 800, 200);
-        assert_eq!(window_size(View::Chat, false, 1.0, &w), (800, 200));
-        assert_eq!(window_size(View::Overview, false, 1.0, &w), (800, 200));
+        assert_eq!(window_size(View::Chat, false, 1.0, &w), (664, 200));
+        assert_eq!(window_size(View::Overview, false, 1.0, &w), (664, 200));
     }
 
     #[test]

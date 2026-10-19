@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { wallpaper } from "#lib/modes/wallpaper.ts";
   import { startEntity } from "#lib/entity/entity.ts";
   import { chat } from "#lib/stores/chat.svelte.ts";
   import { attentionCount } from "#lib/stores/toasts.svelte.ts";
@@ -13,6 +14,7 @@
     const stopLightSync = startLightSync();
     const stopEntity = startEntity({
       canvas,
+      wallpaper,
       state: () => chat.uiState,
       // An open confirmation card or an open warning turns the sphere red and makes it beat.
       intensity: () => chat.confirmations.length + attentionCount(),

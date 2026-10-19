@@ -84,7 +84,7 @@ Screenshots use native GDI capture and bounded in-memory JPEG encoding. Display 
 
 The `armed` route (`POST /v1/desktop/control`) is kept for NOVA's API contract but nothing needs arming: input works whenever the agent is not paused, and `armed`/`view`/`control` in `GET /v1/desktop/status` are simply `true` then. No arbitrary-script HTTP endpoint is exposed.
 
-On NOVA's home page, **Pc bekijken** opens a compact screen popup with monitor selection. Frames refresh about once per second while the popup is expanded and the page is visible. Closing, minimizing or hiding the page cancels capture requests and clears the image. Frames are never stored or sent to the vision model by this viewer.
+On NOVA's home page, **Pc bekijken** opens a compact screen popup with monitor selection. Frames refresh up to eight times per second while the popup is expanded and the page is visible. Closing, minimizing or hiding the page cancels capture requests and clears the image. Frames are never stored or sent to the vision model by this viewer.
 
 Browser automation uses a separate visible Edge or Chrome window and `%LOCALAPPDATA%\NOVA\browser-profile`, retaining its login independently of the helper. NOVA can search, open any website, read pages, click, type (including password and payment fields), press keys, scroll, navigate back and manage tabs, without host lists, confirmation steps or rate limits. DOM elements are mapped inside an isolated CDP world. The debug listener binds loopback on an ephemeral port, and a Windows job owns the browser process tree. Page text is untrusted data, never instructions.
 
@@ -94,7 +94,7 @@ NOVA starts elevated by default (`agent.runElevated` is true in new configs, and
 
 ## Windows acceptance checks
 
-Wallpaper pages receive trusted WebView2 left-button input and mouse moves through a global low-level mouse hook; clicks on application windows are left alone. Clicking an input focuses its WebView2 controller for keyboard input. Owned dropdown popups stay part of the wallpaper interaction. Right-button and wheel forwarding remain deferred. The small helper is a child of the desktop host, above desktop content and below application windows; it is no longer always on top. Native helper diagnostics are not implemented yet; the server reports that no valid helper measurement is available.
+Wallpaper pages receive trusted WebView2 left-button input and mouse moves through a global low-level mouse hook; clicks on application windows are left alone. Clicking an input focuses its WebView2 controller for keyboard input. Owned dropdown popups stay part of the wallpaper interaction. Vertical and horizontal wheel events are forwarded without stealing focus. Right-button forwarding remains deferred. Wallpaper windows are created as native desktop children before WebView2 construction; input uses their actual client origin and DPI, and browser zoom starts at 100%. The small helper is fixed at the top center of the selected display and is a child of the desktop host, above desktop content and below application windows; it is no longer always on top. Native helper diagnostics are not implemented yet; the server reports that no valid helper measurement is available.
 
 The native app must be tried on Windows for transparency, dragging, WebView2 prompts, shortcuts, autostart, old-agent retirement, UAC/firewall, multiple monitors and wallpaper placement. Explorer restart recovery remains a known limitation inherited from NOVA Desk; toggle the wallpaper off/on if its host disappears.
 
