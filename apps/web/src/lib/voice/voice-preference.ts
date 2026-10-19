@@ -36,6 +36,13 @@ let serverDefaultVoice: TtsVoiceId = DEFAULT_VOICE;
 const KEY = "novaTtsVoice";
 const RATE_KEY = "novaTtsRate";
 const PITCH_KEY = "novaTtsPitch";
+let profileRevision = 0;
+let pendingProfileWrite: Promise<void> = Promise.resolve();
+if (typeof window !== "undefined")
+  window.addEventListener("storage", (event) => {
+    if (event.key && [KEY, RATE_KEY, PITCH_KEY].includes(event.key))
+      ++profileRevision;
+  });
 
 export function ttsVoice(): TtsVoiceId {
   const saved = storage.get(KEY, "");
@@ -75,21 +82,34 @@ export function saveTtsVoice(voice: string): TtsVoiceId {
 /** Sends the saved voice, speed and pitch to the server for phone calls and spoken conversations. */
 export function syncVoiceProfile(): void {
   const { rate, pitch } = ttsProsody();
-  void pushVoiceProfile({ voice: ttsVoiceForSpeech(), rate, pitch });
+  ++profileRevision;
+  const profile = { voice: ttsVoiceForSpeech(), rate, pitch };
+  pendingProfileWrite = pendingProfileWrite.then(() =>
+    pushVoiceProfile(profile),
+  );
 }
 
-/**
- * On app start: hand a voice the user already chose in this browser to the server (once, only when it differs), so
- * phone calls use it too. Nothing stored locally means nothing to push, so a server profile is never reset to defaults.
- * The outcome is returned (never swallowed) so the caller decides how to surface a failure.
- */
+/** Load the shared profile; migrate a legacy browser choice only when the server has none. */
 export async function syncStoredVoiceProfile(): Promise<VoiceProfileSync> {
+  await pendingProfileWrite;
+  const revision = profileRevision;
   const stored = [KEY, RATE_KEY, PITCH_KEY].some(
     (key) => storage.get(key, "") !== "",
   );
-  if (!stored) return { status: "unchanged" };
   const { rate, pitch } = ttsProsody();
-  return reconcileVoiceProfile({ voice: ttsVoiceForSpeech(), rate, pitch });
+  const result = await reconcileVoiceProfile(
+    stored ? { voice: ttsVoiceForSpeech(), rate, pitch } : undefined,
+  );
+  if (
+    result.status !== "failed" &&
+    result.profile &&
+    revision === profileRevision
+  ) {
+    storage.set(KEY, result.profile.voice ?? "");
+    storage.set(RATE_KEY, String(result.profile.rate));
+    storage.set(PITCH_KEY, String(result.profile.pitch));
+  }
+  return result;
 }
 
 function localeOf(voice: TtsVoiceId): string {

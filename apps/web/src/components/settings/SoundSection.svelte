@@ -14,7 +14,7 @@
     saveTtsProsody,
     saveTtsVoice,
     setServerDefaultVoice,
-    syncVoiceProfile,
+    syncStoredVoiceProfile,
     ttsLocale,
     ttsProsody,
     ttsVoice,
@@ -43,8 +43,10 @@
   let pronunciationNote = $state("");
   let piperVoiceAvailable = $state(false);
   onMount(() => {
-    // Opening this page also hands the voice you already chose to the server, so calls match it right away.
-    syncVoiceProfile();
+    void syncStoredVoiceProfile().then(() => {
+      selectedVoice = ttsVoice();
+      prosody = ttsProsody();
+    });
     fetch("/api/tts/health")
       .then((response) => (response.ok ? response.json() : null))
       .then((health: { piperAvailable?: boolean; voice?: string } | null) => {
@@ -53,6 +55,15 @@
         selectedVoice = ttsVoice();
       })
       .catch(() => {});
+    const synced = () => {
+      selectedVoice = ttsVoice();
+      prosody = ttsProsody();
+      volume = Math.round(outputVolume() * 100);
+      sensitivity = wakeSensitivity();
+      pronunciations = pronunciationEntries();
+    };
+    window.addEventListener("nova-preferences-synced", synced);
+    return () => window.removeEventListener("nova-preferences-synced", synced);
   });
   const voiceExamples: Record<string, string> = {
     "de-DE": "Ich bin da. Womit möchtest du anfangen?",

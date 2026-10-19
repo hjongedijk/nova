@@ -9,11 +9,19 @@ export class VoiceProfileController {
   @Get()
   @Header("Cache-Control", "no-store")
   read() {
-    return this.store.get();
+    return { ...this.store.get(), initialized: this.store.initialized };
   }
 
   @Put()
   update(@Body() body: unknown) {
-    return this.store.set(body);
+    if (
+      body &&
+      typeof body === "object" &&
+      "initialize" in body &&
+      body.initialize === true &&
+      this.store.initialized
+    )
+      return this.read();
+    return { ...this.store.set(body), initialized: true };
   }
 }

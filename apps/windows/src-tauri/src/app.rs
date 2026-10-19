@@ -251,7 +251,7 @@ pub fn apply(app: &AppHandle) {
                 if let Some(window) = create_helper(app) {
                     apply_layout(app);
                     let _ = window.show();
-                    let _ = window.set_always_on_top(true);
+                    // Desktop parenting in apply_layout keeps the helper below application windows.
                 }
             }
             Action::HideHelper => {

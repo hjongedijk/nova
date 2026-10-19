@@ -138,14 +138,50 @@ export class NovaConfig {
     setting("NOVA_EXTENSIONS", "JARVIS_EXTENSIONS"),
     true,
   );
-  /** The user's own list in the data folder wins; otherwise the list shipped in the image. */
+  /** Seed the owned catalog once so shipped defaults remain editable through Settings. */
   readonly mcpConfig = ((): string => {
     const own = setting(
       "NOVA_MCP_CONFIG",
       "JARVIS_MCP_CONFIG",
       path.join(this.dataDir, "mcp-servers.json"),
     );
-    return fs.existsSync(own) ? own : text("NOVA_MCP_DEFAULT", own);
+    if (fs.existsSync(own)) return own;
+    const shipped = text("NOVA_MCP_DEFAULT", own);
+    const relative = path.relative(this.dataDir, path.resolve(own));
+    // Explicit catalogs outside NOVA's data directory remain deployment-owned and read-only.
+    if (
+      !relative ||
+      relative === ".." ||
+      relative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relative)
+    )
+      return shipped;
+    let descriptor: number | undefined;
+    try {
+      const contents = fs.readFileSync(shipped);
+      fs.mkdirSync(path.dirname(own), { recursive: true });
+      descriptor = fs.openSync(own, "wx", 0o600);
+      fs.writeFileSync(descriptor, contents);
+      fs.fsyncSync(descriptor);
+      return own;
+    } catch (error) {
+      if (descriptor !== undefined) {
+        // Remove only the incomplete file created by this invocation, never a concurrent replacement.
+        try {
+          const created = fs.fstatSync(descriptor);
+          const current = fs.lstatSync(own);
+          if (created.dev === current.dev && created.ino === current.ino)
+            fs.unlinkSync(own);
+        } catch {
+          /* Keep the shipped catalog usable when cleanup is unavailable. */
+        }
+      } else if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        return own;
+      }
+      return shipped;
+    } finally {
+      if (descriptor !== undefined) fs.closeSync(descriptor);
+    }
   })();
   /** Fallback for "home" in the weather tools when Home Assistant has no zone.home. */
   readonly homeLocation = (() => {

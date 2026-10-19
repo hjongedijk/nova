@@ -3,8 +3,8 @@
 //! Root cause of "clicking does nothing in wallpaper mode": the wallpaper window is a child of Progman/WorkerW placed
 //! BEHIND the icon layer (`SHELLDLL_DefView`), which covers the whole desktop. Windows hit-tests the icon layer first,
 //! so the page never receives a mouse message. The glue therefore watches the mouse globally and, when the cursor is
-//! over the bare desktop (not over an application window), hands the event to the wallpaper page as synthetic DOM
-//! events. This module is the pure part: which wallpaper (if any) gets the event, where in it, and the script.
+//! over the bare desktop (not over an application window), hands the event to WebView2 browser input.
+//! This module owns routing, drag capture and the DevTools mouse parameters; it never injects DOM events.
 
 use crate::geometry::Rect;
 
@@ -20,6 +20,8 @@ pub enum PointerKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Target {
     pub label: String,
+    /// Native host handle for identifying its owned browser popups; zero in pure tests.
+    pub native_handle: isize,
     pub bounds: Rect,
     pub scale: f64,
 }
@@ -56,25 +58,96 @@ pub fn route(point: (i32, i32), over_desktop: bool, targets: &[Target]) -> Optio
     })
 }
 
-/// The script that replays one pointer event inside the wallpaper page. Only numbers and a fixed kind are spliced
-/// in. A click is synthesised on button-up when the press and release land on the same element.
-pub fn pointer_script(kind: PointerKind, x: f64, y: f64) -> String {
-    let (x, y) = (finite(x), finite(y));
-    let kind = match kind {
-        PointerKind::Move => "move",
-        PointerKind::Down => "down",
-        PointerKind::Up => "up",
-    };
-    format!(
-        "(() => {{ const k = '{kind}', x = {x:.1}, y = {y:.1}; const s = (window.__novaPointer ||= {{}});
-const el = document.elementFromPoint(x, y); if (!el) return;
-const o = (type, extra) => new MouseEvent(type, Object.assign({{ bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y }}, extra));
-const p = (type, extra) => {{ try {{ return new PointerEvent(type, Object.assign({{ bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse', isPrimary: true }}, extra)); }} catch (e) {{ return o(type, extra); }} }};
-if (k === 'move') {{ if (s.over !== el) {{ if (s.over) {{ s.over.dispatchEvent(o('mouseout')); s.over.dispatchEvent(p('pointerout')); }} el.dispatchEvent(p('pointerover')); el.dispatchEvent(o('mouseover')); s.over = el; }} el.dispatchEvent(p('pointermove')); el.dispatchEvent(o('mousemove')); return; }}
-if (k === 'down') {{ s.down = el; el.dispatchEvent(p('pointerdown', {{ button: 0, buttons: 1 }})); el.dispatchEvent(o('mousedown', {{ button: 0, buttons: 1 }})); if (el.focus) try {{ el.focus({{ preventScroll: true }}); }} catch (e) {{}} return; }}
-el.dispatchEvent(p('pointerup', {{ button: 0 }})); el.dispatchEvent(o('mouseup', {{ button: 0 }}));
-const d = s.down; s.down = null; if (d && (d === el || d.contains(el) || el.contains(d))) {{ (d === el ? el : d).dispatchEvent(o('click', {{ button: 0 }})); }} }})()"
-    )
+/// One browser input event, directed to a single wallpaper. Cancellation releases its mouse button without
+/// focusing the wallpaper or clicking a control when the real pointer has moved onto another application.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PointerInput {
+    pub hit: Hit,
+    pub kind: PointerKind,
+    pub buttons: u8,
+    pub focus: bool,
+}
+
+impl PointerInput {
+    /// CSS pixel coordinates for WebView2's Input.dispatchMouseEvent; no JavaScript execution is involved.
+    pub fn params(&self) -> String {
+        let event_type = match self.kind {
+            PointerKind::Move => "mouseMoved",
+            PointerKind::Down => "mousePressed",
+            PointerKind::Up => "mouseReleased",
+        };
+        serde_json::json!({
+            "type": event_type,
+            "x": finite(self.hit.x),
+            "y": finite(self.hit.y),
+            "button": if self.kind == PointerKind::Move && self.buttons == 0 { "none" } else { "left" },
+            "buttons": self.buttons,
+            "clickCount": if self.kind == PointerKind::Move { 0 } else { 1 },
+        })
+        .to_string()
+    }
+}
+
+/// A press belongs to its original wallpaper until release. Leaving it cancels that browser press once;
+/// subsequent real application movements/releases are not replayed into any wallpaper.
+#[derive(Default)]
+pub struct PointerForwarder {
+    pressed: Option<Target>,
+}
+
+impl PointerForwarder {
+    pub const fn new() -> Self {
+        Self { pressed: None }
+    }
+
+    pub fn event(
+        &mut self,
+        kind: PointerKind,
+        point: (i32, i32),
+        over_desktop: bool,
+        targets: &[Target],
+    ) -> Option<PointerInput> {
+        if let Some(pressed) = &self.pressed {
+            let active = targets.iter().any(|target| target == pressed);
+            if !active || !over_desktop || !pressed.bounds.contains(point.0, point.1) {
+                let target = self.pressed.take()?;
+                return Some(PointerInput {
+                    hit: Hit {
+                        label: target.label,
+                        x: -1.0,
+                        y: -1.0,
+                    },
+                    kind: PointerKind::Up,
+                    buttons: 0,
+                    focus: false,
+                });
+            }
+            let hit = route(point, true, std::slice::from_ref(pressed))?;
+            if kind == PointerKind::Up {
+                self.pressed = None;
+            }
+            return Some(PointerInput {
+                hit,
+                kind,
+                buttons: u8::from(kind != PointerKind::Up),
+                focus: kind == PointerKind::Down,
+            });
+        }
+        // A button released after a press in an application is that application's input only.
+        if kind == PointerKind::Up {
+            return None;
+        }
+        let hit = route(point, over_desktop, targets)?;
+        if kind == PointerKind::Down {
+            self.pressed = targets.iter().find(|target| target.label == hit.label).cloned();
+        }
+        Some(PointerInput {
+            hit,
+            kind,
+            buttons: u8::from(kind == PointerKind::Down),
+            focus: kind == PointerKind::Down,
+        })
+    }
 }
 
 fn finite(v: f64) -> f64 {
@@ -93,11 +166,13 @@ mod tests {
         vec![
             Target {
                 label: "wallpaper-a".into(),
+                native_handle: 0,
                 bounds: Rect::new(0, 0, 1920, 1080),
                 scale: 1.0,
             },
             Target {
                 label: "wallpaper-b".into(),
+                native_handle: 0,
                 bounds: Rect::new(1920, -200, 2560, 1440),
                 scale: 2.0,
             },
@@ -131,6 +206,7 @@ mod tests {
     fn a_bad_scale_falls_back_to_one() {
         let t = [Target {
             label: "w".into(),
+            native_handle: 0,
             bounds: Rect::new(10, 10, 100, 100),
             scale: 0.0,
         }];
@@ -145,11 +221,85 @@ mod tests {
         assert!(!is_desktop_class("Chrome_WidgetWin_1"));
     }
 
+    fn params(input: &PointerInput) -> serde_json::Value {
+        serde_json::from_str(&input.params()).unwrap()
+    }
+
     #[test]
-    fn the_script_only_contains_numbers_and_a_fixed_kind() {
-        let s = pointer_script(PointerKind::Down, f64::NAN, 12.34);
-        assert!(s.contains("k = 'down', x = 0.0, y = 12.3"), "{s}");
-        assert!(pointer_script(PointerKind::Up, 1.0, 2.0).contains("k = 'up'"));
-        assert!(pointer_script(PointerKind::Move, 1.0, 2.0).contains("'click'"));
+    fn browser_click_is_a_press_and_release_not_a_dom_click() {
+        let mut forwarder = PointerForwarder::new();
+        let down = forwarder.event(PointerKind::Down, (100, 50), true, &targets()).unwrap();
+        let up = forwarder.event(PointerKind::Up, (100, 50), true, &targets()).unwrap();
+        assert_eq!(
+            params(&down),
+            serde_json::json!({
+                "type": "mousePressed", "x":100.0, "y":50.0, "button":"left", "buttons":1, "clickCount":1
+            })
+        );
+        assert_eq!(params(&up)["type"], "mouseReleased");
+        assert_eq!(params(&up)["buttons"], 0);
+        assert!(down.focus);
+        // Do not move focus away from a native select popup opened on press.
+        assert!(!up.focus);
+        assert!(forwarder.event(PointerKind::Up, (100, 50), true, &targets()).is_none());
+    }
+
+    #[test]
+    fn drag_keeps_button_held_and_uses_monitor_css_coordinates() {
+        let mut forwarder = PointerForwarder::new();
+        forwarder.event(PointerKind::Down, (2020, 0), true, &targets()).unwrap();
+        let drag = forwarder
+            .event(PointerKind::Move, (2320, 200), true, &targets())
+            .unwrap();
+        assert_eq!(
+            params(&drag),
+            serde_json::json!({
+                "type":"mouseMoved", "x":200.0, "y":200.0, "button":"left", "buttons":1, "clickCount":0
+            })
+        );
+        assert!(!drag.focus);
+        let up = forwarder.event(PointerKind::Up, (2320, 200), true, &targets()).unwrap();
+        assert_eq!(params(&up)["buttons"], 0);
+        let hover = forwarder
+            .event(PointerKind::Move, (2320, 200), true, &targets())
+            .unwrap();
+        assert_eq!(params(&hover)["button"], "none");
+    }
+
+    #[test]
+    fn crossing_an_application_or_monitor_boundary_releases_once_without_stealing_focus() {
+        for (point, desktop) in [((120, 60), false), ((2000, 0), true), ((-1, -1), true)] {
+            let mut forwarder = PointerForwarder::new();
+            forwarder.event(PointerKind::Down, (100, 50), true, &targets()).unwrap();
+            let release = forwarder.event(PointerKind::Move, point, desktop, &targets()).unwrap();
+            assert_eq!(release.kind, PointerKind::Up);
+            assert_eq!(release.hit.label, "wallpaper-a");
+            assert_eq!((release.hit.x, release.hit.y), (-1.0, -1.0));
+            assert!(!release.focus);
+            assert_eq!(params(&release)["buttons"], 0);
+            assert!(forwarder.event(PointerKind::Up, point, desktop, &targets()).is_none());
+        }
+    }
+
+    #[test]
+    fn removed_wallpaper_releases_capture_and_nonfinite_coordinates_never_enter_json() {
+        let mut forwarder = PointerForwarder::new();
+        forwarder.event(PointerKind::Down, (100, 50), true, &targets()).unwrap();
+        assert_eq!(
+            forwarder.event(PointerKind::Up, (100, 50), true, &[]).unwrap().kind,
+            PointerKind::Up
+        );
+        let invalid = PointerInput {
+            hit: Hit {
+                label: "w".into(),
+                x: f64::NAN,
+                y: f64::INFINITY,
+            },
+            kind: PointerKind::Move,
+            buttons: 0,
+            focus: false,
+        };
+        assert_eq!(params(&invalid)["x"], 0.0);
+        assert_eq!(params(&invalid)["y"], 0.0);
     }
 }

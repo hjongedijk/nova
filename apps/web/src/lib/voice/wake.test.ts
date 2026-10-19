@@ -65,6 +65,8 @@ vi.mock("./input-device.ts", () => ({
   stopInputStream,
 }));
 
+import { showToast } from "#lib/stores/toasts.svelte.ts";
+
 import { cancelAwait, handleWakeResult, initWake, setWake } from "./wake.ts";
 
 function result(text: string, isFinal: boolean): SpeechResultEvent {
@@ -77,6 +79,7 @@ function result(text: string, isFinal: boolean): SpeechResultEvent {
 beforeEach(() => {
   vi.useFakeTimers();
   ask.mockReset();
+  vi.mocked(showToast).mockClear();
   chat.busy = false;
   shell.awaiting = false;
   selectedInputDevice.mockReturnValue("");
@@ -158,6 +161,32 @@ describe("wake microphone reconnects", () => {
     const track = { readyState };
     return { track, value: { getAudioTracks: () => [track] } };
   };
+
+  it("stops repeated speech-service network failures without losing the wake preference", async () => {
+    const first = stream();
+    openSelectedInputStream.mockResolvedValue(first.value);
+    const { instances, cleanup } = setup();
+    await vi.advanceTimersByTimeAsync(400);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const rec = instances.at(-1)!;
+      rec.onerror?.({ error: "network" });
+      rec.onend?.();
+      await vi.advanceTimersByTimeAsync(5000);
+    }
+    expect(shell.wakeEnabled).toBe(true);
+    expect(shell.wakeActive).toBe(false);
+    expect(instances).toHaveLength(3);
+    expect(showToast).toHaveBeenCalledOnce();
+    expect(showToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Spraakdienst niet bereikbaar" }),
+    );
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(instances).toHaveLength(3);
+    setWake(true, "user");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(instances).toHaveLength(4);
+    cleanup();
+  });
 
   it("reopens an ended track when recognition restarts", async () => {
     const first = stream();

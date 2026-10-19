@@ -59,6 +59,81 @@ describe("request tool selection", () => {
     );
   });
 
+  const desktopTools = [
+    makeTool(
+      "desktop_status",
+      "Read PC desktop status and running takeover session.",
+    ),
+    makeTool("desktop_windows", "List the open windows on the user's PC."),
+    makeTool(
+      "desktop_screenshot",
+      "Look at the PC screen and locate controls.",
+    ),
+    makeTool(
+      "desktop_takeover_start",
+      "Operate the PC mouse and keyboard for a session.",
+    ),
+    makeTool(
+      "desktop_act",
+      "Do a mouse or keyboard action during a running takeover.",
+    ),
+    makeTool("desktop_takeover_stop", "Stop the running takeover on the PC."),
+  ];
+  const mediaCatalog = [
+    ...Array.from({ length: 40 }, (_, index) =>
+      makeTool(
+        `media_${index}`,
+        "Plex Windows media pause play pc computer desktop screen takeover control keyboard mouse",
+      ),
+    ),
+    makeTool("ha_media_pause", "Pause Sonos media in a Home Assistant room."),
+    ...desktopTools,
+    makeTool(TOOL_DISCOVERY_NAME, "Search available capabilities"),
+  ];
+
+  it.each([
+    "neem mijn windows pc over",
+    "pauzeer Plex op mijn pc",
+    "bedien mijn computer",
+    "neem mijn bureaublad over",
+  ])("keeps PC observation and control discoverable for %j", (message) => {
+    const selected = selectToolsForRequest(
+      mediaCatalog,
+      message,
+      "conversation",
+      8,
+    );
+    expect(selected).toHaveLength(8);
+    expect(selected.map((tool) => tool.function.name)).toEqual(
+      expect.arrayContaining([
+        ...desktopTools.map((tool) => tool.function.name),
+        TOOL_DISCOVERY_NAME,
+      ]),
+    );
+  });
+
+  it("does not prioritize PC control for household media requests", () => {
+    const names = selectToolsForRequest(
+      mediaCatalog,
+      "pauzeer Sonos in woonkamer",
+      "conversation",
+      8,
+    ).map((tool) => tool.function.name);
+    expect(names).toContain("ha_media_pause");
+    expect(names).not.toContain("desktop_takeover_start");
+    expect(names).not.toContain("desktop_act");
+  });
+
+  it("does not interpret Plex alone as a PC request", () => {
+    const names = selectToolsForRequest(
+      mediaCatalog,
+      "pauzeer Plex",
+      "conversation",
+      8,
+    ).map((tool) => tool.function.name);
+    expect(names).not.toContain("desktop_takeover_start");
+  });
+
   it("uses the classified role to favor code tools", () => {
     const selected = selectToolsForRequest(
       tools,

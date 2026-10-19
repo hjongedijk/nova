@@ -12,13 +12,17 @@ export type ConversationLanguage = "nl" | "en";
 const LANGUAGE_KEY = "novaConversationLanguage";
 
 export function getConversationLanguage(): ConversationLanguage {
-  const language = storage.get(`${LANGUAGE_KEY}:${getSessionId()}`, "nl");
+  const language = storage.get(
+    LANGUAGE_KEY,
+    storage.get(`${LANGUAGE_KEY}:${getSessionId()}`, "nl"),
+  );
   return language === "en" ? "en" : "nl";
 }
 
 export function setConversationLanguage(
   language: ConversationLanguage,
 ): ConversationLanguage {
+  storage.set(LANGUAGE_KEY, language);
   storage.set(
     `${LANGUAGE_KEY}:${getSessionId()}`,
     language,

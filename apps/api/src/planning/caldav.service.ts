@@ -1,4 +1,5 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
+import { McpSecretsStore } from "../integrations/mcp/mcp-secrets.store.js";
 import crypto from "node:crypto";
 import { XMLParser } from "fast-xml-parser";
 import { NovaConfig } from "../core/config/nova-config.js";
@@ -130,10 +131,22 @@ function parseCalendarData(
 
 @Injectable()
 export class CalDavService {
-  constructor(private readonly config: NovaConfig) {}
+  constructor(
+    private readonly config: NovaConfig,
+    @Optional() private readonly secrets?: McpSecretsStore,
+  ) {}
+
+  private get connection(): NovaConfig["calDav"] {
+    const saved = this.secrets?.environmentFor("caldav") ?? {};
+    return {
+      url: saved.CALDAV_URL || this.config.calDav.url,
+      username: saved.CALDAV_USERNAME || this.config.calDav.username,
+      password: saved.CALDAV_PASSWORD || this.config.calDav.password,
+    };
+  }
 
   get configured(): boolean {
-    const { url, username, password } = this.config.calDav;
+    const { url, username, password } = this.connection;
     return Boolean(url && username && password);
   }
 
@@ -160,7 +173,7 @@ export class CalDavService {
   }
 
   private async upcomingRecords(now: Date): Promise<CalendarRecord[]> {
-    const { url, username, password } = this.config.calDav;
+    const { url, username, password } = this.connection;
     if (!url || !username || !password) return [];
     let endpoint: URL;
     try {
@@ -390,7 +403,7 @@ export class CalDavService {
   }
 
   private collectionUrl(): URL {
-    const { url } = this.config.calDav;
+    const { url } = this.connection;
     let endpoint: URL;
     try {
       endpoint = new URL(url);
@@ -410,7 +423,7 @@ export class CalDavService {
   }
 
   private authHeaders(): Record<string, string> {
-    const { username, password } = this.config.calDav;
+    const { username, password } = this.connection;
     if (!username || !password)
       throw new Error("De agenda is niet geconfigureerd.");
     return {

@@ -94,7 +94,7 @@ NOVA starts elevated by default (`agent.runElevated` is true in new configs, and
 
 ## Windows acceptance checks
 
-Wallpaper pages receive forwarded left-button clicks and mouse moves through a global low-level mouse hook (clicks on application windows are left alone). Right button, wheel and keyboard forwarding are still deferred. Native helper diagnostics are not implemented yet; the server reports that no valid helper measurement is available.
+Wallpaper pages receive trusted WebView2 left-button input and mouse moves through a global low-level mouse hook; clicks on application windows are left alone. Clicking an input focuses its WebView2 controller for keyboard input. Owned dropdown popups stay part of the wallpaper interaction. Right-button and wheel forwarding remain deferred. The small helper is a child of the desktop host, above desktop content and below application windows; it is no longer always on top. Native helper diagnostics are not implemented yet; the server reports that no valid helper measurement is available.
 
 The native app must be tried on Windows for transparency, dragging, WebView2 prompts, shortcuts, autostart, old-agent retirement, UAC/firewall, multiple monitors and wallpaper placement. Explorer restart recovery remains a known limitation inherited from NOVA Desk; toggle the wallpaper off/on if its host disappears.
 

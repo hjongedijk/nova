@@ -1,4 +1,4 @@
-/* The helper: a compact always-on-top panel. Default window 960x280 CSS px (chat 960x420, compact bar 360x44). */
+/* The helper: a compact desktop panel above the wallpaper and below applications. Default window 960x280 CSS px (chat 960x420, compact bar 360x44). */
 html:has(.hp),
 body:has(.hp) {
   background: #0a1424;

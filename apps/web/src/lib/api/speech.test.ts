@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchSpeech } from "./chat.ts";
 
+vi.mock("#lib/voice/voice-preference.ts", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  syncStoredVoiceProfile: vi.fn(async () => ({ status: "unchanged" })),
+}));
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe("speech transport", () => {
@@ -133,8 +138,7 @@ describe("speech transport", () => {
         "neutral",
         "nl",
       ),
-    ).rejects.toBe(failure);
-    expect(request).toHaveBeenCalledOnce();
-    expect(request.mock.calls[0]?.[1].signal).toBe(controller.signal);
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(request).not.toHaveBeenCalled();
   });
 });

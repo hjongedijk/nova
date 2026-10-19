@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { McpSecretsStore } from "../../src/integrations/mcp/mcp-secrets.store.js";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import { CalDavService } from "../../src/planning/caldav.service.js";
 
@@ -31,6 +32,30 @@ function service(
 afterEach(() => vi.unstubAllGlobals());
 
 describe("CalDavService", () => {
+  it("uses saved settings credentials immediately for the native calendar", async () => {
+    let saved = {
+      CALDAV_URL: "https://saved.example.test/calendar/",
+      CALDAV_USERNAME: "saved-user",
+      CALDAV_PASSWORD: "saved-secret",
+    };
+    const config = {
+      timezone: "Europe/Amsterdam",
+      calDav: { url: "", username: "", password: "" },
+    } as NovaConfig;
+    const secrets = {
+      environmentFor: () => saved,
+    } as unknown as McpSecretsStore;
+    const calendar = new CalDavService(config, secrets);
+    const request = vi.fn<(url: string | URL) => Promise<Response>>(
+      async () => new Response(calendarXml, { status: 207 }),
+    );
+    vi.stubGlobal("fetch", request);
+    expect(calendar.configured).toBe(true);
+    await calendar.upcoming(new Date("2026-10-11T00:00:00Z"));
+    expect(String(request.mock.calls[0]?.[0])).toContain("saved.example.test");
+    saved = { CALDAV_URL: "", CALDAV_USERNAME: "", CALDAV_PASSWORD: "" };
+    expect(calendar.configured).toBe(false);
+  });
   it("reads only bounded upcoming event fields and marks them untrusted at the tool boundary", async () => {
     const fetchMock = vi.fn(
       async () => new Response(calendarXml, { status: 207 }),

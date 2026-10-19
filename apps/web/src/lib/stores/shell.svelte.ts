@@ -20,6 +20,7 @@ export const shell = $state({
   speechSupported: false,
   /** "Hey NOVA" is switched on / the microphone is actually listening for it. */
   wakeEnabled: false,
+  wakeSuspended: false,
   wakeActive: false,
   /** NOVA is waiting for a command after the wake word (or after asking something). */
   awaiting: false,

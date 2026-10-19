@@ -532,12 +532,27 @@ export const rollbackHelperHotkeys = (id: string) =>
 
 export const getHelperPreferences = () =>
   read<HelperPreferences>("/helper/preferences");
-export const persistHelperPreferences = (preferences: HelperPreferences) =>
-  write<{
-    ok: true;
-    preferences: HelperPreferences;
-    auditWarning?: string;
-  }>("PUT", "/helper/preferences", preferences);
+export const helperPreferenceWrites = { revision: 0, pending: 0 };
+let helperWriteQueue: Promise<unknown> = Promise.resolve();
+export function persistHelperPreferences(preferences: HelperPreferences) {
+  const snapshot = JSON.parse(JSON.stringify(preferences)) as HelperPreferences;
+  ++helperPreferenceWrites.revision;
+  ++helperPreferenceWrites.pending;
+  const request = helperWriteQueue
+    .catch(() => undefined)
+    .then(() =>
+      write<{
+        ok: true;
+        preferences: HelperPreferences;
+        auditWarning?: string;
+      }>("PUT", "/helper/preferences", snapshot),
+    );
+  helperWriteQueue = request;
+  return request.finally(() => {
+    --helperPreferenceWrites.pending;
+  });
+}
+
 export const getHelperPreferenceHistory = () =>
   read<HelperPreferenceHistory>("/helper/preferences/history");
 export const rollbackHelperPreferenceRevision = (id: string) =>

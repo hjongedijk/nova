@@ -22,6 +22,7 @@ const names = [
   "NOVA_EXTENSIONS",
   "JARVIS_EXTENSIONS",
   "NOVA_MCP_CONFIG",
+  "NOVA_MCP_DEFAULT",
   "JARVIS_MCP_CONFIG",
   "NOVA_HOME_LAT",
   "JARVIS_HOME_LAT",
@@ -85,6 +86,96 @@ describe("NOVA environment names", () => {
       );
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("owned MCP catalog initialization", () => {
+  function fixture() {
+    const directory = fs.mkdtempSync(
+      path.join(os.tmpdir(), "nova-mcp-config-"),
+    );
+    const data = path.join(directory, "data");
+    const shipped = path.join(directory, "shipped.json");
+    const content = JSON.stringify({
+      servers: { existing: { enabled: true } },
+    });
+    fs.writeFileSync(shipped, content, { mode: 0o444 });
+    process.env.NOVA_DATA_DIR = data;
+    process.env.NOVA_MCP_DEFAULT = shipped;
+    return {
+      directory,
+      data,
+      shipped,
+      content,
+      own: path.join(data, "mcp-servers.json"),
+    };
+  }
+
+  it("copies shipped defaults into a private owned file once without changing the source", () => {
+    const f = fixture();
+    try {
+      expect(new NovaConfig().mcpConfig).toBe(f.own);
+      expect(fs.readFileSync(f.own, "utf8")).toBe(f.content);
+      expect(fs.statSync(f.own).mode & 0o777).toBe(0o600);
+      fs.writeFileSync(f.own, "user edits");
+      expect(new NovaConfig().mcpConfig).toBe(f.own);
+      expect(fs.readFileSync(f.own, "utf8")).toBe("user edits");
+      expect(fs.readFileSync(f.shipped, "utf8")).toBe(f.content);
+    } finally {
+      fs.rmSync(f.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves explicitly external catalogs read-only and uncreated", () => {
+    const f = fixture();
+    const external = path.join(f.directory, "external.json");
+    process.env.NOVA_MCP_CONFIG = external;
+    try {
+      expect(new NovaConfig().mcpConfig).toBe(f.shipped);
+      expect(fs.existsSync(external)).toBe(false);
+      fs.writeFileSync(external, "external");
+      expect(new NovaConfig().mcpConfig).toBe(external);
+      expect(fs.readFileSync(external, "utf8")).toBe("external");
+    } finally {
+      fs.rmSync(f.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a catalog created concurrently before exclusive creation", () => {
+    const f = fixture();
+    const open = fs.openSync;
+    vi.spyOn(fs, "openSync").mockImplementation(
+      (...args: Parameters<typeof fs.openSync>) => {
+        if (args[0] === f.own && args[1] === "wx") {
+          fs.writeFileSync(f.own, "concurrent user edits");
+        }
+        return open(...args);
+      },
+    );
+    try {
+      expect(new NovaConfig().mcpConfig).toBe(f.own);
+      expect(fs.readFileSync(f.own, "utf8")).toBe("concurrent user edits");
+    } finally {
+      fs.rmSync(f.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the shipped catalog and removes its incomplete file on a write error", () => {
+    const f = fixture();
+    const write = fs.writeFileSync;
+    vi.spyOn(fs, "writeFileSync").mockImplementation(
+      (...args: Parameters<typeof fs.writeFileSync>) => {
+        if (typeof args[0] === "number")
+          throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+        return write(...args);
+      },
+    );
+    try {
+      expect(new NovaConfig().mcpConfig).toBe(f.shipped);
+      expect(fs.existsSync(f.own)).toBe(false);
+    } finally {
+      fs.rmSync(f.directory, { recursive: true, force: true });
     }
   });
 });

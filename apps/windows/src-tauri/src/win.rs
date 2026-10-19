@@ -111,6 +111,98 @@ mod imp {
         }
     }
 
+    pub fn helper_parent() -> Result<isize, String> {
+        unsafe {
+            let mut candidates = Vec::new();
+            if let Ok(progman) = FindWindowW(w!("Progman"), PCWSTR::null()) {
+                candidates.push(progman);
+            }
+            let _ = EnumWindows(Some(collect), LPARAM(&mut candidates as *mut Vec<HWND> as isize));
+            let parent = candidates
+                .into_iter()
+                .find(|parent| {
+                    matches!(class_of(*parent).as_str(), "Progman" | "WorkerW")
+                        && FindWindowExW(Some(*parent), None, w!("SHELLDLL_DefView"), PCWSTR::null()).is_ok()
+                })
+                .ok_or_else(|| "Windows desktop host for the helper is unavailable".to_string())?;
+            Ok(parent.0 as isize)
+        }
+    }
+
+    /// Place the helper above desktop icons but inside the desktop host.
+    pub fn place_helper(window: isize, rect: Rect) -> Result<(), String> {
+        use windows::Win32::Graphics::Gdi::ScreenToClient;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetWindowLongW, HWND_TOP, SWP_FRAMECHANGED, SWP_NOACTIVATE, WS_CHILD, WS_POPUP,
+        };
+        let h = HWND(window as *mut core::ffi::c_void);
+        let parent = HWND(helper_parent()? as *mut core::ffi::c_void);
+        unsafe {
+            let mut position = POINT { x: rect.x, y: rect.y };
+            if !ScreenToClient(parent, &mut position).as_bool() {
+                return Err("Could not translate the helper's desktop position".into());
+            }
+            // Retain visibility and clipping bits; a hidden helper must stay hidden.
+            let style = GetWindowLongW(h, GWL_STYLE) as u32;
+            SetWindowLongW(h, GWL_STYLE, ((style & !WS_POPUP.0) | WS_CHILD.0) as i32);
+            if GetParent(h).ok() != Some(parent) {
+                SetParent(h, Some(parent)).map_err(|e| format!("Helper SetParent: {e}"))?;
+            }
+            SetWindowPos(
+                h,
+                Some(HWND_TOP),
+                position.x,
+                position.y,
+                rect.w,
+                rect.h,
+                SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+            .map_err(|e| format!("Helper SetWindowPos: {e}"))?;
+            Ok(())
+        }
+    }
+
+    /// The helper receives normal Windows mouse messages; never replay those
+    /// same clicks into a wallpaper behind it.
+    pub fn over_helper(window: isize, point: (i32, i32)) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::IsChild;
+        let h = HWND(window as *mut core::ffi::c_void);
+        unsafe {
+            let target = WindowFromPoint(POINT { x: point.0, y: point.1 });
+            target == h || IsChild(h, target).as_bool()
+        }
+    }
+
+    /// A native select/dropdown popup belongs to its WebView, even though its
+    /// top-level class is not Progman/WorkerW. Do not cancel its captured click.
+    pub fn over_owned_popup(window: isize, point: (i32, i32)) -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::IsChild;
+        if window == 0 {
+            return false;
+        }
+        let root = HWND(window as *mut core::ffi::c_void);
+        unsafe {
+            let mut target = WindowFromPoint(POINT { x: point.0, y: point.1 });
+            for _ in 0..16 {
+                if target.0.is_null() {
+                    return false;
+                }
+                if target == root || IsChild(root, target).as_bool() {
+                    return true;
+                }
+                // GetParent follows the owner for top-level popup windows.
+                let Ok(parent) = GetParent(target) else {
+                    return false;
+                };
+                if parent == target {
+                    return false;
+                }
+                target = parent;
+            }
+            false
+        }
+    }
+
     static KEPT: Mutex<Vec<isize>> = Mutex::new(Vec::new());
     static KEEPER: OnceLock<()> = OnceLock::new();
 
@@ -242,6 +334,15 @@ mod imp {
     }
     pub fn place(_window: isize, _parent: u64, _after: InsertAfter, _rect: Rect) -> Result<(), String> {
         Err("NOVA Desk places wallpaper windows on Windows only".into())
+    }
+    pub fn place_helper(_window: isize, _rect: Rect) -> Result<(), String> {
+        Err("De helper vastzetten op het bureaublad werkt alleen op Windows".into())
+    }
+    pub fn over_helper(_window: isize, _point: (i32, i32)) -> bool {
+        false
+    }
+    pub fn over_owned_popup(_window: isize, _point: (i32, i32)) -> bool {
+        false
     }
     pub fn keep_behind_icons(_window: isize) {}
     pub fn over_desktop(_x: i32, _y: i32) -> bool {

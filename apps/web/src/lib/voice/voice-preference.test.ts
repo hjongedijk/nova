@@ -80,11 +80,13 @@ describe("TTS voice preference", () => {
     setServerDefaultVoice("nl-NL-ColetteNeural");
     expect(ttsVoice()).toBe("nl-NL-ColetteNeural");
     expect(ttsVoiceForSpeech("nl")).toBeUndefined();
-    const fetchMock = vi.fn().mockResolvedValue(new Response("audio"));
+    const fetchMock = vi.fn<
+      (url: string, init?: RequestInit) => Promise<Response>
+    >(async () => new Response("audio"));
     vi.stubGlobal("fetch", fetchMock);
     await fetchSpeech("Goedemorgen.", undefined, "neutral", "nl");
     expect(
-      JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body)),
+      JSON.parse(String((fetchMock.mock.calls.at(-1)![1] as RequestInit).body)),
     ).not.toHaveProperty("voice");
     saveTtsVoice("nl-NL-MaartenNeural");
     expect(ttsVoiceForSpeech("nl")).toBe("nl-NL-MaartenNeural");
@@ -126,10 +128,12 @@ describe("TTS voice preference", () => {
     vi.spyOn(storage, "get").mockImplementation((key, fallback) =>
       key === "novaTtsVoice" ? "nl-NL-FennaNeural" : fallback,
     );
-    const fetchMock = vi.fn().mockResolvedValue(new Response("audio"));
+    const fetchMock = vi.fn<
+      (url: string, init?: RequestInit) => Promise<Response>
+    >(async () => new Response("audio"));
     vi.stubGlobal("fetch", fetchMock);
     await fetchSpeech("Wat fijn.", undefined, "happy");
-    const request = fetchMock.mock.calls[0]![1] as RequestInit;
+    const request = fetchMock.mock.calls.at(-1)![1] as RequestInit;
     expect(JSON.parse(String(request.body))).toEqual({
       text: "Wat fijn.",
       voice: "nl-NL-FennaNeural",
@@ -138,10 +142,12 @@ describe("TTS voice preference", () => {
   });
 
   it("uses a matching voice for English conversation speech", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response("audio"));
+    const fetchMock = vi.fn<
+      (url: string, init?: RequestInit) => Promise<Response>
+    >(async () => new Response("audio"));
     vi.stubGlobal("fetch", fetchMock);
     await fetchSpeech("Good morning.", undefined, "neutral", "en");
-    const request = fetchMock.mock.calls[0]![1] as RequestInit;
+    const request = fetchMock.mock.calls.at(-1)![1] as RequestInit;
     expect(JSON.parse(String(request.body))).toMatchObject({
       text: "Good morning.",
       voice: "en-GB-RyanNeural",
@@ -160,11 +166,20 @@ describe("stored voice profile start sync", () => {
     );
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
       init?.method === "PUT"
-        ? new Response("{}", { status: 200 })
-        : new Response(JSON.stringify({ rate: -3, pitch: -2 })),
+        ? new Response(
+            JSON.stringify({
+              voice: "nl-NL-MaartenNeural",
+              rate: -3,
+              pitch: -2,
+            }),
+            { status: 200 },
+          )
+        : new Response(
+            JSON.stringify({ rate: -3, pitch: -2, initialized: false }),
+          ),
     );
     vi.stubGlobal("fetch", fetchMock);
-    await expect(syncStoredVoiceProfile()).resolves.toEqual({
+    await expect(syncStoredVoiceProfile()).resolves.toMatchObject({
       status: "synced",
     });
     const put = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
@@ -172,13 +187,63 @@ describe("stored voice profile start sync", () => {
       "nl-NL-MaartenNeural",
     );
   });
-  it("leaves the server alone when nothing is stored locally", async () => {
+  it("keeps a local edit made while an older profile read is in flight", async () => {
+    const values = new Map<string, string>([
+      ["novaTtsVoice", "nl-NL-FennaNeural"],
+    ]);
+    vi.spyOn(storage, "get").mockImplementation(
+      (key, fallback) => values.get(key) ?? fallback,
+    );
+    vi.spyOn(storage, "set").mockImplementation((key, value) => {
+      values.set(key, value);
+    });
+    let resolveRead!: (value: Response) => void;
+    let started!: () => void;
+    const readStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.method === "PUT") return Promise.resolve(new Response("{}"));
+        started();
+        return new Promise<Response>((resolve) => {
+          resolveRead = resolve;
+        });
+      }),
+    );
+    const sync = syncStoredVoiceProfile();
+    await readStarted;
+    saveTtsVoice("nl-NL-MaartenNeural");
+    resolveRead(
+      new Response(
+        JSON.stringify({
+          voice: "nl-NL-ColetteNeural",
+          rate: 0,
+          pitch: 0,
+          initialized: true,
+        }),
+      ),
+    );
+    await sync;
+    expect(ttsVoice()).toBe("nl-NL-MaartenNeural");
+  });
+  it("loads the shared voice even when nothing is stored locally", async () => {
     vi.spyOn(storage, "get").mockImplementation((_key, fallback) => fallback);
-    const fetchMock = vi.fn();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ voice: "nl-NL-ColetteNeural", rate: -1, pitch: 1 }),
+        ),
+    );
+    const save = vi.spyOn(storage, "set");
     vi.stubGlobal("fetch", fetchMock);
-    await expect(syncStoredVoiceProfile()).resolves.toEqual({
+    await expect(syncStoredVoiceProfile()).resolves.toMatchObject({
       status: "unchanged",
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith("novaTtsVoice", "nl-NL-ColetteNeural");
+    expect(save).toHaveBeenCalledWith("novaTtsRate", "-1");
+    expect(save).toHaveBeenCalledWith("novaTtsPitch", "1");
   });
 });

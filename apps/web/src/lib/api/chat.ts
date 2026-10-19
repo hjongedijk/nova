@@ -1,6 +1,7 @@
 import type { ChatRequest, ConfirmResult } from "@nova/contracts";
 import { sendJson } from "./client.ts";
 import {
+  syncStoredVoiceProfile,
   ttsProsodyForMood,
   ttsVoiceForSpeech,
 } from "#lib/voice/voice-preference.ts";
@@ -46,6 +47,9 @@ export async function fetchSpeech(
   mood: AssistantMood = "neutral",
   language?: ConversationLanguage,
 ): Promise<Blob> {
+  signal?.throwIfAborted();
+  await syncStoredVoiceProfile();
+  signal?.throwIfAborted();
   const body = JSON.stringify({
     text,
     voice: ttsVoiceForSpeech(language),

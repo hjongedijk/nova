@@ -338,3 +338,15 @@ describe("conversation service on the phone link", () => {
     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   });
 });
+
+describe("conversation response time", () => {
+  it("gives new calls 25 seconds before the first idle prompt and preserves saved choices", () => {
+    const config = {
+      dataFile: (name: string) => path.join(dir, name),
+    } as NovaConfig;
+    const settings = new ConversationSettingsStore(config);
+    expect(settings.get().idleSeconds).toBe(25);
+    settings.update({ idleSeconds: 8 });
+    expect(new ConversationSettingsStore(config).get().idleSeconds).toBe(8);
+  });
+});

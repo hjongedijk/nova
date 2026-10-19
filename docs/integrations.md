@@ -683,6 +683,8 @@ An API with no spec:
 
 ## Telephony and conversations
 
+Requested `phone_call` calls default to a two-way conversation, including requests to tell the time. Set `conversation=false` explicitly for an announcement that hangs up after playback. New conversation settings allow 25 seconds before the first silence reminder; saved idle times remain unchanged.
+
 NOVA can place and receive phone calls through its own Asterisk PBX and talk with you, in a call or a hands-free browser session. Telephony is **off by default**. Asterisk is in the production Compose file under the profile `telephony`.
 
 ### What it is

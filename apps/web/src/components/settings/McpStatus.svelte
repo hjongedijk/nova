@@ -314,7 +314,7 @@
             {server.toolCount} gereedschappen
             {#if server.description}<p>{server.description}</p>{/if}
             {#if server.rights}<p>Rechten: {server.rights}</p>{/if}
-            {#if server.id === "caldav" || server.id === "imap" || server.id === "github"}
+            {#if server.id === "github"}
               <McpConnectionConfig id={server.id} onSaved={load} />
             {/if}
             <p>

@@ -3,7 +3,7 @@
 use crate::state::Shared;
 use crate::{log, win};
 use nova_win_core::desktop::{decide, Decision};
-use nova_win_core::forward::{pointer_script, route, PointerKind, Target};
+use nova_win_core::forward::{PointerForwarder, PointerInput, PointerKind, Target};
 use nova_win_core::geometry::{
     fullscreen_rect, monitor_for_rect, offset_from_position, place, resolve_display, taskbar_px, virtual_origin,
     wallpaper_child_rect, window_size, MonitorInfo, Rect,
@@ -12,7 +12,7 @@ use nova_win_core::mode::WallpaperSpec;
 use nova_win_core::nav::{app_url, browser_args, classify, helper_url, wallpaper_url, Navigation};
 use std::time::{Duration, Instant};
 use tauri::ipc::CapabilityBuilder;
-use tauri::webview::NewWindowResponse;
+use tauri::webview::{NewWindowResponse, PermissionKind, PermissionResponse};
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
@@ -21,50 +21,93 @@ pub const HELPER: &str = "helper";
 /// Wallpaper windows that want the mouse, and the thread that replays it into their pages. The wallpaper sits behind
 /// the icon layer, so Windows delivers no clicks to it (see `nova_win_core::forward`).
 static FORWARD_TARGETS: std::sync::Mutex<Vec<Target>> = std::sync::Mutex::new(Vec::new());
-static FORWARD_TX: std::sync::OnceLock<std::sync::mpsc::Sender<(String, String)>> = std::sync::OnceLock::new();
+static FORWARD_TX: std::sync::OnceLock<std::sync::mpsc::Sender<PointerInput>> = std::sync::OnceLock::new();
+static POINTER_FORWARDER: std::sync::Mutex<PointerForwarder> = std::sync::Mutex::new(PointerForwarder::new());
+static HELPER_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 static LAST_MOVE: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
 
 fn forward_targets() -> std::sync::MutexGuard<'static, Vec<Target>> {
     FORWARD_TARGETS.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// Starts forwarding (once): the mouse hook plus the worker that evals the events in the wallpaper pages.
+/// Starts forwarding once. The worker preserves event order and WebView2 dispatches browser input on its UI thread.
 pub fn start_forwarding(app: &AppHandle) {
-    let (tx, rx) = std::sync::mpsc::channel::<(String, String)>();
+    let (tx, rx) = std::sync::mpsc::channel::<PointerInput>();
     if FORWARD_TX.set(tx).is_err() {
         return;
     }
     let app = app.clone();
     std::thread::spawn(move || {
-        for (label, script) in rx {
-            if let Some(window) = app.get_webview_window(&label) {
-                let _ = window.eval(script);
+        for input in rx {
+            if let Some(window) = app.get_webview_window(&input.hit.label) {
+                dispatch_pointer(&window, input);
             }
         }
     });
     win::watch_mouse(on_mouse);
 }
 
-/// Called from the mouse hook: must stay fast and never block.
+#[cfg(windows)]
+fn dispatch_pointer(window: &WebviewWindow, input: PointerInput) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC;
+    use webview2_com::{CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR};
+
+    let result = window.with_webview(move |platform| unsafe {
+        let controller = platform.controller();
+        // Cancellation over another application must release the old press without stealing that app's focus.
+        if input.focus {
+            let _ = controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        }
+        let Ok(webview) = controller.CoreWebView2() else { return };
+        let method = CoTaskMemPWSTR::from("Input.dispatchMouseEvent");
+        let json = input.params();
+        let params = CoTaskMemPWSTR::from(json.as_str());
+        let completed = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|result, _| {
+            if let Err(error) = result {
+                log!("wallpaper browser input failed: {error}");
+            }
+            Ok(())
+        }));
+        if let Err(error) =
+            webview.CallDevToolsProtocolMethod(*method.as_ref().as_pcwstr(), *params.as_ref().as_pcwstr(), &completed)
+        {
+            log!("could not dispatch wallpaper browser input: {error}");
+        }
+    });
+    if let Err(error) = result {
+        log!("could not queue wallpaper browser input: {error}");
+    }
+}
+
+#[cfg(not(windows))]
+fn dispatch_pointer(_window: &WebviewWindow, _input: PointerInput) {}
+
+/// Called from the mouse hook: must stay fast and never block. Helper events are already delivered natively.
 fn on_mouse(kind: PointerKind, point: (i32, i32)) {
-    let hit = {
-        let targets = forward_targets();
-        if targets.is_empty() || !targets.iter().any(|t| t.bounds.contains(point.0, point.1)) {
+    let targets = forward_targets();
+    let helper = HELPER_HWND.load(std::sync::atomic::Ordering::Relaxed);
+    let target = targets.iter().find(|target| target.bounds.contains(point.0, point.1));
+    let desktop = target.is_some_and(|target| {
+        !win::over_helper(helper, point)
+            && (win::over_desktop(point.0, point.1) || win::over_owned_popup(target.native_handle, point))
+    });
+    let Ok(mut forwarder) = POINTER_FORWARDER.try_lock() else {
+        return;
+    };
+    let Some(input) = forwarder.event(kind, point, desktop, &targets) else {
+        return;
+    };
+    // Boundary cancellation produces an Up, so it is never lost to movement throttling.
+    if input.kind == PointerKind::Move {
+        let Ok(mut last) = LAST_MOVE.try_lock() else { return };
+        let now = Instant::now();
+        if last.is_some_and(|t| now.duration_since(t) < Duration::from_millis(16)) {
             return;
         }
-        if kind == PointerKind::Move {
-            let Ok(mut last) = LAST_MOVE.try_lock() else { return };
-            let now = Instant::now();
-            if last.is_some_and(|t| now.duration_since(t) < Duration::from_millis(16)) {
-                return;
-            }
-            *last = Some(now);
-        }
-        // The window under the cursor is only looked up for a point inside a wallpaper.
-        route(point, win::over_desktop(point.0, point.1), &targets)
-    };
-    if let (Some(hit), Some(tx)) = (hit, FORWARD_TX.get()) {
-        let _ = tx.send((hit.label, pointer_script(kind, hit.x, hit.y)));
+        *last = Some(now);
+    }
+    if let Some(tx) = FORWARD_TX.get() {
+        let _ = tx.send(input);
     }
 }
 
@@ -179,6 +222,7 @@ fn builder<'a>(
     profile: std::path::PathBuf,
 ) -> Option<WebviewWindowBuilder<'a, tauri::Wry, AppHandle>> {
     let parsed: url::Url = url.parse().ok()?;
+    let microphone_origin = origin.to_owned();
     Some(
         WebviewWindowBuilder::new(app, label, WebviewUrl::External(parsed))
             .decorations(false)
@@ -191,6 +235,17 @@ fn builder<'a>(
             .additional_browser_args(&browser_args(origin))
             .disable_drag_drop_handler()
             .initialization_script(DESK_SCRIPT)
+            .on_permission_request(move |webview, kind| {
+                if kind == PermissionKind::Microphone
+                    && webview
+                        .url()
+                        .is_ok_and(|url| url.origin().ascii_serialization() == microphone_origin)
+                {
+                    PermissionResponse::Allow
+                } else {
+                    PermissionResponse::Default
+                }
+            })
             .on_navigation(guard(app, origin.to_string()))
             .on_new_window(new_window_guard(app, origin.to_string())),
     )
@@ -212,7 +267,23 @@ pub fn create_helper(app: &AppHandle) -> Option<WebviewWindow> {
     grant_origin(app, &origin);
     let url = helper_url(&origin, view);
     shared.lock().helper_ready = false;
-    let built = builder(app, HELPER, &url, &origin, profile)?
+    let prepared = builder(app, HELPER, &url, &origin, profile)?;
+    #[cfg(windows)]
+    let prepared = {
+        let parent = match win::helper_parent() {
+            Ok(parent) => parent,
+            Err(error) => {
+                log!("could not attach helper to desktop: {error}");
+                return None;
+            }
+        };
+        // Register the child relationship with Tao too, so later show/hide and
+        // resize operations retain WS_CHILD rather than restoring popup styles.
+        prepared.parent_raw(windows_webview::Win32::Foundation::HWND(
+            parent as *mut core::ffi::c_void,
+        ))
+    };
+    let built = prepared
         .on_page_load(|window, payload| {
             let shared = window.state::<Shared>();
             let (ready, notifications, paused) = {
@@ -239,13 +310,19 @@ pub fn create_helper(app: &AppHandle) -> Option<WebviewWindow> {
         })
         .title("NOVA helper")
         .transparent(true)
-        .always_on_top(true)
+        .always_on_top(false)
         .build();
     match built {
         Ok(window) => {
+            if let Ok(raw) = window.hwnd() {
+                HELPER_HWND.store(raw.0 as isize, std::sync::atomic::Ordering::Relaxed);
+            }
             let handle = app.clone();
             window.on_window_event(move |event| match event {
                 tauri::WindowEvent::Moved(_) => on_moved(&handle),
+                tauri::WindowEvent::Destroyed => {
+                    HELPER_HWND.store(0, std::sync::atomic::Ordering::Relaxed);
+                }
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     // Closing the helper hides it; the tray brings it back.
                     api.prevent_close();
@@ -296,7 +373,11 @@ pub fn apply_layout(app: &AppHandle) {
     }
     // Resize first and move second: the other way round, a bigger window could briefly stick out of the screen.
     let _ = window.set_size(PhysicalSize::new(size.0.max(1) as u32, size.1.max(1) as u32));
-    let _ = window.set_position(PhysicalPosition::new(pos.0, pos.1));
+    if let Ok(raw) = window.hwnd() {
+        if let Err(error) = win::place_helper(raw.0 as isize, Rect::new(pos.0, pos.1, size.0.max(1), size.1.max(1))) {
+            log!("could not place the helper on the desktop: {error}");
+        }
+    }
 }
 
 /// The user stopped dragging: remember where, per display, and which display it is on now.
@@ -444,6 +525,7 @@ pub fn create_wallpaper(app: &AppHandle, monitor: &str, spec: WallpaperSpec) {
                         forward_targets().retain(|t| t.label != label);
                         forward_targets().push(Target {
                             label: label.clone(),
+                            native_handle: handle,
                             bounds: info.bounds,
                             scale: info.scale,
                         });

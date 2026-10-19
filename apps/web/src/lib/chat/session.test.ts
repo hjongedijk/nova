@@ -7,10 +7,10 @@ import {
   setConversationLanguage,
 } from "./session.ts";
 
-describe("per-conversation language preference", () => {
+describe("shared conversation language preference", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("stores the language against this session and starts a new session in Dutch", () => {
+  it("retains the shared language when starting a new chat", () => {
     const values = new Map<string, string>([["novaSessionId", "session-a"]]);
     vi.spyOn(storage, "get").mockImplementation(
       (key, fallback) => values.get(key) ?? fallback,
@@ -25,6 +25,6 @@ describe("per-conversation language preference", () => {
     expect(values.get(`novaConversationLanguage:${getSessionId()}`)).toBe("en");
 
     resetSession();
-    expect(getConversationLanguage()).toBe("nl");
+    expect(getConversationLanguage()).toBe("en");
   });
 });

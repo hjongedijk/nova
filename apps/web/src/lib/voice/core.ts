@@ -34,7 +34,10 @@ export function beginPushToTalk(): void {
   if (isSpeaking()) stopSpeech();
   if (chat.busy) cancelActiveAsk();
   if (shell.awaiting) cancelAwait();
-  startListening();
+  // Web Speech permits one recognizer at a time. Reuse the wake listener
+  // instead of competing with it for the microphone when F8 is pressed.
+  if (shell.wakeActive) startAwait();
+  else startListening();
 }
 
 export { finishListening };

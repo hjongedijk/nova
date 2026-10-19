@@ -16,6 +16,11 @@ const STOP_WORDS = new Set(
 );
 
 const ALIASES: Record<string, string[]> = {
+  pc: ["desktop", "windows", "computer", "screen", "takeover"],
+  computer: ["desktop", "windows", "pc", "screen", "takeover"],
+  bureaublad: ["desktop", "windows", "pc", "screen", "takeover"],
+  overnemen: ["desktop", "takeover", "control"],
+  bedienen: ["desktop", "control", "keyboard", "mouse"],
   tijd: ["clock", "time", "timezone"],
   laat: ["clock", "time"],
   datum: ["clock", "date"],
@@ -113,7 +118,11 @@ function words(value: string): Set<string> {
       .toLocaleLowerCase("nl-NL")
       .replace(/[^a-z0-9_]+/g, " ")
       .split(/\s+/)
-      .filter((word) => word.length > 2 && !STOP_WORDS.has(word)),
+      .filter(
+        (word) =>
+          (word.length > 2 || Object.hasOwn(ALIASES, word)) &&
+          !STOP_WORDS.has(word),
+      ),
   );
 }
 
@@ -148,6 +157,13 @@ export function rankToolsForRequest<T extends SelectableTool>(
   role: ModelRoleId,
 ): T[] {
   const query = words(message);
+  const explicitPc = [
+    "pc",
+    "computer",
+    "windows",
+    "desktop",
+    "bureaublad",
+  ].some((word) => query.has(word));
   const expanded = new Set(query);
   for (const word of query)
     for (const alias of Object.hasOwn(ALIASES, word)
@@ -159,7 +175,15 @@ export function rankToolsForRequest<T extends SelectableTool>(
       const nameWords = words(tool.function.name.replace(/_/g, " "));
       nameWords.add(tool.function.name.toLowerCase());
       const descriptionWords = words(tool.function.description);
-      let score = 0;
+      // Keep the complete observe/control sequence available for explicit PC requests,
+      // even when a large integration catalog also matches the requested app/media.
+      let score =
+        explicitPc &&
+        /^desktop_(?:status|windows|screenshot|takeover_start|act|takeover_stop)$/.test(
+          tool.function.name,
+        )
+          ? 100
+          : 0;
       for (const word of expanded) {
         if (nameWords.has(word)) score += 3;
         if (descriptionWords.has(word)) score += 1;

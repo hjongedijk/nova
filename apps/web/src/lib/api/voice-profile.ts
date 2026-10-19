@@ -21,7 +21,7 @@ export async function pushVoiceProfile(
 }
 
 export type VoiceProfileSync =
-  | { status: "unchanged" | "synced" }
+  | { status: "unchanged" | "synced"; profile?: VoiceProfilePayload }
   | { status: "failed"; message: string; auth?: boolean };
 
 const sameProfile = (a: VoiceProfilePayload, b: VoiceProfilePayload) =>
@@ -30,19 +30,27 @@ const sameProfile = (a: VoiceProfilePayload, b: VoiceProfilePayload) =>
   a.pitch === b.pitch;
 
 /**
- * Makes the server (phone calls) match the profile this browser stored: reads the server copy and only writes when it
- * differs, so running it on every start is harmless. Unlike pushVoiceProfile the outcome is reported, never swallowed.
+ * Reads the shared profile for every client. A legacy local choice migrates only when the server has no chosen voice.
+ * Opening an older browser or helper never overwrites an existing shared voice.
  */
 export async function reconcileVoiceProfile(
-  local: VoiceProfilePayload,
+  local?: VoiceProfilePayload,
 ): Promise<VoiceProfileSync> {
   try {
-    const remote = await getJson<VoiceProfilePayload>(
+    const remote = await getJson<
+      VoiceProfilePayload & { initialized?: boolean }
+    >("/settings/voice-profile", { signal: AbortSignal.timeout(5000) });
+    if (!Number.isFinite(remote.rate) || !Number.isFinite(remote.pitch))
+      throw new Error("Ongeldig stemprofiel");
+    // The shared profile wins. Only migrate an older browser choice when no server voice exists.
+    if (!local || remote.initialized !== false || sameProfile(local, remote))
+      return { status: "unchanged", profile: remote };
+    const saved = await sendJson<VoiceProfilePayload>(
+      "PUT",
       "/settings/voice-profile",
+      { ...local, initialize: true },
     );
-    if (sameProfile(local, remote)) return { status: "unchanged" };
-    await sendJson("PUT", "/settings/voice-profile", local);
-    return { status: "synced" };
+    return { status: "synced", profile: saved };
   } catch (error) {
     return {
       status: "failed",

@@ -13,6 +13,7 @@
     setSelectedInputDevice,
     supportsSpeechInputSelection,
   } from "#lib/voice/input-device.ts";
+  import { micErrorMessage } from "#lib/voice/conversation-logic.ts";
   import { storage } from "#lib/util/storage.ts";
   let hotkeys = $state<Record<string, string>>({
     open: "Ctrl+Alt+N",
@@ -100,8 +101,8 @@
           ? "Microfoons gevonden. Je keuze geldt voor spreken en Hey NOVA."
           : "Geen microfoon gevonden.";
       }
-    } catch {
-      note = "Geef NOVA microfoontoegang om invoerapparaten te tonen.";
+    } catch (error) {
+      note = micErrorMessage(error instanceof Error ? error.name : "");
     }
   }
   function setInput() {

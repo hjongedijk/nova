@@ -21,6 +21,17 @@ export function showToast(
   toast: { severity: ToastSeverity; title: string; detail?: string },
   ms?: number,
 ): void {
+  // Persistent warnings must not stack when the same failing service retries.
+  if (
+    toast.severity !== "info" &&
+    toasts.items.some(
+      (item) =>
+        item.severity === toast.severity &&
+        item.title === toast.title &&
+        item.detail === toast.detail,
+    )
+  )
+    return;
   const entry: Toast = { id: ++next, ...toast };
   toasts.items.unshift(entry);
   while (toasts.items.length > MAX_TOASTS) toasts.items.pop();

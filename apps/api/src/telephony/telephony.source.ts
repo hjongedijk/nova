@@ -11,7 +11,7 @@ import {
 import { TelephonyService } from "./telephony.service.js";
 import { TelephonyError } from "./telephony.types.js";
 
-/** Phone tools: status, an announcement call and hanging up. Calls are never auto-approved for external numbers. */
+/** Phone tools: status, conversational calls, optional announcements and hanging up. */
 @ToolSourceProvider()
 export class TelephonySource implements ToolSource {
   readonly source = "telephony";
@@ -31,12 +31,17 @@ export class TelephonySource implements ToolSource {
       {
         name: "phone_call",
         description:
-          'Call an internal extension (3-4 digits, e.g. "101"), an external number (digits, optional +, needs a SIP trunk) or a saved contact by name (see phone_status), and speak "message" when they answer. With conversation=true NOVA instead has a real two-way spoken conversation that opens with "message" (needs Gesprekken switched on; only read-only tools are used on the phone). The user is always asked to confirm external numbers.',
+          'Call an internal extension (3-4 digits, e.g. "101"), an external number (digits, optional +, needs a SIP trunk) or a saved contact by name (see phone_status), and speak "message" when they answer. By default NOVA has a two-way spoken conversation that opens with "message" (needs Gesprekken switched on). Set conversation=false only for a one-way announcement that hangs up after speaking.',
         parameters: schema(
           {
             to: text(60),
             message: text(500),
-            conversation: { type: "boolean" },
+            conversation: {
+              type: "boolean",
+              default: true,
+              description:
+                "Keep the call open for a two-way conversation (default). Set false only for a one-way announcement.",
+            },
           },
           ["to", "message"],
         ),
@@ -56,7 +61,7 @@ export class TelephonySource implements ToolSource {
     ];
   }
 
-  /** External numbers always need a fresh confirmation; internal extensions only when the user allows skipping it. */
+  /** Resolve the destination and retain call classification metadata. */
   async prepare(
     name: string,
     args: Record<string, unknown>,
@@ -75,7 +80,7 @@ export class TelephonySource implements ToolSource {
       args: {
         to: target.number,
         message: args.message,
-        ...(args.conversation === true ? { conversation: true } : {}),
+        conversation: args.conversation !== false,
       },
       risk: internalOk ? "SAFE" : "CONFIRM",
     };
@@ -108,13 +113,16 @@ export class TelephonySource implements ToolSource {
       }
       if (name === "phone_call") {
         const result = await this.telephony.call(args.to, args.message, {
-          conversation: args.conversation === true,
+          conversation: args.conversation !== false,
         });
         return {
           ok: true,
           verified: null,
           result,
-          hint: "Het gesprek is gestart; de boodschap wordt uitgesproken zodra er wordt opgenomen.",
+          hint:
+            args.conversation !== false
+              ? "Het gesprek is gestart; NOVA spreekt de openingsboodschap uit en luistert daarna naar het antwoord."
+              : "De aankondiging is gestart; de boodschap wordt uitgesproken zodra er wordt opgenomen, daarna wordt opgehangen.",
         };
       }
       if (name === "phone_hangup") {

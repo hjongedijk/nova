@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { VoiceProfileController } from "../../src/tts/voice-profile.controller.js";
 import { TtsService } from "../../src/tts/tts.service.js";
 import { VoiceProfileStore } from "../../src/tts/voice-profile.store.js";
 
@@ -22,6 +23,23 @@ afterEach(() => {
 });
 
 describe("VoiceProfileStore", () => {
+  it("initializes only once and preserves a configured default voice", () => {
+    const { store: s } = store();
+    const controller = new VoiceProfileController(s);
+    expect(controller.read().initialized).toBe(false);
+    controller.update({ rate: 2, pitch: 1, initialize: true });
+    expect(
+      controller.update({
+        voice: "nl-NL-MaartenNeural",
+        rate: -3,
+        pitch: -2,
+        initialize: true,
+      }),
+    ).toEqual({ rate: 2, pitch: 1, initialized: true });
+    controller.update({ voice: "nl-NL-ColetteNeural", rate: 0, pitch: 0 });
+    expect(controller.read().voice).toBe("nl-NL-ColetteNeural");
+  });
+
   it("defaults to the server voice with the standard prosody", () => {
     expect(store().store.get()).toEqual({ rate: -3, pitch: -2 });
   });

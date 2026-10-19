@@ -22,7 +22,7 @@ const DEFAULTS = (): ConversationSettings => ({
   language: "nl",
   greeting: "Hallo, met Nova. Waarmee kan ik je helpen?",
   secretUuid: crypto.randomUUID(),
-  idleSeconds: 12,
+  idleSeconds: 25,
   maxMinutes: 10,
 });
 
@@ -52,7 +52,7 @@ export class ConversationSettingsStore {
           typeof raw.greeting === "string" && raw.greeting.trim()
             ? raw.greeting.trim().slice(0, 200)
             : value.greeting,
-        idleSeconds: clamp(raw.idleSeconds, 5, 60, 12),
+        idleSeconds: clamp(raw.idleSeconds, 5, 60, 25),
         maxMinutes: clamp(raw.maxMinutes, 1, 60, 10),
         secretUuid:
           typeof raw.secretUuid === "string" &&

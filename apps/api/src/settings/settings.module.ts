@@ -1,3 +1,4 @@
+import { ClientPreferencesController } from "./client-preferences.controller.js";
 import { NodeRedEditorAccess } from "./node-red-editor-access.service.js";
 import { NodeRedEditorProxy } from "./node-red-editor-proxy.service.js";
 import { NodeRedEditorController } from "./node-red-editor.controller.js";
@@ -128,6 +129,7 @@ import { HouseholdProfileHistory } from "./household-profile-history.service.js"
     UpdatesModule,
   ],
   controllers: [
+    ClientPreferencesController,
     NodeRedEditorController,
     SettingsController,
     ToolUsageController,

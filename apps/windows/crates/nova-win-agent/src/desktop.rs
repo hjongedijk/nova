@@ -178,6 +178,10 @@ fn parse_key(raw: &str) -> Result<Vec<u16>, (u16, String)> {
         "escape" | "esc" => 0x1b,
         "tab" => 9,
         "space" => 0x20,
+        "media_play_pause" | "mediaplaypause" => 0xb3,
+        "media_stop" | "mediastop" => 0xb2,
+        "media_next" | "medianext" => 0xb0,
+        "media_previous" | "mediaprevious" => 0xb1,
         "backspace" => 8,
         "win" | "meta" => 0x5b,
         "delete" | "del" => 0x2e,
@@ -297,6 +301,10 @@ mod tests {
         for key in ["Ctrl+Ctrl+A", "F13", "", "Alt+"] {
             assert!(parse_key(key).is_err(), "{key}");
         }
+        assert_eq!(parse_key("media_play_pause").unwrap(), vec![0xb3]);
+        assert_eq!(parse_key("media_stop").unwrap(), vec![0xb2]);
+        assert_eq!(parse_key("media_next").unwrap(), vec![0xb0]);
+        assert_eq!(parse_key("media_previous").unwrap(), vec![0xb1]);
         assert_eq!(parse_key("Win+R").unwrap(), vec![0x5b, 0x52]);
         assert_eq!(parse_key("Ctrl+Shift+Tab").unwrap(), vec![0x11, 0x10, 9]);
         assert_eq!(parse_key("Ctrl+Alt+Delete").unwrap(), vec![0x11, 0x12, 0x2e]);

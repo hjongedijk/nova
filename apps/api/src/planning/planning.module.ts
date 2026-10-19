@@ -1,3 +1,4 @@
+import { McpModule } from "../integrations/mcp/mcp.module.js";
 import { Module } from "@nestjs/common";
 import { ProxmoxModule } from "../proxmox/proxmox.module.js";
 import { JarvisStateStore } from "./jarvis-state.store.js";
@@ -16,7 +17,7 @@ import { HomeModule } from "../home/home.module.js";
  * (timers(), lists(), onEvent()) and the JarvisStateStore the checks module shares.
  */
 @Module({
-  imports: [ProxmoxModule, HomeModule],
+  imports: [ProxmoxModule, HomeModule, McpModule],
   controllers: [CookingController, AutonomyController],
   providers: [
     JarvisStateStore,

@@ -120,9 +120,9 @@ export function initRecognition(): boolean {
     else if (event.error === "network")
       showToast({
         severity: "warning",
-        title: "Spraakherkenning heeft internet nodig",
+        title: "Spraakdienst niet bereikbaar",
         detail:
-          "Je browser stuurt je stem naar een online dienst. Controleer je verbinding.",
+          "De spraakdienst van de browser antwoordt niet. Werk NOVA voor Windows bij als je de helper of wallpaper gebruikt; controleer anders je browser en verbinding.",
       });
     else if (event.error === "no-speech")
       showToast({

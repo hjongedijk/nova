@@ -230,6 +230,8 @@ function stopWake(): void {
   wakeInputDevice = "";
 }
 
+let networkErrors = 0;
+
 async function startWake(): Promise<void> {
   if (!Ctor || !shell.wakeEnabled || wakeRec || wakeStarting) return;
   if (!window.isSecureContext) {
@@ -259,6 +261,7 @@ async function startWake(): Promise<void> {
   };
   rec.onresult = (event) => {
     if (attempt !== wakeStartAttempt || !shell.wakeEnabled) return;
+    networkErrors = 0;
     handleWakeResult(event);
   };
   rec.onerror = (error) => {
@@ -268,13 +271,21 @@ async function startWake(): Promise<void> {
       error.error === "service-not-allowed"
     ) {
       shell.wakeEnabled = false;
-      storage.set("novaWake", "off");
+      // Permission failures belong to this device; retain the shared wake preference.
       stopWake();
       showToast({
         severity: "warning",
         title: "De microfoon is geblokkeerd",
         detail:
           "Sta de microfoon toe voor deze pagina en zet Hey NOVA daarna weer aan in het menu.",
+      });
+    } else if (error.error === "network" && ++networkErrors >= 3) {
+      stopWake();
+      showToast({
+        severity: "warning",
+        title: "Spraakdienst niet bereikbaar",
+        detail:
+          "Hey NOVA is tijdelijk gestopt. Werk NOVA voor Windows bij als je de helper of wallpaper gebruikt. Zet Hey NOVA daarna opnieuw aan om te proberen.",
       });
     } else if (error.error === "audio-capture") {
       showToast({
@@ -345,6 +356,7 @@ export function setWake(
   on: boolean,
   origin: "user" | "system" = "system",
 ): void {
+  if (on) networkErrors = 0;
   shell.wakeEnabled = on && !!Ctor;
   storage.set(
     "novaWake",
@@ -357,6 +369,7 @@ export function setWake(
 
 /** Read the saved choice and start listening. Returns the cleanup. */
 export function initWake(): () => void {
+  networkErrors = 0;
   Ctor = recognizerCtor();
   shell.wakeEnabled =
     !!Ctor &&

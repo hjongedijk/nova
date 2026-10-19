@@ -82,6 +82,21 @@
       personalityStored &&
         flags.every(([key, value]) => storage.matches(key, value)),
     );
+    try {
+      await persistHelperPreferences({
+        autohide,
+        contrast,
+        shape: helper.shape,
+        notifications: helper.notifications,
+        rituals: helper.rituals,
+        wardrobe: helper.wardrobe,
+        cues: { ...helper.cues, quiet: helper.cues.quiet! },
+      });
+      preferencesNote = "Helperinstellingen gesynchroniseerd.";
+    } catch {
+      preferencesNote =
+        "Alleen lokaal opgeslagen. Probeer opnieuw op te slaan.";
+    }
   }
   const MODEL_ROLE_LABELS: Record<string, string> = {
     conversation: "Gesprek",
@@ -633,6 +648,7 @@
         if (disposed) return;
         if (result.preferences?.paused) {
           paused = true;
+          shell.wakeSuspended = true;
           wakeBeforePause = shell.wakeEnabled;
           setWake(false);
           cancelAwait();
@@ -707,6 +723,7 @@
       }
       if (action.action === "pause") {
         paused = action.paused === true;
+        shell.wakeSuspended = paused;
         if (paused) {
           wakeBeforePause = shell.wakeEnabled;
           setWake(false);
@@ -718,6 +735,21 @@
       }
     };
     window.addEventListener("nova-helper-action", nativeAction);
+    const syncedPreferences = (event: Event) => {
+      const prefs = (
+        event as CustomEvent<{ autohide: boolean; contrast: boolean }>
+      ).detail;
+      autohide = prefs.autohide;
+      contrast = prefs.contrast;
+    };
+    const syncedVolume = () => {
+      volume = Math.round(outputVolume() * 100);
+    };
+    window.addEventListener(
+      "nova-helper-preferences-synced",
+      syncedPreferences,
+    );
+    window.addEventListener("nova-preferences-synced", syncedVolume);
     const confirmationCue = (event: Event) =>
       !paused &&
       cuePlayer?.play(
@@ -843,6 +875,12 @@
     ];
     return () => {
       disposed = true;
+      shell.wakeSuspended = false;
+      window.removeEventListener(
+        "nova-helper-preferences-synced",
+        syncedPreferences,
+      );
+      window.removeEventListener("nova-preferences-synced", syncedVolume);
       stops.forEach((stop) => stop());
       cuePlayer?.stop();
       clearInterval(thinkingTimer);

@@ -32,6 +32,10 @@ export class VoiceProfileStore {
     return this.config.dataFile("voice-profile.json");
   }
 
+  get initialized(): boolean {
+    return fs.existsSync(this.file);
+  }
+
   get(): VoiceProfile {
     if (this.cached) return this.cached;
     let profile: VoiceProfile = { rate: DEFAULT_RATE, pitch: DEFAULT_PITCH };
