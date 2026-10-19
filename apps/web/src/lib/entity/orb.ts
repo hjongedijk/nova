@@ -24,6 +24,7 @@ export interface OrbHost {
   hue?(): number;
   night?(): boolean;
   reaction?(event: OrbEvent): void;
+  portrait?: boolean;
 }
 
 export type OrbEvent =
@@ -286,6 +287,7 @@ export function startOrb(host: OrbHost): OrbHandle {
     state: host.state,
     intensity: host.intensity,
     compact: { life },
+    portrait: host.portrait,
   });
 
   return {
