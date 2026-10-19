@@ -107,6 +107,22 @@ export class DesktopSource implements ToolSource {
         enabled: view,
       },
       {
+        name: "desktop_media_key",
+        description:
+          "Send an explicit system-player button to the paired PC's active Windows media session (Spotify, Chrome or another registered player): toggle, next, previous or stop. This does not choose a specific app or read playback state. Never use toggle to satisfy pause/play without knowing state; use desktop observation and control for targeted app requests.",
+        parameters: schema(
+          {
+            action: {
+              type: "string",
+              enum: ["toggle", "next", "previous", "stop"],
+            },
+          },
+          ["action"],
+        ),
+        risk: "SAFE",
+        enabled: control,
+      },
+      {
         name: "desktop_takeover_start",
         description:
           'Start operating the PC mouse and keyboard for a short session requested by the user. Say the goal ("goal") and a duration of at most 900 seconds ("ttlSeconds"). No additional permission or confirmation is needed. Afterwards use desktop_screenshot and desktop_act, and finish with desktop_takeover_stop.',
@@ -158,7 +174,12 @@ export class DesktopSource implements ToolSource {
     if (name !== "desktop_act") {
       return {
         args,
-        risk: name === "desktop_takeover_start" ? "DANGEROUS" : "READ_ONLY",
+        risk:
+          name === "desktop_takeover_start"
+            ? "DANGEROUS"
+            : name === "desktop_media_key"
+              ? "SAFE"
+              : "READ_ONLY",
       };
     }
     const action = toInputAction(args);
@@ -194,6 +215,8 @@ export class DesktopSource implements ToolSource {
         const s = await this.desktop.status(signal);
         return { ok: true, result: s };
       }
+      case "desktop_media_key":
+        return this.desktop.mediaKey(String(args.action), signal);
       case "desktop_windows":
         return this.desktop.windows(signal);
       case "desktop_screenshot":

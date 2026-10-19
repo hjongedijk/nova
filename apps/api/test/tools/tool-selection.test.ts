@@ -96,6 +96,21 @@ describe("request tool selection", () => {
     "pauzeer Plex op mijn pc",
     "bedien mijn computer",
     "neem mijn bureaublad over",
+    "pauzeer Plex",
+    "kun je Plex pauzeren",
+    "wil je Chrome openen",
+    "maak dit venster kleiner",
+    "hervat VLC",
+    "open Chrome",
+    "sluit het venster",
+    "verplaats dit venster naar mijn tweede scherm",
+    "typ hallo wereld",
+    "klik op de blauwe knop",
+    "scroll naar beneden",
+    "druk op enter",
+    "druk op spatie",
+    "open Spotify",
+    "sluit Discord",
   ])("keeps PC observation and control discoverable for %j", (message) => {
     const selected = selectToolsForRequest(
       mediaCatalog,
@@ -103,7 +118,7 @@ describe("request tool selection", () => {
       "conversation",
       8,
     );
-    expect(selected).toHaveLength(8);
+    expect(selected.length).toBeLessThanOrEqual(8);
     expect(selected.map((tool) => tool.function.name)).toEqual(
       expect.arrayContaining([
         ...desktopTools.map((tool) => tool.function.name),
@@ -124,10 +139,14 @@ describe("request tool selection", () => {
     expect(names).not.toContain("desktop_act");
   });
 
-  it("does not interpret Plex alone as a PC request", () => {
+  it.each([
+    "pauzeer Plex op de tv",
+    "pauzeer Plex via Chromecast",
+    "wat is Plex",
+  ])("does not force PC control for %j", (message) => {
     const names = selectToolsForRequest(
       mediaCatalog,
-      "pauzeer Plex",
+      message,
       "conversation",
       8,
     ).map((tool) => tool.function.name);

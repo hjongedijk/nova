@@ -280,6 +280,39 @@ describe("desktop control", () => {
         expect(info(name)?.enabled, name).toBe(true);
     });
 
+    it("sends explicit PC media buttons without taking over the mouse or calling vision", async () => {
+      const session = sid();
+      const result = await run(
+        "desktop_media_key",
+        { action: "next" },
+        session,
+      );
+      expect(result.ok).toBe(true);
+      expect(result.verified).toBeNull();
+      expect(fake.inputs).toEqual([{ action: "key", key: "media_next" }]);
+      expect(fake.controls).toHaveLength(0);
+      expect(visionLog).toHaveLength(0);
+      expect(desktop.info()).toBeNull();
+    });
+
+    it("rejects arbitrary media keys without touching the PC", async () => {
+      expect(
+        (await run("desktop_media_key", { action: "ctrl+delete" }, sid())).ok,
+      ).toBe(false);
+      expect(fake.inputs).toHaveLength(0);
+    });
+
+    it("reports a rejected PC media button instead of claiming playback changed", async () => {
+      fake.failInput = true;
+      const result = await run(
+        "desktop_media_key",
+        { action: "toggle" },
+        sid(),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.performed).toBeUndefined();
+    });
+
     it("looks and starts without additional permission switches", async () => {
       expect((await look(sid())).ok).toBe(true);
       const start = await run(

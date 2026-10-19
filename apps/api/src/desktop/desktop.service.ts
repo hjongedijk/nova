@@ -376,6 +376,35 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Explicit player buttons use Windows' active media session, without taking over the mouse. */
+  async mediaKey(action: string, signal?: AbortSignal) {
+    const keys: Record<string, string> = {
+      toggle: "media_play_pause",
+      next: "media_next",
+      previous: "media_previous",
+      stop: "media_stop",
+    };
+    if (!Object.hasOwn(keys, action)) return fail("Onbekende mediabediening.");
+    if (!this.port.configured) return NO_AGENT;
+    if (!this.settings().controlEnabled) return fail("Pc-bediening staat uit.");
+    try {
+      const result = await this.port.input(
+        { action: "key", key: keys[action]! },
+        signal,
+      );
+      return result.ok
+        ? {
+            ok: true as const,
+            performed: action,
+            verified: null,
+            note: "Mediatoets verstuurd naar de actieve Windows-speler; afspeelstatus is niet gemeten.",
+          }
+        : result;
+    } catch {
+      return fail("De Windows-agent antwoordt niet.");
+    }
+  }
+
   /** A failed look or action counts toward the error loop that ends the session. */
   private async failed(session: Session | null, error: string): Promise<Fail> {
     if (session && this.session === session) {

@@ -29,7 +29,7 @@ fn main() {
                 platform::show_error(&error);
                 return;
             }
-        } else if !args.iter().any(|arg| arg == "--quit") && !platform::is_elevated() {
+        } else if args.len() == 1 && !platform::is_elevated() {
             let configured = std::env::var_os("LOCALAPPDATA")
                 .map(std::path::PathBuf::from)
                 .and_then(|dir| std::fs::read_to_string(dir.join("NOVA/config.json")).ok())
@@ -38,11 +38,18 @@ fn main() {
                 .is_none_or(|(_, agent)| agent.run_elevated);
             if configured {
                 // Refused or impossible elevation is not an error: NOVA simply keeps running unelevated.
-                if platform::request_elevation(std::process::id()).is_ok() {
+                if win::start_elevated_autostart() || platform::request_elevation(std::process::id()).is_ok() {
                     return;
                 }
             }
         }
+        let ordinary_start = args.len() == 1 || args.get(1).is_some_and(|arg| arg == "--wait-for-pid");
+        if ordinary_start && platform::is_elevated() && win::autostart_enabled() {
+            if let Err(error) = win::set_autostart(true) {
+                crate::log!("Windows startup could not be configured: {error}");
+            }
+        }
+
         if args.get(1).is_some_and(|a| a == "--configure-network") {
             let result = args
                 .get(2)

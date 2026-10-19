@@ -157,13 +157,33 @@ export function rankToolsForRequest<T extends SelectableTool>(
   role: ModelRoleId,
 ): T[] {
   const query = words(message);
-  const explicitPc = [
-    "pc",
-    "computer",
-    "windows",
-    "desktop",
-    "bureaublad",
-  ].some((word) => query.has(word));
+  const pcRequest =
+    [
+      "pc",
+      "computer",
+      "windows",
+      "desktop",
+      "bureaublad",
+      "venster",
+      "vensters",
+      "toetsenbord",
+      "muis",
+    ].some((word) => query.has(word)) ||
+    /\b(?:klik|klikken|click|dubbelklik|typ|typen|intypen|toetsenbord|keyboard|muis|muisknop|muiswiel|scroll|scrollen|scrol)\b/i.test(
+      message,
+    ) ||
+    (/\b(?:open(?:en)?|start(?:en)?|sluit(?:en)?|afsluiten|close|pauze(?:er|ren)|pause|stop(?:pen)?|speel|afspelen|play|hervat(?:ten)?|resume|minimaliseer|minimaliseren|maximaliseer|maximaliseren|verplaats(?:en)?|sleep|slepen|focus)\b/i.test(
+      message,
+    ) &&
+      /\b(?:plex|vlc|spotify|steam|discord|word|excel|powerpoint|verkenner|explorer|kladblok|notepad|chrome|firefox|edge|venster|vensters|window|windows|programma|programmas|app)\b/i.test(
+        message,
+      ) &&
+      !/\b(?:sonos|chromecast|televisie|tv|speaker|luidspreker)\b/i.test(
+        message,
+      )) ||
+    /\b(?:druk|press)\s+(?:op\s+)?(?:enter|escape|esc|tab|ctrl|alt|shift|spatie|space|delete|backspace|f(?:[1-9]|1[0-2]))\b/i.test(
+      message,
+    );
   const expanded = new Set(query);
   for (const word of query)
     for (const alias of Object.hasOwn(ALIASES, word)
@@ -175,10 +195,10 @@ export function rankToolsForRequest<T extends SelectableTool>(
       const nameWords = words(tool.function.name.replace(/_/g, " "));
       nameWords.add(tool.function.name.toLowerCase());
       const descriptionWords = words(tool.function.description);
-      // Keep the complete observe/control sequence available for explicit PC requests,
+      // Keep the complete observe/control sequence available for PC apps and interaction requests,
       // even when a large integration catalog also matches the requested app/media.
       let score =
-        explicitPc &&
+        pcRequest &&
         /^desktop_(?:status|windows|screenshot|takeover_start|act|takeover_stop)$/.test(
           tool.function.name,
         )

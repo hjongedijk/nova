@@ -9,10 +9,12 @@
   import { SvelteSet } from "svelte/reactivity";
   import type { FeedEvent, NotificationModes } from "@nova/contracts";
   import Orb from "#components/helper/Orb.svelte";
+  import HelperCompanion from "#components/helper/HelperCompanion.svelte";
   import Toasts from "#components/shell/Toasts.svelte";
   import ActionReceipts from "#components/shell/ActionReceipts.svelte";
   import HelperUi from "#components/helper/HelperUi.svelte";
   import HelperDevices from "#components/helper/HelperDevices.svelte";
+  import HelperMusic from "#components/helper/HelperMusic.svelte";
   import HelperConfirm from "#components/helper/HelperConfirm.svelte";
   import {
     displayLabel,
@@ -142,8 +144,9 @@
     { key: "timer", label: "Timer" },
   ];
 
-  type View = "overview" | "chat" | "notifications" | "weather" | "lists";
-  let extraViews = $state<("weather" | "lists")[]>([]);
+  type View =
+    "overview" | "chat" | "notifications" | "weather" | "lists" | "music";
+  let extraViews = $state<("weather" | "lists" | "music")[]>([]);
   let extraMenu = $state(false);
   const baseTabs: { id: View; label: string }[] = [
     { id: "overview", label: "Overzicht" },
@@ -154,7 +157,7 @@
     ...baseTabs,
     ...extraViews.map((id) => ({
       id,
-      label: id === "weather" ? "Weer" : "Lijsten",
+      label: id === "weather" ? "Weer" : id === "music" ? "Muziek" : "Lijsten",
     })),
   ]);
   let initialized = $state(false);
@@ -600,7 +603,9 @@
         : expanded
           ? view === "chat"
             ? "chat"
-            : view
+            : view === "music"
+              ? "overview"
+              : view
           : "compact",
       hidden,
     );
@@ -635,8 +640,8 @@
       new URLSearchParams(location.search).get("view") ??
       storage.get("nova.helper.view", "compact");
     expanded = saved !== "compact";
-    if (["weather", "lists"].includes(saved))
-      extraViews = [saved as "weather" | "lists"];
+    if (["weather", "lists", "music"].includes(saved))
+      extraViews = [saved as "weather" | "lists" | "music"];
     if (tabs.some((tab) => tab.id === saved)) view = saved as View;
     autohide = storage.get("nova.helper.autohide", "true") === "true";
     contrast = storage.get("nova.helper.contrast", "false") === "true";
@@ -897,6 +902,58 @@
   });
 </script>
 
+{#snippet composer()}
+  <form class="hp-form" onsubmit={submit}>
+    <input
+      type="file"
+      multiple
+      hidden
+      bind:this={picker}
+      onchange={(event) => {
+        select(Array.from(event.currentTarget.files ?? []));
+        event.currentTarget.value = "";
+      }}
+    />
+    <HelperUi
+      class="hp-button"
+      type="button"
+      disabled={paused || chat.busy || reading}
+      onclick={() => picker?.click()}
+      aria-label="Bestanden bijvoegen">+</HelperUi
+    >
+    <input
+      class="hp-input"
+      bind:this={input}
+      bind:value={shell.draft}
+      disabled={paused || chat.busy || reading}
+      aria-label="Bericht aan NOVA"
+      placeholder="Zeg of typ iets…"
+    />
+    <HelperUi
+      class="hp-button"
+      type="button"
+      hidden={!shell.speechSupported}
+      disabled={paused || reading}
+      onclick={microphone}
+      aria-label="Microfoon"
+      ><HelperCompanion state={orbState} compact /></HelperUi
+    >
+    <HelperUi
+      class="hp-button hp-primary"
+      type="submit"
+      disabled={paused ||
+        chat.busy ||
+        reading ||
+        (!shell.draft.trim() && !files.length)}
+      aria-label="Verstuur"
+      title="Verstuur"
+      ><svg viewBox="0 0 20 20" aria-hidden="true"
+        ><path d="M10 16V4M5 9l5-5 5 5" /></svg
+      ><span class="hp-sr">Verstuur</span></HelperUi
+    >
+  </form>
+{/snippet}
+
 <svelte:window onkeydown={onKey} />
 <svelte:document
   onfullscreenchange={() => (fullscreen = !!document.fullscreenElement)}
@@ -949,13 +1006,28 @@
       <nav class="hp-tabs" aria-label="Helperweergaven">
         {#each tabs as tab (tab.id)}<HelperUi
             variant="tab"
-            aria-current={view === tab.id ? "page" : undefined}
+            aria-label={tab.label}
+            title={tab.label}
+            aria-current={!settings && view === tab.id ? "page" : undefined}
             onclick={() => {
               detail = "";
               settings = false;
               open(tab.id);
             }}
-            >{tab.label}{#if tab.id === "notifications" && visibleNotices.length}<span
+            >{#if tab.id === "overview"}<svg
+                viewBox="0 0 20 20"
+                aria-hidden="true"><path d="m3 9 7-6 7 6v8h-5v-5H8v5H3Z" /></svg
+              ><span class="hp-sr">{tab.label}</span
+              >{:else if tab.id === "chat"}<svg
+                viewBox="0 0 20 20"
+                aria-hidden="true"><path d="M4 4h12v9H9l-5 4Z" /></svg
+              ><span class="hp-sr">{tab.label}</span
+              >{:else if tab.id === "notifications"}<svg
+                viewBox="0 0 20 20"
+                aria-hidden="true"
+                ><path d="M4 14h12l-2-3V8a4 4 0 0 0-8 0v3ZM8 17h4" /></svg
+              ><span class="hp-sr">{tab.label}</span
+              >{:else}{tab.label}{/if}{#if tab.id === "notifications" && visibleNotices.length}<span
                 class="hp-count">{visibleNotices.length}</span
               >{/if}</HelperUi
           >{/each}
@@ -967,10 +1039,14 @@
           onclick={() => (extraMenu = !extraMenu)}>+</HelperUi
         >
         {#if extraMenu}<div class="hp-menu hp-extra-menu">
-            {#each [{ id: "weather", label: "Weer" }, { id: "lists", label: "Lijsten" }] as extra (extra.id)}<HelperUi
+            {#each [{ id: "weather", label: "Weer" }, { id: "lists", label: "Lijsten" }, { id: "music", label: "Muziek" }] as extra (extra.id)}<HelperUi
                 onclick={() => {
-                  if (!extraViews.includes(extra.id as "weather" | "lists"))
-                    extraViews.push(extra.id as "weather" | "lists");
+                  if (
+                    !extraViews.includes(
+                      extra.id as "weather" | "lists" | "music",
+                    )
+                  )
+                    extraViews.push(extra.id as "weather" | "lists" | "music");
                   extraMenu = false;
                   open(extra.id as View);
                 }}>{extra.label}</HelperUi
@@ -1417,24 +1493,76 @@
         </section>
       {:else if view === "overview"}
         <section class="hp-content hp-overview-layout" aria-label="Overzicht">
-          <div class="hp-overview">
-            {#each overviewBlocks as block (block.name)}
-              <button
-                class="hp-block"
-                data-state={block.state}
-                class:available={block.available}
-                aria-expanded={detail === block.name}
-                onclick={() =>
-                  (detail = detail === block.name ? "" : block.name)}
-                ><span class="hp-block-name"><i></i>{block.name}</span><strong
-                  class:skeleton={block.state === "loading"}
-                  >{block.value}</strong
-                >{#if block.state !== "loading"}<small title={block.detail}
-                    >{block.detail}</small
-                  >{/if}</button
-              >
-            {/each}
+          <div class="hp-workspace">
+            <div class="hp-workspace-heading">
+              <span class="hp-workspace-state"
+                ><i></i>{paused ? "Gepauzeerd" : status}</span
+              ><span>NOVA</span>
+            </div>
+            <button
+              class="hp-companion-action"
+              aria-label="Spreek met NOVA"
+              onclick={microphone}
+              disabled={paused}
+            >
+              <HelperCompanion state={orbState} />
+            </button>
+            <div class="hp-workspace-copy">
+              <h1>{greeting}</h1>
+              <p>
+                {(chat.busy ? chat.hint || chat.toolResult : chat.reply) ||
+                  chat.hint ||
+                  chat.toolResult ||
+                  (chat.busy
+                    ? "Ik ben ermee bezig…"
+                    : "Wat kan ik voor je doen?")}
+              </p>
+            </div>
+            {@render composer()}
+            {#if fileError}<p class="hp-error" role="alert">{fileError}</p>{/if}
+            <div class="hp-suggestions" aria-label="Voorbeelden">
+              {#each ["Pauzeer Plex", "Open Chrome"] as suggestion (suggestion)}
+                <HelperUi
+                  disabled={paused || chat.busy || reading}
+                  onclick={() => {
+                    if (!paused && !chat.busy && !reading) {
+                      shell.draft = suggestion;
+                      input?.form?.requestSubmit();
+                    }
+                  }}>{suggestion}</HelperUi
+                >
+              {/each}
+            </div>
           </div>
+          <aside class="hp-context" aria-label="Actueel overzicht">
+            <div class="hp-overview">
+              {#each overviewBlocks as block (block.name)}
+                <button
+                  class="hp-block"
+                  data-state={block.state}
+                  class:available={block.available}
+                  aria-expanded={detail === block.name}
+                  onclick={() =>
+                    (detail = detail === block.name ? "" : block.name)}
+                  ><span class="hp-block-name"><i></i>{block.name}</span><strong
+                    class:skeleton={block.state === "loading"}
+                    >{block.value}</strong
+                  >{#if block.state !== "loading"}<small title={block.detail}
+                      >{block.detail}</small
+                    >{/if}</button
+                >
+              {/each}
+            </div>
+            <div class="hp-services" aria-label="Koppelingen">
+              {#each [{ name: "Home Assistant", ok: !!dashboard.overview?.home }, { name: "Node-RED", ok: dashboard.health?.nodeRed === true }, { name: "MQTT", ok: dashboard.health?.mqtt === true }, { name: "Proxmox", ok: !!dashboard.overview?.proxmox }] as service (service.name)}<span
+                  class="hp-service"
+                  ><i class:online={service.ok}></i>{service.name}<span
+                    class="hp-sr"
+                    >{service.ok ? "Verbonden" : "Niet verbonden"}</span
+                  ></span
+                >{/each}
+            </div>
+          </aside>
           {#if overviewDown}
             <div class="hp-retry" role="status">
               <span>Het overzicht kon niet worden geladen.</span>
@@ -1451,6 +1579,8 @@
             >
             <a href="/" target="_blank" rel="noopener">Open details ↗</a>
           </div>{/if}
+      {:else if view === "music"}
+        <HelperMusic />
       {:else if view === "weather"}
         <section class="hp-content hp-extra" aria-label="Weer">
           {#if dashboard.overview?.weather}<strong
@@ -1487,11 +1617,13 @@
             <option value="nl">Nederlands</option>
             <option value="en">English</option>
           </select>
-          <span
-            >{chat.model
-              ? `${MODEL_ROLE_LABELS[chat.modelRole] ?? "Model"} · ${chat.model}`
-              : "Model nog niet gemeld"}</span
-          >
+          <details class="hp-model-details">
+            <summary>Model</summary><span
+              >{chat.model
+                ? `${MODEL_ROLE_LABELS[chat.modelRole] ?? "Model"} · ${chat.model}`
+                : "Nog geen antwoord ontvangen"}</span
+            >
+          </details>
           {#if chat.reply && chat.mood !== "neutral"}<span
               class="hp-mood"
               aria-label="Toon van het antwoord">{MOOD_LABELS[chat.mood]}</span
@@ -1551,47 +1683,7 @@
             >
           </div>{/if}
         {#if fileError}<p class="hp-error" role="alert">{fileError}</p>{/if}
-        <form class="hp-form" onsubmit={submit}>
-          <input
-            type="file"
-            multiple
-            hidden
-            bind:this={picker}
-            onchange={(event) => {
-              select(Array.from(event.currentTarget.files ?? []));
-              event.currentTarget.value = "";
-            }}
-          />
-          <HelperUi
-            class="hp-button"
-            type="button"
-            disabled={chat.busy || reading}
-            onclick={() => picker?.click()}
-            aria-label="Bestanden bijvoegen">+</HelperUi
-          >
-          <input
-            class="hp-input"
-            bind:this={input}
-            bind:value={shell.draft}
-            disabled={chat.busy || reading}
-            aria-label="Bericht aan NOVA"
-            placeholder="Zeg of typ iets…"
-          />
-          <HelperUi
-            class="hp-button"
-            type="button"
-            hidden={!shell.speechSupported}
-            onclick={microphone}
-            aria-label="Microfoon">Mic</HelperUi
-          >
-          <HelperUi
-            class="hp-button hp-primary"
-            type="submit"
-            disabled={chat.busy ||
-              reading ||
-              (!shell.draft.trim() && !files.length)}>Verstuur</HelperUi
-          >
-        </form>
+        {@render composer()}
       {:else}
         <section class="hp-notices" aria-label="Meldingen">
           {#each visibleNotices as event (event.seq)}<HelperUi
@@ -1629,20 +1721,6 @@
             chat.toolResult ||
             (chat.busy ? "NOVA denkt na…" : "Gereed voor je volgende vraag")}
         </footer>
-        {#if view === "overview" && !settings}
-          <div class="hp-integrations" aria-label="Koppelingen">
-            {#each [{ name: "Proxmox", prefix: "proxmox_", ok: !!dashboard.overview?.proxmox }, { name: "Home Assistant", prefix: "ha_", ok: !!dashboard.overview?.home }, { name: "Node-RED", prefix: "nodered_", ok: dashboard.health?.nodeRed === true }, { name: "MQTT", prefix: "mqtt_", ok: dashboard.health?.mqtt === true }] as service (service.name)}<span
-                class="hp-chip"
-                ><i
-                  class:online={service.ok}
-                  class:busy={chat.activeTool.startsWith(service.prefix)}
-                  data-service={service.name}
-                ></i>{service.name}<span class="hp-sr"
-                  >{service.ok ? "Verbonden" : "Niet verbonden"}</span
-                ></span
-              >{/each}
-          </div>
-        {/if}
       </div>
     {/if}
   {/if}

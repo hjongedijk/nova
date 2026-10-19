@@ -10,12 +10,15 @@ use nova_win_core::geometry::Rect;
 #[cfg(windows)]
 mod imp {
     use super::*;
-    use nova_win_core::autostart::{run_value, RUN_KEY, RUN_VALUE_NAME};
+    use nova_win_core::autostart::{run_value, task_matches, task_name, task_xml, RUN_KEY, RUN_VALUE_NAME};
     use nova_win_core::desktop::{
         needs_reorder, IconWorker, CHILD_STYLE, REORDER_FLAGS, SHOW_FLAGS, SPAWN_WORKER_MESSAGE,
     };
     use nova_win_core::forward::PointerKind;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Output};
     use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
     use windows::core::{w, BOOL, PCWSTR};
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -314,7 +317,86 @@ mod imp {
         });
     }
 
-    pub fn autostart_enabled() -> bool {
+    fn system_tool(name: &str) -> Result<Command, String> {
+        let root = std::env::var_os("SystemRoot").ok_or("Windows-map ontbreekt")?;
+        let mut command = Command::new(std::path::PathBuf::from(root).join("System32").join(name));
+        command.creation_flags(0x08000000);
+        Ok(command)
+    }
+
+    fn current_sid() -> Result<&'static str, String> {
+        static SID: OnceLock<String> = OnceLock::new();
+        if let Some(sid) = SID.get() {
+            return Ok(sid);
+        }
+        let output = system_tool("whoami.exe")?
+            .args(["/user", "/fo", "csv", "/nh"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            return Err("Windows-account kon niet worden bepaald".into());
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let sid = text.trim().rsplit(',').next().unwrap_or("").trim_matches('"');
+        task_name(sid).ok_or("Ongeldig Windows-account")?;
+        let _ = SID.set(sid.to_owned());
+        SID.get()
+            .map(String::as_str)
+            .ok_or_else(|| "Windows-account ontbreekt".into())
+    }
+
+    fn task_command(args: &[&str]) -> Result<Output, String> {
+        system_tool("schtasks.exe")?
+            .args(args)
+            .output()
+            .map_err(|e| e.to_string())
+    }
+
+    fn decode_task_xml(bytes: &[u8]) -> Option<String> {
+        if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
+            let little = bytes[0] == 0xff;
+            let data = &bytes[2..];
+            if !data.len().is_multiple_of(2) {
+                return None;
+            }
+            let words: Vec<u16> = data
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| {
+                    if little {
+                        u16::from_le_bytes([pair[0], pair[1]])
+                    } else {
+                        u16::from_be_bytes([pair[0], pair[1]])
+                    }
+                })
+                .collect();
+            String::from_utf16(&words).ok()
+        } else {
+            String::from_utf8(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes).to_vec()).ok()
+        }
+    }
+
+    fn verified_task() -> Result<bool, String> {
+        let sid = current_sid()?;
+        let name = task_name(sid).ok_or("Ongeldig Windows-account")?;
+        let output = task_command(&["/Query", "/TN", &name, "/XML"])?;
+        if !output.status.success() {
+            return Ok(false);
+        }
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        Ok(decode_task_xml(&output.stdout).is_some_and(|xml| task_matches(&xml, &exe.to_string_lossy(), sid)))
+    }
+
+    static AUTOSTART: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+
+    fn invalidate_autostart() {
+        if let Ok(mut cached) = AUTOSTART.lock() {
+            *cached = None;
+        }
+    }
+
+    fn run_enabled() -> bool {
         use winreg::{enums::HKEY_CURRENT_USER, RegKey};
         RegKey::predef(HKEY_CURRENT_USER)
             .open_subkey(RUN_KEY)
@@ -322,21 +404,116 @@ mod imp {
             .is_ok()
     }
 
+    pub fn autostart_enabled() -> bool {
+        if let Ok(cached) = AUTOSTART.lock() {
+            if let Some((at, enabled)) = *cached {
+                if at.elapsed() < Duration::from_secs(15) {
+                    return enabled;
+                }
+            }
+        }
+        let enabled = run_enabled() || verified_task().unwrap_or(false);
+        if let Ok(mut cached) = AUTOSTART.lock() {
+            *cached = Some((Instant::now(), enabled));
+        }
+        enabled
+    }
+
+    pub fn start_elevated_autostart() -> bool {
+        if !verified_task().unwrap_or(false) {
+            return false;
+        }
+        let Ok(sid) = current_sid() else {
+            return false;
+        };
+        let Some(name) = task_name(sid) else {
+            return false;
+        };
+        task_command(&["/Run", "/TN", &name]).is_ok_and(|output| output.status.success())
+    }
+
+    fn remove_autostart_task() -> Result<(), String> {
+        let sid = current_sid()?;
+        let name = task_name(sid).ok_or("Ongeldig Windows-account")?;
+        let existing = task_command(&["/Query", "/TN", &name, "/XML"])?;
+        if existing.status.success() {
+            let deleted = task_command(&["/Delete", "/TN", &name, "/F"])?;
+            if !deleted.status.success() {
+                return Err("Starttaak kon niet worden uitgeschakeld; beheerrechten zijn mogelijk nodig".into());
+            }
+        } else {
+            // Distinguish an absent task from a query/access failure without parsing localized errors.
+            let listing = task_command(&["/Query", "/FO", "CSV", "/NH"])?;
+            if !listing.status.success() || String::from_utf8_lossy(&listing.stdout).contains(&name) {
+                return Err("Starttaak kon niet worden gecontroleerd; autostart is niet gewijzigd".into());
+            }
+        }
+        Ok(())
+    }
+
+    fn elevated_startup_requested() -> bool {
+        std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .and_then(|dir| std::fs::read_to_string(dir.join("NOVA/config.json")).ok())
+            .and_then(|text| nova_win_core::agent::decode(&text).ok())
+            .is_none_or(|(_, agent)| agent.run_elevated)
+    }
+
     pub fn set_autostart(on: bool) -> Result<(), String> {
         use winreg::{enums::HKEY_CURRENT_USER, RegKey};
+        invalidate_autostart();
         let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
             .create_subkey(RUN_KEY)
             .map_err(|e| e.to_string())?;
-        if on {
+        if on && elevated_startup_requested() && nova_win_agent::platform::is_elevated() {
+            use std::io::Write;
+            let sid = current_sid()?;
+            let name = task_name(sid).ok_or("Ongeldig Windows-account")?;
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let xml = task_xml(&exe.to_string_lossy(), sid).ok_or("Ongeldig NOVA-pad")?;
+            // Exclusive creation prevents following an existing file or overwriting somebody else's file.
+            let path = std::env::temp_dir().join(format!(
+                "nova-autostart-{}-{}.xml",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|e| e.to_string())?
+                    .as_nanos()
+            ));
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .map_err(|e| e.to_string())?;
+            let result: Result<(), String> = (|| {
+                file.write_all(xml.as_bytes()).map_err(|e| e.to_string())?;
+                file.sync_all().map_err(|e| e.to_string())?;
+                drop(file);
+                let output = task_command(&["/Create", "/TN", &name, "/XML", &path.to_string_lossy(), "/F"])?;
+                if !output.status.success() || !verified_task()? {
+                    return Err("Starttaak kon niet worden ingesteld of gecontroleerd".into());
+                }
+                Ok(())
+            })();
+            let _ = std::fs::remove_file(path);
+            result?;
+            // Keep the old startup entry until the scheduled task has been verified.
+        } else if on {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let value = run_value(&exe.to_string_lossy()).ok_or("het pad van NOVA Desk is niet geschikt")?;
-            key.set_value(RUN_VALUE_NAME, &value).map_err(|e| e.to_string())
-        } else {
-            match key.delete_value(RUN_VALUE_NAME) {
-                Ok(()) => Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(e) => Err(e.to_string()),
+            key.set_value(RUN_VALUE_NAME, &value).map_err(|e| e.to_string())?;
+            // Preserve normal startup before retiring an elevated task after opting out.
+            if !elevated_startup_requested() {
+                remove_autostart_task()?;
             }
+            return Ok(());
+        } else {
+            remove_autostart_task()?;
+        }
+        match key.delete_value(RUN_VALUE_NAME) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.to_string()),
         }
     }
 }
