@@ -44,13 +44,24 @@ describe("shared client preferences", () => {
       false,
     );
   });
+  it("syncs a complete supported pronunciation dictionary with Unicode entries", () => {
+    const { prefs } = controller();
+    const rules = Array.from({ length: 100 }, (_, index) => ({
+      term: String(index) + "語".repeat(77),
+      say: "声".repeat(120),
+    }));
+    const value = JSON.stringify(rules);
+    expect(Buffer.byteLength(value)).toBeGreaterThan(8192);
+    prefs.put({ values: { novaPronunciations: value } });
+    expect(prefs.get().values.novaPronunciations).toBe(value);
+  });
   it("rejects device identifiers, unknown fields and oversized values without changing saved choices", () => {
     const { prefs } = controller();
     prefs.put({ values: { novaVolume: "1" } });
     for (const body of [
       { values: { novaAudioInput: "private" } },
       { values: { novaVolume: 0.5 } },
-      { values: { novaVolume: "a".repeat(8193) } },
+      { values: { novaVolume: "a".repeat(65537) } },
       { values: { novaWake: "on" }, token: "secret" },
     ])
       expect(() => prefs.put(body)).toThrow();

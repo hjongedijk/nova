@@ -18,8 +18,8 @@ export const CLIENT_PREFERENCE_KEYS = [
 ] as const;
 
 const ALLOWED_KEYS = new Set<string>(CLIENT_PREFERENCE_KEYS);
-const MAX_VALUE_BYTES = 8 * 1024;
-const MAX_DOCUMENT_BYTES = 32 * 1024;
+const MAX_VALUE_BYTES = 64 * 1024;
+const MAX_DOCUMENT_BYTES = 128 * 1024;
 type Values = Record<string, string>;
 
 function record(value: unknown): value is Record<string, unknown> {
