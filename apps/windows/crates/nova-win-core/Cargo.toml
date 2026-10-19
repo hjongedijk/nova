@@ -1,6 +1,6 @@
 [package]
 name = "nova-win-core"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "NOVA for Windows: configuration, authentication, migration and desktop geometry."
 license = "MIT"
