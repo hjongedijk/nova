@@ -1,9 +1,65 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+  import { startOrb, type OrbHandle } from "#lib/entity/orb.ts";
+  import { helper, helperHue } from "#lib/stores/helper.svelte.ts";
+  import { chat, type UiState } from "#lib/stores/chat.svelte.ts";
+  import { attentionCount } from "#lib/stores/toasts.svelte.ts";
+  import { cueQuiet } from "#lib/voice/helper-cues.ts";
   let {
     state: mood = "ready",
     compact = false,
   }: { state?: string; compact?: boolean } = $props();
   let face: HTMLDivElement;
+  let canvas: HTMLCanvasElement;
+  let orb: OrbHandle | undefined;
+
+  function currentState(): UiState {
+    if (mood === "idle" || mood === "ready") return "ready";
+    if (mood === "listening" || mood === "thinking" || mood === "speaking")
+      return mood;
+    return chat.uiState;
+  }
+
+  onMount(() => {
+    let visible = false;
+    function updateVisibility() {
+      if (visible && !document.hidden) {
+        orb ??= startOrb({
+          canvas,
+          state: currentState,
+          shape: () => helper.shape,
+          hue: helperHue,
+          night: () => cueQuiet(helper.cues),
+          intensity: () => chat.confirmations.length + attentionCount(),
+          // The existing helper orb owns sound cues. This is the same visual
+          // renderer, without broadcasting a second copy of its reactions.
+        });
+      } else {
+        orb?.stop();
+        orb = undefined;
+      }
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      visible = !!entry?.isIntersecting;
+      updateVisibility();
+    });
+    observer.observe(canvas);
+    document.addEventListener("visibilitychange", updateVisibility);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", updateVisibility);
+      orb?.stop();
+      orb = undefined;
+    };
+  });
+
+  $effect(() => {
+    void helper.eventId;
+    orb?.trigger(helper.event);
+  });
+  $effect(() => {
+    if (mood === "error") orb?.trigger("error");
+  });
   let gaze = $state({ x: 0, y: 0 });
   function follow(event: PointerEvent) {
     if (!face) return;
@@ -27,6 +83,7 @@
   class:compact
   data-state={mood}
   aria-hidden="true"
+  style:--companion-hue={helperHue()}
   style:--gaze-x={`${gaze.x}px`}
   style:--gaze-y={`${gaze.y}px`}
 >
@@ -35,7 +92,7 @@
     <span class="companion-arm arm-right"></span>
     <span class="companion-suit"></span>
     <span class="companion-orbit"></span>
-    <span class="companion-helmet"></span>
+    <canvas class="companion-helmet" bind:this={canvas}></canvas>
     <div class="companion-face">
       <i class="eye"></i><i class="eye"></i>
       <span class="mouth"></span>
@@ -60,7 +117,7 @@
     position: relative;
     width: 88px;
     height: 94px;
-    color: #c2edff;
+    color: hsl(var(--companion-hue) 78% 72%);
     transform: rotate(-4deg);
     transition:
       transform 0.3s ease,
@@ -69,21 +126,11 @@
   .companion-helmet {
     position: absolute;
     z-index: 2;
-    top: 2px;
-    left: 12px;
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    background: radial-gradient(
-      circle at 32% 22%,
-      #fff 0,
-      #e5faff 25%,
-      currentColor 65%,
-      #79badb 100%
-    );
-    box-shadow:
-      inset 0 1px 1px #fff,
-      0 5px 10px #071b3540;
+    top: -10px;
+    left: 0;
+    width: 88px;
+    height: 88px;
+    pointer-events: none;
   }
   .companion-suit {
     position: absolute;
@@ -92,7 +139,12 @@
     width: 36px;
     height: 32px;
     border-radius: 12px 12px 18px 18px;
-    background: linear-gradient(125deg, #e5faff, currentColor 55%, #82bad9);
+    background: linear-gradient(
+      125deg,
+      hsl(var(--companion-hue) 80% 88% / 0.9),
+      currentColor 55%,
+      hsl(var(--companion-hue) 65% 42% / 0.8)
+    );
     clip-path: polygon(0 0, 100% 0, 85% 100%, 15% 100%);
   }
   .companion-suit::after {
@@ -103,8 +155,8 @@
     left: calc(50% - 3.5px);
     top: 13px;
     border-radius: 50%;
-    background: #198cb8;
-    box-shadow: 0 0 0 3px #93e6ff;
+    background: hsl(var(--companion-hue) 80% 42%);
+    box-shadow: 0 0 0 3px hsl(var(--companion-hue) 90% 78% / 0.6);
   }
   .companion-arm {
     position: absolute;
@@ -129,7 +181,7 @@
     top: 70px;
     width: 56px;
     height: 13px;
-    border: 1.5px solid #67c9ed;
+    border: 1.5px solid hsl(var(--companion-hue) 80% 67% / 0.7);
     border-radius: 50%;
     transform: rotate(-18deg);
     box-sizing: border-box;
@@ -143,9 +195,8 @@
     height: 30px;
     padding-top: 8px;
     box-sizing: border-box;
-    border-radius: 48%;
-    background: linear-gradient(145deg, #193c5c, #0e2139);
-    box-shadow: inset 0 1px 2px #0005;
+    border-radius: 50%;
+    background: radial-gradient(ellipse, #08232ccc, #08232c00 75%);
     z-index: 3;
     display: flex;
     justify-content: center;
