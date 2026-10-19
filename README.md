@@ -57,7 +57,7 @@ docker compose pull && docker compose up -d
 Open `http://<nova-host>:8080`. The stack contains NOVA, OmniRoute, Mosquitto, Qdrant, Node-RED and Home Assistant. For the AI to answer, add free provider accounts in OmniRoute (`http://<nova-host>:20128`) and create the free-routing policy NOVA verifies, as described in [Getting started](docs/getting-started.md#5-set-up-omniroute-and-the-free-route).
 
 - **HTTPS and microphone.** Browsers allow the microphone and app installation only on HTTPS or `localhost`. Use a reverse proxy (and set `NOVA_PUBLIC_URL`), or put `cert.pem` and `key.pem` in `nova-data/certs/` for NOVA's own port 8443.
-- **Data.** `nova-data/` holds settings, memory, the action log and the routing policy; the other services keep data in their own `*-data/` folders. NOVA writes daily and weekly backups of its own folder to `nova-backups/`; back up the rest yourself.
+- **Data.** `nova-data/` holds settings, memory, the action log and the routing policy; the other services keep data in their own `*-data/` folders. NOVA writes daily and weekly backups of its own data to `nova-backups/`; the separate private `nova-data/linphone-chat/` bridge volume is excluded. Back up other service data separately; see [backup coverage](docs/getting-started.md#backups).
 - **Update.** Set `NOVA_VERSION` in `.env`, then `docker compose pull && docker compose up -d`.
 
 The full walk-through, with HTTPS, integrations and troubleshooting, is in [Getting started](docs/getting-started.md).

@@ -74,6 +74,47 @@ describe("scheduled NOVA data backups", () => {
     expect(fs.readdirSync(dataDir)).toEqual(["settings.json"]);
   });
 
+  it("excludes only the separate private Linphone bridge volume", async () => {
+    const { dataDir, backupDir, alerts, service } = fixture();
+    const bridge = path.join(dataDir, "linphone-chat");
+    fs.mkdirSync(bridge, { mode: 0o700 });
+    fs.writeFileSync(path.join(bridge, "chat.db"), "private bridge state");
+    // Same name inside NOVA's workspace is ordinary application data.
+    fs.mkdirSync(path.join(dataDir, "workspace", "linphone-chat"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(dataDir, "workspace", "linphone-chat", "notes.txt"),
+      "keep this",
+    );
+    await service.checkSchedule(new Date("2026-10-12T01:40:00.000Z"));
+    const listing = spawnSync(
+      "tar",
+      [
+        "--list",
+        "--gzip",
+        `--file=${path.join(backupDir, "daily-2026-10-12.tar.gz")}`,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(listing.status).toBe(0);
+    const names = listing.stdout.split("\n");
+    expect(names).toContain("./settings.json");
+    expect(names).toContain("./workspace/linphone-chat/notes.txt");
+    expect(names.some((name) => name.startsWith("./linphone-chat"))).toBe(
+      false,
+    );
+    expect(fs.readFileSync(path.join(bridge, "chat.db"), "utf8")).toBe(
+      "private bridge state",
+    );
+    expect(fs.statSync(bridge).mode & 0o777).toBe(0o700);
+    expect(alerts.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ severity: "info" }),
+      }),
+    );
+  });
+
   it("reports failures without exposing archive paths or process errors", async () => {
     const { root, alerts } = fixture();
     const bad = new DataBackupService(

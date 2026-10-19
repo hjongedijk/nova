@@ -211,6 +211,10 @@ export class DataBackupService implements OnModuleInit, OnModuleDestroy {
           "--create",
           "--gzip",
           "--file=-",
+          // Separate Linphone bridge volume (UID 10001, private LIME keys/chat DB).
+          // Its service backup must retain its own ownership; never weaken access
+          // or ignore read errors in NOVA-owned data to archive it here.
+          "--exclude=./linphone-chat",
           "--exclude=./*.tmp",
           "--exclude=./*.tmp.*",
           ...DB_LIVE_FILES.map((name) => `--exclude=./${name}`),
