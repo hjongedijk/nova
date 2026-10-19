@@ -1,6 +1,6 @@
 {
   "name": "@nova/api",
-  "version": "0.1.77",
+  "version": "0.1.78",
   "private": true,
   "description": "NOVA backend: NestJS. Also serves the built web app.",
   "type": "module",
