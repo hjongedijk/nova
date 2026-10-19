@@ -31,7 +31,11 @@
   style:--gaze-y={`${gaze.y}px`}
 >
   <div class="companion-body" bind:this={face}>
-    <span class="companion-star">✦</span>
+    <span class="companion-arm arm-left"></span>
+    <span class="companion-arm arm-right"></span>
+    <span class="companion-suit"></span>
+    <span class="companion-orbit"></span>
+    <span class="companion-helmet"></span>
     <div class="companion-face">
       <i class="eye"></i><i class="eye"></i>
       <span class="mouth"></span>
@@ -54,34 +58,98 @@
   }
   .companion-body {
     position: relative;
-    width: 82px;
-    height: 66px;
-    border-radius: 26px 25px 24px 29px;
-    background: linear-gradient(145deg, #f2fcff, #b9e8f1 68%, #8fc5d9);
-    box-shadow:
-      inset 0 2px 1px #ffffffb3,
-      inset 0 -3px 8px #5fadc333,
-      0 9px 22px #0005;
-    transform: rotate(-5deg);
+    width: 88px;
+    height: 94px;
+    color: #c2edff;
+    transform: rotate(-4deg);
     transition:
       transform 0.3s ease,
-      background 0.3s ease;
+      color 0.3s ease;
   }
-  .companion-star {
+  .companion-helmet {
     position: absolute;
-    left: 10px;
-    top: 5px;
-    color: #469eb5;
-    font:
-      12px/1 system-ui,
-      sans-serif;
+    z-index: 2;
+    top: 2px;
+    left: 12px;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle at 32% 22%,
+      #fff 0,
+      #e5faff 25%,
+      currentColor 65%,
+      #79badb 100%
+    );
+    box-shadow:
+      inset 0 1px 1px #fff,
+      0 5px 10px #071b3540;
+  }
+  .companion-suit {
+    position: absolute;
+    left: 26px;
+    top: 57px;
+    width: 36px;
+    height: 32px;
+    border-radius: 12px 12px 18px 18px;
+    background: linear-gradient(125deg, #e5faff, currentColor 55%, #82bad9);
+    clip-path: polygon(0 0, 100% 0, 85% 100%, 15% 100%);
+  }
+  .companion-suit::after {
+    content: "";
+    position: absolute;
+    width: 7px;
+    height: 7px;
+    left: calc(50% - 3.5px);
+    top: 13px;
+    border-radius: 50%;
+    background: #198cb8;
+    box-shadow: 0 0 0 3px #93e6ff;
+  }
+  .companion-arm {
+    position: absolute;
+    top: 59px;
+    width: 13px;
+    height: 24px;
+    border-radius: 50%;
+    background: linear-gradient(90deg, #e5faff, currentColor);
+  }
+  .arm-left {
+    left: 14px;
+    transform: rotate(28deg);
+  }
+  .arm-right {
+    right: 14px;
+    transform: rotate(-28deg);
+  }
+  .companion-orbit {
+    position: absolute;
+    z-index: 3;
+    left: 16px;
+    top: 70px;
+    width: 56px;
+    height: 13px;
+    border: 1.5px solid #67c9ed;
+    border-radius: 50%;
+    transform: rotate(-18deg);
+    box-sizing: border-box;
+    pointer-events: none;
   }
   .companion-face {
     position: absolute;
-    inset: 23px 0 12px;
+    top: 23px;
+    left: 21px;
+    width: 46px;
+    height: 30px;
+    padding-top: 8px;
+    box-sizing: border-box;
+    border-radius: 48%;
+    background: linear-gradient(145deg, #193c5c, #0e2139);
+    box-shadow: inset 0 1px 2px #0005;
+    z-index: 3;
     display: flex;
     justify-content: center;
-    gap: 16px;
+    gap: 12px;
     transform: translate(var(--gaze-x), var(--gaze-y));
     transition: transform 0.12s ease-out;
   }
@@ -89,24 +157,24 @@
     width: 6px;
     height: 11px;
     border-radius: 50%;
-    background: #183a48;
+    background: #c2f5ff;
     box-shadow: inset 1px 1px 1px #ffffff24;
     animation: blink 7s infinite;
   }
   .mouth {
     position: absolute;
-    top: 16px;
+    top: 21px;
     left: calc(50% - 4px);
     width: 8px;
     height: 4px;
-    border-bottom: 2px solid #397184;
+    border-bottom: 1.5px solid #a4e4f5;
     border-radius: 0 0 8px 8px;
   }
   .companion-shadow {
     position: absolute;
     z-index: -1;
-    bottom: 6px;
-    width: 64px;
+    bottom: 0;
+    width: 48px;
     height: 8px;
     border-radius: 50%;
     background: #0004;
@@ -117,18 +185,19 @@
   }
   [data-state="listening"] .companion-body {
     transform: rotate(4deg) translateY(-3px);
-    box-shadow:
-      inset 0 2px 1px #ffffffb3,
-      0 0 22px #8adcec26;
+    color: #dffaff;
+  }
+  [data-state="listening"] .companion-orbit {
+    border-color: #b7f3ff;
   }
   [data-state="speaking"] .mouth {
     height: calc(4px + var(--level, 0) * 8px);
     border: 0;
-    background: #397184;
+    background: #a4e4f5;
     border-radius: 50%;
   }
   [data-state="error"] .companion-body {
-    background: linear-gradient(145deg, #fff6e9, #f3cfb5);
+    color: #f1d8bf;
   }
   [data-state="error"] .mouth {
     transform: rotate(180deg);
@@ -139,10 +208,13 @@
   }
   .compact .companion-body {
     animation: none;
-    transform: scale(0.34) rotate(-5deg);
+    transform: scale(0.44) rotate(-4deg) translateY(14px);
     flex: none;
   }
-  .compact .companion-shadow {
+  .compact .companion-shadow,
+  .compact .companion-suit,
+  .compact .companion-arm,
+  .compact .companion-orbit {
     display: none;
   }
   @keyframes blink {
