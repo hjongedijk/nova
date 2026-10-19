@@ -85,6 +85,40 @@ describe("isolated MCP broker transport", () => {
     expect(onclose).toHaveBeenCalledOnce();
   });
 
+  it("sends provider credentials in an authenticated header without URL or process exposure", async () => {
+    const credentials = {
+      IMAP_HOST: "mail.fixture.invalid",
+      IMAP_USER: "fixture-user",
+      IMAP_PASSWORD: "fixture-secret",
+    };
+    let received: http.IncomingMessage | undefined;
+    const base = await fixture((request, socket) => {
+      received = request;
+      socket.write(
+        "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: nova-mcp\r\n\r\n",
+      );
+    });
+    const transport = new SandboxMcpTransport(
+      base,
+      token,
+      "imap",
+      undefined,
+      credentials,
+    );
+    await transport.start();
+    expect(received?.url).toBe("/mcp/offline?server=imap");
+    expect(received?.headers.authorization).toBe(`Bearer ${token}`);
+    expect(
+      JSON.parse(
+        Buffer.from(
+          String(received?.headers["x-nova-mcp-credentials"]),
+          "base64url",
+        ).toString(),
+      ),
+    ).toEqual(credentials);
+    await transport.close();
+  });
+
   it("returns a fixed failure for refused upgrades without exposing their body", async () => {
     const transport = new SandboxMcpTransport(
       await fixture(),

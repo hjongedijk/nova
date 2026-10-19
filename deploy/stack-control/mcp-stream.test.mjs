@@ -525,3 +525,43 @@ test("shutdown waits for pending preparation and cleans the eventual owned conta
   await connection;
   assert.deepEqual(f.calls, [["close", "shutdown-late-id"]]);
 });
+
+test("authenticated network provider credentials travel outside the request URL", async (t) => {
+  const f = await fixture(t);
+  const credentials = {
+    IMAP_HOST: "mail.fixture.invalid",
+    IMAP_USER: "fixture-user",
+    IMAP_PASSWORD: "fixture-secret",
+  };
+  const encoded = Buffer.from(JSON.stringify(credentials)).toString(
+    "base64url",
+  );
+  const response = await f.connect("/mcp/offline?server=imap", {
+    headers: { "x-nova-mcp-credentials": encoded },
+  });
+  assert.equal(response.status, 101);
+  assert.deepEqual(
+    f.calls.find((call) => call[0] === "prepare"),
+    ["prepare", { server: "imap", credentials }],
+  );
+  assert.equal((await f.connect("/mcp/offline?server=imap")).status, 400);
+  assert.equal(
+    (
+      await f.connect("/mcp/offline?server=filesystem", {
+        headers: { "x-nova-mcp-credentials": encoded },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await f.connect("/mcp/offline?server=imap", {
+        headers: {
+          Authorization: "Bearer wrong",
+          "x-nova-mcp-credentials": encoded,
+        },
+      })
+    ).status,
+    401,
+  );
+});

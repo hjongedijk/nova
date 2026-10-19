@@ -10,7 +10,12 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 const MAX_MESSAGE_BYTES = 1024 * 1024;
 const CONNECT_TIMEOUT_MS = 90_000;
 export type IsolatedMcpServer =
-  "sequential-thinking" | "filesystem" | "workspace-git" | "context7";
+  | "sequential-thinking"
+  | "filesystem"
+  | "workspace-git"
+  | "context7"
+  | "imap"
+  | "caldav";
 
 /** MCP JSON lines over the authenticated broker's isolated-container stream. */
 export class SandboxMcpTransport implements Transport {
@@ -28,6 +33,7 @@ export class SandboxMcpTransport implements Transport {
     private readonly token: string,
     private readonly server: IsolatedMcpServer,
     private readonly projectId?: string,
+    private readonly credentials?: Record<string, string>,
   ) {}
 
   async start(): Promise<void> {
@@ -55,6 +61,13 @@ export class SandboxMcpTransport implements Transport {
         {
           headers: {
             authorization: `Bearer ${this.token}`,
+            ...(this.credentials
+              ? {
+                  "x-nova-mcp-credentials": Buffer.from(
+                    JSON.stringify(this.credentials),
+                  ).toString("base64url"),
+                }
+              : {}),
             connection: "Upgrade",
             upgrade: "nova-mcp",
           },

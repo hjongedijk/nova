@@ -104,14 +104,89 @@ describe("MCP hub", () => {
     }
   });
 
-  it("blocks network servers before process start or resolving private credentials", async () => {
+  it.each(["imap", "caldav"] as const)(
+    "routes %s through the isolated broker with only its exact credentials",
+    async (id) => {
+      const previous = process.env.NODE_ENV;
+      const fallbackKey = id === "imap" ? "IMAP_USER" : "CALDAV_USERNAME";
+      const previousFallback = process.env[fallbackKey];
+      process.env.NODE_ENV = "production";
+      process.env[fallbackKey] = "deployment-user";
+      const expected: Record<string, string> =
+        id === "imap"
+          ? {
+              IMAP_HOST: "mail.example.test",
+              IMAP_USER: "deployment-user",
+              IMAP_PASSWORD: "private-imap-password",
+            }
+          : {
+              CALDAV_URL: "https://calendar.example.test/calendar/",
+              CALDAV_USERNAME: "deployment-user",
+              CALDAV_PASSWORD: "private-caldav-password",
+            };
+      const saved: Record<string, string> = {
+        ...expected,
+        UNRELATED_SECRET: "must-not-leave-api",
+      };
+      delete saved[fallbackKey];
+      const environment = vi.fn(() => {
+        throw new Error("broad credentials must not be read");
+      });
+      const environmentFor = vi.fn(() => saved);
+      const connect = vi
+        .spyOn(Client.prototype, "connect")
+        .mockResolvedValue(undefined);
+      const tools = vi
+        .spyOn(Client.prototype, "listTools")
+        .mockResolvedValue({ tools: [] });
+      const hub = new McpHub(
+        {
+          mcpConfig: configFile(
+            { [id]: { ...reviewedMcpServerSpec(id), enabled: true } },
+            `${id}-network-isolation.json`,
+          ),
+          stackControlUrl: "http://broker:8090",
+          stackControlToken: "a".repeat(64),
+        } as NovaConfig,
+        { environment, environmentFor } as never,
+      );
+      try {
+        await hub.sync();
+        expect(connect).toHaveBeenCalledTimes(1);
+        const transport = connect.mock.calls[0]![0];
+        expect(transport).toBeInstanceOf(SandboxMcpTransport);
+        expect(transport).toMatchObject({
+          server: id,
+          projectId: undefined,
+          credentials: expected,
+        });
+        expect(
+          (transport as unknown as { credentials: Record<string, string> })
+            .credentials,
+        ).toEqual(expected);
+        expect(environmentFor).toHaveBeenCalledExactlyOnceWith(id);
+        expect(environment).not.toHaveBeenCalled();
+        expect(tools).toHaveBeenCalledTimes(1);
+      } finally {
+        await hub.stop();
+        connect.mockRestore();
+        tools.mockRestore();
+        if (previous === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previous;
+        if (previousFallback === undefined) delete process.env[fallbackKey];
+        else process.env[fallbackKey] = previousFallback;
+      }
+    },
+  );
+
+  it("blocks unsupported network servers before process start or resolving private credentials", async () => {
     const previous = process.env.NODE_ENV;
     process.env.NODE_ENV = "production";
     const connect = vi.spyOn(Client.prototype, "connect");
     const environment = vi.fn(() => ({}));
     const environmentFor = vi.fn(() => ({}));
     const servers = Object.fromEntries(
-      ["arxiv", "caldav", "imap", "github"].map((id) => [
+      ["arxiv", "github"].map((id) => [
         id,
         { ...reviewedMcpServerSpec(id), enabled: true },
       ]),

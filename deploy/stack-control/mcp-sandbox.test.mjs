@@ -436,3 +436,76 @@ test("missing late creations exhaust bounded polling and retain all eight reserv
   await f.sandbox.close(names[0]);
   await f.sandbox.prepare({ server: "filesystem" });
 });
+
+test("mail and calendar workers receive scoped credentials and no host data mounts", async () => {
+  const f = fixture();
+  const inputs = [
+    {
+      server: "imap",
+      credentials: {
+        IMAP_HOST: "mail.fixture.invalid",
+        IMAP_USER: "fixture-user",
+        IMAP_PASSWORD: "fixture-secret",
+      },
+    },
+    {
+      server: "caldav",
+      credentials: {
+        CALDAV_URL: "https://calendar.fixture.invalid/",
+        CALDAV_USERNAME: "fixture-user",
+        CALDAV_PASSWORD: "fixture-secret",
+      },
+    },
+  ];
+  for (const input of inputs) {
+    await f.sandbox.prepare(input);
+    const config = f.calls.at(-1).body;
+    assert.deepEqual(config.Cmd, [
+      `/opt/${input.server}-mcp/node_modules/.bin/${input.server}-mcp`,
+    ]);
+    assert.equal(config.HostConfig.NetworkMode, "bridge");
+    assert.equal(config.HostConfig.ReadonlyRootfs, true);
+    assert.deepEqual(config.HostConfig.Mounts, []);
+    assert.deepEqual(config.HostConfig.CapDrop, ["ALL"]);
+    assert.equal(config.User, "1000:1000");
+    assert.ok(
+      config.Env.includes(
+        `${input.server === "imap" ? "IMAP_PASSWORD" : "CALDAV_PASSWORD"}=fixture-secret`,
+      ),
+    );
+    assert.ok(
+      !config.Env.some((value) =>
+        /NOVA_|STACK_CONTROL|GITHUB|OPENAI/.test(value),
+      ),
+    );
+    assert.ok(
+      config.Env.includes(
+        input.server === "imap"
+          ? "IMAP_READ_ONLY=true"
+          : "CALDAV_READ_ONLY=true",
+      ),
+    );
+  }
+  for (const input of [
+    { server: "filesystem", credentials: { IMAP_PASSWORD: "secret" } },
+    {
+      server: "imap",
+      credentials: {
+        IMAP_HOST: "mail.fixture.invalid",
+        IMAP_USER: "user",
+        IMAP_PASSWORD: "secret",
+        NOVA_APP_TOKEN: "private",
+      },
+    },
+    {
+      server: "caldav",
+      credentials: {
+        CALDAV_URL: "http://calendar.fixture.invalid",
+        CALDAV_USERNAME: "user",
+        CALDAV_PASSWORD: "secret",
+      },
+    },
+    { server: "imap" },
+  ])
+    await assert.rejects(() => f.sandbox.prepare(input));
+});

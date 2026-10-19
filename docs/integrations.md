@@ -223,7 +223,7 @@ The stack includes Home Assistant on port 8123 with host networking. Finish onbo
 
 ## Calendar (CalDAV)
 
-NOVA reads one CalDAV calendar collection when `CALDAV_URL` (HTTPS, pointing at a collection), `CALDAV_USERNAME` and `CALDAV_PASSWORD` are all set in the deployment `.env` (restart afterwards). It sends a bounded `REPORT` for the next seven days, refuses redirects, limits the XML to 2 MiB and returns at most 40 events, sharing only summary, start, end, time zone and all-day status. Calendar text is untrusted data.
+Configure **Settings → Koppelingen → Mail en agenda → CalDAV instellen** with the HTTPS collection URL, username and password or app password. Saved values apply immediately to the native calendar and reminders. Deployment `CALDAV_URL`, `CALDAV_USERNAME` and `CALDAV_PASSWORD` remain fallback values (restart after changing the deployment environment). NOVA reads one CalDAV calendar collection. It sends a bounded `REPORT` for the next seven days, refuses redirects, limits the XML to 2 MiB and returns at most 40 events, sharing only summary, start, end, time zone and all-day status. Calendar text is untrusted data.
 
 `calendar_events` and `daily_briefing` use this provider. `calendar_create` and `calendar_move` write one timed event with an exact title and times. Creation uses a server-generated UID and refuses overwrites; moving needs one exact title and start match plus the event's ETag, keeps time zone definitions, and refuses recurring, ambiguous, changed or out-of-collection events. The optional CalDAV MCP stays read-only.
 
@@ -425,9 +425,7 @@ or set `NOVA_MCP_SANDBOX_TEST_IMAGE` to another cached NOVA image. The runtime g
 workspace and container; it neither pulls images nor edits the running stack. It checks a real MCP
 initialization alongside failed direct internet/provider connections and then removes the container.
 
-Network MCP servers still use the direct stdio path. The destination-bound relay and its end-to-end
-proof remain unfinished, so L1.2 is open. The running production image also needs an approved release
-and deployment before it receives the offline transport; repository tests do not prove that rollout.
+IMAP and CalDAV also use broker-created containers. Each receives only its three provider credentials, with no workspace or private data mount. These two workers use Docker bridge networking and fixed read-only tool lists; their egress is not destination-bound. Context7 retains its dedicated destination-bound relay. No production provider falls back to direct execution inside the NOVA container.
 
 ### Admission checks
 
@@ -505,11 +503,13 @@ The pinned `v2.0.2` [server configuration guide](https://github.com/github/githu
 
 Context7 now uses the authenticated broker outside tests, with no direct-process fallback. Its pinned MCP executable runs in a read-only, unprivileged, networkless container. The only host mount is the read-only Context7 relay socket directory; model secrets, workspace and private application data are absent. A worker-local loopback adapter sends HTTP requests through that Unix socket. The separate relay owns TLS and fixes both SNI and Host to `context7.com:443`, with certificate verification enabled. It accepts only GET requests for `/api/v2/libs/search` and `/api/v2/context` with bounded, explicitly named parameters. Caller headers, credentials, CONNECT, upgrades, alternate paths and redirects are rejected. Responses are limited to 1 MiB, upstream calls to 15 seconds, and concurrent upstream calls to four.
 
-The Compose relay runs as UID/GID 1000 with dropped capabilities and exposes no TCP listener. Deployment must create and own `nova-data/mcp-relay/context7` before startup; the socket uses mode 0660. Eight relay tests, two adapter/launcher tests and eight runner tests pass, including a real UID-1000 launcher with no effective capabilities. `npm run test:mcp-sandbox:context7-runtime` passes against the cached pinned MCP executable: authenticated broker attachment, initialization, tool listing and both documentation tools succeed through the socket, while direct internet/provider access fails. The upstream responses in this gate are controlled fixtures, not live Context7 requests. The disposable wrapper-image layer and containers are removed afterwards; the production image is unchanged. arXiv, CalDAV, IMAP and GitHub still require equivalent source-specific boundaries, so L1.2 remains open.
+The Compose relay runs as UID/GID 1000 with dropped capabilities and exposes no TCP listener. Deployment must create and own `nova-data/mcp-relay/context7` before startup; the socket uses mode 0660. Eight relay tests, two adapter/launcher tests and eight runner tests pass, including a real UID-1000 launcher with no effective capabilities. `npm run test:mcp-sandbox:context7-runtime` passes against the cached pinned MCP executable: authenticated broker attachment, initialization, tool listing and both documentation tools succeed through the socket, while direct internet/provider access fails. The upstream responses in this gate are controlled fixtures, not live Context7 requests. The disposable wrapper-image layer and containers are removed afterwards; the production image is unchanged. IMAP and CalDAV use the isolated network-worker policy below. arXiv and GitHub remain unavailable until their source-specific process boundaries are implemented.
 
-### Fail-closed release policy (2026-10-13)
+### Provider worker policy (2026-10-19)
 
-Production rejects arXiv, CalDAV, IMAP and GitHub before creating a transport or resolving credentials until source-specific relays are available. Saved configuration and credentials remain intact. Only the three isolated hub identities and separately isolated workspace Git can execute; missing broker access has no direct-process fallback. The production regression checks all four denials, no client connection, no credential resolution, no registered tools and unchanged config. This closes the L1.2 process boundary for this release while leaving those optional integrations unavailable. The earlier direct-stdio notes above describe the historical implementation.
+Production routes sequential-thinking, filesystem, Context7, IMAP and CalDAV through the authenticated broker; workspace Git uses the same transport separately. IMAP and CalDAV receive only their own host/URL, username and password in a bounded upgrade header, never in the request URL. Commands, image, tool lists and container limits are fixed by the broker. Their roots are read-only, capabilities are dropped, no host data is mounted, and Docker bridge networking permits their provider connections. IMAP uses TLS on port 993. These workers have general network egress rather than Context7's destination-bound relay.
+
+Production still rejects arXiv and GitHub before resolving private credentials or starting a transport. A missing broker has no direct-process fallback. Settings can save provider credentials, add the reviewed IMAP/CalDAV catalog entry and enable it through **Opslaan en verbinden**. A missing owned MCP catalog is seeded once from the shipped defaults with mode `0600`; existing and explicitly external catalogs remain unchanged. Unit and transport tests use synthetic credentials; a real account connection must be checked with that account's configuration.
 
 ## Your own HTTP APIs
 

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { networkMcpSpec } from "./mcp-network-credentials.mjs";
 import path from "node:path";
 import crypto from "node:crypto";
 
@@ -8,6 +9,8 @@ const SERVERS = new Set([
   "filesystem",
   "workspace-git",
   "context7",
+  "imap",
+  "caldav",
 ]);
 const MAX_CONTAINERS = 8;
 const CREATE_TIMEOUT_MS = 60_000;
@@ -42,7 +45,7 @@ function mountAt(detail, destination) {
   return mounts.length === 1 ? mounts[0] : undefined;
 }
 
-/** Creates fixed offline MCP containers; the transport must attach before starting. */
+/** Creates fixed MCP containers; the transport must attach before starting. */
 export function createMcpSandbox({
   docker,
   workspaceRoot = "/workspace-host",
@@ -108,7 +111,7 @@ export function createMcpSandbox({
         typeof input !== "object" ||
         Array.isArray(input) ||
         Reflect.ownKeys(input).some(
-          (key) => !["server", "projectId"].includes(key),
+          (key) => !["server", "projectId", "credentials"].includes(key),
         ) ||
         !SERVERS.has(input.server) ||
         (input.server === "workspace-git"
@@ -117,6 +120,7 @@ export function createMcpSandbox({
           : Object.hasOwn(input, "projectId"))
       )
         fail("invalid MCP sandbox request");
+      const network = networkMcpSpec(input.server, input.credentials);
       if (slots >= MAX_CONTAINERS) fail("MCP sandbox capacity reached");
       slots += 1;
       let workerName;
@@ -164,19 +168,21 @@ export function createMcpSandbox({
           realDirectory(relayRoot);
           realDirectory(path.join(relayRoot, "context7"));
         }
-        const cmd = git
-          ? [
-              "/opt/git-mcp/bin/python",
-              "-m",
-              "mcp_server_git",
-              "--repository",
-              `/data/workspace/${input.projectId}`,
-            ]
-          : input.server === "filesystem"
-            ? ["mcp-server-filesystem", "/data/workspace"]
-            : context7
-              ? ["node", "/app/stack-control/mcp-proxy-stdio.mjs", "context7"]
-              : ["mcp-server-sequential-thinking"];
+        const cmd = network
+          ? network.command
+          : git
+            ? [
+                "/opt/git-mcp/bin/python",
+                "-m",
+                "mcp_server_git",
+                "--repository",
+                `/data/workspace/${input.projectId}`,
+              ]
+            : input.server === "filesystem"
+              ? ["mcp-server-filesystem", "/data/workspace"]
+              : context7
+                ? ["node", "/app/stack-control/mcp-proxy-stdio.mjs", "context7"]
+                : ["mcp-server-sequential-thinking"];
         workerName = `nova-mcp-${crypto.randomUUID()}`;
         createdIds.add(workerName);
         pendingNames.add(workerName);
@@ -196,6 +202,9 @@ export function createMcpSandbox({
               "PYTHONNOUSERSITE=1",
               "PYTHONDONTWRITEBYTECODE=1",
               "DISABLE_THOUGHT_LOGGING=true",
+              ...Object.entries(network?.environment ?? {}).map(
+                ([key, value]) => `${key}=${value}`,
+              ),
             ],
             OpenStdin: true,
             StdinOnce: false,
@@ -206,7 +215,7 @@ export function createMcpSandbox({
             HostConfig: {
               // Docker removes exited workers even if broker cleanup cannot run.
               AutoRemove: true,
-              NetworkMode: "none",
+              NetworkMode: network ? "bridge" : "none",
               ReadonlyRootfs: true,
               CapDrop: ["ALL"],
               SecurityOpt: ["no-new-privileges:true"],
@@ -227,7 +236,7 @@ export function createMcpSandbox({
                       ReadOnly: true,
                     },
                   ]
-                : input.server === "sequential-thinking"
+                : input.server === "sequential-thinking" || network
                   ? []
                   : [
                       {

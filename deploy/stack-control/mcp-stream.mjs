@@ -1,4 +1,5 @@
 import http from "node:http";
+import { networkMcpSpec } from "./mcp-network-credentials.mjs";
 
 const MAX_BYTES = 1024 * 1024;
 const PREPARE_TIMEOUT_MS = 75_000;
@@ -8,6 +9,8 @@ const SERVERS = new Set([
   "filesystem",
   "workspace-git",
   "context7",
+  "imap",
+  "caldav",
 ]);
 const PROJECT_ID = /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/;
 
@@ -41,13 +44,31 @@ function parseRequest(request, head) {
   )
     throw new Error("invalid request");
   const server = params.get("server");
+  const encoded = request.headers["x-nova-mcp-credentials"];
+  let credentials;
+  if (encoded !== undefined) {
+    if (
+      typeof encoded !== "string" ||
+      encoded.length > 12288 ||
+      !/^[A-Za-z0-9_-]+$/.test(encoded)
+    )
+      throw new Error("invalid request");
+    try {
+      credentials = JSON.parse(
+        Buffer.from(encoded, "base64url").toString("utf8"),
+      );
+    } catch {
+      throw new Error("invalid request");
+    }
+  }
+  const network = networkMcpSpec(server, credentials);
   if (server === "workspace-git") {
     if (!PROJECT_ID.test(params.get("projectId") ?? ""))
       throw new Error("invalid request");
     return { server, projectId: params.get("projectId") };
   }
   if (params.has("projectId")) throw new Error("invalid request");
-  return { server };
+  return network ? { server, credentials } : { server };
 }
 
 // Scan bytes instead of buffering whole messages, keeping memory bounded even

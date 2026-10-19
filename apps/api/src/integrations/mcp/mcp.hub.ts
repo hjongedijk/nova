@@ -356,11 +356,30 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
     if (!RISKS.includes(spec.risk as Risk))
       throw new Error("missing or invalid risk; set risk explicitly");
     const isolated =
-      id === "sequential-thinking" || id === "filesystem" || id === "context7";
+      id === "sequential-thinking" ||
+      id === "filesystem" ||
+      id === "context7" ||
+      id === "imap" ||
+      id === "caldav";
     if (process.env.NODE_ENV !== "test" && !isolated)
       throw new Error("server requires an isolated source relay");
-    const envSource =
-      id === "github"
+    const credentialKeys =
+      id === "imap"
+        ? ["IMAP_HOST", "IMAP_USER", "IMAP_PASSWORD"]
+        : id === "caldav"
+          ? ["CALDAV_URL", "CALDAV_USERNAME", "CALDAV_PASSWORD"]
+          : undefined;
+    const scopedCredentials = credentialKeys
+      ? this.secrets.environmentFor(id)
+      : undefined;
+    const envSource = credentialKeys
+      ? Object.fromEntries(
+          credentialKeys.map((key) => [
+            key,
+            scopedCredentials?.[key] ?? process.env[key] ?? "",
+          ]),
+        )
+      : id === "github"
         ? this.secrets.environmentFor(id)
         : { ...process.env, ...this.secrets.environment() };
     const resolved = resolveEnv(spec.env, envSource);
@@ -373,6 +392,12 @@ export class McpHub implements OnModuleInit, OnModuleDestroy {
             this.config.stackControlUrl,
             this.config.stackControlToken,
             id,
+            undefined,
+            credentialKeys
+              ? Object.fromEntries(
+                  credentialKeys.map((key) => [key, resolved.env[key]!]),
+                )
+              : undefined,
           )
         : new StdioClientTransport({
             command: spec.command,
