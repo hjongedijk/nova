@@ -49,11 +49,54 @@ pub fn start_forwarding(app: &AppHandle) {
 
 #[cfg(windows)]
 fn dispatch_pointer(window: &WebviewWindow, input: PointerInput) {
-    use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2Controller3, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
+    };
     use webview2_com::{CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR};
+    use windows_webview::core::Interface;
 
     let result = window.with_webview(move |platform| unsafe {
         let controller = platform.controller();
+        // The Tao child window can retain the primary monitor's cached DPI.
+        // CDP expects CSS pixels of this actual WebView, so query its own scale
+        // and client origin on the UI thread immediately before dispatch.
+        let input = if input.hit.screen_point.is_some() {
+            let viewport = (|| {
+                let controller3 = controller.cast::<ICoreWebView2Controller3>().ok()?;
+                let mut scale = 0.0;
+                let mut zoom = 0.0;
+                let mut parent = windows_webview::Win32::Foundation::HWND::default();
+                let mut bounds = windows_webview::Win32::Foundation::RECT::default();
+                controller3.RasterizationScale(&mut scale).ok()?;
+                controller.ZoomFactor(&mut zoom).ok()?;
+                controller.ParentWindow(&mut parent).ok()?;
+                controller.Bounds(&mut bounds).ok()?;
+                let origin = win::client_bounds(parent.0 as isize)?;
+                Some((
+                    Rect::new(
+                        origin.x + bounds.left,
+                        origin.y + bounds.top,
+                        bounds.right - bounds.left,
+                        bounds.bottom - bounds.top,
+                    ),
+                    scale,
+                    zoom,
+                ))
+            })();
+            match viewport {
+                Some((bounds, scale, zoom)) => {
+                    let Some(input) = input.for_viewport(bounds, scale, zoom) else {
+                        return;
+                    };
+                    input
+                }
+                // A resize or shutdown must never strand a pressed browser button.
+                None if input.kind == PointerKind::Up => input.cancelled_release(),
+                None => return,
+            }
+        } else {
+            input
+        };
         // Cancellation over another application must release the old press without stealing that app's focus.
         if input.focus {
             let _ = controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
@@ -84,7 +127,15 @@ fn dispatch_pointer(_window: &WebviewWindow, _input: PointerInput) {}
 
 /// Called from the mouse hook: must stay fast and never block. Helper events are already delivered natively.
 fn on_mouse(kind: PointerKind, point: (i32, i32)) {
-    let targets = forward_targets();
+    let mut targets = forward_targets().clone();
+    targets.retain_mut(|target| {
+        if let Some(bounds) = win::client_bounds(target.native_handle) {
+            target.bounds = bounds;
+            true
+        } else {
+            false
+        }
+    });
     let helper = HELPER_HWND.load(std::sync::atomic::Ordering::Relaxed);
     let target = targets.iter().find(|target| target.bounds.contains(point.0, point.1));
     let desktop = target.is_some_and(|target| {

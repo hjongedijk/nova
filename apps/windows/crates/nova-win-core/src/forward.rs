@@ -35,6 +35,8 @@ pub struct Target {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hit {
     pub label: String,
+    /// Keep the hook's physical point until WebView2 supplies its current viewport and scale.
+    pub screen_point: Option<(i32, i32)>,
     pub x: f64,
     pub y: f64,
 }
@@ -58,6 +60,7 @@ pub fn route(point: (i32, i32), over_desktop: bool, targets: &[Target]) -> Optio
     };
     Some(Hit {
         label: target.label.clone(),
+        screen_point: Some(point),
         x: f64::from(point.0 - target.bounds.x) / scale,
         y: f64::from(point.1 - target.bounds.y) / scale,
     })
@@ -74,6 +77,39 @@ pub struct PointerInput {
 }
 
 impl PointerInput {
+    /// Release a browser press outside every control, without moving focus.
+    pub fn cancelled_release(mut self) -> Self {
+        self.kind = PointerKind::Up;
+        self.buttons = 0;
+        self.focus = false;
+        self.hit.screen_point = None;
+        self.hit.x = -1.0;
+        self.hit.y = -1.0;
+        self
+    }
+
+    /// Reproject at dispatch time: a desktop child can retain its creation monitor's
+    /// cached scale while WebView2 already renders at the second monitor's DPI.
+    pub fn for_viewport(mut self, viewport: Rect, rasterization_scale: f64, zoom: f64) -> Option<Self> {
+        let Some(point) = self.hit.screen_point else {
+            // A cancelled drag must stay outside the page, regardless of monitor changes.
+            return Some(self);
+        };
+        let scale = rasterization_scale * zoom;
+        if !rasterization_scale.is_finite()
+            || rasterization_scale <= 0.0
+            || !zoom.is_finite()
+            || zoom <= 0.0
+            || !scale.is_finite()
+            || !viewport.contains(point.0, point.1)
+        {
+            return (self.kind == PointerKind::Up).then(|| self.cancelled_release());
+        }
+        self.hit.x = (f64::from(point.0) - f64::from(viewport.x)) / scale;
+        self.hit.y = (f64::from(point.1) - f64::from(viewport.y)) / scale;
+        Some(self)
+    }
+
     /// CSS pixel coordinates for WebView2's Input.dispatchMouseEvent; no JavaScript execution is involved.
     pub fn params(&self) -> String {
         let event_type = match self.kind {
@@ -125,6 +161,7 @@ impl PointerForwarder {
                 return Some(PointerInput {
                     hit: Hit {
                         label: target.label,
+                        screen_point: None,
                         x: -1.0,
                         y: -1.0,
                     },
@@ -188,6 +225,74 @@ mod tests {
                 scale: 2.0,
             },
         ]
+    }
+
+    #[test]
+    fn second_4k_monitor_uses_current_browser_scale_instead_of_primary_creation_scale() {
+        let target = Target {
+            label: "4k".into(),
+            native_handle: 0,
+            bounds: Rect::new(1920, 0, 3840, 2160),
+            scale: 1.0,
+        };
+        let mut forwarder = PointerForwarder::new();
+        for kind in [
+            PointerKind::Down,
+            PointerKind::Up,
+            PointerKind::Wheel {
+                delta_x: 0,
+                delta_y: 120,
+            },
+        ] {
+            let input = forwarder
+                .event(kind, (3420, 900), true, std::slice::from_ref(&target))
+                .unwrap();
+            assert_eq!((input.hit.x, input.hit.y), (1500.0, 900.0));
+            let input = input.for_viewport(target.bounds, 1.5, 1.0).unwrap();
+            assert_eq!((input.hit.x, input.hit.y), (1000.0, 600.0));
+        }
+    }
+
+    #[test]
+    fn a_release_is_cancelled_when_the_browser_moves_or_scale_is_unavailable() {
+        for (viewport, scale) in [
+            (Rect::new(0, 0, 1920, 1080), 1.0),
+            (Rect::new(1920, -200, 2560, 1440), 0.0),
+        ] {
+            let mut forwarder = PointerForwarder::new();
+            forwarder.event(PointerKind::Down, (2020, 0), true, &targets()).unwrap();
+            let up = forwarder.event(PointerKind::Up, (2020, 0), true, &targets()).unwrap();
+            let release = up.for_viewport(viewport, scale, 1.0).unwrap();
+            assert_eq!(release.kind, PointerKind::Up);
+            assert_eq!((release.hit.x, release.hit.y), (-1.0, -1.0));
+            assert_eq!(release.hit.screen_point, None);
+            assert_eq!(release.buttons, 0);
+            assert!(!release.focus);
+        }
+    }
+
+    #[test]
+    fn browser_origin_and_zoom_are_current_and_cancelled_drags_stay_cancelled() {
+        let mut forwarder = PointerForwarder::new();
+        let down = forwarder.event(PointerKind::Down, (2020, 0), true, &targets()).unwrap();
+        let input = down.for_viewport(Rect::new(1870, -300, 3840, 2160), 1.5, 1.25).unwrap();
+        assert_eq!((input.hit.x, input.hit.y), (80.0, 160.0));
+        assert!(input
+            .clone()
+            .for_viewport(Rect::new(0, 0, 1920, 1080), 1.0, 1.0)
+            .is_none());
+        for scale in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(input
+                .clone()
+                .for_viewport(Rect::new(1920, -200, 3840, 2160), scale, 1.0)
+                .is_none());
+        }
+        let cancelled = forwarder.event(PointerKind::Move, (1, 1), false, &targets()).unwrap();
+        let input = cancelled
+            .for_viewport(Rect::new(1920, 0, 3840, 2160), 1.5, 1.0)
+            .unwrap();
+        assert_eq!((input.hit.x, input.hit.y), (-1.0, -1.0));
+        assert!(!input.focus);
     }
 
     #[test]
@@ -323,6 +428,7 @@ mod tests {
         let invalid = PointerInput {
             hit: Hit {
                 label: "w".into(),
+                screen_point: None,
                 x: f64::NAN,
                 y: f64::INFINITY,
             },

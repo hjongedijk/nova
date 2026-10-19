@@ -87,6 +87,27 @@ mod imp {
         }
     }
 
+    /// Current client origin in physical desktop pixels; unlike cached creation geometry,
+    /// this also works after Explorer or Windows has repositioned a child window.
+    pub fn client_bounds(window: isize) -> Option<Rect> {
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::Graphics::Gdi::ClientToScreen;
+        use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+        let h = HWND(window as *mut core::ffi::c_void);
+        let mut origin = POINT::default();
+        let mut bounds = RECT::default();
+        unsafe {
+            if !IsWindow(Some(h)).as_bool()
+                || GetClientRect(h, &mut bounds).is_err()
+                || !ClientToScreen(h, &mut origin).as_bool()
+            {
+                return None;
+            }
+        }
+        let (width, height) = (bounds.right - bounds.left, bounds.bottom - bounds.top);
+        (width > 0 && height > 0).then(|| Rect::new(origin.x, origin.y, width, height))
+    }
+
     /// Makes `window` a child of the chosen desktop window, at `rect`, and shows it.
     pub fn place(window: isize, parent: u64, after: InsertAfter, rect: Rect) -> Result<(), String> {
         let h = HWND(window as *mut core::ffi::c_void);
@@ -522,6 +543,9 @@ mod imp {
 mod imp {
     use super::*;
 
+    pub fn client_bounds(_window: isize) -> Option<Rect> {
+        None
+    }
     pub fn snapshot() -> DesktopSnapshot {
         DesktopSnapshot::default()
     }
