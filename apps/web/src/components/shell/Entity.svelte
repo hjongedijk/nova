@@ -41,7 +41,7 @@
   style:visibility={showFace ? "hidden" : undefined}
 ></canvas>
 {#if showFace}
-  <div class="wallpaper-portrait">
+  <div class="wallpaper-portrait" class:panoramic={wallpaper}>
     <HelperCompanion state={chat.uiState} large panoramic={wallpaper} />
   </div>
 {/if}
@@ -67,5 +67,9 @@
     width: 100vw;
     height: min(68vmin, 640px);
     pointer-events: none;
+  }
+  .wallpaper-portrait.panoramic {
+    top: 50%;
+    height: 100vh;
   }
 </style>

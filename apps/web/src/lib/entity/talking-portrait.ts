@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { audioLevel } from "#lib/stores/audio-level.svelte.ts";
 import type { UiState } from "#lib/stores/chat.svelte.ts";
 import type { OrbHandle } from "./orb.ts";
-import { portraitPose } from "./portrait-motion.ts";
+import { portraitPose, portraitBodyPose } from "./portrait-motion.ts";
 import { createProjectionBackdrop } from "./projection-backdrop.ts";
 import { loadProjection } from "./projection-field.ts";
 
@@ -43,6 +43,7 @@ export async function startTalkingPortrait(
   const uniforms = {
     look: { value: new THREE.Vector2() },
     pose: { value: new THREE.Vector3() },
+    bodyPose: { value: new THREE.Vector3() },
     time: { value: 0 },
     voice: { value: 0 },
     activity: { value: 0 },
@@ -62,7 +63,7 @@ export async function startTalkingPortrait(
     depthWrite: false,
     vertexColors: true,
     vertexShader: `attribute vec3 signal;
-      uniform float time, voice, activity, pointSize; uniform vec3 pose;
+      uniform float time, voice, activity, pointSize; uniform vec3 pose, bodyPose;
       varying vec3 vColor; varying float vAlpha, vWarm;
       void main() {
         vec3 p = position;
@@ -76,6 +77,11 @@ export async function startTalkingPortrait(
         h.yz = mat2(cos(pose.y), -sin(pose.y), sin(pose.y), cos(pose.y)) * h.yz;
         h.xy = mat2(cos(pose.z), sin(pose.z), -sin(pose.z), cos(pose.z)) * h.xy;
         p = mix(p, h + vec3(0.0, -0.16, 0.01), head);
+        vec3 torso = p - vec3(0.0, -0.42, -0.02);
+        torso.xz = mat2(cos(bodyPose.x), -sin(bodyPose.x), sin(bodyPose.x), cos(bodyPose.x)) * torso.xz;
+        torso.yz = mat2(cos(bodyPose.y), -sin(bodyPose.y), sin(bodyPose.y), cos(bodyPose.y)) * torso.yz;
+        torso.xy = mat2(cos(bodyPose.z), sin(bodyPose.z), -sin(bodyPose.z), cos(bodyPose.z)) * torso.xy;
+        p = mix(p, torso + vec3(0.0, -0.42, -0.02), max(head, body));
         p.x += sin(position.y * 95.0 - time * 3.0 + signal.z) * head * voice * 0.0012;
         vColor = color; vAlpha = signal.x; vWarm = signal.y;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
@@ -100,6 +106,7 @@ export async function startTalkingPortrait(
   );
   scene.add(backdrop.mesh);
   const targetPose = new THREE.Vector3();
+  const targetBodyPose = new THREE.Vector3();
   let frame = 0,
     previous = 0,
     stopped = false,
@@ -108,10 +115,22 @@ export async function startTalkingPortrait(
   const resize = () => {
     const width = Math.max(1, node.clientWidth),
       height = Math.max(1, node.clientHeight);
-    camera.left = (-0.55 * width) / height;
-    camera.right = (0.55 * width) / height;
+    const portraitHeight = host.panoramic
+      ? Math.min(Math.min(width, height) * 0.68, 640)
+      : height;
+    camera.left = (-0.55 * width) / portraitHeight;
+    camera.right = (0.55 * width) / portraitHeight;
+    camera.top = (0.55 * height) / portraitHeight;
+    camera.bottom = -camera.top;
+    portrait.position.y = host.panoramic
+      ? (0.055 * height) / portraitHeight
+      : 0;
     camera.updateProjectionMatrix();
-    const scale = Math.min(1, 640 / height, 2048 / width);
+    // Bound total framebuffer pixels rather than stretching a 640px render.
+    const scale = Math.min(
+      1,
+      Math.sqrt(5_000_000 / (width * height * renderer.getPixelRatio() ** 2)),
+    );
     backdrop.resize(width, height);
     renderer.setSize(
       Math.round(width * scale),
@@ -120,10 +139,10 @@ export async function startTalkingPortrait(
     );
     uniforms.pointSize.value = Math.max(
       0.7,
-      ((height * scale * renderer.getPixelRatio() * field.stride) /
+      ((portraitHeight * scale * renderer.getPixelRatio() * field.stride) /
         field.sourceHeight /
         1.1) *
-        1.3,
+        1.05,
     );
   };
   const targetLook = new THREE.Vector2();
@@ -191,6 +210,17 @@ export async function startTalkingPortrait(
         ),
       );
       uniforms.pose.value.lerp(targetPose, 1 - Math.exp(-elapsed / 280));
+      targetBodyPose.fromArray(
+        portraitBodyPose(uniforms.time.value, uniforms.voice.value, reduced),
+      );
+      uniforms.bodyPose.value.lerp(
+        targetBodyPose,
+        1 - Math.exp(-elapsed / 450),
+      );
+      renderer.domElement.dataset.bodyPose = uniforms.bodyPose.value
+        .toArray()
+        .map((angle) => angle.toFixed(4))
+        .join(",");
       renderer.domElement.dataset.pose = uniforms.pose.value
         .toArray()
         .map((angle) => angle.toFixed(4))
