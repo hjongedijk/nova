@@ -1,5 +1,5 @@
 /**
- * How loud NOVA's own voice is right now. The shell's speaker writes it every animation frame
+ * How loud NOVA's own voice is right now. The speech player's independent meter writes it every animation frame
  * while NOVA speaks; the Stem panel draws its equaliser from it.
  *
  *   audioLevel.level    0..1, smoothed overall loudness (0 when silent)

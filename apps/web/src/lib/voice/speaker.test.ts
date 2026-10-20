@@ -17,6 +17,7 @@ const { audio, playback, fetchSpeech, setState } = vi.hoisted(() => {
   };
 });
 
+vi.mock("./voice-meter.ts", () => ({ startVoiceMeter: vi.fn(() => vi.fn()) }));
 vi.mock("#lib/api/chat.ts", () => ({ fetchSpeech }));
 vi.mock("#lib/stores/chat.svelte.ts", () => ({ setState }));
 vi.mock("#lib/stores/toasts.svelte.ts", () => ({ showToast: vi.fn() }));
@@ -35,6 +36,7 @@ vi.mock("#lib/stores/helper.svelte.ts", () => ({ helper: { cues: {} } }));
 vi.mock("#lib/voice/helper-cues.ts", () => ({ cueQuiet: () => false }));
 
 import { createSpeaker } from "./speaker.ts";
+import { startVoiceMeter } from "./voice-meter.ts";
 import { showToast } from "#lib/stores/toasts.svelte.ts";
 import { afterSpeech } from "./wake.ts";
 
@@ -89,8 +91,15 @@ describe("speech start measurement", () => {
     audio.onplaying?.();
     audio.onplaying?.();
     expect(firstPlayback).toHaveBeenCalledOnce();
+    expect(startVoiceMeter).toHaveBeenCalledTimes(2);
+    expect(
+      vi.mocked(startVoiceMeter).mock.results[0]?.value,
+    ).toHaveBeenCalledOnce();
 
     audio.onended?.();
+    expect(
+      vi.mocked(startVoiceMeter).mock.results[1]?.value,
+    ).toHaveBeenCalledOnce();
     speaker.finish();
     await speaker.done;
   });

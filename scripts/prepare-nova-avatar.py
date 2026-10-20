@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strip textures and hair meshes from TalkingHead's CC0 MPFB example, preserving rig and visemes.
+"""Trim the CC0 MPFB example, preserving face textures, hair, rig and expressions.
 
 Usage: python3 scripts/prepare-nova-avatar.py mpfb.glb nova-human.glb
 Source and license: docs/third-party-assets.md
@@ -14,7 +14,21 @@ assert source[:4] == b"glTF"
 size = struct.unpack_from("<I", source, 12)[0]
 model = json.loads(source[20:20 + size])
 binary = source[28 + size:]
-allowed = {"base", "high-poly", "teeth_base", "tongue01"}
+texture_meshes = {"base", "high-poly", "ponytail01"}
+retained_materials = []
+retained_images = []
+material_indices = {}
+for mesh in model["meshes"]:
+    if mesh.get("name") not in texture_meshes:
+        continue
+    material = model["materials"][mesh["primitives"][0]["material"]]
+    texture = model["textures"][material["pbrMetallicRoughness"]["baseColorTexture"]["index"]]
+    image = dict(model["images"][texture["source"]])
+    material["pbrMetallicRoughness"]["baseColorTexture"]["index"] = len(retained_images)
+    retained_images.append(image)
+    retained_materials.append(material)
+    material_indices[mesh["name"]] = len(retained_materials)
+allowed = {"base", "high-poly", "teeth_base", "tongue01", "mind_eyebrows_02", "mind_eyelashes_02", "ponytail01"}
 meshes = {i: m for i, m in enumerate(model["meshes"]) if m.get("name") in allowed}
 mesh_map = {old: new for new, old in enumerate(meshes)}
 for node in model["nodes"]:
@@ -27,12 +41,17 @@ model["meshes"] = list(meshes.values())
 needed = set()
 for mesh in model["meshes"]:
     for primitive in mesh["primitives"]:
-        primitive["attributes"].pop("TEXCOORD_0", None)
+        if mesh.get("name") not in texture_meshes:
+            primitive["attributes"].pop("TEXCOORD_0", None)
         needed.update(primitive["attributes"].values())
         needed.add(primitive["indices"])
         for target in primitive.get("targets", []):
+            # Fine eyebrow/lash fibers keep positional expressions and skinning.
+            # Their matte emissive material does not need bulky animated normal deltas.
+            if mesh.get("name") in {"mind_eyebrows_02", "mind_eyelashes_02"}:
+                target.pop("NORMAL", None)
             needed.update(target.values())
-        primitive["material"] = 0
+        primitive["material"] = material_indices.get(mesh.get("name"), 0)
 for skin in model.get("skins", []):
     if "inverseBindMatrices" in skin:
         needed.add(skin["inverseBindMatrices"])
@@ -60,6 +79,7 @@ for accessor in accessors:
     for part in accessor.get("sparse", {}).values():
         if isinstance(part, dict) and "bufferView" in part:
             views.add(part["bufferView"])
+views.update(image["bufferView"] for image in retained_images)
 view_map = {old: new for new, old in enumerate(sorted(views))}
 output = bytearray()
 new_views = []
@@ -82,8 +102,12 @@ model["bufferViews"] = new_views
 model["buffers"] = [{"byteLength": len(output)}]
 model["materials"] = [{"name": "NOVA hologram", "pbrMetallicRoughness": {
     "baseColorFactor": [0.08, 0.45, 0.6, 1], "metallicFactor": 0.15, "roughnessFactor": 0.45}}]
-for key in ["images", "textures", "samplers"]:
-    model.pop(key, None)
+for image in retained_images:
+    image["bufferView"] = view_map[image["bufferView"]]
+model["materials"].extend(retained_materials)
+model["images"] = retained_images
+model["textures"] = [{"source": i} for i in range(len(retained_images))]
+model.pop("samplers", None)
 model["asset"]["copyright"] = "MPFB avatar from met4citizen/TalkingHead, CC0; optimized for NOVA"
 encoded = json.dumps(model, separators=(",", ":")).encode()
 encoded += b" " * (-len(encoded) % 4)

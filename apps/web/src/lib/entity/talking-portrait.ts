@@ -36,7 +36,7 @@ export async function startTalkingPortrait(
     10,
   );
   scene.add(new THREE.AmbientLight(0xa5e9ff, 0.22));
-  const light = new THREE.DirectionalLight(0xc6edff, 3.0);
+  const light = new THREE.DirectionalLight(0xc6edff, 1.35);
   light.position.set(-2, 1.5, 2);
   scene.add(light);
   const rim = new THREE.DirectionalLight(0x17b9ff, 3);
@@ -105,7 +105,7 @@ export async function startTalkingPortrait(
   };
   try {
     await head.showAvatar({
-      url: "/avatars/nova-human.glb",
+      url: "/avatars/nova-human.glb?v=471f9c49",
       body: "F",
       avatarMood: "neutral",
     });
@@ -117,7 +117,7 @@ export async function startTalkingPortrait(
     if (!leftEye) throw new Error("NOVA avatar has no eye rig");
     head.armature.updateMatrixWorld(true);
     const eyes = leftEye.getWorldPosition(new THREE.Vector3());
-    camera.position.set(0.17, eyes.y - 0.045, 0.9);
+    camera.position.set(0.12, eyes.y - 0.045, 0.9);
     camera.lookAt(0, eyes.y - 0.055, 0);
     core.value.set(0, eyes.y + 0.005, eyes.z + 0.04);
     backdrop.mesh.position.set(0, eyes.y - 0.035, -0.14);
@@ -127,9 +127,9 @@ export async function startTalkingPortrait(
     });
     const filaments: THREE.MeshBasicMaterial[] = [];
     for (const object of surfaces) {
-      if (object.name === "Human") {
+      if (object.name === "Human" || /ponytail/i.test(object.name)) {
         const positions = object.geometry.getAttribute("position");
-        // Refine only the nose, using the bundled model's rest-space landmarks.
+        // Refine nose projection and crown height using this model's rest-space landmarks.
         // The eye sockets, lips, topology, skin weights and expression targets stay intact.
         for (let i = 0; i < positions.count; i++) {
           const x = positions.getX(i),
@@ -138,8 +138,16 @@ export async function startTalkingPortrait(
           const front = THREE.MathUtils.smoothstep(z, 0.145, 0.17);
           const weight =
             Math.exp(-((x / 0.018) ** 2) - ((y - 1.614) / 0.024) ** 2) * front;
-          if (weight < 0.001) continue;
-          positions.setXYZ(i, x * (1 - weight * 0.12), y, z - weight * 0.009);
+          const crown = THREE.MathUtils.smoothstep(y, 1.69, 1.78);
+          const jawShape =
+            Math.exp(-(((y - 1.55) / 0.045) ** 2)) *
+            THREE.MathUtils.smoothstep(Math.abs(x), 0.025, 0.07);
+          positions.setXYZ(
+            i,
+            x * (1 - weight * 0.12) * (1 - jawShape * 0.06),
+            y - crown * 0.012,
+            z - weight * 0.009,
+          );
         }
         positions.needsUpdate = true;
         object.geometry.computeVertexNormals();
@@ -148,12 +156,28 @@ export async function startTalkingPortrait(
       // GLTFLoader sanitizes dots in node names before binding the skeleton.
       const isEye =
         object.name.replace(/[^a-z]/gi, "").toLowerCase() === "humanhighpoly";
+      const isFiber = /eyebrows|eyelashes|ponytail/i.test(object.name);
+      const isHair = /ponytail/i.test(object.name);
+      const original = Array.isArray(object.material)
+        ? object.material[0]
+        : object.material;
+      const surfaceMap =
+        original instanceof THREE.MeshStandardMaterial ? original.map : null;
       const material = new THREE.MeshPhysicalMaterial({
-        color: isEye ? 0xadc6ce : 0x174151,
-        emissive: 0x00040a,
-        roughness: isEye ? 0.12 : 0.36,
-        metalness: isEye ? 0 : 0.32,
-        clearcoat: isEye ? 1 : 0.55,
+        map: surfaceMap,
+        alphaTest: isHair ? 0.3 : 0,
+        side: isHair ? THREE.DoubleSide : THREE.FrontSide,
+        color: surfaceMap
+          ? 0xffffff
+          : isEye
+            ? 0xadc6ce
+            : isFiber
+              ? 0x176b7a
+              : 0x071a25,
+        emissive: isFiber ? 0x04313b : 0x00040a,
+        roughness: isEye ? 0.12 : 0.72,
+        metalness: isEye ? 0 : 0.05,
+        clearcoat: isEye ? 1 : 0,
         clearcoatRoughness: isEye ? 0.06 : 0.24,
         transparent: true,
       });
@@ -164,6 +188,7 @@ export async function startTalkingPortrait(
           novaCore: core,
           novaLevel: level,
           novaEyes: { value: isEye ? 1 : 0 },
+          novaHair: { value: isHair ? 1 : 0 },
         });
         shader.vertexShader = shader.vertexShader
           .replace(
@@ -185,6 +210,7 @@ export async function startTalkingPortrait(
           varying vec3 vNovaPosition;
           varying vec3 vNovaSurface;
           uniform float novaEyes;
+          uniform float novaHair;
           uniform float novaTime;
           uniform float novaLevel;
           uniform vec3 novaColor;
@@ -197,6 +223,7 @@ export async function startTalkingPortrait(
               float detail = 1.0 - smoothstep(0.002, 0.005, length(fwidth(vNovaSurface)));
               float pores = sin(dot(vNovaSurface, vec3(3950.0, 2711.0, 1379.0))) * sin(dot(vNovaSurface, vec3(-2573.0, 4733.0, 1199.0)));
               float skinHeight = pores * 0.000025 * detail;
+              if (novaHair > 0.5) skinHeight = novaAlbedo * 0.0012;
               vec3 dpdx = dFdx(-vViewPosition), dpdy = dFdy(-vViewPosition);
               vec3 r1 = cross(dpdy, normal), r2 = cross(normal, dpdx);
               float determinant = dot(dpdx, r1);
@@ -215,6 +242,9 @@ export async function startTalkingPortrait(
           .replace(
             "#include <color_fragment>",
             `#include <color_fragment>
+            float novaAlbedo = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+            if (novaHair > 0.5) diffuseColor.rgb = novaColor * pow(max(novaAlbedo, 0.001), 1.8) * 0.8;
+            else if (novaEyes < 0.5) diffuseColor.rgb = mix(diffuseColor.rgb * 0.35, novaColor * pow(max(novaAlbedo, 0.001), 1.2) * 0.2, 0.65);
             if (novaEyes > 0.5) {
               vec2 eyeUv = vec2(abs(vNovaSurface.x) - 0.032, vNovaSurface.y - 1.651);
               float eyeRadius = length(eyeUv);
@@ -224,7 +254,7 @@ export async function startTalkingPortrait(
               float fibers = 0.5 + 0.5 * sin(eyeAngle * 83.0 + sin(eyeAngle * 27.0) * 2.0 + eyeRadius * 2700.0);
               float fineFibers = 0.5 + 0.5 * sin(eyeAngle * 173.0 - eyeRadius * 4300.0);
               float limbal = exp(-pow((eyeRadius - 0.0059) / 0.0007, 2.0));
-              vec3 irisColor = novaColor * (0.22 + fibers * 0.43 + fineFibers * 0.15);
+              vec3 irisColor = novaColor * (0.16 + fibers * 0.23 + fineFibers * 0.1 + novaAlbedo * 0.8);
               irisColor *= 1.0 - limbal * 0.72;
               vec3 eyeColor = mix(vec3(0.38, 0.48, 0.52), irisColor, irisMask);
               eyeColor = mix(eyeColor, vec3(0.003, 0.008, 0.014), pupilMask);
@@ -258,17 +288,18 @@ export async function startTalkingPortrait(
             totalEmissiveRadiance += novaColor * novaEyes * iris * irisFront * (0.18 + novaLevel * 0.1);
             float catchlight = exp(-dot(irisPosition - vec2(-0.0018, 0.0022), irisPosition - vec2(-0.0018, 0.0022)) / 0.00000035);
             totalEmissiveRadiance += vec3(0.65, 0.85, 1.0) * catchlight * novaEyes * irisFront * 0.8;
-            totalEmissiveRadiance += novaColor * (0.015 + bands * 0.04 + novaRim * 0.4);
-            totalEmissiveRadiance += novaColor * warmth * (0.03 + novaLevel * 0.15);`,
+            if (novaHair > 0.5) totalEmissiveRadiance = novaColor * pow(max(novaAlbedo, 0.001), 1.8) * 0.07;
+            totalEmissiveRadiance += novaColor * (0.015 + bands * 0.04 + novaRim * 0.4) * (1.0 - novaHair);
+            totalEmissiveRadiance += novaColor * warmth * (0.03 + novaLevel * 0.15) * (1.0 - novaHair);`,
           );
         shader.fragmentShader = shader.fragmentShader.replace(
           "#include <opaque_fragment>",
-          `diffuseColor.a *= smoothstep(novaCore.y - 0.27, novaCore.y - 0.19, vNovaPosition.y);
+          `diffuseColor.a *= smoothstep(novaCore.y - 0.23, novaCore.y - 0.13, vNovaPosition.y);
           if (diffuseColor.a < 0.003) discard;
           #include <opaque_fragment>`,
         );
       };
-      material.customProgramCacheKey = () => "nova-human-hologram-v1";
+      material.customProgramCacheKey = () => "nova-human-hologram-v2";
       const old = Array.isArray(object.material)
         ? object.material
         : [object.material];
@@ -279,7 +310,7 @@ export async function startTalkingPortrait(
           color: 0x18c9f4,
           wireframe: true,
           transparent: true,
-          opacity: 0.045,
+          opacity: 0.065,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
         });
@@ -301,7 +332,7 @@ export async function startTalkingPortrait(
             )
             .replace(
               "#include <opaque_fragment>",
-              `diffuseColor.a *= smoothstep(novaCore.y - 0.27, novaCore.y - 0.19, vNovaPosition.y);
+              `diffuseColor.a *= smoothstep(novaCore.y - 0.23, novaCore.y - 0.13, vNovaPosition.y);
               if (diffuseColor.a < 0.001) discard;
               #include <opaque_fragment>`,
             );
@@ -353,7 +384,7 @@ export async function startTalkingPortrait(
             ? 0.24
             : state === "speaking"
               ? 0.07
-              : 0.035;
+              : 0.07;
       const targets: Record<string, number> = {
         browInnerUp: concerned
           ? 0.18
@@ -394,7 +425,7 @@ export async function startTalkingPortrait(
       }
       const jaw = head.mtAvatar.jawOpen;
       if (jaw) {
-        jaw.realtime = level.value * 0.65;
+        jaw.realtime = Math.min(0.85, Math.pow(level.value, 0.7) * 2);
         jaw.needsUpdate = true;
       }
       // This is audio-reactive mouth movement, not a phoneme/viseme timing claim.

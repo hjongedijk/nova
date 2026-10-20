@@ -2,7 +2,6 @@
 // @ts-nocheck -- the frame loop indexes typed arrays in hot loops; noUncheckedIndexedAccess would need `!` on every access.
 import type { UiState } from "#lib/stores/chat.svelte.ts";
 import { dashboard, guests } from "#lib/stores/dashboard.svelte.ts";
-import { audioLevel as voiceLevel } from "#lib/stores/audio-level.svelte.ts";
 import { voiceSpectrum } from "#lib/voice/audio.ts";
 import { ALERT, STATES, type Look } from "./states.ts";
 
@@ -735,13 +734,6 @@ export function startEntity(host: EntityHost): () => void {
       core.style.top = `${Math.round(cy - hit / 2)}px`;
       core.style.width = `${hit}px`;
       core.style.height = `${hit}px`;
-    }
-
-    /* the panels (voice equaliser) read the voice from here */
-    if (!compact) {
-      voiceLevel.level = audioLevel;
-      voiceLevel.speaking = speaking;
-      voiceLevel.bands = useBands ? freq : null;
     }
 
     raf = requestAnimationFrame(frame);

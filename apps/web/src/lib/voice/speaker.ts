@@ -3,6 +3,7 @@ import { setState } from "#lib/stores/chat.svelte.ts";
 import { showToast } from "#lib/stores/toasts.svelte.ts";
 import { quietWallpaper } from "#lib/modes/wallpaper.ts";
 import { applyVolume, attachAnalyser, playback, ttsElement } from "./audio.ts";
+import { startVoiceMeter } from "./voice-meter.ts";
 import { afterSpeech, noteSpoken } from "./wake.ts";
 import { speechChunkBoundary, speechText } from "./speech-filter.ts";
 export { speechText } from "./speech-filter.ts";
@@ -116,9 +117,11 @@ export function createSpeaker(
       tts.src = url;
       playback.current = tts;
       let ended = false;
+      let stopMeter: (() => void) | undefined;
       const end = () => {
         if (ended) return;
         ended = true;
+        stopMeter?.();
         tts.onended = tts.onerror = tts.onplaying = null;
         endCurrent = null;
         playedChars += length;
@@ -128,6 +131,8 @@ export function createSpeaker(
       tts.onended = end;
       tts.onerror = end;
       tts.onplaying = () => {
+        stopMeter?.();
+        stopMeter = startVoiceMeter(tts);
         if (reportedFirstPlayback) return;
         reportedFirstPlayback = true;
         onFirstPlayback?.();
