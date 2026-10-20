@@ -4,7 +4,7 @@ import type { UiState } from "#lib/stores/chat.svelte.ts";
 import type { OrbHandle } from "./orb.ts";
 import { portraitPose, portraitBodyPose } from "./portrait-motion.ts";
 import { createProjectionBackdrop } from "./projection-backdrop.ts";
-import { loadProjection } from "./projection-field.ts";
+import { loadProjectionSurface } from "./projection-surface.ts";
 
 interface Host {
   panoramic?: boolean;
@@ -12,23 +12,27 @@ interface Host {
   cancelled(): boolean;
 }
 
-/** The cyan/gold artwork becomes a breathing, audio-reactive particle portrait. */
+/** A continuous, filtered holographic surface preserves fine contours during gestures. */
 export async function startTalkingPortrait(
   node: HTMLElement,
   host: Host,
 ): Promise<OrbHandle> {
-  const field = await loadProjection(
+  const field = await loadProjectionSurface(
     "/avatars/nova-projection.png?v=cd34ec38",
     host.cancelled,
   );
-  if (!field || host.cancelled()) return { stop() {}, trigger() {} };
+  if (!field) return { stop() {}, trigger() {} };
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.domElement.className = "companion-helmet";
-  renderer.domElement.dataset.renderer = "particle-projection";
+  renderer.domElement.dataset.renderer = "holographic-surface";
   renderer.setClearColor(0x000000, 0);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NoToneMapping;
+  field.texture.anisotropy = Math.min(
+    8,
+    renderer.capabilities.getMaxAnisotropy(),
+  );
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(
     -0.55,
@@ -48,23 +52,17 @@ export async function startTalkingPortrait(
     voice: { value: 0 },
     activity: { value: 0 },
     reaction: { value: 0 },
-    pointSize: { value: 1 },
+    artwork: { value: field.texture },
   };
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.BufferAttribute(field.positions, 3),
-  );
-  geometry.setAttribute("color", new THREE.BufferAttribute(field.colors, 3));
-  geometry.setAttribute("signal", new THREE.BufferAttribute(field.signals, 3));
+  const geometry = field.geometry;
   const material = new THREE.ShaderMaterial({
     uniforms,
     transparent: true,
     depthWrite: false,
-    vertexColors: true,
-    vertexShader: `attribute vec3 signal;
-      uniform float time, voice, activity, pointSize; uniform vec3 pose, bodyPose;
-      varying vec3 vColor; varying float vAlpha, vWarm;
+    side: THREE.DoubleSide,
+    vertexShader: `
+      uniform float time, voice; uniform vec3 pose, bodyPose;
+      varying vec2 vUv;
       void main() {
         vec3 p = position;
         float head = smoothstep(-0.19, -0.055, p.y) * (1.0 - smoothstep(0.20, 0.27, abs(p.x)));
@@ -82,22 +80,24 @@ export async function startTalkingPortrait(
         torso.yz = mat2(cos(bodyPose.y), -sin(bodyPose.y), sin(bodyPose.y), cos(bodyPose.y)) * torso.yz;
         torso.xy = mat2(cos(bodyPose.z), sin(bodyPose.z), -sin(bodyPose.z), cos(bodyPose.z)) * torso.xy;
         p = mix(p, torso + vec3(0.0, -0.42, -0.02), max(head, body));
-        p.x += sin(position.y * 95.0 - time * 3.0 + signal.z) * head * voice * 0.0012;
-        vColor = color; vAlpha = signal.x; vWarm = signal.y;
+        p.x += sin(position.y * 12.0 - time * 3.0) * head * voice * 0.0005;
+        vUv = uv;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-        gl_PointSize = pointSize;
       }`,
-    fragmentShader: `uniform float voice, activity, reaction;
-      varying vec3 vColor; varying float vAlpha, vWarm;
+    fragmentShader: `uniform sampler2D artwork;
+      uniform float voice, activity, reaction;
+      varying vec2 vUv;
       void main() {
-        float edge = 1.0 - smoothstep(0.43, 0.52, length(gl_PointCoord - 0.5));
-        vec3 light = vColor * (1.0 + vWarm * (voice * 1.2 + activity * 0.1));
-        light = mix(light, light * vec3(1.2, 0.45, 0.35), reaction * vWarm);
-        gl_FragColor = vec4(light, vAlpha * edge);
+        vec4 source = texture2D(artwork, vUv);
+        float fade = smoothstep(0.0, 0.12, min(vUv.x, 1.0 - vUv.x));
+        float warm = max(0.0, source.r - source.b);
+        vec3 light = source.rgb * (1.0 + warm * (voice * 1.2 + activity * 0.1));
+        light = mix(light, light * vec3(1.2, 0.45, 0.35), reaction * warm);
+        gl_FragColor = vec4(light, source.a * fade);
         #include <colorspace_fragment>
       }`,
   });
-  const portrait = new THREE.Points(geometry, material);
+  const portrait = new THREE.Mesh(geometry, material);
   scene.add(portrait);
   const backdrop = createProjectionBackdrop(
     uniforms.time,
@@ -137,13 +137,6 @@ export async function startTalkingPortrait(
       Math.round(height * scale),
       false,
     );
-    uniforms.pointSize.value = Math.max(
-      0.7,
-      ((portraitHeight * scale * renderer.getPixelRatio() * field.stride) /
-        field.sourceHeight /
-        1.1) *
-        1.05,
-    );
   };
   const targetLook = new THREE.Vector2();
   const followPointer = (event: PointerEvent) => {
@@ -173,6 +166,7 @@ export async function startTalkingPortrait(
     window.removeEventListener("blur", resetLook);
     backdrop.dispose();
     geometry.dispose();
+    field.texture.dispose();
     material.dispose();
     renderer.dispose();
     renderer.forceContextLoss();
@@ -185,7 +179,9 @@ export async function startTalkingPortrait(
     window.addEventListener("pointermove", followPointer, { passive: true });
     window.addEventListener("blur", resetLook);
     renderer.domElement.dataset.avatarReady = "true";
-    renderer.domElement.dataset.particles = String(field.positions.length / 3);
+    renderer.domElement.dataset.vertices = String(
+      geometry.getAttribute("position").count,
+    );
     const draw = (now: number) => {
       if (stopped) return;
       frame = requestAnimationFrame(draw);

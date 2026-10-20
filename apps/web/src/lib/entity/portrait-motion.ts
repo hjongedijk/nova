@@ -23,7 +23,11 @@ export function portraitPose(
   }
   pitch += Math.sin(time * 3.1) * voice * 0.065;
   roll += Math.sin(time * 1.8) * voice * 0.018;
-  return [yaw + lookX * 0.15, pitch + lookY * 0.055, roll];
+  return [
+    Math.max(-0.3, Math.min(0.3, yaw + lookX * 0.15)),
+    Math.max(-0.14, Math.min(0.14, pitch + lookY * 0.055)),
+    roll,
+  ];
 }
 
 /** The torso turns more slowly than the head, around the lower chest. */

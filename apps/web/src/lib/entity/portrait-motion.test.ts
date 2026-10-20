@@ -25,6 +25,13 @@ describe("portrait gestures", () => {
     );
     expect(portraitBodyPose(5, 1, true)).toEqual([0, 0, 0]);
   });
+  it("bounds turns even when pointer and speech gestures combine", () => {
+    for (let t = 0; t < 60; t++) {
+      const [yaw, pitch] = portraitPose(t, "thinking", 1, 1, -1, false);
+      expect(Math.abs(yaw)).toBeLessThanOrEqual(0.3);
+      expect(Math.abs(pitch)).toBeLessThanOrEqual(0.14);
+    }
+  });
   it("respects reduced motion, including pointer and speech gestures", () => {
     expect(portraitPose(5, "speaking", 1, 1, 1, true)).toEqual([0, 0, 0]);
   });
