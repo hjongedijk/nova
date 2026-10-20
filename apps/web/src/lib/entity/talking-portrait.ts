@@ -4,6 +4,8 @@ import type { UiState } from "#lib/stores/chat.svelte.ts";
 import type { OrbHandle } from "./orb.ts";
 import { portraitPose, portraitBodyPose } from "./portrait-motion.ts";
 import { createProjectionBackdrop } from "./projection-backdrop.ts";
+import { STATES } from "./states.ts";
+import { projectionShading } from "./projection-shading.ts";
 import { loadProjectionSurface } from "./projection-surface.ts";
 
 interface Host {
@@ -53,6 +55,14 @@ export async function startTalkingPortrait(
     activity: { value: 0 },
     reaction: { value: 0 },
     artwork: { value: field.texture },
+    stateTint: { value: new THREE.Color(1, 1, 1) },
+    tintAmount: { value: 0 },
+    texel: {
+      value: new THREE.Vector2(
+        1 / field.texture.image.width,
+        1 / field.texture.image.height,
+      ),
+    },
   };
   const geometry = field.geometry;
   const material = new THREE.ShaderMaterial({
@@ -72,12 +82,16 @@ export async function startTalkingPortrait(
         p.y += body * breath * 0.0045;
         vec3 h = p - vec3(0.0, -0.16, 0.01);
         h.xz = mat2(cos(pose.x), -sin(pose.x), sin(pose.x), cos(pose.x)) * h.xz;
+        h.x /= cos(pose.x);
         h.yz = mat2(cos(pose.y), -sin(pose.y), sin(pose.y), cos(pose.y)) * h.yz;
+        h.y /= cos(pose.y);
         h.xy = mat2(cos(pose.z), sin(pose.z), -sin(pose.z), cos(pose.z)) * h.xy;
         p = mix(p, h + vec3(0.0, -0.16, 0.01), head);
         vec3 torso = p - vec3(0.0, -0.42, -0.02);
         torso.xz = mat2(cos(bodyPose.x), -sin(bodyPose.x), sin(bodyPose.x), cos(bodyPose.x)) * torso.xz;
+        torso.x /= cos(bodyPose.x);
         torso.yz = mat2(cos(bodyPose.y), -sin(bodyPose.y), sin(bodyPose.y), cos(bodyPose.y)) * torso.yz;
+        torso.y /= cos(bodyPose.y);
         torso.xy = mat2(cos(bodyPose.z), sin(bodyPose.z), -sin(bodyPose.z), cos(bodyPose.z)) * torso.xy;
         p = mix(p, torso + vec3(0.0, -0.42, -0.02), max(head, body));
         p.x += sin(position.y * 12.0 - time * 3.0) * head * voice * 0.0005;
@@ -85,15 +99,24 @@ export async function startTalkingPortrait(
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }`,
     fragmentShader: `uniform sampler2D artwork;
-      uniform float voice, activity, reaction;
+      uniform float voice, activity, reaction, tintAmount;
+      uniform vec3 stateTint;
+      uniform vec2 texel;
+      ${projectionShading}
       varying vec2 vUv;
       void main() {
         vec4 source = texture2D(artwork, vUv);
+        vec3 nearby = (texture2D(artwork, vUv + vec2(texel.x, 0.0)).rgb
+          + texture2D(artwork, vUv - vec2(texel.x, 0.0)).rgb
+          + texture2D(artwork, vUv + vec2(0.0, texel.y)).rgb
+          + texture2D(artwork, vUv - vec2(0.0, texel.y)).rgb) * 0.25;
+        source.rgb = clamp(source.rgb + (source.rgb - nearby) * 0.16, 0.0, 1.0);
         float fade = smoothstep(0.0, 0.12, min(vUv.x, 1.0 - vUv.x));
         float warm = max(0.0, source.r - source.b);
         vec3 light = source.rgb * (1.0 + warm * (voice * 1.2 + activity * 0.1));
+        light = tintProjection(light, stateTint, tintAmount);
         light = mix(light, light * vec3(1.2, 0.45, 0.35), reaction * warm);
-        gl_FragColor = vec4(light, source.a * fade);
+        gl_FragColor = vec4(light, source.a * fade * figureCoverage(vUv));
         #include <colorspace_fragment>
       }`,
   });
@@ -104,8 +127,11 @@ export async function startTalkingPortrait(
     uniforms.voice,
     host.panoramic,
     field.texture,
+    uniforms.stateTint,
+    uniforms.tintAmount,
   );
   scene.add(backdrop.mesh);
+  const targetTint = new THREE.Color();
   const targetPose = new THREE.Vector3();
   const targetBodyPose = new THREE.Vector3();
   let frame = 0,
@@ -133,7 +159,7 @@ export async function startTalkingPortrait(
     // Bound total framebuffer pixels rather than stretching a 640px render.
     const scale = Math.min(
       1,
-      Math.sqrt(5_000_000 / (width * height * renderer.getPixelRatio() ** 2)),
+      Math.sqrt(9_000_000 / (width * height * renderer.getPixelRatio() ** 2)),
     );
     backdrop.resize(width, height);
     renderer.setSize(
@@ -192,6 +218,21 @@ export async function startTalkingPortrait(
       if (now - previous < 1000 / 30) return;
       const elapsed = Math.min(100, previous ? now - previous : 33);
       previous = now;
+      const state = host.state();
+      const look = STATES[state] ?? STATES.ready;
+      targetTint.setHSL(
+        look.h / 360,
+        look.s / 100,
+        look.l / 100,
+        THREE.SRGBColorSpace,
+      );
+      const blend = 1 - Math.exp(-elapsed / 200);
+      uniforms.stateTint.value.lerp(targetTint, blend);
+      uniforms.tintAmount.value +=
+        ((state === "ready" ? 0 : 0.85) - uniforms.tintAmount.value) * blend;
+      renderer.domElement.dataset.state = state;
+      renderer.domElement.dataset.tint =
+        uniforms.stateTint.value.getHexString();
       const targetVoice = audioLevel.speaking
         ? Math.min(1, Math.pow(Math.max(0, audioLevel.level), 0.7) * 2.3)
         : 0;
