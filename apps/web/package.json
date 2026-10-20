@@ -1,6 +1,6 @@
 {
   "name": "@nova/web",
-  "version": "0.1.85",
+  "version": "0.1.86",
   "private": true,
   "description": "NOVA interface: SvelteKit, built to static files that the API serves.",
   "type": "module",
