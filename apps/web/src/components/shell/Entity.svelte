@@ -42,7 +42,7 @@
 ></canvas>
 {#if showFace}
   <div class="wallpaper-portrait">
-    <HelperCompanion state={chat.uiState} large />
+    <HelperCompanion state={chat.uiState} large panoramic={wallpaper} />
   </div>
 {/if}
 

@@ -9,7 +9,13 @@
     state: mood = "ready",
     compact = false,
     large = false,
-  }: { state?: string; compact?: boolean; large?: boolean } = $props();
+    panoramic = false,
+  }: {
+    state?: string;
+    compact?: boolean;
+    large?: boolean;
+    panoramic?: boolean;
+  } = $props();
   let stage: HTMLDivElement;
   let avatar: OrbHandle | undefined;
   let refreshAppearance: (() => void) | undefined;
@@ -63,6 +69,7 @@
           const result = await startTalkingPortrait(stage, {
             state: currentState,
             cancelled,
+            panoramic,
           });
           if (cancelled()) result.stop();
           else avatar = result;

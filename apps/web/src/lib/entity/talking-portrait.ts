@@ -7,6 +7,7 @@ import { createProjectionBackdrop } from "./projection-backdrop.ts";
 import { loadProjection } from "./projection-field.ts";
 
 interface Host {
+  panoramic?: boolean;
   state(): UiState;
   cancelled(): boolean;
 }
@@ -92,7 +93,11 @@ export async function startTalkingPortrait(
   });
   const portrait = new THREE.Points(geometry, material);
   scene.add(portrait);
-  const backdrop = createProjectionBackdrop(uniforms.time, uniforms.voice);
+  const backdrop = createProjectionBackdrop(
+    uniforms.time,
+    uniforms.voice,
+    host.panoramic,
+  );
   scene.add(backdrop.mesh);
   const targetPose = new THREE.Vector3();
   let frame = 0,
