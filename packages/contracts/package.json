@@ -1,6 +1,6 @@
 {
   "name": "@nova/contracts",
-  "version": "0.1.88",
+  "version": "0.1.89",
   "private": true,
   "description": "Types shared by the NOVA API and web app. Types only: import them with `import type`.",
   "type": "module",
