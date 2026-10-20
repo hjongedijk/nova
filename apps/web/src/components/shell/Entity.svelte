@@ -53,7 +53,7 @@
   title="Tik om te spreken"
   bind:this={core}
   style={showFace
-    ? "left:50%;top:45%;width:min(28vmin,260px);height:min(40vmin,360px);transform:translate(-50%,-50%)"
+    ? `left:50%;top:${wallpaper ? 39 : 45}%;width:min(28vmin,260px);height:min(40vmin,360px);transform:translate(-50%,-50%)`
     : undefined}
   onclick={pressCore}
 ></button>

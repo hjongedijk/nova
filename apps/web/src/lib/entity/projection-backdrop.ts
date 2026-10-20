@@ -5,16 +5,23 @@ export function createProjectionBackdrop(
   time: { value: number },
   voice: { value: number },
   panoramic = false,
+  artwork?: THREE.Texture,
 ) {
   const aspect = { value: 1 };
   const material = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
     depthTest: false,
-    uniforms: { time, voice, aspect, panoramic: { value: panoramic ? 1 : 0 } },
+    uniforms: {
+      time,
+      voice,
+      aspect,
+      panoramic: { value: panoramic ? 1 : 0 },
+      artwork: { value: artwork ?? null },
+    },
     vertexShader: `varying vec2 vUv;
       void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
-    fragmentShader: `varying vec2 vUv; uniform float time, voice, aspect, panoramic;
+    fragmentShader: `varying vec2 vUv; uniform float time, voice, aspect, panoramic; uniform sampler2D artwork;
       void main() {
         vec2 p = (vUv - 0.5) * vec2(aspect * 1.1, 1.1);
         float wave = sin(p.x * 6.0 - time * 0.16) * 0.032 + sin(p.x * 15.0 + time * 0.12) * 0.012;
@@ -42,7 +49,17 @@ export function createProjectionBackdrop(
         vec2 dustUv = fract(vUv * vec2(190.0 * aspect, 190.0)) - 0.5;
         float dust = exp(-dot(dustUv, dustUv) * 140.0) * step(0.988, seed) * (0.6 + 0.4 * sin(time * 0.4 + seed * 80.0)) * panoramic;
         float fieldAlpha = (lines * 0.16 + nodes * 0.48) * band * sides * fade * (0.8 + voice * 0.2) * mix(1.0, 1.8, panoramic);
-        gl_FragColor = vec4(light, fieldAlpha + haze * 0.022 + dust * 0.23);
+        // Extend the original mountain texture separately from the central bust.
+        float reach = clamp((abs(vUv.x - 0.5) - 0.13) / 0.37, 0.0, 1.0);
+        float mountainX = mix(0.28, 0.015, reach);
+        if (vUv.x > 0.5) mountainX = 1.0 - mountainX;
+        vec2 mountainUv = vec2(mountainX, vUv.y * 0.8 + 0.06 + sin(time * 0.12 + vUv.x * 4.0) * 0.004);
+        vec4 mountain = texture2D(artwork, mountainUv);
+        float mountainAlpha = mountain.a * smoothstep(0.24, 0.42, vUv.y) * smoothstep(0.10, 0.24, abs(vUv.x - 0.5)) * panoramic * 0.8;
+        float ambientAlpha = (fieldAlpha * mix(1.0, 0.24, panoramic) + haze * 0.022 + dust * 0.23) * (1.0 - mountainAlpha);
+        float alpha = mountainAlpha + ambientAlpha;
+        vec3 combined = (mountain.rgb * mountainAlpha + light * ambientAlpha) / max(alpha, 0.0001);
+        gl_FragColor = vec4(combined, alpha);
         #include <colorspace_fragment>
       }`,
   });
