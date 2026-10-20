@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { audioLevel } from "#lib/stores/audio-level.svelte.ts";
 import type { UiState } from "#lib/stores/chat.svelte.ts";
 import type { OrbHandle } from "./orb.ts";
+import { portraitPose } from "./portrait-motion.ts";
+import { createProjectionBackdrop } from "./projection-backdrop.ts";
 import { loadProjection } from "./projection-field.ts";
 
 interface Host {
@@ -39,6 +41,7 @@ export async function startTalkingPortrait(
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const uniforms = {
     look: { value: new THREE.Vector2() },
+    pose: { value: new THREE.Vector3() },
     time: { value: 0 },
     voice: { value: 0 },
     activity: { value: 0 },
@@ -58,20 +61,21 @@ export async function startTalkingPortrait(
     depthWrite: false,
     vertexColors: true,
     vertexShader: `attribute vec3 signal;
-      uniform float time, voice, activity, pointSize; uniform vec2 look;
+      uniform float time, voice, activity, pointSize; uniform vec3 pose;
       varying vec3 vColor; varying float vAlpha, vWarm;
       void main() {
         vec3 p = position;
-        float breath = sin(time * 0.8) * 0.0015;
-        p.xy *= 1.0 + breath;
-        float face = exp(-pow(p.x / 0.2, 4.0) - pow((p.y - 0.1) / 0.25, 4.0));
-        p.x += sin(p.y * 95.0 - time * 3.0 + signal.z) * face * voice * 0.0012;
-        p.y += sin(time * 0.45 + signal.z * 6.28) * 0.00035;
-        p.z += face * sin(time * 0.9) * 0.001;
-        float yaw = look.x * 0.1;
-        float turnX = cos(yaw) * p.x + sin(yaw) * p.z;
-        p.x = mix(p.x, turnX, face);
-        p.y += look.y * (p.z - 0.04) * face * 0.07;
+        float head = smoothstep(-0.19, -0.055, p.y) * (1.0 - smoothstep(0.20, 0.27, abs(p.x)));
+        float body = (1.0 - smoothstep(-0.15, 0.03, p.y)) * (1.0 - smoothstep(0.25, 0.49, abs(p.x)));
+        float breath = sin(time * 1.1);
+        p.x *= 1.0 + body * breath * 0.008;
+        p.y += body * breath * 0.0045;
+        vec3 h = p - vec3(0.0, -0.16, 0.01);
+        h.xz = mat2(cos(pose.x), -sin(pose.x), sin(pose.x), cos(pose.x)) * h.xz;
+        h.yz = mat2(cos(pose.y), -sin(pose.y), sin(pose.y), cos(pose.y)) * h.yz;
+        h.xy = mat2(cos(pose.z), sin(pose.z), -sin(pose.z), cos(pose.z)) * h.xy;
+        p = mix(p, h + vec3(0.0, -0.16, 0.01), head);
+        p.x += sin(position.y * 95.0 - time * 3.0 + signal.z) * head * voice * 0.0012;
         vColor = color; vAlpha = signal.x; vWarm = signal.y;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         gl_PointSize = pointSize;
@@ -88,6 +92,9 @@ export async function startTalkingPortrait(
   });
   const portrait = new THREE.Points(geometry, material);
   scene.add(portrait);
+  const backdrop = createProjectionBackdrop(uniforms.time, uniforms.voice);
+  scene.add(backdrop.mesh);
+  const targetPose = new THREE.Vector3();
   let frame = 0,
     previous = 0,
     stopped = false,
@@ -99,7 +106,8 @@ export async function startTalkingPortrait(
     camera.left = (-0.55 * width) / height;
     camera.right = (0.55 * width) / height;
     camera.updateProjectionMatrix();
-    const scale = Math.min(1, 640 / Math.max(width, height));
+    const scale = Math.min(1, 640 / height, 2048 / width);
+    backdrop.resize(width, height);
     renderer.setSize(
       Math.round(width * scale),
       Math.round(height * scale),
@@ -137,8 +145,9 @@ export async function startTalkingPortrait(
     stopped = true;
     cancelAnimationFrame(frame);
     observer.disconnect();
-    node.removeEventListener("pointermove", followPointer);
-    node.removeEventListener("pointerleave", resetLook);
+    window.removeEventListener("pointermove", followPointer);
+    window.removeEventListener("blur", resetLook);
+    backdrop.dispose();
     geometry.dispose();
     material.dispose();
     renderer.dispose();
@@ -149,8 +158,8 @@ export async function startTalkingPortrait(
     node.replaceChildren(renderer.domElement);
     resize();
     observer.observe(node);
-    node.addEventListener("pointermove", followPointer);
-    node.addEventListener("pointerleave", resetLook);
+    window.addEventListener("pointermove", followPointer, { passive: true });
+    window.addEventListener("blur", resetLook);
     renderer.domElement.dataset.avatarReady = "true";
     renderer.domElement.dataset.particles = String(field.positions.length / 3);
     const draw = (now: number) => {
@@ -166,6 +175,21 @@ export async function startTalkingPortrait(
         (targetVoice - uniforms.voice.value) * (1 - Math.exp(-elapsed / 80));
       uniforms.time.value = reduced ? 0 : now / 1000;
       uniforms.look.value.lerp(targetLook, 1 - Math.exp(-elapsed / 150));
+      targetPose.fromArray(
+        portraitPose(
+          uniforms.time.value,
+          host.state(),
+          uniforms.voice.value,
+          uniforms.look.value.x,
+          uniforms.look.value.y,
+          reduced,
+        ),
+      );
+      uniforms.pose.value.lerp(targetPose, 1 - Math.exp(-elapsed / 280));
+      renderer.domElement.dataset.pose = uniforms.pose.value
+        .toArray()
+        .map((angle) => angle.toFixed(4))
+        .join(",");
       uniforms.activity.value =
         host.state() === "thinking"
           ? reduced

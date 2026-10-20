@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { sampleProjection } from "./projection-field.ts";
+import { sampleProjection, projectionEdgeFade } from "./projection-field.ts";
 
 describe("projection artwork sampling", () => {
+  it("dissolves both source crop edges without dimming the central figure", () => {
+    expect(projectionEdgeFade(0)).toBe(0);
+    expect(projectionEdgeFade(1)).toBe(0);
+    expect(projectionEdgeFade(0.5)).toBe(1);
+    expect(projectionEdgeFade(0.03)).toBeLessThan(0.2);
+    expect(projectionEdgeFade(0.03)).toBeCloseTo(projectionEdgeFade(0.97));
+  });
   it("keeps the source colors, omits transparency and locates warm face energy", () => {
     const pixels = new Uint8ClampedArray(4 * 4 * 4);
     pixels.set([255, 128, 0, 255], (2 * 4 + 2) * 4);

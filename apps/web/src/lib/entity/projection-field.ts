@@ -1,5 +1,11 @@
 import * as THREE from "three";
 
+/** Dissolve the source image's vertical crop rather than displaying its rectangle. */
+export function projectionEdgeFade(u: number) {
+  const t = THREE.MathUtils.clamp(Math.min(u, 1 - u) / 0.12, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
 /** Reconstruct the reference artwork as colored splats with a shallow head volume. */
 export function sampleProjection(
   pixels: Uint8ClampedArray,
@@ -22,10 +28,12 @@ export function sampleProjection(
   for (let y = 0; y < height; y += stride) {
     for (let x = 0; x < width; x += stride) {
       const index = (y * width + x) * 4;
-      const alpha = (pixels[index + 3] ?? 0) / 255;
+      let alpha = (pixels[index + 3] ?? 0) / 255;
       if (alpha < 0.025) continue;
       const u = x / width,
         v = y / height;
+      alpha *= projectionEdgeFade(u);
+      if (alpha < 0.025) continue;
       const head = Math.exp(
         -Math.pow((u - 0.5) / 0.2, 4) - Math.pow((v - 0.36) / 0.3, 4),
       );

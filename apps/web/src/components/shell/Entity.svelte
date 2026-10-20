@@ -64,7 +64,7 @@
     left: 50%;
     top: 45%;
     transform: translate(-50%, -50%);
-    width: min(68vmin, 640px);
+    width: 100vw;
     height: min(68vmin, 640px);
     pointer-events: none;
   }
