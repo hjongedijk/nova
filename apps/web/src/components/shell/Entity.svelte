@@ -41,8 +41,8 @@
   style:visibility={showFace ? "hidden" : undefined}
 ></canvas>
 {#if showFace}
-  <div class="wallpaper-portrait" class:panoramic={wallpaper}>
-    <HelperCompanion state={chat.uiState} large panoramic={wallpaper} />
+  <div class="wallpaper-portrait">
+    <HelperCompanion state={chat.uiState} large panoramic />
   </div>
 {/if}
 
@@ -53,7 +53,7 @@
   title="Tik om te spreken"
   bind:this={core}
   style={showFace
-    ? `left:50%;top:${wallpaper ? 39 : 45}%;width:min(28vmin,260px);height:min(40vmin,360px);transform:translate(-50%,-50%)`
+    ? "left:50%;top:37%;width:min(42vmin,420px);height:min(55vmin,520px);transform:translate(-50%,-50%)"
     : undefined}
   onclick={pressCore}
 ></button>
@@ -62,14 +62,10 @@
   .wallpaper-portrait {
     position: fixed;
     left: 50%;
-    top: 45%;
+    top: 50%;
     transform: translate(-50%, -50%);
     width: 100vw;
-    height: min(68vmin, 640px);
-    pointer-events: none;
-  }
-  .wallpaper-portrait.panoramic {
-    top: 50%;
     height: 100vh;
+    pointer-events: none;
   }
 </style>

@@ -117,14 +117,17 @@ export async function startTalkingPortrait(
     const width = Math.max(1, node.clientWidth),
       height = Math.max(1, node.clientHeight);
     const portraitHeight = host.panoramic
-      ? Math.min(height * 1.1, width * 1.65)
+      ? Math.min(height * 1.45, width * 2.6)
       : height;
     camera.left = (-0.55 * width) / portraitHeight;
     camera.right = (0.55 * width) / portraitHeight;
     camera.top = (0.55 * height) / portraitHeight;
     camera.bottom = -camera.top;
     portrait.position.y = host.panoramic
-      ? (-0.55 * height) / portraitHeight + 0.46
+      ? Math.min(
+          (-0.55 * height) / portraitHeight + 0.46,
+          (0.55 * height) / portraitHeight - 0.43,
+        )
       : 0;
     camera.updateProjectionMatrix();
     // Bound total framebuffer pixels rather than stretching a 640px render.
