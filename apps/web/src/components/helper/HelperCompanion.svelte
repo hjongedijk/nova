@@ -8,17 +8,12 @@
   let {
     state: mood = "ready",
     compact = false,
-    large = false,
-    panoramic = false,
   }: {
     state?: string;
     compact?: boolean;
-    large?: boolean;
-    panoramic?: boolean;
   } = $props();
   let stage: HTMLDivElement;
   let avatar: OrbHandle | undefined;
-  let refreshAppearance: (() => void) | undefined;
 
   function currentState(): UiState {
     if (mood === "idle" || mood === "ready") return "ready";
@@ -28,10 +23,8 @@
   }
   onMount(() => {
     let visible = false,
-      disposed = false,
-      starting = false,
-      revision = 0;
-    function fallback() {
+      disposed = false;
+    function mountOrb() {
       const canvas = document.createElement("canvas");
       canvas.className = "companion-helmet";
       canvas.dataset.renderer = "orb";
@@ -48,47 +41,14 @@
     }
     function updateVisibility() {
       if (!visible || document.hidden || disposed) {
-        revision++;
         avatar?.stop();
         avatar = undefined;
-        // eslint-disable-next-line svelte/no-dom-manipulating -- Remove only canvases owned by the renderer in this empty mount.
+        // eslint-disable-next-line svelte/no-dom-manipulating -- The renderer owns this empty mount's canvases.
         stage.replaceChildren();
         return;
       }
-      if (avatar || starting) return;
-      if (compact || helper.avatar === "orb") {
-        fallback();
-        return;
-      }
-      const attempt = ++revision;
-      starting = true;
-      const cancelled = () => disposed || attempt !== revision;
-      void import("#lib/entity/talking-portrait.ts")
-        .then(async ({ startTalkingPortrait }) => {
-          if (cancelled()) return;
-          const result = await startTalkingPortrait(stage, {
-            state: currentState,
-            cancelled,
-            panoramic,
-          });
-          if (cancelled()) result.stop();
-          else avatar = result;
-        })
-        .catch(() => {
-          if (!cancelled()) fallback();
-        })
-        .finally(() => {
-          starting = false;
-          if (!disposed && !avatar && visible && !document.hidden)
-            updateVisibility();
-        });
+      if (!avatar) mountOrb();
     }
-    refreshAppearance = () => {
-      revision++;
-      avatar?.stop();
-      avatar = undefined;
-      updateVisibility();
-    };
     const observer = new IntersectionObserver(([entry]) => {
       visible = !!entry?.isIntersecting;
       updateVisibility();
@@ -97,17 +57,11 @@
     document.addEventListener("visibilitychange", updateVisibility);
     return () => {
       disposed = true;
-      refreshAppearance = undefined;
-      revision++;
       observer.disconnect();
       document.removeEventListener("visibilitychange", updateVisibility);
       avatar?.stop();
       avatar = undefined;
     };
-  });
-  $effect(() => {
-    void helper.avatar;
-    refreshAppearance?.();
   });
   $effect(() => {
     void helper.eventId;
@@ -121,7 +75,6 @@
 <div
   class="nova-companion"
   class:compact
-  class:large
   data-state={mood}
   aria-hidden="true"
   bind:this={stage}
@@ -137,10 +90,6 @@
   }
   .nova-companion :global(canvas) {
     display: block;
-    width: 100%;
-    height: 100%;
-  }
-  .large {
     width: 100%;
     height: 100%;
   }

@@ -10,7 +10,7 @@ import {
 } from "#lib/voice/helper-cues.ts";
 
 export const helper = $state({
-  avatar: "face" as "face" | "orb",
+  avatar: "orb" as "face" | "orb",
   wardrobe: { theme: "nova", seasonal: false, birthday: "" } as {
     theme: "nova" | "violet" | "gold";
     seasonal: boolean;
@@ -55,8 +55,8 @@ export function loadHelperPreferences(): void {
     );
     if (!value || typeof value !== "object") return;
     const saved = value as Record<string, unknown>;
-    if (saved.avatar === "face" || saved.avatar === "orb")
-      helper.avatar = saved.avatar;
+    // Retired face preferences must not reactivate the rejected humanoid.
+    helper.avatar = "orb";
     if (["orb", "ring", "mist"].includes(String(saved.shape)))
       helper.shape = saved.shape as typeof helper.shape;
     if (saved.notifications && typeof saved.notifications === "object") {

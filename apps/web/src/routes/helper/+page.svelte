@@ -671,7 +671,7 @@
         if (disposed) return;
         autohide = prefs.autohide;
         contrast = prefs.contrast;
-        helper.avatar = prefs.avatar ?? "face";
+        helper.avatar = "orb";
         helper.shape = prefs.shape;
         if (prefs.notifications)
           helper.notifications = {
@@ -1210,13 +1210,6 @@
               onchange={() =>
                 storage.set("novaVolume", String(volume / 100), "volume")}
             /></label
-          >
-          <label
-            >Avatar <select data-helper-live bind:value={helper.avatar}>
-              <option value="face">Gezicht</option><option value="orb"
-                >Originele orb</option
-              >
-            </select></label
           >
           <label
             >Orb <select data-helper-live bind:value={helper.shape}

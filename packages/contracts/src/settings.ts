@@ -685,6 +685,7 @@ export interface NotificationModes {
   timer: NotificationMode;
 }
 export interface HelperPreferences {
+  /** Legacy face values are accepted and normalized to the original orb. */
   avatar?: "face" | "orb";
   wardrobe?: {
     theme: "nova" | "violet" | "gold";

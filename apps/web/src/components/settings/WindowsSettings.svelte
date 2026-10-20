@@ -7,7 +7,6 @@
   import DesktopSection from "./DesktopSection.svelte";
   import DevicesSection from "./DevicesSection.svelte";
   import WindowsAgentPanel from "./WindowsAgentPanel.svelte";
-  import AvatarPreferences from "./AvatarPreferences.svelte";
   import HelperPreferencesHistory from "./HelperPreferencesHistory.svelte";
   import Disclosure from "./ui/Disclosure.svelte";
 
@@ -134,8 +133,7 @@
     title="Helper en achtergrond"
     hint="Weergave en beeldschermen"
     id="windows-appearance"
-    group="settings-section"
-    ><AvatarPreferences /><DevicesSection part="windows" /></Disclosure
+    group="settings-section"><DevicesSection part="windows" /></Disclosure
   >
   <Disclosure
     group="settings-section"

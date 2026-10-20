@@ -1,7 +1,5 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import HelperCompanion from "#components/helper/HelperCompanion.svelte";
-  import { helper } from "#lib/stores/helper.svelte.ts";
   import { wallpaper } from "#lib/modes/wallpaper.ts";
   import { startEntity } from "#lib/entity/entity.ts";
   import { chat } from "#lib/stores/chat.svelte.ts";
@@ -11,13 +9,12 @@
 
   let canvas = $state<HTMLCanvasElement>();
   let core = $state<HTMLButtonElement>();
-  const showFace = $derived(helper.avatar === "face");
 
   onMount(() => {
     return startLightSync();
   });
   $effect(() => {
-    if (showFace || !canvas || !core) return;
+    if (!canvas || !core) return;
     const target = canvas;
     return untrack(() =>
       startEntity({
@@ -34,17 +31,7 @@
   });
 </script>
 
-<canvas
-  id="entity"
-  bind:this={canvas}
-  aria-hidden="true"
-  style:visibility={showFace ? "hidden" : undefined}
-></canvas>
-{#if showFace}
-  <div class="wallpaper-portrait">
-    <HelperCompanion state={chat.uiState} large panoramic />
-  </div>
-{/if}
+<canvas id="entity" bind:this={canvas} aria-hidden="true"></canvas>
 
 <button
   id="core"
@@ -52,20 +39,5 @@
   aria-label="Spreken of spraak stoppen"
   title="Tik om te spreken"
   bind:this={core}
-  style={showFace
-    ? "left:50%;top:37%;width:min(42vmin,420px);height:min(55vmin,520px);transform:translate(-50%,-50%)"
-    : undefined}
   onclick={pressCore}
 ></button>
-
-<style>
-  .wallpaper-portrait {
-    position: fixed;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: 100vw;
-    height: 100vh;
-    pointer-events: none;
-  }
-</style>

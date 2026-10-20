@@ -278,7 +278,7 @@ export function normalizeHelperPreferences(
     body?.avatar !== undefined &&
     !["face", "orb"].includes(String(body.avatar))
   )
-    throw new ValidationError(["Kies Gezicht of Originele orb."]);
+    throw new ValidationError(["Kies de originele orb."]);
   const cues = body?.cues as Record<string, unknown> | undefined;
   const quiet = cues?.quiet as Record<string, unknown> | undefined;
   const notifications = body?.notifications as
@@ -457,9 +457,7 @@ export function normalizeHelperPreferences(
   )
     throw new ValidationError(["Ongeldige orbkleuren of verjaardag."]);
   const preferences: HelperPreferences = {
-    ...(body.avatar !== undefined
-      ? { avatar: body.avatar as "face" | "orb" }
-      : {}),
+    ...(body.avatar !== undefined ? { avatar: "orb" as const } : {}),
     ...(wardrobe
       ? {
           wardrobe: {

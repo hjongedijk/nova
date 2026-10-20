@@ -31,14 +31,17 @@ function fixture() {
 }
 
 describe("helper preference history", () => {
-  it("preserves the avatar choice and accepts legacy preferences without it", () => {
+  it("maps retired face preferences to the orb without changing other preferences", () => {
     const preferences = fixture().settings.get().helperPreferences;
     expect(normalize(preferences).avatar).toBeUndefined();
-    expect(normalize({ ...preferences, avatar: "face" }).avatar).toBe("face");
+    expect(normalize({ ...preferences, avatar: "face" })).toEqual({
+      ...normalize(preferences),
+      avatar: "orb",
+    });
     expect(normalize({ ...preferences, avatar: "orb" }).avatar).toBe("orb");
     expect(() =>
       normalize({ ...preferences, avatar: "unknown" as never }),
-    ).toThrow("Kies Gezicht of Originele orb.");
+    ).toThrow("Kies de originele orb.");
   });
 
   it("keeps legacy delivery defaults and rejects unknown notification modes", () => {
