@@ -1,39 +1,13 @@
-# Third-party avatar assets
+# Avatar artwork and rendering
 
-NOVA uses [TalkingHead](https://github.com/met4citizen/TalkingHead), by Mika Suominen, under the MIT license. Its copyright and license are included in the installed package and the served avatar credits.
+`apps/web/static/avatars/nova-projection.png` is generated reconstruction artwork based on the visual reference supplied by the user: the cyan contour humanoid with orange facial energy shown in [this reel](https://www.instagram.com/reel/Dd95nEZig-V/), credited to A.P.E.X Intelligence and Reznikov Engineering. Imagegen produced a clean transparent source artwork from the reference cover, preserving the requested faceless silhouette, horizontal filaments, neck conduits and shoulder field.
 
-`apps/web/static/avatars/nova-human.glb` is a portrait extraction of **Sky by VTubeMe**, licensed under **Creative Commons Attribution 4.0 International (CC BY 4.0)**. The publisher explicitly permits modification and redistribution, including commercial use. Credit: [VTubeMe](https://vtubeme.com), [Sky source and license](https://vtubeme.com/free-vrm-avatars/sky), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+This is a reconstructed visual, not the original APEX source package. No code or assets from the paid source kit are bundled. Reference information: [Reznikov Engineering](https://reznikov-engineering.com/apex/humanoid).
 
-NOVA removes the body, visible clothing and unused textures while retaining the original skeleton, facial morphs, eyelashes, detailed eyeballs, teeth, skin textures and normal maps. The face and its integrated hairstyle receive NOVA's holographic material at runtime. Head orientation is corrected for the source rig's additional neck joints. A hidden foot mesh preserves the animation library’s geometry-based ground balance without loading its clothing textures. This replaces the previous MPFB-derived portrait; its geometry and textures are no longer shipped.
-
-- Download: https://vtubeme.com/media/free/sky/model.glb
-- Source SHA256: `fe4cfc38504b586ba750fd872723091bec962b988b826b457e42f25e8c524bfc`
-- Derived SHA256: `b8404dc8bda68d0173ed54edfee09eb89b54ea3eacc4ec4caf536e406487ddca`
-- Rebuild: `python3 scripts/prepare-nova-avatar.py sky.glb apps/web/static/avatars/nova-human.glb`
+- Artwork SHA256: `cd34ec381fbae0e8b87cf9eefb1d5850d0644478443278868f111d67a85a8edd`
 - Served attribution: `/credits/nova-avatar.txt`
+- The complete source PNG is checked in; rebuilding does not call an image service.
 
-All avatar assets and code are served by NOVA. The avatar uses NOVA's existing speech player, shared audio level and status colors. TalkingHead's optional cloud speech services are not configured. Mouth movement follows audio amplitude; it is not phoneme-accurate lip sync.
+NOVA samples the artwork into a bounded field of colored particles. Its front-facing silhouette and cyan/gold palette come from the image. A shallow inferred depth gives restrained pointer parallax. Breathing, small contour displacements and facial energy respond to the existing speech player and NOVA state. The depiction is deliberately faceless; it does not use a human skin mesh, eyes or a skeletal mouth animation. Speech energy is not phoneme lip sync.
 
-The face itself is the energy field. Fine connections, light points and contours follow its moving surface. A restrained optical glow and transparent corona sit around the head; there is no second orb. Reduced-motion preferences stop moving projection effects and idle head drift. Hidden portraits release their rendering resources. The original orb remains selectable through the shared avatar preference on website, mobile, wallpaper and helper.
-
-MIT License
-
-Copyright (c) 2023-2024 Mika Suominen
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+All assets are served by NOVA. Displaying the portrait does not request a microphone or use a separate voice or external avatar service. The same face/orb selection applies to website, mobile, wallpaper and helper. Reduced-motion preferences stop autonomous movement and pointer parallax. Hidden portraits release geometry, GPU resources, observers and event listeners. The previous GLB avatar, TalkingHead dependency and its preparation tools are no longer shipped.
