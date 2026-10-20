@@ -1,57 +1,66 @@
 #!/usr/bin/env python3
-"""Trim the CC0 MPFB example, preserving face textures, hair, rig and expressions.
+"""Extract NOVA's portrait from VTubeMe Sky, preserving textures, rig and expressions.
 
-Usage: python3 scripts/prepare-nova-avatar.py mpfb.glb nova-human.glb
-Source and license: docs/third-party-assets.md
+Usage: python3 scripts/prepare-nova-avatar.py sky.glb nova-human.glb
+Source, pinned hash and attribution: docs/third-party-assets.md
 """
+import hashlib
 import json
 from pathlib import Path
 import struct
 import sys
 
 source = Path(sys.argv[1]).read_bytes()
+assert hashlib.sha256(source).hexdigest() == "fe4cfc38504b586ba750fd872723091bec962b988b826b457e42f25e8c524bfc", "Unexpected source avatar"
 assert source[:4] == b"glTF"
 size = struct.unpack_from("<I", source, 12)[0]
 model = json.loads(source[20:20 + size])
 binary = source[28 + size:]
-texture_meshes = {"base", "high-poly", "ponytail01"}
-retained_materials = []
-retained_images = []
-material_indices = {}
-for mesh in model["meshes"]:
-    if mesh.get("name") not in texture_meshes:
-        continue
-    material = model["materials"][mesh["primitives"][0]["material"]]
-    texture = model["textures"][material["pbrMetallicRoughness"]["baseColorTexture"]["index"]]
-    image = dict(model["images"][texture["source"]])
-    material["pbrMetallicRoughness"]["baseColorTexture"]["index"] = len(retained_images)
-    retained_images.append(image)
-    retained_materials.append(material)
-    material_indices[mesh["name"]] = len(retained_materials)
-allowed = {"base", "high-poly", "teeth_base", "tongue01", "mind_eyebrows_02", "mind_eyelashes_02", "ponytail01"}
-meshes = {i: m for i, m in enumerate(model["meshes"]) if m.get("name") in allowed}
-mesh_map = {old: new for new, old in enumerate(meshes)}
+allowed = {"AvatarHead", "AvatarEyelashes", "AvatarLeftEyeball", "AvatarRightEyeball", "AvatarTeethLower", "AvatarTeethUpper", "outfit_shoes"}
+keep = {node["mesh"] for node in model["nodes"] if node.get("name") in allowed}
+mesh_map = {old: new for new, old in enumerate(sorted(keep))}
 for node in model["nodes"]:
     if "mesh" in node:
         if node["mesh"] in mesh_map:
             node["mesh"] = mesh_map[node["mesh"]]
         else:
             node.pop("mesh")
-model["meshes"] = list(meshes.values())
+model["meshes"] = [model["meshes"][i] for i in sorted(keep)]
+# TalkingHead balances the hips from geometry bounds. Keep the hidden foot anchor,
+# with a shared material so its clothing textures are not bundled.
+anchor = next(node["mesh"] for node in model["nodes"] if node.get("name") == "outfit_shoes")
+shared = model["meshes"][0]["primitives"][0]["material"]
+for primitive in model["meshes"][anchor]["primitives"]:
+    primitive["material"] = shared
+used_materials = sorted({p["material"] for m in model["meshes"] for p in m["primitives"]})
+material_map = {old: new for new, old in enumerate(used_materials)}
+model["materials"] = [model["materials"][i] for i in used_materials]
+
+def texture_refs(material):
+    for container in [material, material.get("pbrMetallicRoughness", {})]:
+        for key, value in container.items():
+            if key.endswith("Texture") and isinstance(value, dict):
+                yield value
+
+used_textures = sorted({ref["index"] for m in model["materials"] for ref in texture_refs(m)})
+texture_map = {old: new for new, old in enumerate(used_textures)}
+model["textures"] = [model["textures"][i] for i in used_textures]
+for material in model["materials"]:
+    for ref in texture_refs(material):
+        ref["index"] = texture_map[ref["index"]]
+used_images = sorted({texture["source"] for texture in model["textures"]})
+image_map = {old: new for new, old in enumerate(used_images)}
+retained_images = [model["images"][i] for i in used_images]
+for texture in model["textures"]:
+    texture["source"] = image_map[texture["source"]]
 needed = set()
 for mesh in model["meshes"]:
     for primitive in mesh["primitives"]:
-        if mesh.get("name") not in texture_meshes:
-            primitive["attributes"].pop("TEXCOORD_0", None)
         needed.update(primitive["attributes"].values())
         needed.add(primitive["indices"])
         for target in primitive.get("targets", []):
-            # Fine eyebrow/lash fibers keep positional expressions and skinning.
-            # Their matte emissive material does not need bulky animated normal deltas.
-            if mesh.get("name") in {"mind_eyebrows_02", "mind_eyelashes_02"}:
-                target.pop("NORMAL", None)
             needed.update(target.values())
-        primitive["material"] = material_indices.get(mesh.get("name"), 0)
+        primitive["material"] = material_map[primitive["material"]]
 for skin in model.get("skins", []):
     if "inverseBindMatrices" in skin:
         needed.add(skin["inverseBindMatrices"])
@@ -100,15 +109,10 @@ for accessor in accessors:
 model["accessors"] = accessors
 model["bufferViews"] = new_views
 model["buffers"] = [{"byteLength": len(output)}]
-model["materials"] = [{"name": "NOVA hologram", "pbrMetallicRoughness": {
-    "baseColorFactor": [0.08, 0.45, 0.6, 1], "metallicFactor": 0.15, "roughnessFactor": 0.45}}]
 for image in retained_images:
     image["bufferView"] = view_map[image["bufferView"]]
-model["materials"].extend(retained_materials)
 model["images"] = retained_images
-model["textures"] = [{"source": i} for i in range(len(retained_images))]
-model.pop("samplers", None)
-model["asset"]["copyright"] = "MPFB avatar from met4citizen/TalkingHead, CC0; optimized for NOVA"
+model["asset"]["copyright"] = "Sky by VTubeMe (https://vtubeme.com/free-vrm-avatars/sky), CC BY 4.0; portrait extraction and holographic rendering by NOVA"
 encoded = json.dumps(model, separators=(",", ":")).encode()
 encoded += b" " * (-len(encoded) % 4)
 output += b"\x00" * (-len(output) % 4)

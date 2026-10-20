@@ -1,15 +1,17 @@
 # Third-party avatar assets
 
-NOVA's humanoid helper uses [TalkingHead](https://github.com/met4citizen/TalkingHead), by Mika Suominen, under the MIT license. Its copyright and license are included in the installed package.
+NOVA uses [TalkingHead](https://github.com/met4citizen/TalkingHead), by Mika Suominen, under the MIT license. Its copyright and license are included in the installed package and the served avatar credits.
 
-`apps/web/static/avatars/nova-human.glb` is derived from TalkingHead's `avatars/mpfb.glb`, created with Blender and MPFB. The upstream README identifies this model as **CC0**. The model keeps its skeleton, ARKit expressions and Oculus visemes. NOVA keeps the skin, eye and hair textures, the rigged eyebrow and eyelash fibers, and a ponytail; removes clothing and unused assets; applies its own holographic material; and frames only the head and shoulders.
+`apps/web/static/avatars/nova-human.glb` is a portrait extraction of **Sky by VTubeMe**, licensed under **Creative Commons Attribution 4.0 International (CC BY 4.0)**. The publisher explicitly permits modification and redistribution, including commercial use. Credit: [VTubeMe](https://vtubeme.com), [Sky source and license](https://vtubeme.com/free-vrm-avatars/sky), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
-- Source: https://github.com/met4citizen/TalkingHead/blob/main/avatars/mpfb.glb
-- License declaration: https://github.com/met4citizen/TalkingHead#readme (test app asset licenses)
-- Source SHA256: `63c645a2a863b9972e9a9c2ed576a1de4c390b8475508e1473e69c87a3ee299c`
-- Derived SHA256: `471f9c493120e479fd8a60f8fbb093f2fc6da3740a5fc1f49f642e478cee9409`
-- Rebuild: `python3 scripts/prepare-nova-avatar.py mpfb.glb apps/web/static/avatars/nova-human.glb`
+NOVA removes the body, visible clothing and unused textures while retaining the original skeleton, facial morphs, eyelashes, detailed eyeballs, teeth, skin textures and normal maps. The face and its integrated hairstyle receive NOVA's holographic material at runtime. Head orientation is corrected for the source rig's additional neck joints. A hidden foot mesh preserves the animation library’s geometry-based ground balance without loading its clothing textures. This replaces the previous MPFB-derived portrait; its geometry and textures are no longer shipped.
 
-All avatar assets and code are served by NOVA. Displaying the avatar does not request a microphone, use a separate TTS voice, or send speech or model data to another service. The initial integration drives mouth opening from NOVA's existing voice level; it does not claim phoneme-accurate lip sync. TalkingHead's optional cloud speech services are not configured.
+- Download: https://vtubeme.com/media/free/sky/model.glb
+- Source SHA256: `fe4cfc38504b586ba750fd872723091bec962b988b826b457e42f25e8c524bfc`
+- Derived SHA256: `b8404dc8bda68d0173ed54edfee09eb89b54ea3eacc4ec4caf536e406487ddca`
+- Rebuild: `python3 scripts/prepare-nova-avatar.py sky.glb apps/web/static/avatars/nova-human.glb`
+- Served attribution: `/credits/nova-avatar.txt`
 
-The portrait uses the live facial rig for its cyan filament overlay. The face itself is the energy field: surface light points and connections respond to the same NOVA audio level and status colors as the compact orb. No second orb is displayed. A transparent projection of light arcs and data points sits behind the head. Reduced-motion preferences disable moving scan bands and idle head drift. Hidden portraits stop rendering and release their GPU resources.
+All avatar assets and code are served by NOVA. The avatar uses NOVA's existing speech player, shared audio level and status colors. TalkingHead's optional cloud speech services are not configured. Mouth movement follows audio amplitude; it is not phoneme-accurate lip sync.
+
+The face itself is the energy field. Fine connections, light points and contours follow its moving surface. A restrained optical glow and transparent corona sit around the head; there is no second orb. Reduced-motion preferences stop moving projection effects and idle head drift. Hidden portraits release their rendering resources. The original orb remains selectable through the shared avatar preference on website, mobile, wallpaper and helper.

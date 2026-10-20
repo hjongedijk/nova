@@ -8,7 +8,7 @@ declare module "@met4citizen/talkinghead" {
     audioReverbNode?: AudioNode;
     mtAvatar: Record<
       string,
-      { realtime?: number | null; needsUpdate?: boolean }
+      { value: number; realtime?: number | null; needsUpdate?: boolean }
     >;
     showAvatar(options: Record<string, unknown>): Promise<void>;
     animate(deltaMilliseconds: number): void;
