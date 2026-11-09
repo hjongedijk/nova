@@ -15,6 +15,7 @@ export const STACK_SERVICES = Object.freeze({
   piper: "nova-piper",
   "home-assistant": "nova-home-assistant",
   "mcp-egress": "nova-mcp-egress",
+  searxng: "nova-searxng",
 });
 export const STATUS_SERVICES = Object.freeze({
   ...STACK_SERVICES,

@@ -7,6 +7,7 @@ Everything NOVA talks to besides its tools' own logic: language models, smart-ho
 | Language models (OmniRoute, free routing)        | [Language models](#language-models-omniroute)                                                                                                                  |
 | Home Assistant, Proxmox, Termix, Pangolin        | [Home Assistant](#home-assistant), [Proxmox, Termix, Pangolin](#proxmox-termix-pangolin)                                                                       |
 | CalDAV calendar, news, routes, ntfy, Piper voice | [Calendar](#calendar-caldav), [News](#news), [Routes](#routes-and-travel-time), [ntfy](#urgent-phone-notifications-ntfy), [Piper](#optional-local-piper-voice) |
+| Web search (SearXNG)                             | [SearXNG web search](#searxng-web-search)                                                                                                                      |
 | Node-RED and MQTT                                | [Node-RED and MQTT](#node-red-and-mqtt)                                                                                                                        |
 | MCP servers                                      | [MCP servers](#mcp-servers)                                                                                                                                    |
 | Your own HTTP APIs                               | [Your own HTTP APIs](#your-own-http-apis)                                                                                                                      |
@@ -238,6 +239,25 @@ NOVA_NEWS_FEEDS=[{"name":"NOS","url":"https://feeds.nos.nl/nosnieuwsalgemeen"},{
 ```
 
 Feeds are read in parallel (500 KB and seven seconds each), up to ten headlines are combined with their source names, and unavailable feeds are skipped. Only HTTP(S) URLs without credentials are accepted and the address is re-checked at fetch time, including redirects, to block private targets. Feed text is untrusted.
+
+For news about a specific subject the model calls `web_search` with `category: "news"`, which asks SearXNG's news engines (Bing, DuckDuckGo, Brave, Google and Startpage news); see the next section.
+
+## SearXNG web search
+
+`web_search` asks NOVA's own [SearXNG](https://github.com/searxng/searxng) metasearch first, so searches no longer depend on one engine that may answer with a captcha. SearXNG is the `searxng` service in the default stack (always on, no profile), image `searxng/searxng:2026.11.2-cccbc9e15` (rolling releases; bump the pinned tag deliberately). It has no host port: only NOVA reaches it on the private `nova` network.
+
+- **Request.** `GET <NOVA_SEARXNG_URL>/search?q=…&format=json&language=nl&safesearch=1` (plus `categories=news` for news searches), eight-second timeout, 1 MB answer limit, no redirects. Results are normalised to `title`, `url`, `snippet`, `engine` (and `published` for news), deduplicated, only `http(s)` links, at most eight. The tool result names the `provider` and stays marked untrusted.
+- **Fallback.** When SearXNG is unreachable, answers an HTTP error or malformed JSON, or finds nothing, NOVA logs one warning (`SearXNG search failed (…); falling back to DuckDuckGo.`) and uses DuckDuckGo's HTML page, then Wikipedia, exactly as before.
+- **Network boundary.** The SearXNG address is operator configuration (`NOVA_SEARXNG_URL` or Settings), never model input, and it is the only internal address the world tools may call: requests must stay on its origin and path. `web_read` and every other model-controlled fetch keep the public-only guard, and user HTTP skills cannot reach `searxng` at all.
+- **Settings.** **Instellingen > Geavanceerd > Webzoeken (SearXNG)** or `.env`: `NOVA_SEARXNG_URL` (default `http://searxng:8080`; `off` in `.env` skips SearXNG and searches DuckDuckGo directly). `NOVA_SEARXNG_SECRET` optionally fixes SearXNG's own secret key; without it the container generates a random one at every start (it only signs SearXNG's cookies and image URLs, which NOVA does not use).
+- **Configuration file.** `deploy/searxng/settings.yml`, mounted read-only from `./searxng/settings.yml` next to the compose file. It keeps only Wikipedia, Google, Bing, DuckDuckGo, Brave and Startpage (web, news and a few image engines), enables the JSON format, defaults to Dutch, uses safe search "moderate", turns the bot limiter off (internal use, no Valkey needed) and disables metrics. Google and Startpage may still refuse requests from a server address; SearXNG then suspends that engine for a while and the others answer.
+- **Hardening.** Runs as the image's `searxng` user (uid 977), read-only root filesystem with tmpfs for `/tmp` and its cache, all capabilities dropped, `no-new-privileges`, 512 MB, one CPU, 128 processes, and a `/healthz` health check.
+
+Check it from the host without publishing a port:
+
+```sh
+docker compose exec nova node -e "fetch('http://searxng:8080/search?q=test&format=json').then(r=>r.json()).then(j=>console.log(j.results.length,'results',j.unresponsive_engines))"
+```
 
 ## Routes and travel time
 

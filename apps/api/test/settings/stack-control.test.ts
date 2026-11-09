@@ -13,6 +13,7 @@ const services = [
   ["piper", "Lokale stem"],
   ["home-assistant", "Home Assistant"],
   ["mcp-egress", "MCP-bronverbinding"],
+  ["searxng", "Webzoeken (SearXNG)"],
   ["stack-control", "Stackbeheer"],
 ].map(([id]) => ({
   id,

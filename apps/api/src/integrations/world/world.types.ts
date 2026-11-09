@@ -10,6 +10,22 @@ export interface WorldHttp {
   getJson<T = unknown>(url: string, signal?: AbortSignal): Promise<T>;
   /** Anything the model can ask for: must refuse non-public addresses. */
   getPage(url: string, options?: FetchPublicOptions): Promise<PublicResponse>;
+  /**
+   * JSON from one of NOVA's own stack services (SearXNG). Only URLs under `allowedBase`, which comes from
+   * the operator's configuration, never from the model. Optional so test doubles can leave it out.
+   */
+  getServiceJson?<T = unknown>(
+    url: string,
+    options: ServiceJsonOptions,
+  ): Promise<T>;
+}
+
+export interface ServiceJsonOptions {
+  /** The configured service base URL; the request must stay on its origin and path. */
+  allowedBase: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  maxBytes?: number;
 }
 
 /**

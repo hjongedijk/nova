@@ -125,6 +125,8 @@ const NOVA_INTERNAL_HOSTS = new Set([
   "nova-piper",
   "speaches",
   "nova-speaches",
+  "searxng",
+  "nova-searxng",
   "asterisk",
   "linphone-chat",
   "host.docker.internal",

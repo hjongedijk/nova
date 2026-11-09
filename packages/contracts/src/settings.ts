@@ -930,6 +930,7 @@ export type StackServiceId =
   | "qdrant"
   | "home-assistant"
   | "mcp-egress"
+  | "searxng"
   | "stack-control";
 export interface StackServiceStatus {
   id: StackServiceId;

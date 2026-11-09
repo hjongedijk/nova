@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import type {
   AirQuality,
   IssPosition,
@@ -31,8 +31,14 @@ import { routeEstimate } from "./route.js";
 import type { CalDavService } from "../../planning/caldav.service.js";
 import { calendarEventStartInstant } from "../../planning/calendar-day.js";
 import { webRead, webSearch, wikipedia } from "./web.js";
-import { WORLD_HTTP, type HomeSource, type WorldHttp } from "./world.types.js";
+import {
+  WORLD_HTTP,
+  type HomeSource,
+  type ServiceJsonOptions,
+  type WorldHttp,
+} from "./world.types.js";
 
+const logger = new Logger("WorldService");
 const MAX_FIXED_JSON_BYTES = 1_500_000;
 const FIXED_JSON_HOSTS = new Set([
   "air-quality-api.open-meteo.com",
@@ -59,14 +65,38 @@ function assertFixedJsonUrl(value: string): void {
     throw new Error("Blocked: JSON service URL is not in the fixed allowlist");
 }
 
-async function jsonWithLimit<T>(response: Response): Promise<T> {
+/**
+ * The single exception to the public-only rule: NOVA's own stack service at the operator-configured
+ * address (SearXNG). The URL must stay on that origin and below its path; everything else is refused.
+ */
+export function assertServiceUrl(value: string, allowedBase: string): URL {
+  const url = new URL(value);
+  const base = new URL(allowedBase);
+  const basePath = base.pathname.replace(/\/?$/, "/");
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    base.username ||
+    base.password ||
+    url.origin !== base.origin ||
+    !`${url.pathname}/`.startsWith(basePath)
+  )
+    throw new Error("Blocked: not the configured internal service");
+  return url;
+}
+
+async function jsonWithLimit<T>(
+  response: Response,
+  maxBytes = MAX_FIXED_JSON_BYTES,
+): Promise<T> {
   const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_FIXED_JSON_BYTES)
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes)
     throw new Error("Response too large");
   const reader = response.body?.getReader();
   if (!reader) {
     const body = await response.text();
-    if (Buffer.byteLength(body) > MAX_FIXED_JSON_BYTES)
+    if (Buffer.byteLength(body) > maxBytes)
       throw new Error("Response too large");
     return JSON.parse(body) as T;
   }
@@ -76,7 +106,7 @@ async function jsonWithLimit<T>(response: Response): Promise<T> {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_FIXED_JSON_BYTES) {
+    if (size > maxBytes) {
       await reader.cancel().catch(() => {});
       throw new Error("Response too large");
     }
@@ -108,6 +138,30 @@ export const defaultWorldHttp: WorldHttp = {
     if (response.status >= 400)
       throw new Error(`Page returned ${response.status}`);
     return response;
+  },
+  async getServiceJson<T>(
+    url: string,
+    {
+      allowedBase,
+      signal,
+      timeoutMs = 8000,
+      maxBytes = 1_000_000,
+    }: ServiceJsonOptions,
+  ): Promise<T> {
+    assertServiceUrl(url, allowedBase);
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const response = await fetch(url, {
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      redirect: "error",
+      headers: {
+        accept: "application/json",
+        "user-agent": "NOVA/1.0 (private assistant)",
+        // SearXNG's bot detection logs an error for every request without a client address.
+        "x-real-ip": "127.0.0.1",
+      },
+    });
+    if (!response.ok) throw new Error(`Request failed (${response.status})`);
+    return jsonWithLimit<T>(response, maxBytes);
   },
 };
 
@@ -277,11 +331,23 @@ export class WorldService {
         };
       }
       case "web_search": {
-        const results = await webSearch(
+        const category = args.category === "news" ? "news" : "general";
+        const { provider, results } = await webSearch(
           this.http,
           str("query"),
-          (args.maxResults as number | undefined) ?? 5,
+          Math.min(
+            8,
+            Math.max(1, (args.maxResults as number | undefined) ?? 5),
+          ),
           signal,
+          {
+            searxngUrl: this.config.searxngUrl,
+            category,
+            onFallback: (reason) =>
+              logger.warn(
+                `SearXNG search failed (${reason}); falling back to DuckDuckGo.`,
+              ),
+          },
         );
         if (!results.length)
           return { ok: false, error: "Geen zoekresultaten gevonden." };
@@ -289,6 +355,8 @@ export class WorldService {
           ok: true,
           result: {
             query: args.query,
+            ...(category === "news" ? { category } : {}),
+            provider,
             untrusted: true,
             results,
             hint: 'Beantwoord de vraag zelf in een of twee zinnen en noem de bron ("volgens ..."). Geen lijst met links, tenzij erom gevraagd wordt.',

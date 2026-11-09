@@ -1,0 +1,67 @@
+# SearXNG for NOVA: private metasearch on the stack network only (no host port). NOVA's web_search asks it
+# first (/search?format=json) and falls back to DuckDuckGo HTML and Wikipedia when it fails.
+# Mounted read-only at /etc/searxng. Everything not set here comes from SearXNG's own defaults.
+# See docs/integrations.md#searxng-web-search.
+use_default_settings:
+  engines:
+    # Only these engines are loaded; the rest of SearXNG's long default list stays off.
+    keep_only:
+      - wikipedia
+      - google
+      - bing
+      - duckduckgo
+      - brave
+      - startpage
+      - google news
+      - bing news
+      - duckduckgo news
+      - brave.news
+      - startpage news
+      - bing images
+      - duckduckgo images
+      - brave.images
+
+general:
+  instance_name: NOVA
+  enable_metrics: false
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  default_lang: nl-NL
+  # json is what NOVA reads; html keeps the page usable for a manual check from inside the network.
+  formats:
+    - html
+    - json
+
+server:
+  # Placeholder only: compose sets SEARXNG_SECRET (NOVA_SEARXNG_SECRET in .env, or a random value per start).
+  secret_key: "ultrasecretkey"
+  # Internal service for one client (NOVA): no bot limiter, no valkey needed.
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: GET
+
+ui:
+  default_locale: nl
+  query_in_title: false
+
+outgoing:
+  request_timeout: 4.0
+  max_request_timeout: 8.0
+  pool_connections: 50
+  pool_maxsize: 10
+
+engines:
+  # Off in SearXNG's defaults (captcha-prone); NOVA wants them, SearXNG suspends an engine that hits a captcha.
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: startpage
+    inactive: false
+    disabled: false
+  - name: startpage news
+    inactive: false
+    disabled: false

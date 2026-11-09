@@ -264,6 +264,45 @@ services:
       timeout: 3s
       retries: 3
 
+  # NOVA's own web search (SearXNG metasearch). Always on: web_search asks it first (NOVA_SEARXNG_URL, default
+  # http://searxng:8080) and falls back to DuckDuckGo/Wikipedia when it is down. No host port: only NOVA reaches it.
+  # Settings come read-only from ./searxng/settings.yml (copy deploy/searxng next to this file). The secret is
+  # NOVA_SEARXNG_SECRET from .env, or a fresh random one per start. See docs/integrations.md#searxng-web-search.
+  searxng:
+    <<: *restart
+    image: searxng/searxng:2026.11.2-cccbc9e15
+    container_name: nova-searxng
+    user: "977:977" # the image's searxng user
+    read_only: true
+    tmpfs: [/tmp, "/var/cache/searxng:uid=977,gid=977"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1
+    environment:
+      SEARXNG_SECRET: ${NOVA_SEARXNG_SECRET:-}
+      FORCE_OWNERSHIP: "false"
+    # Without a configured secret, generate one per start (only signs SearXNG's own cookies and URLs).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - export SEARXNG_SECRET="$${SEARXNG_SECRET:-$$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')}"; exec /usr/local/searxng/entrypoint.sh
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/searxng/.venv/bin/python
+        - -I
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks: [nova]
+
   node-red:
     <<: *restart
     image: nodered/node-red:4.1

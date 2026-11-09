@@ -19,11 +19,14 @@ Make a folder for the installation and download the compose file, environment te
 mkdir nova && cd nova
 curl -fsSLO https://raw.githubusercontent.com/hjongedijk/nova/main/deploy/docker-compose.yml
 curl -fsSL  https://raw.githubusercontent.com/hjongedijk/nova/main/.env.example -o .env
-mkdir -p nodered
+mkdir -p nodered searxng
 for file in flows.json settings.js package.json seed-entrypoint.sh; do
   curl -fsSL "https://raw.githubusercontent.com/hjongedijk/nova/main/deploy/nodered/$file" -o "nodered/$file"
 done
+curl -fsSL https://raw.githubusercontent.com/hjongedijk/nova/main/deploy/searxng/settings.yml -o searxng/settings.yml
 ```
+
+The default stack runs NOVA, OmniRoute, Qdrant, MQTT, Node-RED, Home Assistant, the stack-control and MCP egress helpers, and SearXNG (NOVA's own web search, read-only settings from `searxng/settings.yml`, no host port; see [SearXNG web search](integrations.md#searxng-web-search)). Piper, speaches, Asterisk and the Linphone bridge are optional Compose profiles.
 
 Everything NOVA and its services write ends up in folders next to the compose file (`nova-data`, `nova-backups`, `omniroute-data`, `qdrant-data`, `mosquitto-data`, `home-assistant-data`, `nodered-data`). Node-RED copies the repository's initial `flows.json`, `settings.js`, and node manifest only when those files are absent. Updates preserve the persistent copies and all operator-created flows. See [Backups](#backups) for schedule, retention, permissions, and coverage limits.
 

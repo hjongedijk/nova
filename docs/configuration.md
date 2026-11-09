@@ -40,7 +40,8 @@ the default voice `TTS_VOICE` (Sound settings). Managed under **Instellingen > G
 `NOVA_STT_FREE_VERIFIED`, `NOVA_STT_KEY`, `NOVA_LOCAL_STT_URL` (local speech-to-text fallback, default
 `http://speaches:8000/v1`; `off` in `.env` disables it), `NOVA_LOCAL_STT_MODEL` (default `Systran/faster-whisper-small`,
 see [local speech-to-text](integrations.md#local-speech-to-text-fallback)), `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `EMBEDDING_FREE_VERIFIED`,
-`NOVA_NEWS_FEEDS`, `NTFY_URL`, `NTFY_TOPIC`, `NTFY_TOKEN`, `NOVA_CHECK_TARGETS`, `NOVA_HOME_LAT`, `NOVA_HOME_LON`.
+`NOVA_NEWS_FEEDS`, `NOVA_SEARXNG_URL` (NOVA's own SearXNG for `web_search`, default `http://searxng:8080`;
+`off` in `.env` skips it, see [SearXNG web search](integrations.md#searxng-web-search)), `NTFY_URL`, `NTFY_TOPIC`, `NTFY_TOKEN`, `NOVA_CHECK_TARGETS`, `NOVA_HOME_LAT`, `NOVA_HOME_LON`.
 Secret fields are never shown again; a blank secret keeps its value.
 
 ### Optional extras you can still put in `.env`

@@ -78,6 +78,15 @@ export const RUNTIME_GROUPS: RuntimeGroup[] = [
     ],
   },
   {
+    id: "search",
+    label: "Webzoeken (SearXNG)",
+    fields: [
+      f("searxngUrl", "NOVA_SEARXNG_URL", "SearXNG-adres", "url", {
+        hint: "http://searxng:8080",
+      }),
+    ],
+  },
+  {
     id: "ntfy",
     label: "Pushmeldingen (ntfy)",
     fields: [
@@ -254,12 +263,13 @@ export function applyRuntimeOverrides(live: NovaConfig): void {
       embeddingDimensions: live.embeddingDimensions,
       embeddingFreeVerified: live.embeddingFreeVerified,
       newsFeeds: live.newsFeeds,
+      searxngUrl: live.searxngUrl,
       ntfy: { ...live.ntfy },
       checkTargets: live.checkTargets,
       homeLocation: live.homeLocation,
     } as NovaConfig);
   const config = baselines.get(live)!;
-  const { stt, embeddings, news, ntfy, checks, home } = readRuntime(
+  const { stt, embeddings, news, search, ntfy, checks, home } = readRuntime(
     live.dataDir,
   ).groups;
   const latitude = saved(home, "latitude");
@@ -287,6 +297,7 @@ export function applyRuntimeOverrides(live: NovaConfig): void {
         ? embeddings.freeVerified
         : config.embeddingFreeVerified,
     newsFeeds: str(news, "feeds", config.newsFeeds),
+    searxngUrl: str(search, "searxngUrl", config.searxngUrl),
     ntfy: {
       url: str(ntfy, "url", config.ntfy.url),
       topic: str(ntfy, "topic", config.ntfy.topic),
@@ -315,6 +326,7 @@ export function environmentDefault(
     "embeddings.dimensions": base.embeddingDimensions || "",
     "embeddings.freeVerified": base.embeddingFreeVerified ? "true" : "",
     "news.feeds": base.newsFeeds,
+    "search.searxngUrl": base.searxngUrl,
     "ntfy.url": base.ntfy.url,
     "ntfy.topic": base.ntfy.topic,
     "ntfy.token": base.ntfy.token,

@@ -41,11 +41,12 @@ export function worldDefinitions(): ToolDefinition[] {
     {
       name: "web_search",
       description:
-        "Search the web and return titles, links and snippets. Use it for anything current or that you do not know for certain: recent events, prices, release dates, local facts, product details. For research and comparisons, search criteria with separate targeted queries, prefer primary sources, and use web_read on useful results when snippets are not enough. Cite URLs from returned results in the answer.",
+        "Search the web and return titles, links and snippets. Use it for anything current or that you do not know for certain: recent events, prices, release dates, local facts, product details. For research and comparisons, search criteria with separate targeted queries, prefer primary sources, and use web_read on useful results when snippets are not enough. Cite URLs from returned results in the answer. category news searches recent news articles on a specific subject (for the general latest headlines use news_headlines).",
       parameters: schema(
         {
           query: text(2, 200),
           maxResults: { type: "integer", minimum: 1, maximum: 8 },
+          category: { type: "string", enum: ["general", "news"] },
         },
         ["query"],
       ),

@@ -281,6 +281,14 @@ export class NovaConfig {
   };
   /** Optional JSON array of named public RSS feeds; URLs are rechecked by the public fetch guard. */
   readonly newsFeeds = text("NOVA_NEWS_FEEDS");
+  /**
+   * NOVA's own SearXNG (compose service searxng), the first choice for web_search. Operator-set, so it is
+   * the one internal address the world tools may call; "off" skips it and searches DuckDuckGo directly.
+   */
+  readonly searxngUrl =
+    text("NOVA_SEARXNG_URL").toLowerCase() === "off"
+      ? ""
+      : url("NOVA_SEARXNG_URL", "http://searxng:8080");
   readonly windowsAgent = {
     url: url("WINDOWS_AGENT_URL", ""),
     token: text("WINDOWS_AGENT_TOKEN"),
