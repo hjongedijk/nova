@@ -35,6 +35,8 @@ export interface SegmenterEvents {
   /** The caller started talking (after startFrames). `whileSpeaking` frames needed bargeInFrames. */
   onSpeechStart(): void;
   onUtterance(samples: Int16Array, voicedMs: number): void;
+  /** A burst that started like speech turned out to be noise (a cough, a click) and was dropped. */
+  onDiscard?(): void;
 }
 
 /**
@@ -147,7 +149,7 @@ export class UtteranceSegmenter {
     this.silentFrames = 0;
     this.voicedFrames = 0;
     this.utterance = [];
-    if (voicedMs < o.minVoicedMs) return;
+    if (voicedMs < o.minVoicedMs) return this.events.onDiscard?.();
     const out = new Int16Array(kept.reduce((n, f) => n + f.length, 0));
     let at = 0;
     for (const f of kept) {

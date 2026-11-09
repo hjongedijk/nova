@@ -73,7 +73,7 @@ const TEXT = {
       "Ik kan je op dit moment niet goed verstaan. Probeer het later nog eens. Tot ziens.",
     stillThere: "Ben je er nog?",
     idleBye: "Ik hoor niets meer, dus ik hang op. Tot ziens.",
-    bye: "Tot ziens!",
+    bye: "Oké, fijn dat je belde. Tot ziens!",
     screen:
       "Dat moet je op het scherm bevestigen. Over de telefoon voer ik zoiets niet uit.",
     failed: "Daar ging iets mis. Probeer het zo nog eens.",
@@ -87,7 +87,7 @@ const TEXT = {
     stuck: "I can't understand you right now. Please try again later. Goodbye.",
     stillThere: "Are you still there?",
     idleBye: "I can't hear anything, so I'm hanging up. Goodbye.",
-    bye: "Goodbye!",
+    bye: "Okay, nice talking to you. Goodbye!",
     screen:
       "That needs confirmation on the screen. I won't do that over the phone.",
     failed: "Something went wrong. Please try again in a moment.",
@@ -117,6 +117,13 @@ export class ConversationSession {
   private turns = 0;
   private fillerIndex = 0;
   private closing = false;
+  /** Audio of the turn in progress, until NOVA starts saying her answer. */
+  private current?: Int16Array;
+  /**
+   * Audio of a turn the caller talked over before NOVA answered: they were not finished yet. It is
+   * put in front of what they say next, so "wat is het weer ... morgen in Utrecht" stays one question.
+   */
+  private carry?: Int16Array;
   readonly startedAt: number;
   private readonly timers: NonNullable<SessionOptions["timers"]>;
 
@@ -132,6 +139,7 @@ export class ConversationSession {
       {
         onSpeechStart: () => this.onSpeechStart(),
         onUtterance: (samples) => this.onUtterance(samples),
+        onDiscard: () => this.onDiscard(),
       },
       options.segmenter ?? DEFAULT_SEGMENTER,
       STT_RATE,
@@ -224,6 +232,9 @@ export class ConversationSession {
   private onSpeechStart(): void {
     this.clearIdle();
     this.idleStage = 0;
+    // Still no answer said: the caller is continuing the same thought, so keep what they said.
+    if (this.current && this.stateValue !== "listening")
+      this.carry = this.current;
     if (this.stateValue === "speaking" || this.stateValue === "greeting") {
       // Barge-in: stop talking at once and listen.
       this.turn?.abort();
@@ -235,6 +246,12 @@ export class ConversationSession {
       this.transport.clear();
       this.stateValue = "listening";
     }
+  }
+
+  /** The sound that interrupted a turn was only noise: answer the interrupted turn after all. */
+  private onDiscard(): void {
+    if (this.closed || !this.carry || this.stateValue !== "listening") return;
+    this.onUtterance(new Int16Array(0));
   }
 
   private onUtterance(samples: Int16Array): void {
@@ -250,7 +267,11 @@ export class ConversationSession {
     const controller = new AbortController();
     this.turn?.abort();
     this.turn = controller;
-    const stt = await this.deps.stt.transcribe(encodeWav(samples, STT_RATE), {
+    const audio = this.carry ? join(this.carry, samples) : samples;
+    this.carry = undefined;
+    this.current = audio;
+    if (!audio.length) return this.afterSpeech(controller);
+    const stt = await this.deps.stt.transcribe(encodeWav(audio, STT_RATE), {
       language: this.options.language,
       signal: controller.signal,
     });
@@ -275,6 +296,7 @@ export class ConversationSession {
 
   private afterSpeech(controller: AbortController): void {
     if (controller.signal.aborted || this.closed) return;
+    this.current = undefined;
     this.listen();
   }
 
@@ -288,7 +310,7 @@ export class ConversationSession {
     const speakQueue: Promise<void>[] = [];
     // Synthesis starts as soon as a sentence is complete; playback keeps the order.
     let chain: Promise<void> = Promise.resolve();
-    const enqueue = (sentence: string) => {
+    const enqueue = (sentence: string, answer = true) => {
       const clean = forSpeech(sentence);
       if (!clean) return;
       const audio = this.deps
@@ -297,6 +319,8 @@ export class ConversationSession {
       chain = chain.then(async () => {
         const pcm = await audio;
         if (controller.signal.aborted || this.closed || !pcm.length) return;
+        // From the first word of the answer on, talking over NOVA is a new turn, not a continuation.
+        if (answer) this.current = undefined;
         this.stateValue = "speaking";
         this.transport.play(resample(pcm, STT_RATE, this.transport.rate));
       });
@@ -305,7 +329,10 @@ export class ConversationSession {
     const slow = this.timers.setTimeout(() => {
       if (!controller.signal.aborted && !spoken.trim() && !toolSaid) {
         toolSaid = true;
-        enqueue(this.t.fillers[this.fillerIndex++ % this.t.fillers.length]!);
+        enqueue(
+          this.t.fillers[this.fillerIndex++ % this.t.fillers.length]!,
+          false,
+        );
       }
     }, this.options.fillerAfterMs ?? 2500);
     slow.unref?.();
@@ -324,6 +351,7 @@ export class ConversationSession {
             toolSaid = true;
             enqueue(
               this.t.fillers[this.fillerIndex++ % this.t.fillers.length]!,
+              false,
             );
           }
         },
@@ -384,6 +412,13 @@ export class ConversationSession {
     this.transport.close();
     this.close(reason);
   }
+}
+
+function join(a: Int16Array, b: Int16Array): Int16Array {
+  const out = new Int16Array(a.length + b.length);
+  out.set(a);
+  out.set(b, a.length);
+  return out;
 }
 
 export { rms };

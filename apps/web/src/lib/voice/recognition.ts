@@ -8,6 +8,7 @@ import { ttsLocale } from "./voice-preference.ts";
 import { getConversationLanguage } from "../chat/session.ts";
 import { saveQuickNote } from "#lib/api/notes.ts";
 import { stopSpeaking } from "./speaker.ts";
+import { setFollowUpListener } from "./wake.ts";
 import {
   onInputDeviceChange,
   openSelectedInputStream,
@@ -21,6 +22,9 @@ let inputStream: MediaStream | null = null;
 let listenAttempt = 0;
 let transcriptSettleTimer: ReturnType<typeof setTimeout> | undefined;
 let quickNoteArmed = false;
+/** Listening on its own after NOVA answered (no tap): quiet when nothing is said. */
+let followUp = false;
+const MIC_LIMIT_MS = 15000;
 
 async function storeQuickNote(text: string): Promise<void> {
   try {
@@ -80,14 +84,16 @@ export function initRecognition(): boolean {
   rec.lang = ttsLocale(getConversationLanguage());
   rec.interimResults = true;
   rec.continuous = false;
+  setFollowUpListener((ms) => {
+    if (chat.uiState === "listening" || quickNoteArmed) return;
+    followUp = true;
+    followUpMs = ms;
+    if (!startListening()) followUp = false;
+  });
 
   let micTimer: ReturnType<typeof setTimeout> | undefined;
-  rec.onstart = () => {
-    if (chat.uiState === "speaking") {
-      cancelActiveAsk();
-    }
-    setState("listening");
-    // A microphone that hears nothing must not stay "listening" for ever.
+  let followUpMs = 0;
+  const stopAfter = (ms: number) => {
     clearTimeout(micTimer);
     micTimer = setTimeout(() => {
       try {
@@ -95,14 +101,26 @@ export function initRecognition(): boolean {
       } catch {
         /* already stopped */
       }
-    }, 15000);
+    }, ms);
+  };
+  rec.onstart = () => {
+    if (chat.uiState === "speaking") {
+      cancelActiveAsk();
+    }
+    setState("listening");
+    // A microphone that hears nothing must not stay "listening" for ever; a follow-up waits shorter.
+    stopAfter(followUp ? followUpMs : MIC_LIMIT_MS);
   };
 
   rec.onerror = (event) => {
     quickNoteArmed = false;
-    console.error("Speech recognition:", event.error);
+    const quiet = followUp;
+    followUp = false;
     setState("ready");
     releaseInput();
+    // Silence (or a browser refusing to listen without a tap) after an answer is no error.
+    if (quiet) return;
+    console.error("Speech recognition:", event.error);
     if (["not-allowed", "service-not-allowed"].includes(event.error))
       showToast({
         severity: "warning",
@@ -136,6 +154,11 @@ export function initRecognition(): boolean {
     const last = event.results[event.results.length - 1];
     const text = (last?.[0]?.transcript ?? "").trim();
     if (!last?.isFinal) {
+      // The owner is answering: give the sentence the normal time to finish.
+      if (followUp && text) {
+        followUp = false;
+        stopAfter(MIC_LIMIT_MS);
+      }
       clearTimeout(transcriptSettleTimer);
       // Show what is being heard, so it is clear the microphone works.
       chat.you = `“${text}”`;
@@ -154,6 +177,7 @@ export function initRecognition(): boolean {
 
   rec.onend = () => {
     quickNoteArmed = false;
+    followUp = false;
     clearTimeout(micTimer);
     releaseInput();
     if (chat.uiState === "listening") setState("ready");
@@ -291,6 +315,7 @@ export function startQuickNoteCapture(): void {
 /** Stop the explicit recognizer when the native agent pauses. */
 export function stopListening(): void {
   quickNoteArmed = false;
+  followUp = false;
   listenAttempt++;
   clearTimeout(transcriptSettleTimer);
   transcriptSettleTimer = undefined;

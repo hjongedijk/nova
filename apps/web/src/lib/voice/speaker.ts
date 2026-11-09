@@ -35,11 +35,16 @@ const NO_SPEAKER: Speaker = {
 };
 
 let activeSpeaker: Speaker | null = null;
+/** Everything handed to the current speaker so far, to tell NOVA's own echo from the owner. */
+let activeText = "";
 let stopCurrentSpeech: (() => void) | null = null;
 
 /** NOVA is speaking (or about to): clicking the sphere stops it. */
 export const isSpeaking = (): boolean =>
   !!playback.current || activeSpeaker !== null;
+
+/** What NOVA is saying right now (the streamed answer so far), or "" when she is quiet. */
+export const speakingText = (): string => (activeSpeaker ? activeText : "");
 
 /** Stop whatever NOVA is saying. */
 export function stopSpeech(): void {
@@ -218,6 +223,7 @@ export function createSpeaker(
   const speaker: Speaker = {
     feed(delta) {
       fedChars += delta.length;
+      if (activeSpeaker === self) activeText += delta;
       if (cancelled || speechFailed) return;
       buffer += delta;
       for (;;) {
@@ -256,6 +262,7 @@ export function createSpeaker(
   self = speaker;
   stopCurrentSpeech = cancel;
   activeSpeaker = speaker;
+  activeText = "";
   return speaker;
 }
 

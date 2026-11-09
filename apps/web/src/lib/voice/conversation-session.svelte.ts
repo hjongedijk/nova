@@ -42,7 +42,7 @@ import {
   type SpeechResultEvent,
 } from "./speech-types.ts";
 import { ttsLocale } from "./voice-preference.ts";
-import { cancelAwait } from "./wake.ts";
+import { cancelAwait, setFollowUpGuard } from "./wake.ts";
 
 /** The hands-free 'Gesprek': listen, answer, listen again, until the user stops it. */
 export const conversation = $state({
@@ -52,6 +52,9 @@ export const conversation = $state({
   devices: [] as InputDevice[],
   deviceId: "",
 });
+
+// The Gesprek has its own listening loop: the short follow-up window must not open a second one.
+setFollowUpGuard(() => conversation.phase === "off");
 
 const silenceMs = () =>
   clampNumber(

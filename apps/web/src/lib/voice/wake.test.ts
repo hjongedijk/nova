@@ -9,7 +9,11 @@ const {
   openSelectedInputStream,
   onInputDeviceChange,
   stopInputStream,
+  speaking,
+  stopSpeech,
 } = vi.hoisted(() => ({
+  speaking: { now: false, text: "" },
+  stopSpeech: vi.fn(),
   selectedInputDevice: vi.fn(() => ""),
   openSelectedInputStream: vi.fn(),
   onInputDeviceChange: vi.fn<(listener: () => void) => () => void>(
@@ -44,10 +48,10 @@ vi.mock("#lib/util/storage.ts", () => ({
 vi.mock("#lib/modes/wallpaper.ts", () => ({ quietWallpaper: false }));
 vi.mock("./audio.ts", () => ({ playback: { current: null } }));
 vi.mock("./speaker.ts", () => ({
-  isSpeaking: () => false,
-  stopSpeech: vi.fn(),
+  isSpeaking: () => speaking.now,
+  speakingText: () => speaking.text,
+  stopSpeech,
 }));
-vi.mock("./speech-echo.ts", () => ({ isSpeechEcho: () => false }));
 vi.mock("#lib/chat/ask.ts", () => ({ cancelActiveAsk: vi.fn() }));
 vi.mock("./chime.ts", () => ({ chime: vi.fn() }));
 vi.mock("./wake-matcher.ts", () => ({
@@ -67,7 +71,18 @@ vi.mock("./input-device.ts", () => ({
 
 import { showToast } from "#lib/stores/toasts.svelte.ts";
 
-import { cancelAwait, handleWakeResult, initWake, setWake } from "./wake.ts";
+import {
+  afterSpeech,
+  cancelAwait,
+  FOLLOW_UP_MS,
+  FOLLOW_UP_QUESTION_MS,
+  handleWakeResult,
+  initWake,
+  noteSpoken,
+  setFollowUpGuard,
+  setFollowUpListener,
+  setWake,
+} from "./wake.ts";
 
 function result(text: string, isFinal: boolean): SpeechResultEvent {
   return {
@@ -86,6 +101,13 @@ beforeEach(() => {
   openSelectedInputStream.mockReset();
   stopInputStream.mockReset();
   onInputDeviceChange.mockClear();
+  stopSpeech.mockClear();
+  speaking.now = false;
+  speaking.text = "";
+  shell.wakeEnabled = false;
+  shell.wakeActive = false;
+  setFollowUpListener(null);
+  setFollowUpGuard(() => true);
 });
 
 afterEach(() => {
@@ -283,5 +305,101 @@ describe("wake microphone reconnects", () => {
     resolve(late.value);
     await vi.advanceTimersByTimeAsync(0);
     expect(stopInputStream).toHaveBeenCalledWith(late.value);
+  });
+});
+
+describe("follow-up after NOVA spoke", () => {
+  // Every new phrase gets the next result index, like a running recognizer.
+  let index = 100;
+  const plain = (text: string, isFinal: boolean): SpeechResultEvent => {
+    const results = Array.from({ length: index + 1 }, () => ({
+      0: { transcript: "" },
+      length: 1,
+      isFinal: true,
+    }));
+    results[index] = { 0: { transcript: text }, length: 1, isFinal };
+    const event = { resultIndex: index, results };
+    if (isFinal) index++;
+    return event;
+  };
+
+  it("keeps listening without the wake word for several seconds", () => {
+    shell.wakeEnabled = true;
+    shell.wakeActive = true;
+    noteSpoken("Het is half drie.", true);
+    afterSpeech();
+    vi.advanceTimersByTime(950);
+    expect(shell.awaiting).toBe(true);
+    vi.advanceTimersByTime(FOLLOW_UP_MS - 100);
+    expect(shell.awaiting).toBe(true);
+    handleWakeResult(plain("en morgen", true));
+    vi.advanceTimersByTime(650);
+    expect(ask).toHaveBeenCalledWith("en morgen", [], "voice");
+  });
+
+  it("waits longer after a question and closes the window when nobody answers", () => {
+    shell.wakeEnabled = true;
+    shell.wakeActive = true;
+    noteSpoken("Zal ik dat voor morgen ook bekijken?", true);
+    afterSpeech();
+    vi.advanceTimersByTime(950 + FOLLOW_UP_QUESTION_MS - 100);
+    expect(shell.awaiting).toBe(true);
+    vi.advanceTimersByTime(200);
+    expect(shell.awaiting).toBe(false);
+  });
+
+  it("does not close the window while the owner is still talking", () => {
+    shell.wakeEnabled = true;
+    shell.wakeActive = true;
+    noteSpoken("Het is half drie.", true);
+    afterSpeech();
+    vi.advanceTimersByTime(950 + FOLLOW_UP_MS - 500);
+    handleWakeResult(plain("en wat moet ik dan", false));
+    vi.advanceTimersByTime(1000);
+    expect(shell.awaiting).toBe(true);
+    handleWakeResult(plain("en wat moet ik dan aantrekken", true));
+    vi.advanceTimersByTime(650);
+    expect(ask).toHaveBeenCalledWith(
+      "en wat moet ik dan aantrekken",
+      [],
+      "voice",
+    );
+  });
+
+  it("listens once more by itself after a spoken turn when Hey NOVA is off", () => {
+    const listen = vi.fn();
+    setFollowUpListener(listen);
+    noteSpoken("Leuk! Waar ga je heen?", true);
+    afterSpeech();
+    vi.advanceTimersByTime(700);
+    expect(listen).toHaveBeenCalledWith(FOLLOW_UP_QUESTION_MS);
+  });
+
+  it("does not open the microphone after a typed question or during a Gesprek", () => {
+    const listen = vi.fn();
+    setFollowUpListener(listen);
+    noteSpoken("Het is half drie.", false);
+    afterSpeech();
+    vi.advanceTimersByTime(2000);
+    noteSpoken("Het is half drie.", true);
+    setFollowUpGuard(() => false);
+    afterSpeech();
+    vi.advanceTimersByTime(2000);
+    expect(listen).not.toHaveBeenCalled();
+  });
+
+  it("stops talking when the owner says something of their own", () => {
+    speaking.now = true;
+    speaking.text =
+      "Morgen wordt het zonnig in Utrecht met een graad of achttien.";
+    handleWakeResult(plain("zonnig in Utrecht met een", false));
+    expect(stopSpeech).not.toHaveBeenCalled();
+    handleWakeResult(plain("wacht even en zaterdag dan", false));
+    expect(stopSpeech).toHaveBeenCalledOnce();
+    expect(shell.awaiting).toBe(true);
+    speaking.now = false;
+    handleWakeResult(plain("wacht even en zaterdag dan", true));
+    vi.advanceTimersByTime(650);
+    expect(ask).toHaveBeenCalledWith("wacht even en zaterdag dan", [], "voice");
   });
 });

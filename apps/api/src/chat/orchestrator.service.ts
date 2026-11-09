@@ -127,14 +127,17 @@ export function responseStyle(
   quietHours = false,
 ): string {
   const manner =
-    "Answer the user's actual request in their language. Be calm, warm and capable, like a trusted personal assistant. Give the useful result, not a tool report. Keep simple answers brief; give enough detail for complex requests. Do not force a joke, an opening catchphrase or a follow-up question.";
-  return inputMode === "voice"
+    "Answer the user's actual request in their language. Be calm, warm and capable, like a trusted personal assistant. Give the useful result, not a tool report.";
+  if (inputMode === "text")
+    return (
+      manner +
+      " Keep simple answers brief; give enough detail for complex requests. Do not force a joke, an opening catchphrase or a follow-up question. This is typed chat: use readable paragraphs, lists, links, tables or code when they help, especially for documents and technical help. Do not arbitrarily stop after four sentences."
+    );
+  return quietHours
     ? manner +
-        (quietHours
-          ? " Quiet hours are active: keep the spoken answer brief and limited to the essential result. Do not add an optional offer, filler or follow-up question."
-          : " This is a spoken conversation: use natural sentences and no markdown. Start with the key point; expand when asked.")
+        " Quiet hours are active: keep the spoken answer brief and limited to the essential result. Do not add an optional offer, filler or follow-up question."
     : manner +
-        " This is typed chat: use readable paragraphs, lists, links, tables or code when they help, especially for documents and technical help. Do not arbitrarily stop after four sentences.";
+        " This is a spoken conversation that stays open after you answer: the user can simply reply. Talk like a person in a real conversation: one to three short sentences, natural spoken language, no lists, headings or markdown. Start with the key point, react to what they said and build on the thread of this conversation. When it fits, end with one natural, specific follow-up question or remark that keeps the conversation going; skip it after a plain command or when they are wrapping up. Never use stock closers such as 'kan ik nog iets voor je doen?' or 'anything else?'.";
 }
 
 export function codeResponseStyle(language: "nl" | "en" = "nl"): string {
