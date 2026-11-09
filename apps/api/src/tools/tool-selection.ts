@@ -149,6 +149,8 @@ export function capApiOperationTools<T extends SelectableTool>(
 
 export const TOOL_DISCOVERY_NAME = "nova_tools_search";
 export const MAX_MODEL_TOOLS = 24;
+/** Offered whenever enabled, regardless of keywords (see selectToolsForRequest). */
+const PINNED_TOOLS = new Set(["skill_read"]);
 
 /** Shared lexical ranking for initial selection and explicit catalog discovery. */
 /**
@@ -242,12 +244,20 @@ export function selectToolsForRequest<T extends SelectableTool>(
   const discovery = tools.find(
     (tool) => tool.function.name === TOOL_DISCOVERY_NAME,
   );
-  const candidates = tools.filter((tool) => tool !== discovery);
+  // The system prompt lists installed skills by name; reading one must always be possible.
+  const pinned = tools.filter((tool) => PINNED_TOOLS.has(tool.function.name));
+  const candidates = tools.filter(
+    (tool) => tool !== discovery && !pinned.includes(tool),
+  );
   const ranked = rankToolsForRequest(candidates, message, role);
   // Compatibility for registries that intentionally disable catalog discovery.
-  if (!ranked.length) return discovery ? [discovery] : tools;
+  if (!ranked.length) return discovery ? [...pinned, discovery] : tools;
   return [
-    ...ranked.slice(0, Math.max(0, maxTools - (discovery ? 1 : 0))),
+    ...ranked.slice(
+      0,
+      Math.max(0, maxTools - pinned.length - (discovery ? 1 : 0)),
+    ),
+    ...pinned,
     ...(discovery ? [discovery] : []),
   ];
 }

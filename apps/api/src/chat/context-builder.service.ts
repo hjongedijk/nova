@@ -1,4 +1,5 @@
 import { Injectable, Optional } from "@nestjs/common";
+import { AgentSkillsService } from "../agent-skills/agent-skills.service.js";
 import { AuditService } from "../core/audit/audit.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { StateService } from "../core/state/state.service.js";
@@ -107,6 +108,7 @@ export class ContextBuilder {
     private readonly state: StateService,
     private readonly audit: AuditService,
     @Optional() private readonly learner?: CorrectionLearner,
+    @Optional() private readonly agentSkills?: AgentSkillsService,
   ) {}
 
   async build(
@@ -207,6 +209,9 @@ export class ContextBuilder {
       });
     const playbooks = this.playbooks.promptFor(message);
     if (playbooks) messages.push({ role: "system", content: playbooks });
+    // Installed Agent Skills: names and descriptions only; skill_read loads the rest on demand.
+    const skills = this.agentSkills?.promptSection();
+    if (skills) messages.push({ role: "system", content: skills });
 
     if (/\b(system|systeem|infrastructure|infrastructuur)\b/i.test(message))
       messages.push({
