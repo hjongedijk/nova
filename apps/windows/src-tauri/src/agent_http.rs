@@ -1,5 +1,5 @@
 //! LAN HTTP transport. Authentication precedes parsing and UI dispatch.
-use crate::{app, platform, state::Shared, windows_ops};
+use crate::{app, log, platform, state::Shared, windows_ops};
 use nova_win_core::{
     agent::VERSION,
     args::{Args, WallpaperArg},
@@ -9,7 +9,10 @@ use nova_win_core::{
 };
 use serde_json::{json, Value};
 use std::{
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Manager};
@@ -20,11 +23,58 @@ fn bad(message: &str) -> (u16, String) {
     (400, message.into())
 }
 
+static LISTENING: AtomicBool = AtomicBool::new(false);
+static RETRYING: AtomicBool = AtomicBool::new(false);
+
+fn bind_error(port: u16, error: &dyn std::fmt::Display) -> String {
+    format!(
+        "Poort {port} is bezet of geblokkeerd ({error}). Sluit het andere programma (bijvoorbeeld de oude NOVA-agent); NOVA probeert het zelf opnieuw."
+    )
+}
+
+/// Starts the listener; when the port is taken it keeps retrying in the background (5 s, 10 s, 20 s, then every
+/// 30 s) and clears the setup page's error once NOVA listens. Safe to call more than once.
+pub fn start_or_retry(app: &AppHandle) {
+    if let Err(error) = start(app) {
+        log!("HTTP agent could not start: {error}");
+        app.state::<Shared>().lock().agent_error = Some(error);
+        if RETRYING.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let mut attempt = 0;
+            while !LISTENING.load(Ordering::SeqCst) {
+                std::thread::sleep(nova_win_core::backoff::listener(attempt));
+                attempt = attempt.saturating_add(1);
+                match start(&app) {
+                    Ok(()) => {
+                        log!("HTTP agent listens after {attempt} retries");
+                        app.state::<Shared>().lock().agent_error = None;
+                    }
+                    Err(error) => app.state::<Shared>().lock().agent_error = Some(error),
+                }
+            }
+            RETRYING.store(false, Ordering::SeqCst);
+        });
+    }
+}
+
+pub fn listening() -> bool {
+    LISTENING.load(Ordering::SeqCst)
+}
+
 pub fn start(app: &AppHandle) -> Result<(), String> {
+    if LISTENING.load(Ordering::SeqCst) {
+        return Ok(());
+    }
     let port = app.state::<Shared>().lock().agent.port;
-    let server = std::sync::Arc::new(Server::http(("0.0.0.0", port)).map_err(|e| format!("Poort {}: {e}", port))?);
-    // Bounded workers let the stop/status routes run while a CDP call is waiting.
-    for _ in 0..3 {
+    let server = std::sync::Arc::new(Server::http(("0.0.0.0", port)).map_err(|e| bind_error(port, &e))?);
+    if LISTENING.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+    // Bounded workers let the stop/status routes run while a CDP call or a screenshot is waiting.
+    for _ in 0..6 {
         let app = app.clone();
         let server = server.clone();
         std::thread::spawn(move || {
@@ -38,19 +88,27 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
                         }
                         let (sender, receiver) = mpsc::sync_channel(1);
                         let handle = app.clone();
-                        let path = path.to_owned();
+                        let route_path = path.to_owned();
                         let method = method.clone();
                         let deadline = Instant::now() + Duration::from_secs(30);
                         app.run_on_main_thread(move || {
                             if Instant::now() > deadline {
                                 return;
                             }
-                            let _ = sender.send(route(&handle, &path, &method, body));
+                            let _ = sender.send(route(&handle, &route_path, &method, body));
                         })
                         .map_err(|_| (503, "NOVA sluit af".into()))?;
-                        receiver
+                        let mut result = receiver
                             .recv_timeout(Duration::from_secs(30))
-                            .unwrap_or_else(|_| Err((503, "Windows antwoordt niet op tijd".into())))
+                            .unwrap_or_else(|_| Err((503, "Windows antwoordt niet op tijd".into())));
+                        // Listing processes is slow; do it here instead of on the window thread.
+                        if path == "/v1/status" {
+                            if let Ok(value) = result.as_mut() {
+                                let apps = app.state::<Shared>().lock().agent.apps.clone();
+                                value["running"] = json!(platform::running_apps(&apps));
+                            }
+                        }
+                        result
                     },
                 );
             }
@@ -116,7 +174,7 @@ fn route(app: &AppHandle, path: &str, method: &Method, body: Value) -> Outcome {
                 .and_then(|w| w.is_visible().ok())
                 .unwrap_or(false));
             result["apps"] = json!(inner.agent.apps.keys().collect::<Vec<_>>());
-            result["running"] = json!(platform::running_apps(&inner.agent.apps));
+            result["listening"] = json!(listening());
             Ok(result)
         }
         "/v1/displays" => Ok(desktop_state(app)),

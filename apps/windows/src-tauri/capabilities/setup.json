@@ -1,6 +1,6 @@
 {
   "identifier": "setup",
-  "description": "Local setup owns pairing, the firewall rule and signed updates. Remote pages receive none of these commands.",
+  "description": "The local NOVA app window owns settings, pairing, the firewall rule and signed updates. Remote pages receive none of these commands.",
   "windows": ["setup"],
   "permissions": [
     "allow-desk-set-url",
@@ -12,6 +12,15 @@
     "allow-agent-update-status",
     "allow-agent-check-update",
     "allow-agent-install-update",
+    "allow-app-state",
+    "allow-app-set-mode",
+    "allow-app-set-helper-display",
+    "allow-app-set-wallpaper",
+    "allow-app-set-helper-visible",
+    "allow-app-show-login",
+    "allow-app-open-browser",
+    "allow-app-set-autostart",
+    "allow-app-set-paused",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

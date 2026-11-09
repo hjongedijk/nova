@@ -3,106 +3,255 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NOVA voor Windows</title>
+    <title>NOVA</title>
     <link rel="stylesheet" href="setup.css" />
   </head>
   <body>
-    <main>
-      <h1>NOVA voor Windows</h1>
-      <p id="app-version" class="note">NOVA</p>
-      <p>Eén app voor je helper, achtergrond en verbinding met NOVA.</p>
-      <section id="updates" aria-labelledby="updates-title">
-        <h2 id="updates-title">Updates</h2>
-        <p id="update-message" role="status" aria-live="polite">
-          Updatecontrole laden…
-        </p>
-        <p id="update-notes"></p>
-        <progress
-          id="update-progress"
-          hidden
-          aria-label="Update downloaden"
-        ></progress>
-        <button id="check-update" type="button">Controleren op updates</button>
-        <button id="install-update" type="button" hidden>
-          Bijwerken en herstarten
+    <div class="shell">
+      <nav class="sidebar" aria-label="Onderdelen">
+        <div class="brand">
+          <span class="orb" aria-hidden="true"></span>
+          <div>
+            <strong>NOVA</strong>
+            <span id="app-version">voor Windows</span>
+          </div>
+        </div>
+        <button
+          class="nav"
+          type="button"
+          data-page="overview"
+          aria-current="page"
+        >
+          Overzicht
         </button>
-        <p class="note">
-          NOVA controleert automatisch op nieuwe versies. Jij kiest wanneer de
-          update wordt geïnstalleerd.
+        <button class="nav" type="button" data-page="display">Weergave</button>
+        <button class="nav" type="button" data-page="pair">Koppelen</button>
+        <button class="nav" type="button" data-page="system">
+          Systeem en updates
+          <span
+            id="update-dot"
+            class="dot"
+            hidden
+            aria-label="Update beschikbaar"
+          ></span>
+        </button>
+        <p class="sidebar-note">
+          Sluiten laat NOVA actief bij de klok. Noodstop: Ctrl+Alt+Shift+K.
         </p>
-      </section>
-      <form id="form">
-        <label for="url">Adres van NOVA</label>
-        <input
-          id="url"
-          type="url"
-          required
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="https://nova.example.nl"
-        />
-        <button type="submit">Opslaan en openen</button>
-      </form>
-      <form id="network">
-        <button type="submit">Verbinding toestaan in Windows</button>
-        <p class="note">
-          Windows vraagt toestemming om de poort van NOVA in de firewall te
-          openen, zodat NOVA deze pc kan bereiken.
-        </p>
-      </form>
-      <form id="pair">
-        <label for="address">Netwerkadres van deze pc</label>
-        <select id="address" required></select>
-        <button type="submit">Koppelcode tonen</button>
-        <input
-          id="code"
-          type="password"
-          readonly
-          aria-label="Koppelcode"
-          autocomplete="off"
-        />
-        <button id="copy" type="button">Code kopiëren</button>
-        <p class="note">
-          Plak deze code in NOVA → Instellingen → Windows-pc. De code is de
-          enige koppeling tussen NOVA en deze pc: bewaar hem als een wachtwoord.
-        </p>
-      </form>
-      <section id="access" aria-labelledby="access-title">
-        <h2 id="access-title">NOVA op deze pc</h2>
-        <p class="note">
-          Met de koppelcode heeft NOVA volledige toegang tot deze pc: meekijken,
-          muis en toetsenbord, browser en programma's, zonder verdere
-          instellingen. Ctrl+Alt+Shift+K is de noodstop: die pauzeert NOVA
-          direct. Hervatten kan alleen via het systeemvak.
-        </p>
-      </section>
-      <details>
-        <summary>Oude agent vervangen</summary>
-        <form id="legacy">
-          <label for="directory">Map van de oude agent</label>
-          <input
-            id="directory"
-            required
-            spellcheck="false"
-            placeholder="C:\NovaAgent"
-          />
-          <p class="note">
-            Importeren herstart NOVA als de poort verandert. Uitschakelen stopt
-            de oude PowerShell-agent in deze map, verwijdert taken NOVAAgent en
-            JarvisAgent en sluit NOVA Desk. Bestanden blijven bewaard.
-          </p>
-          <button id="import" type="button">
-            Oude instellingen importeren
+      </nav>
+
+      <main>
+        <section
+          id="page-overview"
+          class="page"
+          aria-labelledby="overview-title"
+        >
+          <h1 id="overview-title">Overzicht</h1>
+          <div class="cards">
+            <article class="card">
+              <h2>Server</h2>
+              <p id="status-server" class="status">Laden…</p>
+              <p id="status-server-detail" class="note"></p>
+            </article>
+            <article class="card">
+              <h2>Bediening door NOVA</h2>
+              <p id="status-control" class="status">Laden…</p>
+              <button id="pause" type="button">Pauzeren</button>
+            </article>
+            <article class="card">
+              <h2>Helper</h2>
+              <p id="status-helper" class="status">Laden…</p>
+              <div class="row">
+                <button id="helper-toggle" type="button">Helper tonen</button>
+                <button id="login" type="button" class="quiet">Inloggen</button>
+              </div>
+            </article>
+            <article class="card">
+              <h2>Versie</h2>
+              <p id="status-version" class="status">Laden…</p>
+              <button id="go-updates" type="button" class="quiet">
+                Updates bekijken
+              </button>
+            </article>
+          </div>
+          <div
+            id="warnings"
+            class="warnings"
+            role="status"
+            aria-live="polite"
+          ></div>
+          <button id="open-browser" type="button" class="quiet">
+            NOVA openen in de browser
           </button>
-          <button type="submit">Oude agent uitschakelen</button>
-        </form>
-      </details>
-      <p id="message" role="status" aria-live="polite"></p>
-      <p class="note">
-        Instellingen: %LOCALAPPDATA%\NOVA\config.json. Sluiten laat NOVA actief
-        bij de klok.
-      </p>
-    </main>
+        </section>
+
+        <section
+          id="page-display"
+          class="page"
+          aria-labelledby="display-title"
+          hidden
+        >
+          <h1 id="display-title">Weergave</h1>
+          <fieldset>
+            <legend>Wat NOVA op het bureaublad toont</legend>
+            <label class="choice"
+              ><input type="radio" name="mode" value="helper" /> Alleen de
+              helper</label
+            >
+            <label class="choice"
+              ><input type="radio" name="mode" value="wallpaper" /> Alleen de
+              levende achtergrond</label
+            >
+            <label class="choice"
+              ><input type="radio" name="mode" value="both" /> Helper en levende
+              achtergrond</label
+            >
+          </fieldset>
+          <label for="helper-display">Scherm van de helper</label>
+          <select id="helper-display"></select>
+          <fieldset>
+            <legend>Levende achtergrond per scherm</legend>
+            <div id="wallpapers"></div>
+            <p class="note">Je eigen Windows-achtergrond blijft ongewijzigd.</p>
+          </fieldset>
+        </section>
+
+        <section
+          id="page-pair"
+          class="page"
+          aria-labelledby="pair-title"
+          hidden
+        >
+          <h1 id="pair-title">Koppelen</h1>
+          <ol class="steps">
+            <li>
+              <form id="form">
+                <label for="url">Adres van je NOVA-server</label>
+                <div class="row">
+                  <input
+                    id="url"
+                    type="url"
+                    required
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="https://nova.example.nl"
+                  />
+                  <button type="submit">Opslaan</button>
+                </div>
+              </form>
+            </li>
+            <li>
+              <form id="network">
+                <p class="label">Verbinding toestaan in Windows</p>
+                <p class="note">
+                  Windows vraagt één keer om toestemming om de poort van NOVA in
+                  de firewall te openen.
+                </p>
+                <button type="submit">Firewall openen</button>
+              </form>
+            </li>
+            <li>
+              <form id="pair">
+                <label for="address">Netwerkadres van deze pc</label>
+                <div class="row">
+                  <select id="address" required></select>
+                  <button type="submit">Koppelcode tonen</button>
+                </div>
+                <div class="row">
+                  <input
+                    id="code"
+                    type="password"
+                    readonly
+                    aria-label="Koppelcode"
+                    autocomplete="off"
+                  />
+                  <button id="copy" type="button">Kopiëren</button>
+                </div>
+                <p class="note">
+                  Plak de code in NOVA bij Instellingen → Windows-pc. Met deze
+                  code heeft NOVA volledige toegang tot deze pc (meekijken, muis
+                  en toetsenbord, browser, programma's): bewaar hem als een
+                  wachtwoord.
+                </p>
+              </form>
+            </li>
+          </ol>
+        </section>
+
+        <section
+          id="page-system"
+          class="page"
+          aria-labelledby="system-title"
+          hidden
+        >
+          <h1 id="system-title">Systeem en updates</h1>
+          <label class="switch">
+            <input id="autostart" type="checkbox" />
+            <span>Starten met Windows</span>
+          </label>
+          <p id="elevation" class="note"></p>
+
+          <h2 id="updates-title">Updates</h2>
+          <p id="update-message" role="status" aria-live="polite">
+            Updatecontrole laden…
+          </p>
+          <p id="update-notes" class="notes"></p>
+          <progress
+            id="update-progress"
+            hidden
+            aria-label="Update downloaden"
+          ></progress>
+          <div class="row">
+            <button id="check-update" type="button" class="quiet">
+              Controleren op updates
+            </button>
+            <button id="install-update" type="button" hidden>
+              Bijwerken en herstarten
+            </button>
+          </div>
+          <p class="note">
+            NOVA zoekt zelf naar nieuwe versies. Jij kiest wanneer de update
+            wordt geïnstalleerd.
+          </p>
+
+          <details>
+            <summary>Oude agent vervangen</summary>
+            <form id="legacy">
+              <label for="directory">Map van de oude agent</label>
+              <input
+                id="directory"
+                required
+                spellcheck="false"
+                placeholder="C:\NovaAgent"
+              />
+              <p class="note">
+                Importeren herstart NOVA als de poort verandert. Uitschakelen
+                stopt de oude PowerShell-agent in deze map, verwijdert taken
+                NOVAAgent en JarvisAgent en sluit NOVA Desk. Bestanden blijven
+                bewaard.
+              </p>
+              <div class="row">
+                <button id="import" type="button" class="quiet">
+                  Oude instellingen importeren
+                </button>
+                <button type="submit">Oude agent uitschakelen</button>
+              </div>
+            </form>
+          </details>
+          <p class="note">
+            Instellingen: %LOCALAPPDATA%\NOVA\config.json · logboek: nova.log
+          </p>
+        </section>
+
+        <p
+          id="message"
+          class="toast"
+          role="status"
+          aria-live="polite"
+          hidden
+        ></p>
+      </main>
+    </div>
     <script src="setup.js"></script>
   </body>
 </html>

@@ -46,10 +46,19 @@ impl Shared {
     }
 }
 
+/// The text last written, so the many helper size/view requests do not rewrite config.json every time.
+static LAST_SAVED: Mutex<String> = Mutex::new(String::new());
+
 impl Inner {
     pub fn try_save(&self) -> Result<(), String> {
         let text = nova_win_core::agent::encode(&self.config, &self.agent);
-        nova_win_core::agent::atomic_save(&self.config_path, &text)
+        let mut last = LAST_SAVED.lock().unwrap_or_else(|p| p.into_inner());
+        if *last == text {
+            return Ok(());
+        }
+        nova_win_core::agent::atomic_save(&self.config_path, &text)?;
+        *last = text;
+        Ok(())
     }
 
     pub fn save(&self) {

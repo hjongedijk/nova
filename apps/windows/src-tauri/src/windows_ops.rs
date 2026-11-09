@@ -234,9 +234,11 @@ pub fn grant_origin(app: &AppHandle, origin: &str) {
     }
 }
 
-fn guard(app: &AppHandle, origin: String) -> impl Fn(&url::Url) -> bool + Send + 'static {
+fn guard(app: &AppHandle, label: String, origin: String) -> impl Fn(&url::Url) -> bool + Send + 'static {
     let app = app.clone();
     move |target| match classify(target, &origin) {
+        // NOVA's own "not reachable" screen (webview::harden), exactly once per failed load.
+        Navigation::Block if target.scheme() == "data" && crate::webview::take_offline_permit(&label) => true,
         Navigation::Allow => true,
         Navigation::External => {
             open_external(&app, target.as_str());
@@ -296,7 +298,8 @@ fn builder<'a>(
                     PermissionResponse::Default
                 }
             })
-            .on_navigation(guard(app, origin.to_string()))
+            .zoom_hotkeys_enabled(false)
+            .on_navigation(guard(app, label.to_string(), origin.to_string()))
             .on_new_window(new_window_guard(app, origin.to_string())),
     )
 }
@@ -364,6 +367,11 @@ pub fn create_helper(app: &AppHandle) -> Option<WebviewWindow> {
         .build();
     match built {
         Ok(window) => {
+            crate::webview::harden(
+                &window,
+                crate::webview::Kind::Helper,
+                Some((origin.clone(), url.clone())),
+            );
             if let Ok(raw) = window.hwnd() {
                 HELPER_HWND.store(raw.0 as isize, std::sync::atomic::Ordering::Relaxed);
             }
@@ -372,6 +380,7 @@ pub fn create_helper(app: &AppHandle) -> Option<WebviewWindow> {
                 tauri::WindowEvent::Moved(_) => on_moved(&handle),
                 tauri::WindowEvent::Destroyed => {
                     HELPER_HWND.store(0, std::sync::atomic::Ordering::Relaxed);
+                    crate::webview::forget(HELPER);
                 }
                 tauri::WindowEvent::CloseRequested { api, .. } => {
                     // Closing the helper hides it; the tray brings it back.
@@ -536,9 +545,11 @@ pub fn create_wallpaper(app: &AppHandle, monitor: &str, spec: WallpaperSpec) {
     // Reserve this monitor while Explorer creates its host. Closing or changing
     // modes removes the reservation and cancels the queued creation below.
     shared.lock().wallpapers.insert(monitor.to_string(), spec);
+    pending().insert(monitor.to_string());
     let app = app.clone();
     let monitor = monitor.to_string();
     std::thread::spawn(move || {
+        let done = Pending(monitor.clone());
         for _ in 0..30 {
             if app.state::<Shared>().lock().wallpapers.get(&monitor) != Some(&spec) {
                 return;
@@ -546,6 +557,8 @@ pub fn create_wallpaper(app: &AppHandle, monitor: &str, spec: WallpaperSpec) {
             if let Decision::Place { parent, after, .. } = decide(&win::snapshot()) {
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || {
+                    // Stays pending until the window exists, so heal() never races the creation.
+                    let _done = done;
                     if handle.get_webview_window(&label).is_some() {
                         return;
                     }
@@ -567,7 +580,7 @@ pub fn create_wallpaper(app: &AppHandle, monitor: &str, spec: WallpaperSpec) {
                     ));
                     // Tao must know this is a child before construction, just as
                     // for the helper. Late SetParent alone leaves stale popup/DPI state.
-                    let window = match prepared.title("NOVA wallpaper").zoom_hotkeys_enabled(false).build() {
+                    let window = match prepared.title("NOVA wallpaper").build() {
                         Ok(window) => window,
                         Err(error) => {
                             log!("could not open the wallpaper window: {error}");
@@ -575,10 +588,16 @@ pub fn create_wallpaper(app: &AppHandle, monitor: &str, spec: WallpaperSpec) {
                             return;
                         }
                     };
-                    window.on_window_event(|event| {
-                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                            api.prevent_close();
-                        }
+                    crate::webview::harden(
+                        &window,
+                        crate::webview::Kind::Wallpaper,
+                        Some((origin.clone(), url.clone())),
+                    );
+                    let forget = label.clone();
+                    window.on_window_event(move |event| match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => api.prevent_close(),
+                        tauri::WindowEvent::Destroyed => crate::webview::forget(&forget),
+                        _ => {}
                     });
                     let placed = window.hwnd().map_err(|error| error.to_string()).and_then(|raw| {
                         let native = raw.0 as isize;
@@ -620,6 +639,72 @@ pub fn create_wallpaper(app: &AppHandle, monitor: &str, spec: WallpaperSpec) {
             }
         });
     });
+}
+
+/// Wallpaper monitors whose window is still being created (Explorer may need a few seconds).
+static PENDING: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+
+struct PendingSet(std::sync::MutexGuard<'static, Option<std::collections::HashSet<String>>>);
+impl PendingSet {
+    fn insert(mut self, monitor: String) {
+        self.0.get_or_insert_with(Default::default).insert(monitor);
+    }
+    fn contains(&self, monitor: &str) -> bool {
+        self.0.as_ref().is_some_and(|set| set.contains(monitor))
+    }
+}
+fn pending() -> PendingSet {
+    PendingSet(PENDING.lock().unwrap_or_else(|p| p.into_inner()))
+}
+/// Clears the pending mark when the creation thread ends, however it ends.
+struct Pending(String);
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if let Some(set) = pending().0.as_mut() {
+            set.remove(&self.0);
+        }
+    }
+}
+
+/// NOVA windows that Windows took away: Explorer restarted (the desktop host and every child window are gone),
+/// or the helper could not be attached yet right after sign-in. Returns true when something must be rebuilt;
+/// the dead windows are already cleaned up then.
+pub fn heal(app: &AppHandle) -> bool {
+    let (wallpapers, wants_helper) = {
+        let shared = app.state::<Shared>();
+        let inner = shared.lock();
+        (
+            inner.wallpapers.keys().cloned().collect::<Vec<_>>(),
+            inner.config.url.is_some() && inner.desired.mode.wants_helper() && inner.desired.helper_visible,
+        )
+    };
+    let mut rebuild = false;
+    for monitor in wallpapers {
+        if pending().contains(&monitor) {
+            continue;
+        }
+        let alive = app
+            .get_webview_window(&label_for(&monitor))
+            .and_then(|w| w.hwnd().ok())
+            .is_some_and(|h| win::alive(h.0 as isize));
+        if !alive {
+            log!("the wallpaper window on {monitor} disappeared (Explorer restarted?); rebuilding it");
+            close_wallpaper(app, &monitor);
+            rebuild = true;
+        }
+    }
+    match app.get_webview_window(HELPER) {
+        Some(window) => {
+            if !window.hwnd().is_ok_and(|h| win::alive(h.0 as isize)) {
+                log!("the helper window lost its desktop host; rebuilding it");
+                let _ = window.destroy();
+                rebuild = true;
+            }
+        }
+        None if wants_helper => rebuild = true,
+        None => {}
+    }
+    rebuild
 }
 
 pub fn app_address(app: &AppHandle) -> Option<String> {

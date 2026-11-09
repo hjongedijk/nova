@@ -108,6 +108,19 @@ mod imp {
         (width > 0 && height > 0).then(|| Rect::new(origin.x, origin.y, width, height))
     }
 
+    /// The window and the desktop host it is a child of both still exist.
+    pub fn alive(window: isize) -> bool {
+        let h = HWND(window as *mut core::ffi::c_void);
+        unsafe {
+            IsWindow(Some(h)).as_bool()
+                && match GetParent(h) {
+                    Ok(parent) => IsWindow(Some(parent)).as_bool(),
+                    // A top-level window (not attached to the desktop) is alive on its own.
+                    Err(_) => true,
+                }
+        }
+    }
+
     /// Makes `window` a child of the chosen desktop window, at `rect`, and shows it.
     pub fn place(window: isize, parent: u64, after: InsertAfter, rect: Rect) -> Result<(), String> {
         let h = HWND(window as *mut core::ffi::c_void);
@@ -545,6 +558,9 @@ mod imp {
 
     pub fn client_bounds(_window: isize) -> Option<Rect> {
         None
+    }
+    pub fn alive(_window: isize) -> bool {
+        true
     }
     pub fn snapshot() -> DesktopSnapshot {
         DesktopSnapshot::default()

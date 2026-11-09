@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, RunEvent};
 
 pub fn run() {
     let mut startup: Vec<String> = std::env::args().skip(1).collect();
@@ -31,6 +31,12 @@ pub fn run() {
         // Must be the first plugin: a second start hands its arguments to the running instance and ends.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let handle = app.clone();
+            // Starting NOVA again (Start menu, desktop icon) while it runs opens its window, like any app.
+            if argv.len() <= 1 {
+                let again = handle.clone();
+                let _ = handle.run_on_main_thread(move || open_setup(&again));
+                return;
+            }
             match args::parse(argv.into_iter().skip(1)) {
                 Ok(parsed) => {
                     let again = handle.clone();
@@ -57,6 +63,15 @@ pub fn run() {
             commands::agent_update_status,
             commands::agent_check_update,
             commands::agent_install_update,
+            crate::app_window::app_state,
+            crate::app_window::app_set_mode,
+            crate::app_window::app_set_helper_display,
+            crate::app_window::app_set_wallpaper,
+            crate::app_window::app_set_helper_visible,
+            crate::app_window::app_show_login,
+            crate::app_window::app_open_browser,
+            crate::app_window::app_set_autostart,
+            crate::app_window::app_set_paused,
         ])
         .setup(move |app| {
             init(app.handle(), first);
@@ -181,9 +196,8 @@ fn init(app: &AppHandle, args: Args) {
         app.exit(0);
         return;
     }
-    if let Err(error) = crate::agent_http::start(app) {
-        log!("HTTP agent could not start: {error}");
-        app.state::<Shared>().lock().agent_error = Some(error);
+    crate::agent_http::start_or_retry(app);
+    if !crate::agent_http::listening() {
         open_setup(app);
     }
     start(app);
@@ -203,24 +217,9 @@ pub fn start(app: &AppHandle) {
     tray::rebuild(app);
 }
 
+/// The NOVA application window (status, displays, pairing, start-up, updates).
 pub fn open_setup(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("setup") {
-        let _ = window.show();
-        let _ = window.set_focus();
-        return;
-    }
-    // Its own browser profile: it must not share one with the NOVA windows, which start WebView2 with other arguments.
-    let profile = app.state::<Shared>().lock().profile_dir.with_file_name("setup-profile");
-    let built = WebviewWindowBuilder::new(app, "setup", WebviewUrl::App("index.html".into()))
-        .title("NOVA")
-        .inner_size(560.0, 680.0)
-        .resizable(true)
-        .data_directory(profile)
-        .on_navigation(|url| url.scheme() == "tauri" || url.host_str() == Some("tauri.localhost"))
-        .build();
-    if let Err(error) = built {
-        log!("could not open the setup window: {error}");
-    }
+    crate::app_window::open(app);
 }
 
 pub fn running(app: &AppHandle) -> Running {
@@ -402,6 +401,14 @@ fn watch_monitors(app: &AppHandle) {
                 inner.monitor_fingerprint = now;
                 changed
             };
+            if !changed {
+                // Explorer restarts take the desktop-attached windows with them: rebuild what is missing.
+                if crate::windows_ops::heal(&handle) {
+                    apply(&handle);
+                    apply_layout(&handle);
+                    tray::rebuild(&handle);
+                }
+            }
             if changed {
                 log!("the displays changed");
                 // Wallpaper windows keep a fixed size: build them again on the new geometry.

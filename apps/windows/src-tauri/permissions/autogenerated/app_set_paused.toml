@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-set-paused"
+description = "Enables the app_set_paused command without any pre-configured scope."
+commands.allow = ["app_set_paused"]
+
+[[permission]]
+identifier = "deny-app-set-paused"
+description = "Denies the app_set_paused command without any pre-configured scope."
+commands.deny = ["app_set_paused"]

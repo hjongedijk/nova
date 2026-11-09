@@ -26,12 +26,13 @@ pub fn init(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(20));
+        // Right after sign-in the network is often not up yet: a failed check retries within minutes instead of
+        // waiting six hours.
+        let mut failures = 0u32;
         loop {
-            let handle = app.clone();
-            tauri::async_runtime::spawn(async move {
-                let _ = check(&handle, true).await;
-            });
-            std::thread::sleep(Duration::from_secs(6 * 60 * 60));
+            let ok = tauri::async_runtime::block_on(check(&app, true)).is_ok();
+            failures = if ok { 0 } else { failures.saturating_add(1) };
+            std::thread::sleep(nova_win_core::backoff::update_check(failures));
         }
     });
 }

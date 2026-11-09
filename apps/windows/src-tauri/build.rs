@@ -16,6 +16,15 @@ fn main() {
             "agent_update_status",
             "agent_check_update",
             "agent_install_update",
+            "app_state",
+            "app_set_mode",
+            "app_set_helper_display",
+            "app_set_wallpaper",
+            "app_set_helper_visible",
+            "app_show_login",
+            "app_open_browser",
+            "app_set_autostart",
+            "app_set_paused",
         ])),
     )
     .expect("tauri build failed");

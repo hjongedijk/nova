@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-open-browser"
+description = "Enables the app_open_browser command without any pre-configured scope."
+commands.allow = ["app_open_browser"]
+
+[[permission]]
+identifier = "deny-app-open-browser"
+description = "Denies the app_open_browser command without any pre-configured scope."
+commands.deny = ["app_open_browser"]

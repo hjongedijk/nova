@@ -221,11 +221,12 @@ pub async fn agent_retire_legacy(window: WebviewWindow, app: AppHandle, director
     tauri::async_runtime::spawn_blocking(move || crate::platform::retire_legacy(&work))
         .await
         .map_err(|e| e.to_string())??;
-    if app.state::<Shared>().lock().agent_error.is_some() {
+    if !crate::agent_http::listening() {
         match crate::agent_http::start(&app) {
             Ok(()) => app.state::<Shared>().lock().agent_error = None,
             Err(error) => {
                 app.state::<Shared>().lock().agent_error = Some(error.clone());
+                crate::agent_http::start_or_retry(&app);
                 return Err(error);
             }
         }

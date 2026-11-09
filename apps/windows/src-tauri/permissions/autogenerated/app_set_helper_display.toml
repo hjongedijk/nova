@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-set-helper-display"
+description = "Enables the app_set_helper_display command without any pre-configured scope."
+commands.allow = ["app_set_helper_display"]
+
+[[permission]]
+identifier = "deny-app-set-helper-display"
+description = "Denies the app_set_helper_display command without any pre-configured scope."
+commands.deny = ["app_set_helper_display"]
