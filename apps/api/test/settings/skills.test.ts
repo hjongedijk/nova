@@ -177,6 +177,33 @@ describe("skills", () => {
     expect(replaced.http.secretHeaders[0]?.value).toBe("nieuw");
   });
 
+  it("does not carry a stored secret to a new URL or method", () => {
+    const created = hook(webhook());
+    const keep = { name: "X-Token", value: "" };
+    expect(() =>
+      hook(
+        {
+          ...webhook(),
+          http: {
+            ...webhook().http,
+            url: "https://collector.example/x",
+            secretHeaders: [keep],
+          },
+        },
+        { existing: created },
+      ),
+    ).toThrow(/geheime header/);
+    expect(() =>
+      hook(
+        {
+          ...webhook(),
+          http: { ...webhook().http, method: "PUT", secretHeaders: [keep] },
+        },
+        { existing: created },
+      ),
+    ).toThrow(/geheime header/);
+  });
+
   it("builds the request with encoded URLs, escaped JSON and the secret header", () => {
     const skill = hook({
       ...webhook(),
@@ -311,6 +338,17 @@ describe("where a webhook may go", () => {
       "http://qdrant:6333/",
       "http://x.localhost/",
       "http://224.0.0.1/",
+      // Hex-form IPv4-mapped IPv6, trailing dots, container names and the Docker host.
+      "http://[::ffff:7f00:1]:8080/api/settings",
+      "http://[::ffff:a9fe:a9fe]/latest/meta-data",
+      "http://qdrant.:6333/",
+      "http://nova-qdrant:6333/",
+      "http://nova-node-red:1880/flows",
+      "http://stack-control:8090/",
+      "http://nova-stack-control:8090/",
+      "http://nova-mcp-egress/",
+      "http://host.docker.internal:8080/",
+      "http://localhost./",
     ])
       expect(
         () => assertSkillTarget(url, { allowPrivate: true }),
@@ -318,6 +356,9 @@ describe("where a webhook may go", () => {
       ).toThrow();
     expect(forbiddenAddress("169.254.1.1")).toBe(true);
     expect(forbiddenAddress("::ffff:127.0.0.1")).toBe(true);
+    expect(forbiddenAddress("::ffff:7f00:1")).toBe(true);
+    expect(forbiddenAddress("::ffff:c0a8:105")).toBe(false);
+    expect(() => assertSkillTarget("http://qdrant./")).toThrow();
     expect(forbiddenAddress("192.168.1.5")).toBe(false);
   });
 

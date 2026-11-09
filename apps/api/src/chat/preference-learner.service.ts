@@ -23,6 +23,7 @@ import {
   OmniRouteClient,
   type ModelMessage,
 } from "./omniroute-client.service.js";
+import { isOwnerSession } from "./session-provenance.js";
 
 const CHECK_MS = 30_000;
 const RETRY_MS = 5 * 60_000;
@@ -32,8 +33,6 @@ const LEARN_AT = "03:05";
 export const MAX_FACTS_PER_NIGHT = 10;
 const MAX_TRANSCRIPT_CHARS = 10_000;
 export const LEARNED_NIGHTLY_TAGS = ["learned", "nightly"];
-/** Sessions whose "user" turns were not typed by the owner: agent goals, proactive prompts, texts from contacts. */
-const NOT_OWNER_SESSION = /^(?:agent_|proactive_|autopilot|sipchat_)/;
 
 /** What the model may return, mapped onto the memory types that exist. PLACE has no own type. */
 const FACT_TYPES: Record<string, MemoryType> = {
@@ -62,7 +61,7 @@ export function learningInput(
   timezone: string,
 ): string[] {
   const texts = sessions
-    .filter(({ id }) => !NOT_OWNER_SESSION.test(id))
+    .filter(({ id }) => isOwnerSession(id))
     .flatMap(({ messages }) => messages)
     .filter(
       (item) =>

@@ -113,6 +113,26 @@ describe("message parsing", () => {
       "hjongedijk@sip.linphone.org",
     );
     expect(sipAddress("garbage")).toBeNull();
+    expect(sipAddress("Harm <sip:hjongedijk@sip.linphone.org>;tag=1")).toBe(
+      "hjongedijk@sip.linphone.org",
+    );
+  });
+  it("takes the sender only from the addr-spec, never from the display name or parameters", () => {
+    const owner = "owner@sip.linphone.org";
+    for (const from of [
+      '"sip:owner@sip.linphone.org" <sip:mallory@sip.linphone.org;gr=urn:uuid:1>;tag=abc',
+      '"Owner \\" <sip:owner@sip.linphone.org>" <sip:mallory@sip.linphone.org>',
+      '<sip:mallory@sip.linphone.org>;x="<sip:owner@sip.linphone.org>"',
+      'sip:mallory@sip.linphone.org;x="sip:owner@sip.linphone.org"',
+    ])
+      expect(sipAddress(from), from).toBe("mallory@sip.linphone.org");
+    for (const from of [
+      '"sip:owner@sip.linphone.org"',
+      "sip:owner@sip.linphone.org <sip:mallory@sip.linphone.org>",
+      '"unterminated <sip:owner@sip.linphone.org>',
+      "<sip:owner@sip.linphone.org",
+    ])
+      expect(sipAddress(from), from).not.toBe(owner);
   });
   it("cleans markdown and keeps replies short", () => {
     const sample = ["**Hoi** `x`", "```js", "let a", "```", "# Kop | a"].join(
@@ -150,6 +170,33 @@ describe("answering text messages", () => {
     expect(await msg(off)).toBe("");
     expect(runs).toHaveLength(0);
     expect(audits.filter((a) => a.phase === "rejected")).toHaveLength(3);
+  });
+
+  it("gives contacts read-only tools, and only the owner's own address full tools", async () => {
+    const b = boot();
+    expect(await msg(b)).toContain("14 graden");
+    expect(runs.at(-1)).toMatchObject({
+      sessionId: "sipchat_harm",
+      readOnlyOnly: true,
+      ownerTurn: false,
+    });
+    const owned = boot();
+    (owned.service as unknown as { config: NovaConfig }).config = {
+      defaultLanguage: "nl-NL",
+      ownerSip: ["hjongedijk@sip.linphone.org"],
+    } as unknown as NovaConfig;
+    await msg(owned);
+    expect(runs.at(-1)).toMatchObject({
+      readOnlyOnly: false,
+      ownerTurn: true,
+    });
+    // A stranger putting the owner's address in the display name is not the owner.
+    expect(
+      await msg(owned, {
+        from: '"sip:hjongedijk@sip.linphone.org" <sip:mallory@sip.linphone.org>;tag=a',
+      }),
+    ).toBe("");
+    expect(runs).toHaveLength(2);
   });
 
   it("never carries out something that needs a confirmation, and survives failures", async () => {

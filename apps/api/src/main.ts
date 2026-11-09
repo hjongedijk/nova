@@ -13,12 +13,24 @@ import path from "node:path";
 import { NodeRedEditorProxy } from "./settings/node-red-editor-proxy.service.js";
 import { AppModule } from "./app.module.js";
 import { NovaConfig } from "./core/config/nova-config.js";
+import { requestGuard } from "./core/security/request-origin.js";
 
 async function bootstrap() {
   const server = express();
   const app = await NestFactory.create<NestExpressApplication>(
     AppModule,
     new ExpressAdapter(server),
+    // JSON only: no urlencoded parser, so a plain cross-site HTML form cannot build a request body.
+    { bodyParser: false },
+  );
+  const config = app.get(NovaConfig);
+  // Before every /api route (the Node-RED editor proxy included): refuse other websites and rebound host names.
+  server.use(
+    "/api",
+    requestGuard({
+      publicUrl: config.publicUrl,
+      allowedHosts: config.allowedHosts,
+    }),
   );
   app.setGlobalPrefix("api", {
     exclude: ["nova-ca.crt"],
@@ -35,11 +47,15 @@ async function bootstrap() {
     "/api/integrations/node-red/events",
     express.json({ limit: "4kb" }),
   );
+  // The Asterisk dialplan CURLs a form (token-checked); the only route that reads one.
+  server.use(
+    "/api/integrations/asterisk/message",
+    express.urlencoded({ extended: false, limit: "64kb" }),
+  );
   app.useBodyParser("json", { limit: "42mb" });
   app.enableShutdownHooks();
   await app.init();
 
-  const config = app.get(NovaConfig);
   const log = new Logger("NOVA");
   attachEditor(http.createServer(server)).listen(config.port, () =>
     log.log(`http on :${config.port}`),

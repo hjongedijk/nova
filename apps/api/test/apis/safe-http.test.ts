@@ -60,6 +60,53 @@ describe("address rules", () => {
   });
 });
 
+describe("internal targets in local-network mode", () => {
+  it("reads IPv4-mapped IPv6 in hex form like the dotted form", () => {
+    expect(addressAllowed("::ffff:a9fe:a9fe", true)).toBe(false);
+    expect(isMetadataOrUnroutable("::ffff:a9fe:a9fe")).toBe(true);
+    expect(isMetadataOrUnroutable("::ffff:0:0")).toBe(true);
+  });
+
+  it("refuses NOVA's own services by any spelling, and its own port over mapped loopback", async () => {
+    const client = new ApiHttpClient({
+      resolve: async () => ["10.0.0.5"],
+      ownPort: 8080,
+    });
+    for (const url of [
+      "http://nova-qdrant:6333/collections",
+      "http://qdrant.:6333/collections",
+      "http://nova-node-red:1880/flows",
+      "http://nova-stack-control:8090/",
+      "http://stack-control:8090/",
+      "http://nova-mcp-egress/",
+      "http://host.docker.internal:8080/api",
+      "http://LOCALHOST./",
+    ])
+      expect(
+        await code(client.request({ ...base, url, local: true })),
+        url,
+      ).toBe("blocked_host");
+    expect(
+      await code(
+        client.request({
+          ...base,
+          url: "http://[::ffff:7f00:1]:8080/api/settings",
+          local: true,
+        }),
+      ),
+    ).toBe("blocked_host");
+    expect(
+      await code(
+        client.request({
+          ...base,
+          url: "http://[::ffff:a9fe:a9fe]/latest/meta-data",
+          local: true,
+        }),
+      ),
+    ).toBe("blocked_address");
+  });
+});
+
 describe("ApiHttpClient", () => {
   it("blocks the metadata address even for local-network integrations", async () => {
     const client = new ApiHttpClient();

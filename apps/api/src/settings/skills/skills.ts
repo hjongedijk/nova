@@ -149,14 +149,20 @@ function normalizeHttp(
     name: header(row),
     value: String(row?.value ?? "").slice(0, 500),
   }));
+  // Stored secrets only go to the address and method they were entered for (as backup-plan.ts does).
+  const sameTarget =
+    existing?.type === "webhook" &&
+    existing.http.url === url &&
+    existing.http.method === method;
   const previous = new Map(
-    (existing?.type === "webhook" ? existing.http.secretHeaders : []).map(
-      (row) => [row.name.toLowerCase(), row.value],
-    ),
+    (sameTarget ? existing.http.secretHeaders : []).map((row) => [
+      row.name.toLowerCase(),
+      row.value,
+    ]),
   );
   const secretHeaders = secretRows.map((row) => {
     const name = header(row);
-    // An empty value means "keep the stored secret"; the screen never shows it again.
+    // An empty value means "keep the stored secret" (same URL and method only); the screen never shows it again.
     const value = row?.value
       ? String(row.value).slice(0, 500)
       : previous.get(name.toLowerCase());
