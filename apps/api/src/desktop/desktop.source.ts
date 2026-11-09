@@ -76,7 +76,7 @@ export class DesktopSource implements ToolSource {
       {
         name: "desktop_status",
         description:
-          "Read whether the Windows agent can view or control the user's PC desktop, and whether a takeover session is running (time left, actions used). Use it before offering to look at the screen.",
+          "Read whether the Windows agent can view or control the user's PC desktop, and whether a takeover session is running (time left, actions used). It does not show the screen: for “wat zie je”, “wat staat er op mijn scherm” or any question about what is on the PC, call desktop_screenshot.",
         parameters: schema(),
         risk: "READ_ONLY",
       },
@@ -92,7 +92,7 @@ export class DesktopSource implements ToolSource {
       {
         name: "desktop_screenshot",
         description:
-          'Look at the user\'s PC screen: a screenshot is read by the free vision model and you get a text description with approximate x,y positions of controls. Optional "question" says what to look for. During a takeover you must look again after a few actions.' +
+          'Look at the user\'s PC screen: a screenshot is read by the free vision model and you get a text description with approximate x,y positions of controls. Optional "question" says what to look for. Use it whenever the user asks what is on their screen or desktop, and before clicking on something you have not seen.' +
           untrusted,
         parameters: schema(
           {
@@ -125,7 +125,7 @@ export class DesktopSource implements ToolSource {
       {
         name: "desktop_takeover_start",
         description:
-          'Start operating the PC mouse and keyboard for a short session requested by the user. Say the goal ("goal") and a duration of at most 900 seconds ("ttlSeconds"). No additional permission or confirmation is needed. Afterwards use desktop_screenshot and desktop_act, and finish with desktop_takeover_stop.',
+          'Start operating the PC mouse and keyboard for a short session requested by the user. Say the goal ("goal") and a duration of at most 900 seconds ("ttlSeconds"). No additional permission or confirmation is needed. Optional: desktop_act starts a session by itself, and calling this again extends the running one. Finish with desktop_takeover_stop.',
         parameters: schema({ goal: text(200), ttlSeconds: integer(30, 900) }),
         risk: "DANGEROUS",
         allowStandingApproval: false,
@@ -134,7 +134,7 @@ export class DesktopSource implements ToolSource {
       {
         name: "desktop_act",
         description:
-          "Do one mouse or keyboard action on the PC during a running takeover: action is move, click, doubleclick, rightclick (x,y), drag (x,y,toX,toY), scroll (dy, optional dx,x,y), type (text), key (key such as tab, ctrl+f, enter, media_play_pause or media_stop) or focus_window (windowId). Coordinates are pixels of the latest screenshot. Look with desktop_screenshot first and again after a few actions. For Plex, VLC or browser video on the PC, observe the playing state and focus the actual player before pressing space; media_play_pause toggles system media playback, so do not use it blindly." +
+          "Do one mouse or keyboard action on the PC at once (a takeover session starts automatically when none runs): action is move, click, doubleclick, rightclick (x,y), drag (x,y,toX,toY), scroll (dy, optional dx,x,y), type (text), key (key such as tab, ctrl+f, enter, media_play_pause or media_stop) or focus_window (windowId). Coordinates are pixels of the latest screenshot. For a target you have not seen, look with desktop_screenshot first; a plain move, key or typing request can be done directly. For Plex, VLC or browser video on the PC, observe the playing state and focus the actual player before pressing space; media_play_pause toggles system media playback, so do not use it blindly." +
           untrusted,
         parameters: schema(
           {

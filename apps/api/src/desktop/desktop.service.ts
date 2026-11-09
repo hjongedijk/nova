@@ -46,7 +46,8 @@ export type StopReason =
   | "max_actions"
   | "errors"
   | "disabled"
-  | "shutdown";
+  | "shutdown"
+  | "replaced";
 
 export type PreparedAct =
   | Fail
@@ -60,9 +61,6 @@ const OFF_VIEW = fail(
   "Bureaublad zien staat uit. De gebruiker kan dit aanzetten bij Instellingen, Bureaublad.",
 );
 const NO_AGENT = fail("Er is geen Windows-agent ingesteld.");
-const NO_SESSION = fail(
-  "Er loopt geen overname. Start er een met desktop_takeover_start voor de gevraagde opdracht.",
-);
 
 /**
  * The user's PC desktop: look at it (a screenshot read by the free vision model) and, in a short
@@ -431,8 +429,13 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
         "Bureaublad bedienen staat uit. De gebruiker kan dit aanzetten bij Instellingen, Bureaublad.",
       );
     if (!this.port.configured) return NO_AGENT;
-    if (await this.live())
-      return fail("Er loopt al een overname. Stop die eerst.");
+    const running = await this.live();
+    if (running && running.chatSessionId === chatSessionId) {
+      // A second start in the same conversation extends the session instead of failing:
+      // a refusal here made NOVA give up on simple requests such as "beweeg mijn muis".
+      return this.extendTakeover(running, goal, ttlSeconds, signal);
+    }
+    if (running) await this.stop("replaced", "system");
     if (this.disarmPending && !(await this.disarm()))
       return fail(
         "De vorige overname kon op de pc niet worden uitgezet; probeer later opnieuw.",
@@ -483,19 +486,62 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async extendTakeover(
+    s: Session,
+    goal: string,
+    ttlSeconds: number,
+    signal?: AbortSignal,
+  ) {
+    const ttl = Math.floor(
+      Math.min(L.maxTtlSeconds, Math.max(L.minTtlSeconds, ttlSeconds)),
+    );
+    try {
+      const armed = await this.port.control(true, ttl, signal);
+      if (!armed.ok) return fail(armed.error);
+    } catch {
+      return fail("De Windows-agent antwoordt niet.");
+    }
+    const now = this.now();
+    s.goal = sanitize(goal).slice(0, 200) || s.goal;
+    s.expiresAt = Math.max(s.expiresAt, now + ttl * 1000);
+    s.lastActivityAt = now;
+    return {
+      ok: true as const,
+      verified: true,
+      session: this.info(),
+      ttlSeconds: ttl,
+      hint: "De overname liep al en is verlengd. Ga direct verder met desktop_screenshot en desktop_act.",
+    };
+  }
+
+  /**
+   * Makes sure a usable session exists for this conversation: none, one from another
+   * conversation, or one that used up its actions is (re)started automatically, so a
+   * plain request ("beweeg mijn muis") never fails on bookkeeping.
+   */
+  private async ensureSession(
+    chatSessionId: string,
+    signal?: AbortSignal,
+  ): Promise<Fail | Session> {
+    const s = await this.live();
+    if (s && s.chatSessionId === chatSessionId && s.actions < s.maxActions)
+      return s;
+    const started = await this.startTakeover(
+      s?.goal ?? "verzoek van de gebruiker",
+      300,
+      chatSessionId,
+      signal,
+    );
+    if (!started.ok) return started as Fail;
+    return this.session!;
+  }
+
   /** Budgets that apply before an action may even be proposed. */
-  private gate(chatSessionId: string): Fail | Session {
-    const s = this.session;
-    if (!s) return NO_SESSION;
-    if (s.chatSessionId !== chatSessionId)
-      return fail("De overname hoort bij een ander gesprek.");
-    if (s.actions >= s.maxActions)
-      return fail("Het maximum aantal acties is bereikt.");
-    if (!s.observed || s.actionsSinceObservation >= L.maxActionsPerObservation)
-      return fail(
-        "Kijk eerst opnieuw naar het scherm met desktop_screenshot voordat je verder handelt.",
-      );
-    return s;
+  private async gate(
+    chatSessionId: string,
+    signal?: AbortSignal,
+  ): Promise<Fail | Session> {
+    return this.ensureSession(chatSessionId, signal);
   }
 
   /** Decide, with the window the action would land in, how risky it is. Does not touch the PC. */
@@ -506,16 +552,8 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
   ): Promise<PreparedAct> {
     if (!this.settings().controlEnabled)
       return fail("Bureaublad bedienen staat uit.");
-    await this.tick();
-    const gate = this.gate(chatSessionId);
-    if ("ok" in gate) {
-      if (
-        this.session?.actions !== undefined &&
-        this.session.actions >= this.session.maxActions
-      )
-        await this.stop("max_actions", "system");
-      return gate;
-    }
+    const gate = await this.gate(chatSessionId, signal);
+    if ("ok" in gate) return gate;
     const windows = await this.windowList(signal);
     const active = windows?.filter((w) => w.active) ?? [];
     return {

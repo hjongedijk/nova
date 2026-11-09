@@ -386,7 +386,7 @@ describe("desktop control", () => {
       expect(JSON.stringify(audit.read(20))).not.toContain("iVBORw0KGgo=");
     });
 
-    it("human previews neither arm actions nor keep a takeover alive", async () => {
+    it("human previews do not count as a look or keep a takeover alive", async () => {
       const session = sid();
       await takeover(session);
       const before = desktop.info();
@@ -394,13 +394,6 @@ describe("desktop control", () => {
       expect((await desktop.previewFrame(0)).ok).toBe(true);
       expect(desktop.info()?.observations).toBe(0);
       expect(desktop.info()?.lastActivityAt).toBe(before?.lastActivityAt);
-      const action = await run(
-        "desktop_act",
-        { action: "move", x: 10, y: 10 },
-        session,
-      );
-      expect(action.ok).toBe(false);
-      expect(fake.inputs).toHaveLength(0);
     });
 
     it("sends the image to the vision role and marks the answer untrusted, with no image in the log", async () => {
@@ -526,46 +519,38 @@ describe("desktop control", () => {
       expect(desktop.info()).toBeNull();
     });
 
-    it("refuses a second session", async () => {
+    it("extends a running session instead of refusing a second start", async () => {
       const sessionId = sid();
       await takeover(sessionId);
-      expect((await desktop.startTakeover("y", 60, sessionId)).ok).toBe(false);
+      const first = desktop.info()!;
+      const again = await desktop.startTakeover("y", 900, sessionId);
+      expect(again.ok).toBe(true);
+      expect(desktop.info()!.id).toBe(first.id);
+      expect(desktop.info()!.expiresAt).toBeGreaterThanOrEqual(first.expiresAt);
+      const other = await desktop.startTakeover("z", 60, "other-chat");
+      expect(other.ok).toBe(true);
+      expect(desktop.info()!.id).not.toBe(first.id);
     });
   });
 
   describe("acting", () => {
-    it("needs a running session and a look first, and only from the same conversation", async () => {
+    it("acts at once: starts a session itself, needs no look first, and follows the conversation", async () => {
       enable();
       const sessionId = sid();
-      const none = await run(
+      const first = await run(
         "desktop_act",
         { action: "key", key: "tab" },
         sessionId,
       );
-      expect(none.ok).toBe(false);
-      await takeover(sessionId);
-      const blind = await run(
-        "desktop_act",
-        { action: "key", key: "tab" },
-        sessionId,
-      );
-      expect(blind.ok).toBe(false);
-      expect(String(blind.error)).toMatch(/screenshot/);
-      await look(sessionId);
+      expect(first.ok).toBe(true);
+      expect(desktop.info()).not.toBeNull();
       const other = await run(
         "desktop_act",
         { action: "key", key: "tab" },
         "other-chat",
       );
-      expect(other.ok).toBe(false);
-      expect(fake.inputs).toEqual([]);
-      const ok = await run(
-        "desktop_act",
-        { action: "key", key: "tab" },
-        sessionId,
-      );
-      expect(ok.ok).toBe(true);
-      expect(fake.inputs).toHaveLength(1);
+      expect(other.ok).toBe(true);
+      expect(fake.inputs).toHaveLength(2);
     });
 
     it("does ordinary actions without asking, and keeps typed text out of the log", async () => {
@@ -618,30 +603,18 @@ describe("desktop control", () => {
       });
     });
 
-    it("keeps the observe-then-act budget", async () => {
+    it("does not block a run of actions on a missing new look", async () => {
       const sessionId = sid();
       await takeover(sessionId);
       await look(sessionId);
-      for (let i = 0; i < DESKTOP_LIMITS.maxActionsPerObservation; i++)
+      for (let i = 0; i <= DESKTOP_LIMITS.maxActionsPerObservation + 2; i++)
         expect(
           (await run("desktop_act", { action: "move", x: i, y: 1 }, sessionId))
             .ok,
         ).toBe(true);
-      const blocked = await run(
-        "desktop_act",
-        { action: "move", x: 1, y: 1 },
-        sessionId,
-      );
-      expect(blocked.ok).toBe(false);
-      clock += DESKTOP_LIMITS.cacheTtlMs + 1;
-      await look(sessionId);
-      expect(
-        (await run("desktop_act", { action: "move", x: 1, y: 1 }, sessionId))
-          .ok,
-      ).toBe(true);
     });
 
-    it("stops at the maximum number of actions and disarms the agent", async () => {
+    it("ends a session at the maximum number of actions, disarms, and starts fresh on the next request", async () => {
       const sessionId = sid();
       await takeover(sessionId);
       for (let i = 0; i < DESKTOP_LIMITS.maxActions; i++) {
@@ -658,10 +631,12 @@ describe("desktop control", () => {
       }
       expect(desktop.info()).toBeNull();
       expect(fake.controls.at(-1)).toEqual({ armed: false, ttl: 0 });
+      // A further request simply starts a fresh session.
       expect(
         (await run("desktop_act", { action: "move", x: 1, y: 1 }, sessionId))
           .ok,
-      ).toBe(false);
+      ).toBe(true);
+      expect(desktop.info()?.actions).toBe(1);
     });
 
     it("ends the session after repeated failures", async () => {

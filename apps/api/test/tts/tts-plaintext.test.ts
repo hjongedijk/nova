@@ -60,7 +60,8 @@ describe("plain-text speech synthesis", () => {
       new TtsService().speak("Een synthetische testzin.", "nl-NL-FennaNeural"),
     ).rejects.toBe(diagnostic);
     expect(stream).not.toHaveBeenCalled();
-    expect(close).toHaveBeenCalledOnce();
+    // One close per attempt: Edge is tried three times before the Piper fallback.
+    expect(close).toHaveBeenCalledTimes(3);
     expect(JSON.stringify(warning.mock.calls)).not.toContain(
       diagnostic.message,
     );

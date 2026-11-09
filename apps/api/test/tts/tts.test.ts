@@ -257,11 +257,41 @@ describe("local Piper fallback voices", () => {
       "nl-NL-MaartenNeural",
     );
     expect(again.cached).toBe(false);
-    expect(voices).toEqual(["nl-NL-MaartenNeural", "nl-NL-MaartenNeural"]);
+    // Three Edge attempts for the first sentence, then Piper holds so the answer keeps one voice.
+    expect(voices).toEqual([
+      "nl-NL-MaartenNeural",
+      "nl-NL-MaartenNeural",
+      "nl-NL-MaartenNeural",
+    ]);
     expect(piperBodies(piper).map((body) => body.voice)).toEqual([
       "nl_NL-pim-medium",
       "nl_NL-pim-medium",
     ]);
+  });
+
+  it("retries a single Edge hiccup instead of switching voice, and tries Edge again after the hold", async () => {
+    vi.stubEnv("NOVA_PIPER_TTS_URL", "http://piper:5000/synthesize");
+    const piper = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => wav());
+    const service = new TtsService();
+    let clock = 1_000;
+    service.now = () => clock;
+    let failures = 1;
+    service.engine = async () => {
+      if (failures-- > 0) throw new Error("stream failed");
+      return Buffer.from("mp3");
+    };
+    const hiccup = await service.speak("Eerste zin.", "nl-NL-MaartenNeural");
+    expect(hiccup.contentType).toBe("audio/mpeg");
+    expect(piper).not.toHaveBeenCalled();
+
+    failures = 3;
+    const down = await service.speak("Tweede zin.", "nl-NL-MaartenNeural");
+    expect(down.contentType).toBe("audio/wav");
+    clock += 2 * 60_000 + 1;
+    const back = await service.speak("Derde zin.", "nl-NL-MaartenNeural");
+    expect(back.contentType).toBe("audio/mpeg");
   });
 
   it("uses the English Piper voice only for an English reply", async () => {

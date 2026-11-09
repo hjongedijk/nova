@@ -176,9 +176,9 @@ Images are not stored or logged. Only a short cache (10 s, at most 4, per image 
 Enforced server-side (`desktop.limits.ts`):
 
 - Duration 30-900 s (also clamped on direct calls); 120 s of inactivity ends the session.
-- At most 100 actions and 60 screenshots. Observe, then act: look again after 6 actions.
+- At most 100 actions and 60 screenshots per session. A plain request needs no explicit start: `desktop_act` starts a five-minute session by itself, and a session that reached 100 actions is replaced by a fresh one on the next request. No look is required before acting; the model looks first only when it needs to find a target.
 - Three failed actions or screenshots in a row stop the session and switch the agent off; if switching off fails NOVA retries every 5 seconds and says so in settings.
-- One session at a time, bound to the conversation that started it.
+- One session at a time. A second `desktop_takeover_start` in the same conversation extends the running session; a start or action from another conversation replaces it.
 
 ### Classification of `desktop_act`
 

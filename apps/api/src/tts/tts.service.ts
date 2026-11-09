@@ -55,6 +55,9 @@ export const TTS_VOICE: (typeof TTS_VOICES)[number] = TTS_VOICES.includes(
   : TTS_DEFAULT_VOICE;
 // A little slower and lower than the default: less robotic.
 const DEFAULT_PROSODY = { rate: -3, pitch: -2 } as const;
+const EDGE_ATTEMPTS = 3;
+/** After Edge fails, Piper keeps speaking this long before Edge is tried again. */
+const EDGE_DOWN_HOLD_MS = 2 * 60_000;
 const clamp = (value: unknown, min: number, max: number, fallback: number) =>
   typeof value === "number" && Number.isFinite(value)
     ? Math.round(Math.max(min, Math.min(max, value)))
@@ -77,6 +80,9 @@ export class TtsService {
   private readonly log = new Logger("TTS");
   private readonly cache = new Map<string, Buffer>();
   private readonly cacheSize = 64;
+  private edgeDownUntil = 0;
+  /** Replaceable in tests. */
+  now: () => number = Date.now;
   /** Replaceable in tests. */
   engine: (
     text: string,
@@ -160,16 +166,24 @@ export class TtsService {
     const varied = variation(text);
     let audio: Buffer;
     try {
-      audio = await this.engine(text, voice, {
+      // While Edge is known to be down, stay on Piper: switching voices from
+      // sentence to sentence sounded like a second person joining the answer.
+      if (this.piperUrl() && this.now() < this.edgeDownUntil)
+        throw new Error("Edge recently failed");
+      audio = await this.edgeWithRetry(text, voice, {
         rate: clamp(prosody.rate + varied, -10, 10, prosody.rate),
         pitch: clamp(prosody.pitch - varied, -5, 5, prosody.pitch),
       });
-      if (!audio.length) throw new Error("No audio");
     } catch (error) {
       if (!this.piperUrl()) throw error;
-      // Edge is unreachable: the local Piper voice in the same language speaks instead. Not cached, so Edge
-      // takes over again as soon as it is back.
-      this.log.warn("Edge speech failed; using the local Piper voice");
+      // Edge is unreachable: the local Piper voice in the same language speaks instead, for a while, so one
+      // answer keeps one voice. Not cached, so Edge takes over again once it is back.
+      if (this.now() >= this.edgeDownUntil)
+        this.log.warn("Edge speech failed; using the local Piper voice");
+      this.edgeDownUntil = Math.max(
+        this.edgeDownUntil,
+        this.now() + EDGE_DOWN_HOLD_MS,
+      );
       return {
         audio: await this.synthesizePiper(
           text,
@@ -182,6 +196,29 @@ export class TtsService {
     }
     this.remember(cacheKey, audio);
     return { audio, cached: false, contentType: "audio/mpeg" };
+  }
+
+  /** A single failed Edge stream is common; two quick retries avoid switching voice for a hiccup. */
+  private async edgeWithRetry(
+    text: string,
+    voice: string,
+    prosody: { rate: number; pitch: number },
+  ): Promise<Buffer> {
+    let last: unknown;
+    for (let attempt = 0; attempt < EDGE_ATTEMPTS; attempt++) {
+      try {
+        const audio = await this.engine(
+          text,
+          voice as (typeof TTS_VOICES)[number],
+          prosody,
+        );
+        if (audio.length) return audio;
+        last = new Error("No audio");
+      } catch (error) {
+        last = error;
+      }
+    }
+    throw last;
   }
 
   private remember(cacheKey: string, audio: Buffer): void {
