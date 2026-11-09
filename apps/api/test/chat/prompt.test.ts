@@ -258,6 +258,22 @@ describe("voice response style", () => {
     expect(responseStyle("text", true)).toContain("This is typed chat");
     expect(responseStyle("text", true)).not.toContain("Quiet hours are active");
   });
+
+  it("makes voice turns conversational instead of one-shot answers", () => {
+    const voice = responseStyle("voice", false);
+    expect(voice).toContain("stays open after you answer");
+    expect(voice).toContain("follow-up question");
+    expect(voice).toContain("no lists");
+    expect(voice).toMatch(/stock closers/);
+    expect(voice).not.toContain("Do not force");
+    // Typed chat and quiet hours keep the restraint.
+    expect(responseStyle("text")).toContain(
+      "Do not force a joke, an opening catchphrase or a follow-up question",
+    );
+    expect(responseStyle("voice", true)).toContain(
+      "Do not add an optional offer, filler or follow-up question",
+    );
+  });
 });
 
 describe("automatic model role routing", () => {
