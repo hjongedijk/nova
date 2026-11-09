@@ -6,6 +6,7 @@
   import { attentionCount } from "#lib/stores/toasts.svelte.ts";
   import { pressCore } from "#lib/voice/core.ts";
   import { lightSync, startLightSync } from "#lib/stores/light-sync.svelte.ts";
+  import { helper } from "#lib/stores/helper.svelte.ts";
 
   let canvas = $state<HTMLCanvasElement>();
   let core = $state<HTMLButtonElement>();
@@ -26,6 +27,8 @@
         hue: () => (lightSync.enabled ? lightSync.hue : null),
         core: () => core ?? null,
         stage: () => document.querySelector<HTMLElement>(".stage"),
+        // Read every frame, so switching re-forms the body in place instead of restarting the renderer.
+        appearance: () => helper.avatar,
       }),
     );
   });

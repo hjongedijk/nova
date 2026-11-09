@@ -61,6 +61,7 @@
     animateHelper,
     helper,
     loadHelperPreferences,
+    normalizeAvatar,
     saveHelperPreferences,
   } from "#lib/stores/helper.svelte.ts";
   import { audioLevel } from "#lib/stores/audio-level.svelte.ts";
@@ -671,7 +672,7 @@
         if (disposed) return;
         autohide = prefs.autohide;
         contrast = prefs.contrast;
-        helper.avatar = "orb";
+        helper.avatar = normalizeAvatar(prefs.avatar);
         helper.shape = prefs.shape;
         if (prefs.notifications)
           helper.notifications = {
@@ -1210,6 +1211,13 @@
               onchange={() =>
                 storage.set("novaVolume", String(volume / 100), "volume")}
             /></label
+          >
+          <label
+            >Gedaante <select data-helper-live bind:value={helper.avatar}
+              ><option value="orb">Originele orb</option><option
+                value="presence">Gestalte</option
+              ></select
+            ></label
           >
           <label
             >Orb <select data-helper-live bind:value={helper.shape}

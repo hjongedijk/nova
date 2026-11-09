@@ -39,9 +39,12 @@ describe("helper preference history", () => {
       avatar: "orb",
     });
     expect(normalize({ ...preferences, avatar: "orb" }).avatar).toBe("orb");
+    expect(normalize({ ...preferences, avatar: "presence" }).avatar).toBe(
+      "presence",
+    );
     expect(() =>
       normalize({ ...preferences, avatar: "unknown" as never }),
-    ).toThrow("Kies de originele orb.");
+    ).toThrow("Kies de orb of de gestalte.");
   });
 
   it("keeps legacy delivery defaults and rejects unknown notification modes", () => {

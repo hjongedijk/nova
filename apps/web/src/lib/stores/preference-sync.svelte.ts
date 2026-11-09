@@ -10,7 +10,7 @@ import {
   preferenceChanges,
   type ClientPreferences,
 } from "#lib/util/client-preferences.ts";
-import { helper } from "./helper.svelte.ts";
+import { helper, normalizeAvatar } from "./helper.svelte.ts";
 import { shell } from "./shell.svelte.ts";
 import { lightSync, refreshLightSync } from "./light-sync.svelte.ts";
 import { setWake } from "#lib/voice/wake.ts";
@@ -113,7 +113,7 @@ export function startPreferenceSync(): () => void {
           helperRevision === helperPreferenceWrites.revision &&
           !document.activeElement?.closest("[data-helper-live]")
         ) {
-          helper.avatar = "orb";
+          helper.avatar = normalizeAvatar(prefs.avatar);
           helper.shape = prefs.shape;
           helper.cues = prefs.cues;
           if (prefs.notifications) helper.notifications = prefs.notifications;
