@@ -362,7 +362,7 @@ describe("settings write receipts", () => {
       ts.forEachChild(node, visit);
     };
     visit(source);
-    expect(routes).toHaveLength(100);
+    expect(routes).toHaveLength(103);
     for (const route of routes)
       expect(
         classifySettingsWrite(route.method, route.path),

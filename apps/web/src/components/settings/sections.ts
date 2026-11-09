@@ -271,6 +271,15 @@ export const TOPICS = [
     keywords: "skill vaardigheid webhook testen geschiedenis instructies",
   },
   {
+    id: "agent-skills",
+    page: "geavanceerd",
+    anchor: "agent-skills",
+    name: "Agent Skills",
+    detail: "Installeer SKILL.md-werkwijzen van GitHub en skills.sh.",
+    keywords:
+      "agent skills skill.md skills.sh github claude installeren zoeken vaardigheden werkwijze",
+  },
+  {
     id: "code",
     page: "geavanceerd",
     anchor: "codeprojecten",
