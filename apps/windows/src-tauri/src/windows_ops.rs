@@ -3,11 +3,12 @@
 use crate::state::Shared;
 use crate::{log, win};
 use nova_win_core::desktop::{decide, Decision};
-use nova_win_core::forward::{PointerForwarder, PointerInput, PointerKind, Target};
+use nova_win_core::forward::{parse_zones, PointerForwarder, PointerInput, PointerKind, Target, Zone};
 use nova_win_core::geometry::{
     fullscreen_rect, monitor_for_rect, offset_from_position, place, resolve_display, taskbar_px, window_size, Anchor,
     MonitorInfo, Offset, Rect,
 };
+use nova_win_core::keys::{plan, Call, KeyPlan};
 use nova_win_core::mode::WallpaperSpec;
 use nova_win_core::nav::{app_url, browser_args, classify, helper_url, wallpaper_url, Navigation};
 use std::time::{Duration, Instant};
@@ -21,39 +22,138 @@ pub const HELPER: &str = "helper";
 /// Wallpaper windows that want the mouse, and the thread that replays it into their pages. The wallpaper sits behind
 /// the icon layer, so Windows delivers no clicks to it (see `nova_win_core::forward`).
 static FORWARD_TARGETS: std::sync::Mutex<Vec<Target>> = std::sync::Mutex::new(Vec::new());
-static FORWARD_TX: std::sync::OnceLock<std::sync::mpsc::Sender<PointerInput>> = std::sync::OnceLock::new();
+static FORWARD_TX: std::sync::OnceLock<std::sync::mpsc::Sender<Job>> = std::sync::OnceLock::new();
 static POINTER_FORWARDER: std::sync::Mutex<PointerForwarder> = std::sync::Mutex::new(PointerForwarder::new());
 static HELPER_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 static LAST_MOVE: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+/// The interactive rectangles each wallpaper page reported last: label, when, zones in physical screen pixels.
+type ReportedZones = Vec<(String, Instant, Option<Vec<Zone>>)>;
+static ZONES: std::sync::Mutex<ReportedZones> = std::sync::Mutex::new(Vec::new());
+/// How often the pages are asked for their interactive rectangles, and how long an answer stays valid.
+const ZONE_POLL: Duration = Duration::from_millis(250);
+const ZONE_FRESH: Duration = Duration::from_secs(3);
+
+/// Work for the browser thread, in the order the hooks produced it.
+enum Job {
+    Pointer(PointerInput),
+    Keys { label: String, calls: Vec<Call> },
+}
 
 fn forward_targets() -> std::sync::MutexGuard<'static, Vec<Target>> {
     FORWARD_TARGETS.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+fn zones() -> std::sync::MutexGuard<'static, ReportedZones> {
+    ZONES.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 /// Starts forwarding once. The worker preserves event order and WebView2 dispatches browser input on its UI thread.
 pub fn start_forwarding(app: &AppHandle) {
-    let (tx, rx) = std::sync::mpsc::channel::<PointerInput>();
+    let (tx, rx) = std::sync::mpsc::channel::<Job>();
     if FORWARD_TX.set(tx).is_err() {
         return;
     }
-    let app = app.clone();
+    let worker = app.clone();
     std::thread::spawn(move || {
-        for input in rx {
-            if let Some(window) = app.get_webview_window(&input.hit.label) {
-                dispatch_pointer(&window, input);
+        for job in rx {
+            match job {
+                Job::Pointer(input) => {
+                    if let Some(window) = worker.get_webview_window(&input.hit.label) {
+                        dispatch_pointer(&window, input);
+                    }
+                }
+                Job::Keys { label, calls } => {
+                    if let Some(window) = worker.get_webview_window(&label) {
+                        dispatch_calls(&window, calls);
+                    }
+                }
             }
         }
     });
-    win::watch_mouse(on_mouse);
+    // The page tells where its controls are; only presses there are taken from the desktop.
+    let poller = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(ZONE_POLL);
+        let labels: Vec<String> = forward_targets().iter().map(|t| t.label.clone()).collect();
+        zones().retain(|(label, ..)| labels.contains(label));
+        for label in labels {
+            if let Some(window) = poller.get_webview_window(&label) {
+                poll_zones(&window, label);
+            }
+        }
+    });
+    win::watch_input(on_mouse, on_key);
 }
+
+/// The WebView's current viewport in physical screen pixels, its rasterization scale and zoom, read on the UI thread.
+#[cfg(windows)]
+unsafe fn live_viewport(
+    controller: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller,
+) -> Option<(Rect, f64, f64)> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller3;
+    use windows_webview::core::Interface;
+    let controller3 = controller.cast::<ICoreWebView2Controller3>().ok()?;
+    let mut scale = 0.0;
+    let mut zoom = 0.0;
+    let mut parent = windows_webview::Win32::Foundation::HWND::default();
+    let mut bounds = windows_webview::Win32::Foundation::RECT::default();
+    controller3.RasterizationScale(&mut scale).ok()?;
+    controller.ZoomFactor(&mut zoom).ok()?;
+    controller.ParentWindow(&mut parent).ok()?;
+    controller.Bounds(&mut bounds).ok()?;
+    let origin = win::client_bounds(parent.0 as isize)?;
+    Some((
+        Rect::new(
+            origin.x + bounds.left,
+            origin.y + bounds.top,
+            bounds.right - bounds.left,
+            bounds.bottom - bounds.top,
+        ),
+        scale,
+        zoom,
+    ))
+}
+
+/// Asks the page for `window.__novaZones()` and stores the answer in physical screen pixels. A page without it
+/// (an older NOVA, the offline screen) leaves the zones unknown, which keeps the earlier forward-everything input.
+#[cfg(windows)]
+fn poll_zones(window: &WebviewWindow, label: String) {
+    use webview2_com::ExecuteScriptCompletedHandler;
+    let result = window.with_webview(move |platform| unsafe {
+        let controller = platform.controller();
+        let Some((viewport, scale, zoom)) = live_viewport(&controller) else {
+            return;
+        };
+        let Ok(webview) = controller.CoreWebView2() else { return };
+        let script = windows_webview::core::HSTRING::from(
+            "(() => { try { return window.__novaZones ? window.__novaZones() : null } catch (e) { return null } })()",
+        );
+        let handler = ExecuteScriptCompletedHandler::create(Box::new(move |result, json| {
+            if result.is_err() {
+                return Ok(());
+            }
+            let parsed = serde_json::from_str::<Option<String>>(&json)
+                .ok()
+                .flatten()
+                .and_then(|text| parse_zones(&text, viewport, scale * zoom));
+            let mut all = zones();
+            all.retain(|(l, ..)| *l != label);
+            all.push((label, Instant::now(), parsed));
+            Ok(())
+        }));
+        let _ = webview.ExecuteScript(&script, &handler);
+    });
+    if let Err(error) = result {
+        log!("could not ask the wallpaper where its controls are: {error}");
+    }
+}
+
+#[cfg(not(windows))]
+fn poll_zones(_window: &WebviewWindow, _label: String) {}
 
 #[cfg(windows)]
 fn dispatch_pointer(window: &WebviewWindow, input: PointerInput) {
-    use webview2_com::Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2Controller3, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
-    };
-    use webview2_com::{CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR};
-    use windows_webview::core::Interface;
+    use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC;
 
     let result = window.with_webview(move |platform| unsafe {
         let controller = platform.controller();
@@ -61,29 +161,7 @@ fn dispatch_pointer(window: &WebviewWindow, input: PointerInput) {
         // CDP expects CSS pixels of this actual WebView, so query its own scale
         // and client origin on the UI thread immediately before dispatch.
         let input = if input.hit.screen_point.is_some() {
-            let viewport = (|| {
-                let controller3 = controller.cast::<ICoreWebView2Controller3>().ok()?;
-                let mut scale = 0.0;
-                let mut zoom = 0.0;
-                let mut parent = windows_webview::Win32::Foundation::HWND::default();
-                let mut bounds = windows_webview::Win32::Foundation::RECT::default();
-                controller3.RasterizationScale(&mut scale).ok()?;
-                controller.ZoomFactor(&mut zoom).ok()?;
-                controller.ParentWindow(&mut parent).ok()?;
-                controller.Bounds(&mut bounds).ok()?;
-                let origin = win::client_bounds(parent.0 as isize)?;
-                Some((
-                    Rect::new(
-                        origin.x + bounds.left,
-                        origin.y + bounds.top,
-                        bounds.right - bounds.left,
-                        bounds.bottom - bounds.top,
-                    ),
-                    scale,
-                    zoom,
-                ))
-            })();
-            match viewport {
+            match live_viewport(&controller) {
                 Some((bounds, scale, zoom)) => {
                     let Some(input) = input.for_viewport(bounds, scale, zoom) else {
                         return;
@@ -101,41 +179,84 @@ fn dispatch_pointer(window: &WebviewWindow, input: PointerInput) {
         if input.focus {
             let _ = controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
         }
-        let Ok(webview) = controller.CoreWebView2() else { return };
-        let method = CoTaskMemPWSTR::from("Input.dispatchMouseEvent");
-        let json = input.params();
-        let params = CoTaskMemPWSTR::from(json.as_str());
-        let completed = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|result, _| {
-            if let Err(error) = result {
-                log!("wallpaper browser input failed: {error}");
-            }
-            Ok(())
-        }));
-        if let Err(error) =
-            webview.CallDevToolsProtocolMethod(*method.as_ref().as_pcwstr(), *params.as_ref().as_pcwstr(), &completed)
-        {
-            log!("could not dispatch wallpaper browser input: {error}");
-        }
+        call_devtools(&controller, "Input.dispatchMouseEvent", &input.params());
     });
     if let Err(error) = result {
         log!("could not queue wallpaper browser input: {error}");
     }
 }
 
+#[cfg(windows)]
+fn dispatch_calls(window: &WebviewWindow, calls: Vec<Call>) {
+    let result = window.with_webview(move |platform| unsafe {
+        let controller = platform.controller();
+        for call in &calls {
+            call_devtools(&controller, call.method, &call.params);
+        }
+    });
+    if let Err(error) = result {
+        log!("could not queue wallpaper keyboard input: {error}");
+    }
+}
+
+/// Logs a failing DevTools method once, so a broken input channel is visible in the log without flooding it.
+#[cfg(windows)]
+fn report_devtools_failure(method: &'static str, error: impl std::fmt::Display) {
+    static REPORTED: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut reported = REPORTED.lock().unwrap_or_else(|p| p.into_inner());
+    if !reported.contains(&method) {
+        reported.push(method);
+        log!("wallpaper browser input ({method}) failed: {error}");
+    }
+}
+
+#[cfg(windows)]
+unsafe fn call_devtools(
+    controller: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller,
+    method: &'static str,
+    params: &str,
+) {
+    use webview2_com::{CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR};
+    let Ok(webview) = controller.CoreWebView2() else { return };
+    let name = CoTaskMemPWSTR::from(method);
+    let params = CoTaskMemPWSTR::from(params);
+    let completed = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, _| {
+        if let Err(error) = result {
+            report_devtools_failure(method, error);
+        }
+        Ok(())
+    }));
+    if let Err(error) =
+        webview.CallDevToolsProtocolMethod(*name.as_ref().as_pcwstr(), *params.as_ref().as_pcwstr(), &completed)
+    {
+        report_devtools_failure(method, error);
+    }
+}
+
 #[cfg(not(windows))]
 fn dispatch_pointer(_window: &WebviewWindow, _input: PointerInput) {}
 
-/// Called from the mouse hook: must stay fast and never block. Helper events are already delivered natively.
-fn on_mouse(kind: PointerKind, point: (i32, i32)) {
+#[cfg(not(windows))]
+fn dispatch_calls(_window: &WebviewWindow, _calls: Vec<Call>) {}
+
+/// Called from the mouse hook: must stay fast and never block. Returns true when Windows must drop the event
+/// (a press on one of the page's controls). Helper events are already delivered natively.
+fn on_mouse(kind: PointerKind, point: (i32, i32)) -> bool {
     let mut targets = forward_targets().clone();
-    targets.retain_mut(|target| {
-        if let Some(bounds) = win::client_bounds(target.native_handle) {
+    {
+        let reported = zones();
+        targets.retain_mut(|target| {
+            let Some(bounds) = win::client_bounds(target.native_handle) else {
+                return false;
+            };
             target.bounds = bounds;
+            target.zones = reported
+                .iter()
+                .find(|(label, at, _)| *label == target.label && at.elapsed() < ZONE_FRESH)
+                .and_then(|(_, _, zones)| zones.clone());
             true
-        } else {
-            false
-        }
-    });
+        });
+    }
     let helper = HELPER_HWND.load(std::sync::atomic::Ordering::Relaxed);
     let target = targets.iter().find(|target| target.bounds.contains(point.0, point.1));
     let desktop = target.is_some_and(|target| {
@@ -143,22 +264,68 @@ fn on_mouse(kind: PointerKind, point: (i32, i32)) {
             && (win::over_desktop(point.0, point.1) || win::over_owned_popup(target.native_handle, point))
     });
     let Ok(mut forwarder) = POINTER_FORWARDER.try_lock() else {
-        return;
+        return false;
     };
-    let Some(input) = forwarder.event(kind, point, desktop, &targets) else {
-        return;
-    };
-    // Boundary cancellation produces an Up, so it is never lost to movement throttling.
-    if input.kind == PointerKind::Move {
-        let Ok(mut last) = LAST_MOVE.try_lock() else { return };
-        let now = Instant::now();
-        if last.is_some_and(|t| now.duration_since(t) < Duration::from_millis(16)) {
-            return;
+    let routed = forwarder.event(kind, point, desktop, &targets);
+    drop(forwarder);
+    if routed.inputs.is_empty() {
+        return routed.swallow;
+    }
+    // Hover moves are throttled; presses, releases, wheel turns and ending hover never are.
+    let hover_only = routed
+        .inputs
+        .iter()
+        .all(|input| input.kind == PointerKind::Move && input.hit.screen_point.is_some());
+    if hover_only {
+        if let Ok(mut last) = LAST_MOVE.try_lock() {
+            let now = Instant::now();
+            if last.is_some_and(|t| now.duration_since(t) < Duration::from_millis(16)) {
+                return routed.swallow;
+            }
+            *last = Some(now);
         }
-        *last = Some(now);
     }
     if let Some(tx) = FORWARD_TX.get() {
-        let _ = tx.send(input);
+        for input in routed.inputs {
+            let _ = tx.send(Job::Pointer(input));
+        }
+    }
+    routed.swallow
+}
+
+/// Called from the keyboard hook. Returns true when the key went to the wallpaper page instead of Windows: only
+/// after a click in one of its text fields and only while the desktop itself is the active window.
+fn on_key(key: win::Key) -> bool {
+    let label = {
+        let Ok(forwarder) = POINTER_FORWARDER.try_lock() else {
+            return false;
+        };
+        match forwarder.typing_target() {
+            Some(label) => label.to_string(),
+            None => return false,
+        }
+    };
+    if !win::desktop_is_active() || !forward_targets().iter().any(|t| t.label == label) {
+        return false;
+    }
+    let mods = win::modifiers();
+    let text = if key.down { win::key_text(&key, mods) } else { None };
+    match plan(key.vk, key.down, mods, text.as_deref()) {
+        KeyPlan::Pass => false,
+        KeyPlan::Stop => {
+            if let Ok(mut forwarder) = POINTER_FORWARDER.try_lock() {
+                forwarder.stop_typing();
+            }
+            false
+        }
+        KeyPlan::Page(calls) => {
+            if !calls.is_empty() {
+                if let Some(tx) = FORWARD_TX.get() {
+                    let _ = tx.send(Job::Keys { label, calls });
+                }
+            }
+            true
+        }
     }
 }
 
@@ -616,6 +783,7 @@ pub fn create_wallpaper(app: &AppHandle, monitor: &str, spec: WallpaperSpec) {
                             native_handle: native,
                             bounds: Rect::new(position.x, position.y, size.width as i32, size.height as i32),
                             scale,
+                            zones: None,
                         });
                         start_forwarding(&handle);
                         Ok(())

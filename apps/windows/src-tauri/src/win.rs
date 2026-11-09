@@ -3,9 +3,23 @@
 //! On other systems everything here says "not supported", so the rest of the app still compiles.
 
 use nova_win_core::desktop::{DesktopSnapshot, InsertAfter};
-#[cfg(not(windows))]
 use nova_win_core::forward::PointerKind;
 use nova_win_core::geometry::Rect;
+use nova_win_core::keys::Mods;
+
+/// One key as the low-level keyboard hook saw it.
+#[derive(Debug, Clone, Copy)]
+pub struct Key {
+    pub vk: u32,
+    pub scan: u32,
+    pub extended: bool,
+    pub down: bool,
+}
+
+/// Decides a mouse event; true means Windows must drop it.
+pub type MouseSink = fn(PointerKind, (i32, i32)) -> bool;
+/// Decides a key event; true means Windows must drop it.
+pub type KeySink = fn(Key) -> bool;
 
 #[cfg(windows)]
 mod imp {
@@ -14,19 +28,24 @@ mod imp {
     use nova_win_core::desktop::{
         needs_reorder, IconWorker, CHILD_STYLE, REORDER_FLAGS, SHOW_FLAGS, SPAWN_WORKER_MESSAGE,
     };
-    use nova_win_core::forward::PointerKind;
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Output};
+    use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
     use windows::core::{w, BOOL, PCWSTR};
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, EnumWindows, FindWindowExW, FindWindowW, GetAncestor, GetClassNameW, GetMessageW, GetParent,
-        GetWindow, IsWindow, SendMessageTimeoutW, SetParent, SetWindowLongW, SetWindowPos, SetWindowsHookExW,
-        WindowFromPoint, GA_ROOT, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HWND_BOTTOM, MSG, MSLLHOOKSTRUCT,
-        SET_WINDOW_POS_FLAGS, SMTO_NORMAL, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE,
-        WM_MOUSEWHEEL,
+        CallNextHookEx, EnumWindows, FindWindowExW, FindWindowW, GetAncestor, GetClassNameW, GetCursorPos,
+        GetForegroundWindow, GetMessageW, GetParent, GetWindow, GetWindowThreadProcessId, IsWindow,
+        SendMessageTimeoutW, SetParent, SetTimer, SetWindowLongW, SetWindowPos, SetWindowsHookExW, UnhookWindowsHookEx,
+        WindowFromPoint, GA_ROOT, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HHOOK, HWND_BOTTOM, KBDLLHOOKSTRUCT, MSG,
+        MSLLHOOKSTRUCT, SET_WINDOW_POS_FLAGS, SMTO_NORMAL, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP,
+        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_SYSKEYDOWN, WM_SYSKEYUP,
+        WM_TIMER,
     };
 
     fn hwnd(value: u64) -> HWND {
@@ -293,8 +312,21 @@ mod imp {
         });
     }
 
-    type Sink = fn(PointerKind, (i32, i32));
-    static SINK: OnceLock<Sink> = OnceLock::new();
+    static SINK: OnceLock<(MouseSink, KeySink)> = OnceLock::new();
+    static MOUSE_HOOK: AtomicIsize = AtomicIsize::new(0);
+    static KEY_HOOK: AtomicIsize = AtomicIsize::new(0);
+    /// When the mouse hook last ran (ms since `EPOCH`) and where the cursor was, for the watchdog.
+    static LAST_HOOK_MS: AtomicU64 = AtomicU64::new(0);
+    static LAST_HOOK_POINT: AtomicU64 = AtomicU64::new(0);
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+
+    fn now_ms() -> u64 {
+        EPOCH.get_or_init(Instant::now).elapsed().as_millis() as u64
+    }
+
+    fn pack(x: i32, y: i32) -> u64 {
+        (u64::from(x as u32) << 32) | u64::from(y as u32)
+    }
 
     /// True when the topmost window at the point belongs to the desktop (Progman / WorkerW), not to an application.
     pub fn over_desktop(x: i32, y: i32) -> bool {
@@ -309,9 +341,83 @@ mod imp {
         }
     }
 
+    /// The desktop itself (Progman / WorkerW) is the active window, so keys would go to the icon view.
+    pub fn desktop_is_active() -> bool {
+        unsafe {
+            let active = GetForegroundWindow();
+            if active.0.is_null() {
+                return false;
+            }
+            let root = GetAncestor(active, GA_ROOT);
+            let root = if root.0.is_null() { active } else { root };
+            nova_win_core::forward::is_desktop_class(&class_of(root))
+        }
+    }
+
+    fn held(vk: u16) -> bool {
+        unsafe { GetAsyncKeyState(i32::from(vk)) as u16 & 0x8000 != 0 }
+    }
+
+    pub fn modifiers() -> Mods {
+        Mods {
+            shift: held(0x10),
+            ctrl: held(0x11),
+            alt: held(0x12),
+            win: held(0x5B) || held(0x5C),
+        }
+    }
+
+    /// A dead key (´ ` ¨ ^ ~ on international layouts) waiting for the next key: vk, scan code, keyboard state.
+    static DEAD: Mutex<Option<(u32, u32, [u8; 256])>> = Mutex::new(None);
+
+    /// The text the active keyboard layout produces for a key, like the focused window would get it. A dead key
+    /// yields `None` and is combined with the next key (é from ´ + e).
+    pub fn key_text(key: &Key, mods: Mods) -> Option<String> {
+        // Do not let ToUnicodeEx change the layout's dead-key state (Windows 10 1607+).
+        const KEEP_STATE: u32 = 0x4;
+        unsafe {
+            let mut state = [0u8; 256];
+            // GetKeyState first makes GetKeyboardState report the current state on this input-less thread.
+            GetKeyState(0);
+            let _ = GetKeyboardState(&mut state);
+            for (vk, on) in [(0x10, mods.shift), (0x11, mods.ctrl), (0x12, mods.alt)] {
+                state[vk] = if on { 0x80 } else { 0 };
+            }
+            state[0x14] = (GetKeyState(0x14) as u16 & 1) as u8;
+            let thread = GetWindowThreadProcessId(GetForegroundWindow(), None);
+            let layout = Some(GetKeyboardLayout(thread));
+            let scan = key.scan | if key.extended { 0xE000 } else { 0 };
+            let mut buffer = [0u16; 8];
+            let dead = DEAD.lock().ok().and_then(|mut d| d.take());
+            let n = match dead {
+                Some((dead_vk, dead_scan, dead_state)) => {
+                    // Replay the dead key, then the letter, in this thread's own layout state.
+                    let _ = ToUnicodeEx(dead_vk, dead_scan, &dead_state, &mut buffer, 0, layout);
+                    let n = ToUnicodeEx(key.vk, scan, &state, &mut buffer, 0, layout);
+                    if n < 0 {
+                        // Two dead keys: clear the pending state again.
+                        let _ = ToUnicodeEx(0x20, 0x39, &[0u8; 256], &mut buffer, 0, layout);
+                    }
+                    n
+                }
+                None => ToUnicodeEx(key.vk, scan, &state, &mut buffer, KEEP_STATE, layout),
+            };
+            if n < 0 {
+                if let Ok(mut pending) = DEAD.lock() {
+                    *pending = Some((key.vk, scan, state));
+                }
+                return None;
+            }
+            let n = (n as usize).min(buffer.len());
+            (n > 0).then(|| String::from_utf16_lossy(&buffer[..n]))
+        }
+    }
+
     unsafe extern "system" fn mouse_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
         if code >= 0 {
             let info = &*(l.0 as *const MSLLHOOKSTRUCT);
+            LAST_HOOK_MS.store(now_ms(), Ordering::Relaxed);
+            LAST_HOOK_POINT.store(pack(info.pt.x, info.pt.y), Ordering::Relaxed);
             let delta = (info.mouseData >> 16) as i16 as i32;
             let kind = match w.0 as u32 {
                 WM_MOUSEMOVE => Some(PointerKind::Move),
@@ -327,27 +433,94 @@ mod imp {
                 }),
                 _ => None,
             };
-            if let (Some(kind), Some(sink)) = (kind, SINK.get()) {
-                // Never block the mouse: the sink decides quickly and hands the work to another thread.
-                sink(kind, (info.pt.x, info.pt.y));
+            // Never block the mouse: the sink decides quickly and hands the work to another thread. Injected
+            // events (NOVA's own PC control, remote tools) are handled the same way as real ones.
+            if let (Some(kind), Some((sink, _))) = (kind, SINK.get()) {
+                if sink(kind, (info.pt.x, info.pt.y)) {
+                    // A press on one of the page's controls: the desktop must not also select, drag or deselect.
+                    return LRESULT(1);
+                }
             }
         }
         CallNextHookEx(None, code, w, l)
     }
 
-    /// Watches the mouse system-wide (a low-level hook on its own thread). The wallpaper sits behind the icon
-    /// layer, so Windows never delivers clicks to it; the sink replays them. The hook never swallows an event.
-    pub fn watch_mouse(sink: Sink) {
-        if SINK.set(sink).is_err() {
+    unsafe extern "system" fn key_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+        if code >= 0 {
+            let info = &*(l.0 as *const KBDLLHOOKSTRUCT);
+            let down = match w.0 as u32 {
+                WM_KEYDOWN | WM_SYSKEYDOWN => Some(true),
+                WM_KEYUP | WM_SYSKEYUP => Some(false),
+                _ => None,
+            };
+            if let (Some(down), Some((_, sink))) = (down, SINK.get()) {
+                let key = Key {
+                    vk: info.vkCode,
+                    scan: info.scanCode,
+                    extended: info.flags.0 & 1 != 0,
+                    down,
+                };
+                if sink(key) {
+                    return LRESULT(1);
+                }
+            }
+        }
+        CallNextHookEx(None, code, w, l)
+    }
+
+    /// (Re)installs both hooks on the calling thread, which must pump messages.
+    unsafe fn install_hooks() -> Result<(), String> {
+        use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+        for slot in [&MOUSE_HOOK, &KEY_HOOK] {
+            let old = slot.swap(0, Ordering::Relaxed);
+            if old != 0 {
+                let _ = UnhookWindowsHookEx(HHOOK(old as *mut core::ffi::c_void));
+            }
+        }
+        let module = GetModuleHandleW(PCWSTR::null()).ok().map(|m| m.into());
+        let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), module, 0).map_err(|e| e.to_string())?;
+        MOUSE_HOOK.store(mouse.0 as isize, Ordering::Relaxed);
+        match SetWindowsHookExW(WH_KEYBOARD_LL, Some(key_proc), module, 0) {
+            Ok(key) => KEY_HOOK.store(key.0 as isize, Ordering::Relaxed),
+            Err(error) => crate::log!("typing into the wallpaper is unavailable: {error}"),
+        }
+        LAST_HOOK_MS.store(now_ms(), Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Windows silently removes a low-level hook that once took too long (LowLevelHooksTimeout), after which the
+    /// wallpaper would never get a click again. The cursor moving without the hook seeing it reveals that.
+    unsafe fn hook_lost() -> bool {
+        let mut cursor = POINT::default();
+        if GetCursorPos(&mut cursor).is_err() {
+            return false;
+        }
+        let silent = now_ms().saturating_sub(LAST_HOOK_MS.load(Ordering::Relaxed)) > 3000;
+        silent && pack(cursor.x, cursor.y) != LAST_HOOK_POINT.load(Ordering::Relaxed)
+    }
+
+    /// Watches mouse and keyboard system-wide (low-level hooks on their own thread with a message loop). The
+    /// wallpaper sits behind the icon layer, so Windows never delivers input to it; the sinks replay it and say
+    /// which events the desktop must not also get.
+    pub fn watch_input(mouse: MouseSink, keys: KeySink) {
+        if SINK.set((mouse, keys)).is_err() {
             return;
         }
         std::thread::spawn(|| unsafe {
-            if let Err(error) = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), None, 0) {
+            if let Err(error) = install_hooks() {
                 crate::log!("mouse forwarding for the wallpaper is unavailable: {error}");
                 return;
             }
+            let _ = SetTimer(None, 0, 2000, None);
             let mut msg = MSG::default();
-            while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                if msg.message == WM_TIMER && hook_lost() {
+                    crate::log!("Windows removed the wallpaper mouse hook; installing it again");
+                    if let Err(error) = install_hooks() {
+                        crate::log!("mouse forwarding for the wallpaper could not be restored: {error}");
+                    }
+                }
+            }
         });
     }
 
@@ -581,7 +754,16 @@ mod imp {
     pub fn over_desktop(_x: i32, _y: i32) -> bool {
         false
     }
-    pub fn watch_mouse(_sink: fn(PointerKind, (i32, i32))) {}
+    pub fn desktop_is_active() -> bool {
+        false
+    }
+    pub fn modifiers() -> Mods {
+        Mods::default()
+    }
+    pub fn key_text(_key: &Key, _mods: Mods) -> Option<String> {
+        None
+    }
+    pub fn watch_input(_mouse: MouseSink, _keys: KeySink) {}
     pub fn autostart_enabled() -> bool {
         false
     }

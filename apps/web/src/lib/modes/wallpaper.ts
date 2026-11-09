@@ -39,17 +39,27 @@ export function novaZones(): string {
     return true;
   };
   // Open windows take the whole rectangle, and typing.
-  for (const dialog of document.querySelectorAll("dialog[open], #history.open"))
-    add(dialog.getBoundingClientRect(), true);
+  const windows =
+    "dialog[open], #history.open, [role=dialog], .desktop-live, .code-panel";
+  for (const dialog of document.querySelectorAll(windows))
+    if (shown(dialog)) add(dialog.getBoundingClientRect(), true);
   const field = document.querySelector(".composer");
   if (field && shown(field)) add(field.getBoundingClientRect(), true);
+  // The sphere is hidden (and not clickable) on a quiet wallpaper: then its place is the desktop's.
   const core = document.getElementById("core");
-  if (core) add(core.getBoundingClientRect(), false);
+  if (core && shown(core) && getComputedStyle(core).pointerEvents !== "none")
+    add(core.getBoundingClientRect(), false);
+  // The visible panel page: hovering holds it still and the wheel scrolls it.
+  for (const page of document.querySelectorAll(".col .page.on"))
+    if (shown(page)) add(page.getBoundingClientRect(), false);
   for (const el of document.querySelectorAll(
-    "button, a[href], input, textarea, select, [role=button], .toast, .dock-card",
+    "button, a[href], input, textarea, select, [role=button], [contenteditable=true], .toast, .dock-card",
   ))
-    if (!el.closest("dialog, #history") && shown(el))
-      add(el.getBoundingClientRect(), el.matches("input, textarea, select"));
+    if (!el.closest(windows) && shown(el))
+      add(
+        el.getBoundingClientRect(),
+        el.matches("input, textarea, select, [contenteditable=true]"),
+      );
   return zones.join(";");
 }
 

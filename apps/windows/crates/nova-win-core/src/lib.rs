@@ -8,6 +8,7 @@ pub mod config;
 pub mod desktop;
 pub mod forward;
 pub mod geometry;
+pub mod keys;
 pub mod mode;
 pub mod nav;
 pub mod script;
