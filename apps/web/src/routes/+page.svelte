@@ -10,6 +10,7 @@
   import Entity from "#components/shell/Entity.svelte";
   import Header from "#components/shell/Header.svelte";
   import HistoryDrawer from "#components/shell/HistoryDrawer.svelte";
+  import LiveActivity from "#components/shell/LiveActivity.svelte";
   import Stage from "#components/shell/Stage.svelte";
   import Toasts from "#components/shell/Toasts.svelte";
   import SettingsDialog from "#components/settings/SettingsDialog.svelte";
@@ -108,6 +109,7 @@
 <Entity />
 <Column side="left" />
 <Column side="right" />
+<LiveActivity />
 <div class="shell">
   <Header />
   <Stage />
