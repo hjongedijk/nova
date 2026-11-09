@@ -3,6 +3,7 @@
 
 pub mod args;
 pub mod autostart;
+pub mod backoff;
 pub mod config;
 pub mod desktop;
 pub mod forward;
@@ -11,6 +12,7 @@ pub mod mode;
 pub mod nav;
 pub mod script;
 pub mod view;
+pub mod window_state;
 
 pub mod agent;
 

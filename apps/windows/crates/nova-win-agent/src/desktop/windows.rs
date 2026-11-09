@@ -102,7 +102,7 @@ pub(super) fn native_windows() -> Outcome {
     let mut list = List {
         active: unsafe { GetForegroundWindow() },
         items: vec![],
-        processes: sysinfo::System::new_all(),
+        processes: crate::platform::process_list(),
     };
     unsafe { EnumWindows(Some(visit), LPARAM(&mut list as *mut _ as isize)) }
         .map_err(|_| error("Vensters konden niet worden gelezen"))?;
@@ -282,15 +282,52 @@ fn mouse(flags: MOUSE_EVENT_FLAGS, data: i32) -> INPUT {
     }
 }
 fn key(code: u16, up: bool) -> INPUT {
+    // Navigation, editing, Windows and media keys are "extended": without the flag Windows sends the numeric-keypad
+    // variant, so Shift+Arrow does not select and NumLock turns arrows into digits in some applications.
+    let mut flags = if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) };
+    if super::extended_key(code) {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: VIRTUAL_KEY(code),
-                dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                wScan: unsafe { MapVirtualKeyW(code as u32, MAPVK_VK_TO_VSC) } as u16,
+                dwFlags: flags,
                 ..Default::default()
             },
         },
+    }
+}
+fn unicode(unit: u16, up: bool) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wScan: unit,
+                dwFlags: KEYEVENTF_UNICODE | if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                ..Default::default()
+            },
+        },
+    }
+}
+/// A visible top-level window can only be brought forward by the process that received the last input. A harmless
+/// Alt tap gives NOVA that right, the documented way around the foreground lock.
+fn bring_to_front(hwnd: HWND) -> bool {
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        if SetForegroundWindow(hwnd).as_bool() {
+            return true;
+        }
+        let _ = send(&[key(0x12, false), key(0x12, true)]);
+        if SetForegroundWindow(hwnd).as_bool() {
+            return true;
+        }
+        let _ = BringWindowToTop(hwnd);
+        GetForegroundWindow() == hwnd
     }
 }
 fn move_to(point: (i32, i32)) -> Result<(), (u16, String)> {
@@ -364,19 +401,12 @@ pub(super) fn native_input(input: &Input, body: &Value, cancelled: &dyn Fn() -> 
             }
         }
         Input::Type(text) => {
+            // Line breaks and tabs are real Enter/Tab presses: as Unicode characters most applications ignore them.
             let mut inputs = Vec::new();
-            for unit in text.encode_utf16() {
-                for up in [false, true] {
-                    inputs.push(INPUT {
-                        r#type: INPUT_KEYBOARD,
-                        Anonymous: INPUT_0 {
-                            ki: KEYBDINPUT {
-                                wScan: unit,
-                                dwFlags: KEYEVENTF_UNICODE | if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
-                                ..Default::default()
-                            },
-                        },
-                    });
+            for unit in super::typing_units(text) {
+                match unit {
+                    super::Typed::Key(code) => inputs.extend([key(code, false), key(code, true)]),
+                    super::Typed::Unit(unit) => inputs.extend([unicode(unit, false), unicode(unit, true)]),
                 }
             }
             guarded_send(&inputs)?;
@@ -404,11 +434,10 @@ pub(super) fn native_input(input: &Input, body: &Value, cancelled: &dyn Fn() -> 
                 .ok_or_else(|| (404, "Venster bestaat niet meer".into()))?;
             let hwnd = HWND(*id as *mut _);
             check()?;
-            unsafe {
-                let _ = ShowWindow(hwnd, SW_RESTORE);
-                if !SetForegroundWindow(hwnd).as_bool() {
-                    return Err(error("Windows kon dit venster niet activeren"));
-                }
+            if !bring_to_front(hwnd) {
+                return Err(error(
+                    "Windows liet dit venster niet naar voren komen; klik het aan met een muisklik",
+                ));
             }
         }
     }

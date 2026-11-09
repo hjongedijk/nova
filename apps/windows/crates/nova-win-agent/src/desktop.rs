@@ -182,6 +182,26 @@ fn parse_key(raw: &str) -> Result<Vec<u16>, (u16, String)> {
         "media_stop" | "mediastop" => 0xb2,
         "media_next" | "medianext" => 0xb0,
         "media_previous" | "mediaprevious" => 0xb1,
+        "volume_mute" | "volumemute" | "mute" => 0xad,
+        "volume_down" | "volumedown" => 0xae,
+        "volume_up" | "volumeup" => 0xaf,
+        "printscreen" | "print_screen" | "prtsc" => 0x2c,
+        "capslock" | "caps_lock" => 0x14,
+        "numlock" => 0x90,
+        "scrolllock" => 0x91,
+        "pause" | "break" => 0x13,
+        "apps" | "menu" | "contextmenu" => 0x5d,
+        "plus" | "=" => 0xbb,
+        "minus" | "-" => 0xbd,
+        "comma" | "," => 0xbc,
+        "period" | "." => 0xbe,
+        "slash" | "/" => 0xbf,
+        "semicolon" | ";" => 0xba,
+        "backquote" | "`" => 0xc0,
+        "bracketleft" | "[" => 0xdb,
+        "backslash" | "\\" => 0xdc,
+        "bracketright" | "]" => 0xdd,
+        "quote" | "'" => 0xde,
         "backspace" => 8,
         "win" | "meta" => 0x5b,
         "delete" | "del" => 0x2e,
@@ -200,13 +220,37 @@ fn parse_key(raw: &str) -> Result<Vec<u16>, (u16, String)> {
         _ if key.starts_with('f') => key[1..]
             .parse::<u16>()
             .ok()
-            .filter(|n| (1..=12).contains(n))
+            .filter(|n| (1..=24).contains(n))
             .map(|n| 0x6f + n)
             .ok_or_else(fail)?,
         _ => return Err(fail()),
     };
     keys.push(code);
     Ok(keys)
+}
+/// Keys Windows expects with KEYEVENTF_EXTENDEDKEY.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn extended_key(code: u16) -> bool {
+    matches!(code, 0x21..=0x28 | 0x2c | 0x2d | 0x2e | 0x5b | 0x5c | 0x5d | 0x90 | 0xad..=0xb3)
+}
+#[derive(Debug, PartialEq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+enum Typed {
+    Key(u16),
+    Unit(u16),
+}
+/// Text as key presses: `\r\n`, `\n` and `\r` become Enter, `\t` becomes Tab, everything else is sent as Unicode.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn typing_units(text: &str) -> Vec<Typed> {
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    normalized
+        .encode_utf16()
+        .map(|unit| match unit {
+            0x0a => Typed::Key(0x0d),
+            0x09 => Typed::Key(0x09),
+            other => Typed::Unit(other),
+        })
+        .collect()
 }
 fn scale_point(screen: &Display, body: &Value, x: f64, y: f64) -> Result<(i32, i32), (u16, String)> {
     let (rw, rh) = if let Some(relative) = body.get("relativeTo") {
@@ -298,7 +342,7 @@ mod tests {
     }
     #[test]
     fn input_rejects_malformed_chords_and_text() {
-        for key in ["Ctrl+Ctrl+A", "F13", "", "Alt+"] {
+        for key in ["Ctrl+Ctrl+A", "F25", "", "Alt+", "Hyper+A"] {
             assert!(parse_key(key).is_err(), "{key}");
         }
         assert_eq!(parse_key("media_play_pause").unwrap(), vec![0xb3]);
@@ -306,12 +350,38 @@ mod tests {
         assert_eq!(parse_key("media_next").unwrap(), vec![0xb0]);
         assert_eq!(parse_key("media_previous").unwrap(), vec![0xb1]);
         assert_eq!(parse_key("Win+R").unwrap(), vec![0x5b, 0x52]);
+        assert_eq!(parse_key("volume_up").unwrap(), vec![0xaf]);
+        assert_eq!(parse_key("Win+Shift+S").unwrap(), vec![0x5b, 0x10, 0x53]);
+        assert_eq!(parse_key("Ctrl+/").unwrap(), vec![0x11, 0xbf]);
+        assert_eq!(parse_key("Ctrl+-").unwrap(), vec![0x11, 0xbd]);
+        assert_eq!(parse_key("F13").unwrap(), vec![0x7c]);
+        assert_eq!(parse_key("PrintScreen").unwrap(), vec![0x2c]);
         assert_eq!(parse_key("Ctrl+Shift+Tab").unwrap(), vec![0x11, 0x10, 9]);
         assert_eq!(parse_key("Ctrl+Alt+Delete").unwrap(), vec![0x11, 0x12, 0x2e]);
         assert!(Input::parse(&json!({"action":"type","text":"a".repeat(4001)})).is_err());
         assert!(Input::parse(&json!({"action":"type","text":"a".repeat(2000)})).is_ok());
         assert!(Input::parse(&json!({"action":"click","x":-1,"y":0})).is_err());
         assert!(Input::parse(&json!({"action":"scroll","dy":51})).is_err());
+    }
+    #[test]
+    fn typing_turns_line_breaks_into_enter_and_marks_extended_keys() {
+        assert_eq!(
+            typing_units("a\r\nb\tc\r"),
+            vec![
+                Typed::Unit(97),
+                Typed::Key(0x0d),
+                Typed::Unit(98),
+                Typed::Key(9),
+                Typed::Unit(99),
+                Typed::Key(0x0d)
+            ]
+        );
+        for code in [0x25, 0x26, 0x2e, 0x5b, 0xaf] {
+            assert!(extended_key(code), "{code:#x}");
+        }
+        for code in [0x0d, 0x41, 0x11, 0x70] {
+            assert!(!extended_key(code), "{code:#x}");
+        }
     }
     #[test]
     fn nothing_needs_arming_or_permissions() {

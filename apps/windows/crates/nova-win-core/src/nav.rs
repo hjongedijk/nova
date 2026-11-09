@@ -114,6 +114,29 @@ pub fn app_url(origin: &str) -> String {
     format!("{origin}/")
 }
 
+/// Shown instead of a browser error page when the NOVA server cannot be reached. It says so in Dutch and loads
+/// `target` again by itself after `seconds`. `target` must be a NOVA page URL (it is JSON-encoded, never spliced).
+pub fn offline_page(target: &str, seconds: u64) -> String {
+    let script_target = serde_json::to_string(target)
+        .unwrap_or_else(|_| "\"about:blank\"".into())
+        .replace("</", "<\\/");
+    let seconds = seconds.clamp(1, 3600);
+    format!(
+        r#"<!doctype html><html lang="nl"><head><meta charset="utf-8"><title>NOVA</title><style>
+html,body{{margin:0;height:100%;background:transparent;font:13px/1.4 "Segoe UI",system-ui,sans-serif;color:#edf5ff;
+user-select:none;overflow:hidden;cursor:default}}
+body{{display:flex;align-items:flex-start;justify-content:center}}
+div{{margin:12px;padding:10px 16px;border:1px solid #29415b;border-radius:14px;background:#091321;max-width:420px;text-align:center}}
+b{{display:block;font-weight:600}}span{{color:#a6bbd2}}button{{margin-top:6px;font:inherit;color:#091321;background:#8dd8ff;border:0;border-radius:6px;padding:4px 12px;cursor:pointer}}
+</style></head><body><div role="status"><b>NOVA is niet bereikbaar</b><span id="t">Opnieuw proberen over {seconds} s</span><br>
+<button id="r" type="button">Nu opnieuw proberen</button></div><script>
+(function(){{var target={script_target},left={seconds};function go(){{location.replace(target)}}
+document.getElementById("r").onclick=go;document.addEventListener("contextmenu",function(e){{e.preventDefault()}});
+setInterval(function(){{left-=1;if(left<=0)go();else document.getElementById("t").textContent="Opnieuw proberen over "+left+" s"}},1000)}})();
+</script></body></html>"#
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,6 +221,17 @@ mod tests {
         let http = browser_args("http://192.168.1.10:8080");
         assert!(http.ends_with("--unsafely-treat-insecure-origin-as-secure=http://192.168.1.10:8080"));
         assert!(!http.contains("remote-debugging"));
+    }
+
+    #[test]
+    fn offline_page_retries_the_page_without_injection() {
+        let page = offline_page("https://nova.example.nl/helper?desk=1&view=chat", 20);
+        assert!(page.contains("NOVA is niet bereikbaar"));
+        assert!(page.contains(r#"var target="https://nova.example.nl/helper?desk=1&view=chat""#));
+        assert!(page.contains("left=20"));
+        let hostile = offline_page("https://x/</script><script>alert(1)</script>\"", 0);
+        assert!(!hostile.contains("</script><script>alert"));
+        assert!(hostile.contains("left=1"));
     }
 
     #[test]

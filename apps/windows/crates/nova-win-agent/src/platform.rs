@@ -2,8 +2,23 @@
 use nova_win_core::agent::AppEntry;
 use std::collections::BTreeMap;
 
+/// Process names only. `System::new_all()` also reads CPU, memory, disks and every command line, which took
+/// hundreds of milliseconds per status request.
+pub fn process_list() -> sysinfo::System {
+    let mut system = sysinfo::System::new();
+    system.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        true,
+        sysinfo::ProcessRefreshKind::nothing(),
+    );
+    system
+}
+
 pub fn running_apps(apps: &BTreeMap<String, AppEntry>) -> Vec<String> {
-    let system = sysinfo::System::new_all();
+    if !apps.values().any(|app| app.process.is_some()) {
+        return Vec::new();
+    }
+    let system = process_list();
     apps.iter()
         .filter(|(_, app)| {
             app.process.as_ref().is_some_and(|name| {
@@ -68,7 +83,7 @@ pub fn close_app(name: &str) -> Result<usize, String> {
         }
         BOOL(1)
     }
-    let system = sysinfo::System::new_all();
+    let system = process_list();
     let mut closing = Closing {
         pids: system
             .processes()
@@ -341,6 +356,18 @@ pub fn show_desktop() {
 }
 #[cfg(not(windows))]
 pub fn show_desktop() {}
+
+/// True when NOVA already runs in this Windows session (the window that Tauri's single-instance plugin creates,
+/// named after the app identifier). A second start then only hands over its arguments and never asks for UAC.
+#[cfg(windows)]
+pub fn instance_running() -> bool {
+    use windows::{core::w, Win32::UI::WindowsAndMessaging::FindWindowW};
+    unsafe { FindWindowW(w!("nl.nova.windows-sic"), w!("nl.nova.windows-siw")).is_ok_and(|h| !h.0.is_null()) }
+}
+#[cfg(not(windows))]
+pub fn instance_running() -> bool {
+    false
+}
 
 /// The filtered administrator token is false until the user approves a UAC elevation.
 #[cfg(windows)]
