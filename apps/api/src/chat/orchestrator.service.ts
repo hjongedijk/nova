@@ -39,6 +39,7 @@ import { capabilityNotes } from "./prompt.js";
 import { ContextBuilder } from "./context-builder.service.js";
 import { ConfirmationHandler } from "./confirmation-handler.service.js";
 import type { AssistantMood } from "./assistant-mood.js";
+import { isOwnerSession } from "./session-provenance.js";
 
 /*
  * Questions whose answer lives outside the model: weather, time, device and server state, news,
@@ -174,6 +175,11 @@ export interface OrchestrateInput {
   signal?: AbortSignal;
   /** Restricted Node-RED generated flows: expose and execute read-only tools only. */
   readOnlyOnly?: boolean;
+  /**
+   * Whether the owner typed or said this turn. Only owner turns write durable memory, teach corrections or tune
+   * the autopilot. Defaults to the session kind (see session-provenance.ts): contacts, callers and agents are not.
+   */
+  ownerTurn?: boolean;
 }
 
 export interface Reply {
@@ -490,7 +496,11 @@ export class OrchestratorService {
         toolNames: modelTools.map((tool) => tool.function.name),
         hasAttachments: Boolean(input.attachments?.length),
       },
-      { untrustedTurn: input.readOnlyOnly === true },
+      {
+        untrustedTurn:
+          input.readOnlyOnly === true ||
+          !(input.ownerTurn ?? isOwnerSession(sessionId)),
+      },
     );
     if (responseLanguage)
       messages.splice(1, 0, {

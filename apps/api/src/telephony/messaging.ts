@@ -42,9 +42,32 @@ export function messageText(type: string, body: string): string | null {
   return text || null;
 }
 
-/** "Harm" <sip:user@domain;gr=...> or sip:user@domain to user@domain, lower case. */
+/**
+ * "Harm" <sip:user@domain;gr=...> or sip:user@domain to user@domain, lower case. Only the addr-spec counts:
+ * the display name and header parameters are chosen by the sender and may contain someone else's address.
+ */
 export function sipAddress(from: string): string | null {
-  const m = /sips?:([^@;>\s"]+)@([^;>\s:"]+)/i.exec(from);
+  const whole = from.trim();
+  let rest = whole;
+  // A quoted display name (RFC 3261 quoted-string, backslash escapes) never carries identity.
+  if (rest.startsWith('"')) {
+    const quoted = /^"(?:[^"\\]|\\.)*"/.exec(rest);
+    if (!quoted) return null;
+    rest = rest.slice(quoted[0].length).trimStart();
+  }
+  let uri: string;
+  const open = rest.indexOf("<");
+  if (open >= 0) {
+    // An unquoted display name is tokens only: no address may hide in it.
+    if (/[:"@<>]/.test(rest.slice(0, open))) return null;
+    const close = rest.indexOf(">", open);
+    if (close < 0) return null;
+    uri = rest.slice(open + 1, close);
+  } else {
+    if (rest !== whole) return null; // a display name without <addr-spec>
+    uri = rest.split(/[;\s]/)[0]!;
+  }
+  const m = /^sips?:([^@;>\s"]+)@([^;>\s:"]+)/i.exec(uri.trim());
   return m ? `${m[1]}@${m[2]}`.toLowerCase() : null;
 }
 
@@ -72,7 +95,8 @@ const same = (a: string, b: string) => {
 
 /**
  * Text chat with NOVA from a Linphone contact. Asterisk forwards each SIP MESSAGE here; the answer goes back the same way.
- * Only contacts marked "Mag met NOVA praten" are answered, with read-only tools only, and nothing that needs a confirmation.
+ * Only contacts marked "Mag met NOVA praten" are answered, with read-only tools only (full tools for the owner's own
+ * address in NOVA_OWNER_SIP), and nothing that needs a confirmation.
  */
 @Injectable()
 export class TelephonyMessaging {
@@ -172,6 +196,8 @@ export class TelephonyMessaging {
     address: string,
     text: string,
   ): Promise<string> {
+    // Only the owner's own SIP address (NOVA_OWNER_SIP) gets full tools and may teach NOVA; other contacts are read-only.
+    const owner = (this.config.ownerSip ?? []).includes(address);
     const lang = this.config.defaultLanguage.toLowerCase().startsWith("en")
       ? "en"
       : "nl";
@@ -191,6 +217,8 @@ export class TelephonyMessaging {
         message: text.slice(0, MAX_IN),
         inputMode: "text",
         responseLanguage: lang,
+        readOnlyOnly: !owner,
+        ownerTurn: owner,
         signal: AbortSignal.timeout(40_000),
       });
       if (!result.unavailable) {

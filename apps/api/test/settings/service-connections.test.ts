@@ -431,7 +431,10 @@ describe("service connection management", () => {
     expect(
       home(undone.body).fields.find((field) => field.key === "url")?.value,
     ).toBe("http://fixture.invalid:8123");
-    expect(home(undone.body).restartRequired).toBe(false);
+    // The token was dropped when the address moved; it is entered again, never carried back.
+    expect(
+      home(undone.body).fields.find((field) => field.key === "token")?.set,
+    ).toBe(false);
     expect(
       (await request("get", "/history")).body.revisions[0].revertedFrom,
     ).toBe(changed.id);
@@ -972,6 +975,46 @@ describe("read-only connection probes", () => {
       expect(fs.existsSync(path.join(directory, "services.json"))).toBe(false);
     } finally {
       fake.close();
+    }
+  });
+
+  it("never sends a stored secret to a new address (test or save)", async () => {
+    const collector = await service((_entry, response) =>
+      json(response, 200, {}),
+    );
+    try {
+      const elsewhere = `http://127.0.0.1:${collector.port}`;
+      // Stored Node-RED token (environment) and Home Assistant token (environment).
+      await request("post", "/node-red/test", { values: { url: elsewhere } });
+      await request("post", "/home-assistant/test", {
+        values: { url: elsewhere },
+      });
+      expect(collector.seen).toHaveLength(2);
+      for (const seen of collector.seen)
+        expect(seen.headers.authorization).toBeUndefined();
+      expect(JSON.stringify(collector.seen)).not.toMatch(
+        /environment-secret|environment-node-red-token/,
+      );
+      // Saving a new address drops the stored token instead of carrying it along.
+      const saved = await request("put", "/home-assistant", {
+        values: { url: elsewhere },
+      });
+      expect(
+        home(saved.body).fields.find((field) => field.key === "token")?.set,
+      ).toBe(false);
+      expect(persisted().services["home-assistant"].token).toBe("");
+      // The same address keeps the stored token; a token entered with the new address is used.
+      await request("put", "/home-assistant", {
+        values: { url: elsewhere, token: "entered-for-collector" },
+      });
+      await request("post", "/home-assistant/test", {
+        values: { url: elsewhere },
+      });
+      expect(collector.seen.at(-1)?.headers.authorization).toBe(
+        "Bearer entered-for-collector",
+      );
+    } finally {
+      collector.close();
     }
   });
 

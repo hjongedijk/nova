@@ -27,6 +27,9 @@ export type BackupConnections = Record<
 >;
 const backupField = (field: { key: string; kind: string }) =>
   field.kind !== "secret" && field.key !== "username";
+/** Fields that decide where a connection's secrets are sent. */
+const isDestination = (id: string, field: { key: string; kind: string }) =>
+  field.kind === "url" || (id === "pangolin" && field.key === "host");
 
 @Injectable()
 export class ServiceConnectionsStore {
@@ -254,10 +257,26 @@ export class ServiceConnectionsStore {
     id: string,
     input: unknown,
     clearSecrets?: unknown,
+    /** Only a rollback to an address from the history keeps the current secrets. */
+    keepSecrets = false,
   ): ConnectionValues {
     const spec = connectionSpec(id);
     const patch = normalizeConnection(id, input);
     const next = this.effective(id);
+    // A stored secret only ever goes to the address it was entered for: a new address must bring its own.
+    const destination = (value: unknown) =>
+      String(value ?? "")
+        .trim()
+        .replace(/\/$/, "");
+    const moved = spec.fields.some(
+      (field) =>
+        isDestination(id, field) &&
+        patch[field.key] !== undefined &&
+        destination(patch[field.key]) !== destination(next[field.key]),
+    );
+    if (moved && !keepSecrets)
+      for (const field of spec.fields)
+        if (field.kind === "secret") next[field.key] = "";
     for (const [key, value] of Object.entries(patch)) {
       const field = spec.fields.find((item) => item.key === key)!;
       if (field.kind === "secret" && value === "") continue;
@@ -347,7 +366,7 @@ export class ServiceConnectionsStore {
   ): ServiceConnection[] {
     this.auditWarning = undefined;
     const before = this.effective(id),
-      next = this.candidate(id, input, clearSecrets);
+      next = this.candidate(id, input, clearSecrets, Boolean(revertedFrom));
     const spec = connectionSpec(id);
     const changed = spec.fields.filter(
       (field) => next[field.key] !== before[field.key],
@@ -413,11 +432,24 @@ export class ServiceConnectionsStore {
     return this.list();
   }
 
+  /**
+   * Secrets are not in the history, so a revision that changed one cannot be undone. Secrets that were only
+   * dropped because the address changed do not block undoing that address change; they stay empty.
+   */
+  secretRollbackBlocked(revision: ServiceConnectionRevision): boolean {
+    if (!revision.secretChanges.length) return false;
+    return !connectionSpec(revision.service).fields.some(
+      (field) =>
+        isDestination(revision.service, field) &&
+        revision.before[field.key] !== revision.after[field.key],
+    );
+  }
+
   rollback(revisionId: string): ServiceConnection[] {
     const revision = this.history().find((item) => item.id === revisionId);
     if (!revision)
       throw new ValidationError(["Deze wijziging is niet meer beschikbaar."]);
-    if (revision.secretChanges.length)
+    if (this.secretRollbackBlocked(revision))
       throw new ValidationError([
         "Geheime waarden staan niet in de geschiedenis. Vul de gewenste waarde opnieuw in.",
       ]);

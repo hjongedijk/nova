@@ -3,7 +3,11 @@ import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import zlib from "node:zlib";
-import { isPrivateAddress } from "../core/security/net-guard.js";
+import {
+  isNovaInternalHost,
+  isPrivateAddress,
+  mappedIpv4,
+} from "../core/security/net-guard.js";
 
 export type BlockCode =
   | "blocked_address"
@@ -26,29 +30,14 @@ export class ApiHttpError extends Error {
   }
 }
 
-const NOVA_INTERNAL_HOSTS = new Set([
-  "localhost",
-  "nova",
-  "jarvis-api",
-  "jarvis-web",
-  "jarvis-tts",
-  "jarvis-node-red",
-  "jarvis-omniroute",
-  "node-red",
-  "mqtt",
-  "omniroute",
-  "qdrant",
-  "stack-control",
-]);
-
 const toInt = (address: string) =>
   address.split(".").reduce((total, part) => total * 256 + Number(part), 0) >>>
   0;
 
 function ipv4Of(address: string): number | null {
   if (net.isIP(address) === 4) return toInt(address);
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
-  return mapped?.[1] ? toInt(mapped[1]) : null;
+  const mapped = mappedIpv4(address);
+  return mapped ? toInt(mapped) : null;
 }
 
 /** Never reachable, not even for an integration the user marked as local network. */
@@ -233,8 +222,11 @@ export class ApiHttpClient {
         "blocked_scheme",
         "Put credentials in the vault, not in the URL.",
       );
-    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-    if (NOVA_INTERNAL_HOSTS.has(host) || host.endsWith(".localhost"))
+    const host = url.hostname
+      .replace(/^\[|\]$/g, "")
+      .toLowerCase()
+      .replace(/\.+$/, "");
+    if (isNovaInternalHost(host))
       throw new ApiHttpError(
         "blocked_host",
         "This address belongs to NOVA itself or its internal services and is blocked.",

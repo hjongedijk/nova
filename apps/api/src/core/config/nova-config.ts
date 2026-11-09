@@ -24,6 +24,11 @@ const setting = (name: string, oldName: string, fallback = "") => {
   }
   return old || fallback;
 };
+const list = (name: string) =>
+  text(name)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 const url = (name: string, fallback: string) =>
   text(name, fallback).replace(/\/$/, "");
 const flagValue = (raw: string, fallback: boolean) => {
@@ -73,6 +78,15 @@ export class NovaConfig {
     ),
   );
   readonly publicUrl = text("NOVA_PUBLIC_URL");
+  /**
+   * Extra host names the API answers to besides IP addresses, local names and the NOVA_PUBLIC_URL host
+   * (DNS-rebinding guard; also accepted as a browser Origin). Comma separated; `*.example.com` or `*`.
+   */
+  readonly allowedHosts = list("NOVA_ALLOWED_HOSTS");
+  /** The owner's own SIP addresses (user@domain): their text messages get NOVA's full tools, other contacts read-only. */
+  readonly ownerSip = list("NOVA_OWNER_SIP").map((item) =>
+    item.replace(/^sips?:/i, "").toLowerCase(),
+  );
   /** Permit a graceful process restart only when an external supervisor restarts this process. */
   readonly restartEnabled = flag("NOVA_RESTART_ENABLED", false);
   readonly stackControlUrl = url(

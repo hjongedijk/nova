@@ -16,7 +16,7 @@ export class ServiceConnectionsHistory {
     const revision = this.store.history().find((row) => row.id === id);
     if (!revision)
       throw new ValidationError(["Deze wijziging is niet meer beschikbaar."]);
-    if (revision.secretChanges.length)
+    if (this.store.secretRollbackBlocked(revision))
       throw new ValidationError([
         "Geheime waarden staan niet in de geschiedenis. Vul de gewenste waarde opnieuw in.",
       ]);

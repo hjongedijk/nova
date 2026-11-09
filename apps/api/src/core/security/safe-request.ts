@@ -3,8 +3,10 @@ import https from "node:https";
 import net from "node:net";
 import {
   guardedLookup,
+  isNovaInternalHost,
   isPrivateAddress,
   lookupAllowing,
+  mappedIpv4,
 } from "./net-guard.js";
 
 /*
@@ -13,20 +15,6 @@ import {
  * would turn it into a way around the safeguards: this machine itself, the cloud metadata address,
  * and NOVA's own internal services.
  */
-const INTERNAL_HOSTS = new Set([
-  "localhost",
-  "nova",
-  "jarvis-api",
-  "jarvis-web",
-  "jarvis-tts",
-  "jarvis-node-red",
-  "jarvis-omniroute",
-  "node-red",
-  "mqtt",
-  "omniroute",
-  "qdrant",
-]);
-
 export function forbiddenAddress(address: string): boolean {
   const family = net.isIP(address);
   if (family === 4) {
@@ -47,8 +35,8 @@ export function forbiddenAddress(address: string): boolean {
       lower.startsWith("ff")
     )
       return true;
-    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-    return mapped?.[1] ? forbiddenAddress(mapped[1]) : false;
+    const mapped = mappedIpv4(lower);
+    return mapped ? forbiddenAddress(mapped) : false;
   }
   return true;
 }
@@ -69,8 +57,11 @@ export function assertSkillTarget(
     throw new Error(
       "Een URL met gebruikersnaam of wachtwoord is niet toegestaan.",
     );
-  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-  if (INTERNAL_HOSTS.has(host) || host.endsWith(".localhost"))
+  const host = url.hostname
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase()
+    .replace(/\.+$/, "");
+  if (isNovaInternalHost(host))
     throw new Error(
       "Dit adres hoort bij NOVA zelf en is geblokkeerd voor vaardigheden.",
     );

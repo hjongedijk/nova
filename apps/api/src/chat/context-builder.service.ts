@@ -119,6 +119,9 @@ export class ContextBuilder {
   ): Promise<ModelMessage[]> {
     message = sanitize(message);
     const recent = this.session.recent(sessionId, 12);
+    // Contacts, callers, agents and attachments never write durable memory or tune the autopilot.
+    const untrusted =
+      options.untrustedTurn === true || Boolean(promptContext?.hasAttachments);
     if (role === "conversation" && this.learner)
       await this.learner
         .learn({
@@ -127,8 +130,7 @@ export class ContextBuilder {
           previousAssistant: recent
             .filter((item) => item.role === "assistant")
             .at(-1)?.content,
-          untrusted:
-            options.untrustedTurn || Boolean(promptContext?.hasAttachments),
+          untrusted,
         })
         .catch(() => null);
     const turn = classifyTurn(message, recent);
@@ -218,7 +220,11 @@ export class ContextBuilder {
     messages.push({ role: "user", content: message });
 
     if (this.config.extensionsEnabled)
-      messages.splice(1, 0, await this.storedContext(sessionId, message));
+      messages.splice(
+        1,
+        0,
+        await this.storedContext(sessionId, message, untrusted),
+      );
     return messages;
   }
 
@@ -226,8 +232,9 @@ export class ContextBuilder {
   private async storedContext(
     sessionId: string,
     message: string,
+    untrusted = false,
   ): Promise<ModelMessage> {
-    const candidate = memoryCandidate(message);
+    const candidate = !untrusted && memoryCandidate(message);
     const memoryWrite =
       candidate && this.config.autoExecuteSafe
         ? await this.semantic.write(message)

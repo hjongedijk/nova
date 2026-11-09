@@ -84,6 +84,66 @@ function inIpv6Range(address: bigint, base: bigint, bits: number): boolean {
 const V6 = (address: string) => ipv6Integer(address)!;
 const V6_GLOBAL_UNICAST = [V6("2000::"), 3] as const;
 const V6_IPV4_MAPPED = [V6("::ffff:0:0"), 96] as const;
+
+/**
+ * The IPv4 address inside an IPv4-mapped IPv6 literal, in either spelling: ::ffff:127.0.0.1 or the
+ * hex form URL parsing produces (::ffff:7f00:1). Null for anything else.
+ */
+export function mappedIpv4(address: string): string | null {
+  if (net.isIP(address) !== 6) return null;
+  const value = ipv6Integer(address);
+  if (value === null || !inIpv6Range(value, ...V6_IPV4_MAPPED)) return null;
+  const n = Number(value & 0xffff_ffffn);
+  return `${(n >>> 24) & 255}.${(n >>> 16) & 255}.${(n >>> 8) & 255}.${n & 255}`;
+}
+
+/**
+ * Names of NOVA's own stack (compose service and container names, and the Docker host): user-made
+ * skills, panels and API integrations never reach these, even with "local network" on.
+ */
+const NOVA_INTERNAL_HOSTS = new Set([
+  "localhost",
+  "nova",
+  "jarvis-api",
+  "jarvis-web",
+  "jarvis-tts",
+  "jarvis-node-red",
+  "jarvis-omniroute",
+  "node-red",
+  "nova-node-red",
+  "mqtt",
+  "nova-mqtt",
+  "omniroute",
+  "nova-omniroute",
+  "qdrant",
+  "nova-qdrant",
+  "stack-control",
+  "nova-stack-control",
+  "mcp-egress",
+  "nova-mcp-egress",
+  "piper",
+  "nova-piper",
+  "speaches",
+  "nova-speaches",
+  "asterisk",
+  "linphone-chat",
+  "host.docker.internal",
+  "gateway.docker.internal",
+  "host-gateway",
+]);
+
+/** Whether a URL hostname names NOVA itself or one of its internal services (trailing dots ignored). */
+export function isNovaInternalHost(hostname: string): boolean {
+  const host = hostname
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase()
+    .replace(/\.+$/, "");
+  return (
+    NOVA_INTERNAL_HOSTS.has(host) ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".docker.internal")
+  );
+}
 const BLOCKED_V6 = [
   [V6("fc00::"), 7], // unique local
   [V6("fe80::"), 10], // link local
