@@ -32,7 +32,7 @@ export const TTS_VOICES = [
   { id: "jarvis-en-GB-piper", label: "Engels (lokale Piper-stem)" },
 ] as const;
 export type TtsVoiceId = (typeof TTS_VOICES)[number]["id"];
-const DEFAULT_VOICE: TtsVoiceId = "nl-NL-FennaNeural";
+const DEFAULT_VOICE: TtsVoiceId = "nl-NL-MaartenNeural";
 let serverDefaultVoice: TtsVoiceId = DEFAULT_VOICE;
 const KEY = "novaTtsVoice";
 const RATE_KEY = "novaTtsRate";

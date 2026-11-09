@@ -33,15 +33,15 @@ describe("TTS voice preference", () => {
     expect(ttsVoice()).toBe("nl-NL-ColetteNeural");
   });
 
-  it("falls back to Fenna for an unknown saved or requested voice", () => {
+  it("falls back to Maarten for an unknown saved or requested voice", () => {
     vi.spyOn(storage, "get").mockReturnValue("unreviewed-voice");
     const save = vi.spyOn(storage, "set");
 
-    expect(ttsVoice()).toBe("nl-NL-FennaNeural");
-    expect(saveTtsVoice("unreviewed-voice")).toBe("nl-NL-FennaNeural");
+    expect(ttsVoice()).toBe("nl-NL-MaartenNeural");
+    expect(saveTtsVoice("unreviewed-voice")).toBe("nl-NL-MaartenNeural");
     expect(save).toHaveBeenCalledWith(
       "novaTtsVoice",
-      "nl-NL-FennaNeural",
+      "nl-NL-MaartenNeural",
       "tts-voice",
     );
   });

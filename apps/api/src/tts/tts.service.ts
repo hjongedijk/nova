@@ -4,7 +4,7 @@ import { sanitize } from "../core/security/sanitize.js";
 import { ValidationError } from "../core/errors/validation.error.js";
 import { VoiceProfileStore } from "./voice-profile.store.js";
 
-export const TTS_DEFAULT_VOICE = "nl-NL-FennaNeural";
+export const TTS_DEFAULT_VOICE = "nl-NL-MaartenNeural";
 /** English Piper voice (en_GB-jarvis-medium); used only for English text. */
 export const TTS_PIPER_VOICE = "jarvis-en-GB-piper";
 /** Dutch Piper voice (nl_NL-pim-medium); the local fallback for everything that is not English. */

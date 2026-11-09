@@ -83,7 +83,7 @@ describe("POST /api/tts", () => {
       .expect(200);
     expect(voices.slice(start)).toEqual([
       "nl-NL-ColetteNeural",
-      "nl-NL-FennaNeural",
+      "nl-NL-MaartenNeural",
     ]);
   });
 
@@ -152,7 +152,7 @@ describe("POST /api/tts", () => {
       .expect(200);
     expect(response.body).toMatchObject({
       ok: true,
-      voice: "nl-NL-FennaNeural",
+      voice: "nl-NL-MaartenNeural",
       voices: expect.arrayContaining([
         "nl-NL-FennaNeural",
         "nl-NL-ColetteNeural",
