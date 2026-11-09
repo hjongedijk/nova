@@ -149,7 +149,8 @@ try {
               pairs.push(
                 `the desk page is not transparent (${result.transparent})`,
               );
-            if (desk && (result.panel.left < 11.5 || result.panel.top < 11.5))
+            // The panel hangs from the top edge like a notch: the 12px margin is on the sides and below.
+            if (desk && result.panel.left < 11.5)
               pairs.push("the desk panel is not inset by the 12px margin");
             for (const text of pairs) problems.push(`${where}: ${text}`);
             checked++;

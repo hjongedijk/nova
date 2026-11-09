@@ -101,6 +101,43 @@
         "Alleen lokaal opgeslagen. Probeer opnieuw op te slaan.";
     }
   }
+  async function savePreferences(): Promise<void> {
+    try {
+      const result = await persistHelperPreferences({
+        autohide,
+        contrast,
+        avatar: helper.avatar,
+        shape: helper.shape,
+        notifications: helper.notifications,
+        rituals: helper.rituals,
+        wardrobe: helper.wardrobe,
+        cues: { ...helper.cues, quiet: helper.cues.quiet! },
+      });
+      preferencesNote = result.auditWarning ?? "Helperinstellingen opgeslagen.";
+    } catch (error) {
+      preferencesNote =
+        error instanceof ApiError
+          ? error.message
+          : "Helperinstellingen zijn niet opgeslagen. Controleer de verbinding en probeer opnieuw.";
+    }
+  }
+  const CUE_LABELS: Record<(typeof HELPER_CUE_NAMES)[number], string> = {
+    "listening-start": "Luisteren begint",
+    "listening-end": "Luisteren klaar",
+    thinking: "Nadenken",
+    done: "Klaar",
+    notice: "Melding",
+    error: "Fout",
+    approved: "Bevestigd",
+    declined: "Geweigerd",
+    greet: "Begroeting",
+    goodnight: "Welterusten",
+    file: "Bestand",
+    touch: "Aanraking",
+    dizzy: "Duizelig",
+    heart: "Hartje",
+    wake: "Wakker",
+  };
   const MODEL_ROLE_LABELS: Record<string, string> = {
     conversation: "Gesprek",
     code: "Code",
@@ -921,7 +958,13 @@
       type="button"
       disabled={paused || chat.busy || reading}
       onclick={() => picker?.click()}
-      aria-label="Bestanden bijvoegen">+</HelperUi
+      aria-label="Bestanden bijvoegen"
+      title="Bestanden bijvoegen"
+      ><svg viewBox="0 0 20 20" aria-hidden="true"
+        ><path
+          d="m15.5 9.5-5.8 5.8a3.6 3.6 0 0 1-5.1-5.1l6.2-6.2a2.4 2.4 0 0 1 3.4 3.4l-6.1 6.1a1.2 1.2 0 0 1-1.7-1.7l5.4-5.4"
+        /></svg
+      ></HelperUi
     >
     <input
       class="hp-input"
@@ -932,13 +975,19 @@
       placeholder="Zeg of typ iets…"
     />
     <HelperUi
-      class="hp-button"
+      class="hp-button hp-mic"
       type="button"
       hidden={!shell.speechSupported}
       disabled={paused || reading}
       onclick={microphone}
       aria-label="Microfoon"
-      ><HelperCompanion state={orbState} compact /></HelperUi
+      title="Microfoon"
+      aria-pressed={orbState === "listening"}
+      ><svg viewBox="0 0 20 20" aria-hidden="true"
+        ><rect x="7.5" y="2.5" width="5" height="9" rx="2.5" /><path
+          d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5"
+        /></svg
+      ></HelperUi
     >
     <HelperUi
       class="hp-button hp-primary"
@@ -969,6 +1018,7 @@
   data-state={paused ? "idle" : orbState}
   style:--level={audioLevel.level}
   class:expanded
+  class:bar-orb={expanded && (settings || waiting || view !== "overview")}
   class:desk
   class:deskfull={desk && fullscreen}
   class:contrast
@@ -1029,7 +1079,29 @@
                 aria-hidden="true"
                 ><path d="M4 14h12l-2-3V8a4 4 0 0 0-8 0v3ZM8 17h4" /></svg
               ><span class="hp-sr">{tab.label}</span
-              >{:else}{tab.label}{/if}{#if tab.id === "notifications" && visibleNotices.length}<span
+              >{:else if tab.id === "weather"}<svg
+                viewBox="0 0 20 20"
+                aria-hidden="true"
+                ><circle cx="8" cy="8" r="3" /><path
+                  d="M8 2v1.2M2 8h1.2M3.8 3.8l.9.9M12.2 3.8l-.9.9M7 17h7.5a3 3 0 0 0 0-6 4 4 0 0 0-7.6 1.2A2.4 2.4 0 0 0 7 17Z"
+                /></svg
+              ><span class="hp-sr">{tab.label}</span
+              >{:else if tab.id === "lists"}<svg
+                viewBox="0 0 20 20"
+                aria-hidden="true"
+                ><path
+                  d="M8 5.5h9M8 10h9M8 14.5h9M3.5 5.5h.5M3.5 10h.5M3.5 14.5h.5"
+                /></svg
+              ><span class="hp-sr">{tab.label}</span>{:else}<svg
+                viewBox="0 0 20 20"
+                aria-hidden="true"
+                ><path d="M8 15V4.5l9-2V13" /><circle
+                  cx="5.5"
+                  cy="15"
+                  r="2.5"
+                /><circle cx="14.5" cy="13" r="2.5" /></svg
+              ><span class="hp-sr">{tab.label}</span
+              >{/if}{#if tab.id === "notifications" && visibleNotices.length}<span
                 class="hp-count">{visibleNotices.length}</span
               >{/if}</HelperUi
           >{/each}
@@ -1038,7 +1110,10 @@
           aria-label="Extra weergave toevoegen"
           title="Extra weergave toevoegen"
           aria-expanded={extraMenu}
-          onclick={() => (extraMenu = !extraMenu)}>+</HelperUi
+          onclick={() => (extraMenu = !extraMenu)}
+          ><svg viewBox="0 0 20 20" aria-hidden="true"
+            ><path d="M10 4.5v11M4.5 10h11" /></svg
+          ></HelperUi
         >
         {#if extraMenu}<div class="hp-menu hp-extra-menu">
             {#each [{ id: "weather", label: "Weer" }, { id: "lists", label: "Lijsten" }, { id: "music", label: "Muziek" }] as extra (extra.id)}<HelperUi
@@ -1189,136 +1264,188 @@
           aria-label="Helperinstellingen"
           onchange={recordHelperPreference}
         >
-          <label
-            ><input type="checkbox" data-helper-live bind:checked={autohide} /> Automatisch
-            verbergen</label
-          >
-          <label
-            ><input type="checkbox" data-helper-live bind:checked={contrast} /> Hoog
-            contrast</label
-          >
-          <label
-            >Stemvolume <input
-              type="range"
-              min="0"
-              max="100"
-              bind:value={volume}
-              oninput={() => {
-                storage.set("novaVolume", String(volume / 100));
-                if (playback.current) applyVolume(playback.current);
-              }}
-              onchange={() =>
-                storage.set("novaVolume", String(volume / 100), "volume")}
-            /></label
-          >
-          <label
-            >Orb <select data-helper-live bind:value={helper.shape}
-              ><option value="orb">Bol</option><option value="ring">Ring</option
-              ><option value="mist">Mist</option></select
-            ></label
-          >
-          <label
-            ><input
-              type="checkbox"
-              data-helper-live
-              bind:checked={helper.cues.enabled}
-            /> Geluidjes</label
-          >
-          <label
-            >Kleur <select data-helper-live bind:value={helper.wardrobe.theme}
-              ><option value="nova">NOVA</option><option value="violet"
-                >Violet</option
-              ><option value="gold">Goud</option></select
-            ></label
-          >
-          <label
-            ><input
-              type="checkbox"
-              checked={lightSync.enabled}
-              onchange={(event) => setLightSync(event.currentTarget.checked)}
-            /> Orbkleur volgt kamerlampen</label
-          >
-          <label
-            >Kamer
-            <select
-              aria-label="Kamer voor orbkleur"
-              value={lightSync.areaId}
-              disabled={!lightSync.enabled}
-              onchange={(event) =>
-                setLightSync(true, event.currentTarget.value)}
+          <div class="hp-pref-group">
+            <h2>Weergave</h2>
+            <label class="hp-pref"
+              ><span>Automatisch verbergen</span><input
+                type="checkbox"
+                class="hp-switch"
+                data-helper-live
+                bind:checked={autohide}
+              /></label
             >
-              <option value="">Kies een kamer</option>
-              {#each lightSync.areas as area (area.areaId)}
-                <option value={area.areaId}>{area.areaName}</option>
-              {/each}
-            </select></label
-          >
-          {#if lightSync.enabled && lightSync.unavailable}
-            <p class="hint">
-              Home Assistant is nu niet bereikbaar. De gewone orbkleur blijft
-              zichtbaar.
-            </p>
-          {:else if lightSync.enabled && lightSync.areas.length === 0}
-            <p class="hint">
-              Geen ingeschakelde kleurenlamp in een toegestane kamer gevonden.
-            </p>
-          {/if}
-          <label
-            ><input
-              type="checkbox"
-              data-helper-live
-              bind:checked={helper.wardrobe.seasonal}
-            /> Seizoensaccenten</label
-          >
-          <label data-helper-live
-            >Verjaardag (optioneel, MM-DD)<HelperUi
-              variant="input"
-              aria-label="Verjaardag (MM-DD)"
-              bind:value={helper.wardrobe.birthday}
-              placeholder="MM-DD"
-              maxlength={5}
-            /></label
-          >
-          <label
-            >Geluidvolume <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              data-helper-live
-              bind:value={helper.cues.volume}
-            /></label
-          >
-          <label
-            >Thema <select data-helper-live bind:value={helper.cues.theme}
-              ><option value="soft">Zacht</option><option value="playful"
-                >Speels</option
-              ><option value="minimal">Minimaal</option></select
-            ></label
-          >
-          <label
-            ><input
-              type="checkbox"
-              data-helper-live
-              bind:checked={helper.cues.quiet!.enabled}
-            /> Stille uren</label
-          >
-          <input
-            aria-label="Begin stille uren"
-            type="time"
+            <label class="hp-pref"
+              ><span>Hoog contrast</span><input
+                type="checkbox"
+                class="hp-switch"
+                data-helper-live
+                bind:checked={contrast}
+              /></label
+            >
+            <label class="hp-pref"
+              ><span>Orb</span><select
+                data-helper-live
+                bind:value={helper.shape}
+                ><option value="orb">Bol</option><option value="ring"
+                  >Ring</option
+                ><option value="mist">Mist</option></select
+              ></label
+            >
+            <label class="hp-pref"
+              ><span>Kleur</span><select
+                data-helper-live
+                bind:value={helper.wardrobe.theme}
+                ><option value="nova">NOVA</option><option value="violet"
+                  >Violet</option
+                ><option value="gold">Goud</option></select
+              ></label
+            >
+            <label class="hp-pref"
+              ><span>Seizoensaccenten</span><input
+                type="checkbox"
+                class="hp-switch"
+                data-helper-live
+                bind:checked={helper.wardrobe.seasonal}
+              /></label
+            >
+            <label class="hp-pref" data-helper-live
+              ><span>Verjaardag (optioneel, MM-DD)</span><HelperUi
+                variant="input"
+                aria-label="Verjaardag (MM-DD)"
+                bind:value={helper.wardrobe.birthday}
+                placeholder="MM-DD"
+                maxlength={5}
+              /></label
+            >
+          </div>
+          <div class="hp-pref-group">
+            <h2>Geluid</h2>
+            <label class="hp-pref"
+              ><span>Stemvolume</span><input
+                type="range"
+                min="0"
+                max="100"
+                bind:value={volume}
+                oninput={() => {
+                  storage.set("novaVolume", String(volume / 100));
+                  if (playback.current) applyVolume(playback.current);
+                }}
+                onchange={() =>
+                  storage.set("novaVolume", String(volume / 100), "volume")}
+              /></label
+            >
+            <label class="hp-pref"
+              ><span>Geluidjes</span><input
+                type="checkbox"
+                class="hp-switch"
+                data-helper-live
+                bind:checked={helper.cues.enabled}
+              /></label
+            >
+            <label class="hp-pref"
+              ><span>Geluidvolume</span><input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                data-helper-live
+                bind:value={helper.cues.volume}
+              /></label
+            >
+            <label class="hp-pref"
+              ><span>Thema</span><select
+                data-helper-live
+                bind:value={helper.cues.theme}
+                ><option value="soft">Zacht</option><option value="playful"
+                  >Speels</option
+                ><option value="minimal">Minimaal</option></select
+              ></label
+            >
+            <label class="hp-pref"
+              ><span>Stille uren</span><input
+                type="checkbox"
+                class="hp-switch"
+                data-helper-live
+                bind:checked={helper.cues.quiet!.enabled}
+              /></label
+            >
+            <div class="hp-pref">
+              <span aria-hidden="true">Van – tot</span>
+              <span class="hp-time-range"
+                ><input
+                  aria-label="Begin stille uren"
+                  type="time"
+                  data-helper-live
+                  bind:value={helper.cues.quiet!.start}
+                /><input
+                  aria-label="Einde stille uren"
+                  type="time"
+                  data-helper-live
+                  bind:value={helper.cues.quiet!.end}
+                /></span
+              >
+            </div>
+            <details class="hp-pref-more" data-helper-live>
+              <summary>Geluiden kiezen</summary>
+              <div class="hp-cue-grid">
+                {#each HELPER_CUE_NAMES as name (name)}<label
+                    ><input
+                      type="checkbox"
+                      checked={helper.cues.cues?.[name] !== false}
+                      onchange={(event) =>
+                        (helper.cues.cues = {
+                          ...helper.cues.cues,
+                          [name]: event.currentTarget.checked,
+                        })}
+                    />{CUE_LABELS[name]}</label
+                  >{/each}
+              </div>
+            </details>
+          </div>
+          <div class="hp-pref-group">
+            <h2>Orbkleur</h2>
+            <label class="hp-pref"
+              ><span>Orbkleur volgt kamerlampen</span><input
+                type="checkbox"
+                class="hp-switch"
+                checked={lightSync.enabled}
+                onchange={(event) => setLightSync(event.currentTarget.checked)}
+              /></label
+            >
+            <label class="hp-pref"
+              ><span>Kamer</span>
+              <select
+                aria-label="Kamer voor orbkleur"
+                value={lightSync.areaId}
+                disabled={!lightSync.enabled}
+                onchange={(event) =>
+                  setLightSync(true, event.currentTarget.value)}
+              >
+                <option value="">Kies een kamer</option>
+                {#each lightSync.areas as area (area.areaId)}
+                  <option value={area.areaId}>{area.areaName}</option>
+                {/each}
+              </select></label
+            >
+            {#if lightSync.enabled && lightSync.unavailable}
+              <p class="hint">
+                Home Assistant is nu niet bereikbaar. De gewone orbkleur blijft
+                zichtbaar.
+              </p>
+            {:else if lightSync.enabled && lightSync.areas.length === 0}
+              <p class="hint">
+                Geen ingeschakelde kleurenlamp in een toegestane kamer gevonden.
+              </p>
+            {/if}
+          </div>
+          <fieldset
+            class="hp-pref-group hp-notification-preferences"
             data-helper-live
-            bind:value={helper.cues.quiet!.start}
-          /><input
-            aria-label="Einde stille uren"
-            type="time"
-            data-helper-live
-            bind:value={helper.cues.quiet!.end}
-          />
-          <fieldset class="hp-notification-preferences" data-helper-live>
+          >
             <legend>Meldingen</legend>
             {#each notificationKinds as notice (notice.key)}
-              <label
-                >{notice.label}
+              <label class="hp-pref"
+                ><span>{notice.label}</span>
                 <select bind:value={helper.notifications[notice.key]}>
                   <option value="screen">Alleen scherm</option>
                   <option value="helper">Helper met geluidje</option>
@@ -1327,101 +1454,97 @@
               </label>
             {/each}
           </fieldset>
-          <fieldset class="hp-notification-preferences">
+          <fieldset class="hp-pref-group hp-notification-preferences">
             <legend>Rituelen (standaard uit)</legend>
-            <label
+            <div class="hp-pref">
+              <label
+                ><input
+                  type="checkbox"
+                  bind:checked={helper.rituals.morning.enabled}
+                /> Goedemorgen</label
               ><input
-                type="checkbox"
-                bind:checked={helper.rituals.morning.enabled}
-              /> Goedemorgen</label
-            >
-            <label
-              >Om <input
                 aria-label="Goedemorgen om"
                 type="time"
                 bind:value={helper.rituals.morning.time}
-              /></label
-            >
-            <label
+              />
+            </div>
+            <div class="hp-pref">
+              <label
+                ><input
+                  type="checkbox"
+                  bind:checked={helper.rituals.evening.enabled}
+                /> Welterusten</label
               ><input
-                type="checkbox"
-                bind:checked={helper.rituals.evening.enabled}
-              /> Welterusten</label
-            >
-            <label
-              >Om <input
                 aria-label="Welterusten om"
                 type="time"
                 bind:value={helper.rituals.evening.time}
-              /></label
-            >
-            <label
-              ><input
-                type="checkbox"
-                bind:checked={helper.rituals.checkIn.enabled}
-              /> Check-in na stilte</label
-            >
-            <label
-              >Na
-              <select bind:value={helper.rituals.checkIn.afterHours}>
+              />
+            </div>
+            <div class="hp-pref">
+              <label
+                ><input
+                  type="checkbox"
+                  bind:checked={helper.rituals.checkIn.enabled}
+                /> Check-in na stilte</label
+              ><select
+                aria-label="Check-in na"
+                bind:value={helper.rituals.checkIn.afterHours}
+              >
                 <option value={3}>3 uur</option><option value={4}>4 uur</option
                 ><option value={6}>6 uur</option>
               </select>
-            </label>
-            <label
+            </div>
+            <div class="hp-pref">
+              <label
+                ><input
+                  type="checkbox"
+                  bind:checked={helper.rituals.weeklyOverview.enabled}
+                /> Weekoverzicht op zondag</label
               ><input
-                type="checkbox"
-                bind:checked={helper.rituals.weeklyOverview.enabled}
-              /> Weekoverzicht op zondag</label
-            >
-            <label
-              >Om <input
                 aria-label="Weekoverzicht op zondag om"
                 type="time"
                 bind:value={helper.rituals.weeklyOverview.time}
-              /></label
-            >
-            <label
+              />
+            </div>
+            <div class="hp-pref">
+              <label
+                ><input
+                  type="checkbox"
+                  bind:checked={helper.rituals.dailyHighlight.enabled}
+                /> Dagelijks hoogtepunt</label
               ><input
-                type="checkbox"
-                bind:checked={helper.rituals.dailyHighlight.enabled}
-              /> Dagelijks hoogtepunt</label
-            >
-            <label
-              >Om <input
                 aria-label="Dagelijks hoogtepunt om"
                 type="time"
                 bind:value={helper.rituals.dailyHighlight.time}
-              /></label
-            >
-            <label
-              ><input
-                type="checkbox"
-                bind:checked={helper.rituals.smallSurprises.enabled}
-              /> Kleine verrassingen bij een gelegenheid</label
-            >
-            <label
-              ><input
-                type="checkbox"
-                bind:checked={helper.rituals.welcomeHome.enabled}
-              /> Welkom thuis na Home Assistant-thuiskomst</label
-            >
-            <label
-              ><input
-                type="checkbox"
-                bind:checked={helper.rituals.calendarReminders.enabled}
-              /> Agenda-herinneringen</label
-            >
-            <label
-              >Vooraf
-              <select
+              />
+            </div>
+            <div class="hp-pref">
+              <label
+                ><input
+                  type="checkbox"
+                  bind:checked={helper.rituals.calendarReminders.enabled}
+                /> Agenda-herinneringen</label
+              ><select
+                aria-label="Agenda-herinnering vooraf"
                 bind:value={helper.rituals.calendarReminders.minutesBefore}
               >
                 <option value={5}>5 minuten</option>
                 <option value={15}>15 minuten</option>
                 <option value={30}>30 minuten</option>
               </select>
-            </label>
+            </div>
+            <label class="hp-pref hp-pref-check"
+              ><input
+                type="checkbox"
+                bind:checked={helper.rituals.smallSurprises.enabled}
+              /> Kleine verrassingen bij een gelegenheid</label
+            >
+            <label class="hp-pref hp-pref-check"
+              ><input
+                type="checkbox"
+                bind:checked={helper.rituals.welcomeHome.enabled}
+              /> Welkom thuis na Home Assistant-thuiskomst</label
+            >
             <p class="hint">
               Rituelen komen als gewone melding en volgen je meldingskeuze,
               stille uren en aanwezigheid. Agenda-herinneringen staan standaard
@@ -1430,69 +1553,22 @@
               samenvattingsroute.
             </p>
           </fieldset>
-          <details data-helper-live>
-            <summary>Geluiden kiezen</summary
-            >{#each HELPER_CUE_NAMES as name (name)}<label
-                ><input
-                  type="checkbox"
-                  checked={helper.cues.cues?.[name] !== false}
-                  onchange={(event) =>
-                    (helper.cues.cues = {
-                      ...helper.cues.cues,
-                      [name]: event.currentTarget.checked,
-                    })}
-                />{{
-                  "listening-start": "Luisteren begint",
-                  "listening-end": "Luisteren klaar",
-                  thinking: "Nadenken",
-                  done: "Klaar",
-                  notice: "Melding",
-                  error: "Fout",
-                  approved: "Bevestigd",
-                  declined: "Geweigerd",
-                  greet: "Begroeting",
-                  goodnight: "Welterusten",
-                  file: "Bestand",
-                  touch: "Aanraking",
-                  dizzy: "Duizelig",
-                  heart: "Hartje",
-                  wake: "Wakker",
-                }[name]}</label
-              >{/each}
-          </details>
-          <HelperUi
-            class="hp-button hp-primary"
-            onclick={async () => {
-              try {
-                const result = await persistHelperPreferences({
-                  autohide,
-                  contrast,
-                  avatar: helper.avatar,
-                  shape: helper.shape,
-                  notifications: helper.notifications,
-                  rituals: helper.rituals,
-                  wardrobe: helper.wardrobe,
-                  cues: { ...helper.cues, quiet: helper.cues.quiet! },
-                });
-                preferencesNote =
-                  result.auditWarning ?? "Helperinstellingen opgeslagen.";
-              } catch (error) {
-                preferencesNote =
-                  error instanceof ApiError
-                    ? error.message
-                    : "Helperinstellingen zijn niet opgeslagen. Controleer de verbinding en probeer opnieuw.";
-              }
-            }}>Instellingen opslaan</HelperUi
-          >
-          {#if preferencesNote}<p role="status">{preferencesNote}</p>{/if}
-          <HelperDevices />
-
-          <a
-            class="hp-button"
-            href="/?settings=devices"
-            target="_blank"
-            rel="noopener">Apparaat en geluid in volledige app</a
-          >
+          <div class="hp-pref-group hp-pref-devices">
+            <h2>Apparaat</h2>
+            <HelperDevices />
+            <a
+              class="hp-button"
+              href="/?settings=devices"
+              target="_blank"
+              rel="noopener">Apparaat en geluid in volledige app</a
+            >
+          </div>
+          <div class="hp-pref-save">
+            {#if preferencesNote}<p role="status">{preferencesNote}</p>{/if}
+            <HelperUi class="hp-button hp-primary" onclick={savePreferences}
+              >Instellingen opslaan</HelperUi
+            >
+          </div>
         </section>
       {:else if view === "overview"}
         <section class="hp-content hp-overview-layout" aria-label="Overzicht">
@@ -1500,7 +1576,7 @@
             <div class="hp-workspace-heading">
               <span class="hp-workspace-state"
                 ><i></i>{paused ? "Gepauzeerd" : status}</span
-              ><span>NOVA</span>
+              >
             </div>
             <button
               class="hp-companion-action"
@@ -1575,36 +1651,104 @@
             </div>
           {/if}
         </section>
-        {#if detail}<div class="hp-detail">
-            <strong>{detail}</strong><span
-              >{overviewBlocks.find((block) => block.name === detail)
-                ?.detail}</span
-            >
+        {#if detail}<div
+            class="hp-detail"
+            role="region"
+            aria-label={`Details ${detail}`}
+          >
+            <header>
+              <strong>{detail}</strong><HelperUi
+                class="hp-icon"
+                aria-label="Details sluiten"
+                title="Sluiten"
+                onclick={() => (detail = "")}
+                ><svg viewBox="0 0 20 20" aria-hidden="true"
+                  ><path d="M5.5 5.5l9 9M14.5 5.5l-9 9" /></svg
+                ></HelperUi
+              >
+            </header>
+            <p>
+              {overviewBlocks.find((block) => block.name === detail)?.detail}
+            </p>
             <a href="/" target="_blank" rel="noopener">Open details ↗</a>
           </div>{/if}
       {:else if view === "music"}
         <HelperMusic />
       {:else if view === "weather"}
-        <section class="hp-content hp-extra" aria-label="Weer">
-          {#if dashboard.overview?.weather}<strong
-              >{dashboard.overview.weather.name || "Het weer"} · {dashboard
-                .overview.weather.temperature ?? "—"}
-              {dashboard.overview.weather.temperatureUnit || "°C"}</strong
-            >
-            <p>{dashboard.overview.weather.condition || "Geen omschrijving"}</p>
-            <span
-              >Wind: {dashboard.overview.weather.windSpeed ?? "—"}
-              {dashboard.overview.weather.windUnit || ""}</span
-            >{:else}<p>Weergegevens zijn niet bereikbaar.</p>{/if}
+        {@const weather = dashboard.overview?.weather}
+        <section class="hp-content hp-extra hp-weather" aria-label="Weer">
+          {#if weather}
+            <div class="hp-weather-now">
+              <p class="hp-weather-temp">
+                {weather.temperature ?? "—"}<span
+                  >{weather.temperatureUnit || "°C"}</span
+                >
+              </p>
+              <div class="hp-weather-copy">
+                <strong>{weather.name || "Het weer"}</strong>
+                <p>{weather.condition || "Geen omschrijving"}</p>
+              </div>
+            </div>
+            <dl class="hp-facts">
+              <div>
+                <dt>Wind</dt>
+                <dd>
+                  {weather.windSpeed ?? "—"}
+                  {weather.windUnit || ""}
+                </dd>
+              </div>
+              {#if weather.humidity != null}<div>
+                  <dt>Vochtigheid</dt>
+                  <dd>{weather.humidity}%</dd>
+                </div>{/if}
+            </dl>
+            {#if weather.forecast?.hours.length}
+              <ol class="hp-forecast" aria-label="Verwachting">
+                {#each weather.forecast.hours.slice(0, 6) as hour (hour.time)}
+                  <li>
+                    <span
+                      >{new Date(hour.time).toLocaleTimeString("nl-NL", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}</span
+                    ><strong>{Math.round(hour.temperature)}°</strong
+                    >{#if hour.rainChancePercent != null}<small
+                        >{hour.rainChancePercent}% regen</small
+                      >{/if}
+                  </li>
+                {/each}
+              </ol>
+            {/if}
+          {:else if overviewLoading}
+            <p class="hp-empty hp-empty-state" role="status">Weer laden…</p>
+          {:else}
+            <p class="hp-empty hp-empty-state">
+              Weergegevens zijn niet bereikbaar.
+            </p>
+          {/if}
         </section>
       {:else if view === "lists"}
-        <section class="hp-content hp-extra" aria-label="Lijsten">
-          {#each Object.entries(dashboard.overview?.lists ?? {}) as [name, items] (name)}<strong
-              >{name}</strong
-            >
-            <p>{items.join(" · ") || "Deze lijst is leeg."}</p>{:else}<p>
-              Geen lijsten beschikbaar.
-            </p>{/each}
+        <section class="hp-content hp-extra hp-lists" aria-label="Lijsten">
+          {#each Object.entries(dashboard.overview?.lists ?? {}) as [name, items] (name)}
+            <article class="hp-list">
+              <header>
+                <strong>{name}</strong><span
+                  >{items.length === 1
+                    ? "1 item"
+                    : `${items.length} items`}</span
+                >
+              </header>
+              {#if items.length}
+                <ul>
+                  {#each items as item, index (index)}<li>{item}</li>{/each}
+                </ul>
+              {:else}<p>Deze lijst is leeg.</p>{/if}
+            </article>
+          {:else}
+            <p class="hp-empty hp-empty-state">
+              {overviewLoading ? "Lijsten laden…" : "Geen lijsten beschikbaar."}
+            </p>
+          {/each}
         </section>
       {:else if view === "chat"}
         <div class="hp-chat-actions">
@@ -1702,19 +1846,26 @@
                   dismissNotice(event.seq);
               }}
             >
+              <i class="hp-notice-mark" aria-hidden="true"></i>
               <div>
                 <strong>{event.title}</strong>
-                <p>{event.detail}</p>
+                {#if event.detail}<p>{event.detail}</p>{/if}
               </div>
               <HelperUi class="hp-button" onclick={() => snoozeNotice(event)}
                 >Over 10 min</HelperUi
               ><HelperUi
-                class="hp-button"
+                class="hp-button hp-dismiss"
                 aria-label={`Verwijder ${event.title}`}
-                onclick={() => dismissNotice(event.seq)}>×</HelperUi
+                title="Verwijderen"
+                onclick={() => dismissNotice(event.seq)}
+                ><svg viewBox="0 0 20 20" aria-hidden="true"
+                  ><path d="M5.5 5.5l9 9M14.5 5.5l-9 9" /></svg
+                ></HelperUi
               >
-            </HelperUi>{:else}<p class="hp-empty">
-              Geen nieuwe meldingen. Ik houd het in de gaten.
+            </HelperUi>{:else}<p class="hp-empty hp-empty-state">
+              <svg viewBox="0 0 20 20" aria-hidden="true"
+                ><path d="M4 14h12l-2-3V8a4 4 0 0 0-8 0v3ZM8 17h4" /></svg
+              >Geen nieuwe meldingen. Ik houd het in de gaten.
             </p>{/each}
         </section>
       {/if}
