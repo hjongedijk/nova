@@ -91,7 +91,7 @@ const TINT: Record<UiState, { rim: number; core: number }> = {
   listening: { rim: 0.32, core: 0.15 },
   thinking: { rim: 0.38, core: 0.3 },
   executing: { rim: 0.3, core: 0.15 },
-  speaking: { rim: 0.16, core: 0.12 },
+  speaking: { rim: 0.16, core: 0 },
 };
 
 let cachedGeometry: GestalteGeometry | null = null;
@@ -173,7 +173,7 @@ export async function createGestalte(
   under.before(canvas);
   renderer.setClearColor(PALETTE.bg, 1);
 
-  const geo = (cachedGeometry ??= buildGestalte(1, 4200));
+  const geo = (cachedGeometry ??= buildGestalte(1, 12000));
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 200);
 
@@ -220,9 +220,9 @@ export async function createGestalte(
     uStreak: { value: v3(col(PALETTE.streak)) },
     uFade: { value: 0 },
     uCoreC: { value: new THREE.Vector3() },
-    uCoreS: { value: 1.6 },
+    uCoreS: { value: 1.5 },
   };
-  const shellU = { ...U, uShell: { value: 0.035 } };
+  const shellU = { ...U, uShell: { value: 0.07 } };
 
   // Body mesh, shared by the depth pre-pass, the lit pass and the shell.
   const bodyGeo = new THREE.BufferGeometry();
@@ -307,7 +307,7 @@ export async function createGestalte(
     depthWrite: false,
   });
   const bgMesh = new THREE.Mesh(quad, bgMat);
-  const landGeo = new THREE.PlaneGeometry(100, 64, 340, 210);
+  const landGeo = new THREE.PlaneGeometry(100, 64, 480, 300);
   const landMat = new THREE.ShaderMaterial({
     uniforms: U,
     vertexShader: LAND_VERT,
@@ -335,9 +335,9 @@ export async function createGestalte(
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(256, 256),
-    0.75,
-    0.1,
-    0.55,
+    0.95,
+    0.18,
+    0.5,
   );
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
@@ -509,7 +509,7 @@ export async function createGestalte(
           0.25 *
           (0.5 + 0.5 * Math.sin(t * 1.6 * (motion || 0.2))) +
         weight.listening * 0.15 +
-        weight.speaking * f.audio * 0.8;
+        weight.speaking * f.audio * 0.45;
 
       if (document.hidden) return;
       composer.render(dt);
