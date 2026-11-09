@@ -128,27 +128,34 @@ void main() {
   float t = uT * uMotion;
   float speak = uW.w * uAudio;
 
-  // The warm core sits in the middle of the face.
-  vec3 dc = (r - vec3(0.0, -0.08, 0.3)) * vec3(1.15, 0.9, 1.3);
-  float core = exp(-dot(dc, dc) * 3.0) * uCoreI;
+  // The warm core: a broad soft field over the mid-face (eye line to upper lip, ~60% of its width),
+  // stirred by slow turbulence so hot spots flow through it.
+  vec2 dc = vec2(r.x / 0.44, (r.y + 0.2) / 0.3);
+  float turb = g_noise(vec3(r.x * 3.2, r.y * 3.2 - t * 0.35, t * 0.18 + 4.0))
+             + 0.5 * g_noise(vec3(r.x * 7.0 + 2.0, r.y * 7.0 + t * 0.5, t * 0.3));
+  float core = exp(-dot(dc, dc) * 1.1) * smoothstep(0.0, 0.35, r.z) * (0.75 + 0.45 * turb) * uCoreI;
 
-  // Face: horizontal lines with drifting sine ripples, stronger over the core and with the voice.
-  float rip = sin(r.x * 5.3 + t * 0.45 + r.y * 1.9) * 0.42
-            + sin(r.x * 11.7 - t * 0.7 - r.y * 3.3) * 0.2
-            + sin(r.x * 23.0 + t * 1.2 + r.y * 6.1) * 0.07;
-  rip *= 1.0 + 2.6 * core + speak * 3.5;
+  // Face: clearly wavy lines, four or so waves across the face, drifting; strongest over the core.
+  float rip = sin(r.x * 17.0 + t * 0.6 + r.y * 2.6) * 0.42
+            + sin(r.x * 8.5 - t * 0.42 - r.y * 3.4) * 0.16
+            + sin(r.x * 29.0 + t * 1.1 + r.y * 7.0) * 0.05;
+  rip *= 1.0 + 1.1 * core + speak * 1.6;
   vec3 dmv = (r - vec3(0.0, -0.5, 0.55)) * vec3(1.0, 1.35, 1.0);
   float dm = length(dmv);
-  rip += speak * sin(dm * 24.0 - uT * 8.0) * 0.45 * exp(-dm * 1.1);
+  rip += speak * sin(dm * 24.0 - uT * 8.0) * 0.4 * exp(-dm * 1.1);
   float D = 31.0;
   float fFace = r.y * D + rip;
-  // Neck and chest: field lines that run with the shoulders and wrap forward over the chest.
+  // Neck and chest: topographic lines that follow the shoulders, arc over the chest and dip at the sternum.
   float sx = max(ax - 0.3, 0.0);
   float shoulder = -1.2 - 0.27 * sx - 0.035 * sx * sx;
+  float chest = smoothstep(-1.35, -2.1, r.y);
+  float pec = 0.34 * exp(-pow(ax - 0.85, 2.0) / 0.22) * chest;
+  float sternum = -0.07 * exp(-r.x * r.x / 0.04) * chest;
+  float wrapS = 0.12 * smoothstep(1.6, 2.6, ax) * (r.z + 0.2);
   // Offset so the two fields agree on the neck's centre line: no seam where they blend.
   float flow = g_noise(vec3(r.x * 0.9, r.y * 0.9, t * 0.04 + 2.0));
-  float fBody = (r.y - 0.9 * (shoulder + 1.2) - 0.05 * r.x * r.x) * D
-              + rip * 0.35 + (0.9 * sin(r.x * 1.4 - t * 0.22 + r.y * 0.9) + 3.2 * flow) * smoothstep(0.15, 0.9, ax + max(0.0, -1.5 - r.y));
+  float fBody = (r.y - 0.9 * (shoulder + 1.2) - 0.05 * r.x * r.x - pec - sternum - wrapS) * D
+              + rip * 0.3 + (0.9 * sin(r.x * 1.4 - t * 0.22 + r.y * 0.9) + 4.5 * flow) * smoothstep(0.15, 0.9, ax + max(0.0, -1.5 - r.y));
   float v = mix(fBody, fFace, hw);
 
   float fw = max(fwidth(v), 1e-4);
@@ -165,9 +172,9 @@ void main() {
   float uu = u0 * 96.0 + hs * 17.0 + t * (0.5 + 1.2 * g_h11(li * 1.7)) * dir * (1.0 + 2.5 * uW.z);
   float fu = max(fwidth(uu), 1e-4);
   float duPx = (0.5 - abs(fract(uu) - 0.5)) / fu;
-  float dotm = 1.0 - smoothstep(0.45, 1.35, length(vec2(duPx, dPx)));
+  float dotm = 1.0 - smoothstep(0.5, 1.5, length(vec2(duPx, dPx)));
   float tw = 0.4 + 0.6 * g_h11(li * 7.31 + floor(uu) * 0.137);
-  float lines = (line * 0.3 + dotm * tw) * clear + (1.0 - clear) * 0.2;
+  float lines = (line * 0.34 + dotm * tw * (1.0 + 0.45 * hw)) * clear + (1.0 - clear) * 0.22;
 
   // State: a slow scan while ready, rising bands while thinking, a fast sweep while executing,
   // an attentive head while listening, the voice spreading from the mouth while speaking.
@@ -178,32 +185,39 @@ void main() {
   gain += uW.x * (0.3 + 0.2 * sin(uT * 2.2)) * hw;
   gain += speak * 0.9 * exp(-dm * 1.6);
 
-  float coreMix = smoothstep(0.06, 0.55, core * (1.0 + speak));
+  float coreMix = smoothstep(0.05, 0.5, core * (1.0 + 0.5 * speak));
   vec3 lc = mix(uLine, uLine2, 0.3 + 0.7 * fres);
-  lc = mix(lc, uCore * 1.4, coreMix);
+  // Inside the warm field the lines turn amber and brighter, never white.
+  lc = mix(lc, mix(uCore, uHot, smoothstep(0.5, 1.2, core)) * 1.25, coreMix);
+  gain *= 1.0 + 0.9 * coreMix;
   vec3 col = lc * lines * gain * (0.55 + 0.7 * fres);
   col += uLine * 0.02;
+  // The warm field glows behind the lines, not only through them.
+  col += uCore * core * (0.16 + 0.1 * speak) + uHot * core * core * 0.05;
 
   // The rim: a thick, very bright edge around the whole silhouette.
-  float rim = smoothstep(0.5, 0.96, fres);
-  col += uRim * (rim * rim * 1.6 + pow(fres, 10.0) * 1.2);
+  float rim = smoothstep(0.36, 0.95, fres);
+  col += uRim * (rim * rim * 1.9 + pow(fres, 7.0) * 1.5);
 
   // Branching filaments from the jaw down the neck into the chest, slowly flickering.
-  float vm = smoothstep(-0.5, -0.78, r.y) * smoothstep(-2.45, -1.65, r.y)
-           * (1.0 - smoothstep(0.3, 1.05, ax)) * smoothstep(-0.05, 0.28, r.z);
+  float vm = smoothstep(-0.55, -0.8, r.y) * smoothstep(-2.7, -1.75, r.y)
+           * (1.0 - smoothstep(0.55, 1.6, ax)) * smoothstep(-0.08, 0.22, r.z);
   if (vm > 0.002) {
     // Zero crossings of warped noise, drawn a pixel or two wide: thin trunks, finer branches off them.
-    vec2 q = vec2(r.x * 3.0, r.y * 1.1);
+    vec2 q = vec2(r.x * 6.2, r.y * 1.4);
     q.x += 0.55 * g_noise(vec3(r.x * 2.1, r.y * 2.4, 3.1));
     float a = g_noise(vec3(q, t * 0.03 + 1.0));
     float b = g_noise(vec3(q * 2.6 + 4.7, t * 0.045 + 7.0));
     float aw = abs(a) / max(fwidth(a), 1e-4);
     float bw = abs(b) / max(fwidth(b), 1e-4);
-    float trunk = 1.0 - smoothstep(0.4, 1.6, aw);
-    float branch = (1.0 - smoothstep(0.3, 1.2, bw)) * (1.0 - smoothstep(0.04, 0.16, abs(a)));
-    float vein = trunk + 0.7 * branch;
+    float trunk = 1.0 - smoothstep(0.3, 1.2, aw);
+    float branch = (1.0 - smoothstep(0.2, 0.9, bw)) * (1.0 - smoothstep(0.05, 0.2, abs(a)));
+    float c3 = g_noise(vec3(q * vec2(1.7, 3.2) + 9.1, t * 0.06 + 3.0));
+    float cw = abs(c3) / max(fwidth(c3), 1e-4);
+    float twig = (1.0 - smoothstep(0.2, 0.8, cw)) * (1.0 - smoothstep(0.08, 0.3, abs(b)));
+    float vein = trunk + 0.85 * branch + 0.55 * twig;
     float flick = 0.55 + 0.45 * g_noise(vec3(r.y * 3.0 - t * 1.4, r.x * 2.0, t * 0.5));
-    col += uHot * vein * vm * (0.6 + 0.7 * flick) * (1.1 + speak * 1.2);
+    col += uHot * vein * vm * (1.0 - 0.6 * rim) * (0.65 + 0.7 * flick) * (1.2 + speak * 0.8);
   }
 
   float alpha = smoothstep(0.0, 0.45, vE);
@@ -222,9 +236,9 @@ varying float vHead;
 void main() {
   vec3 n = normalize(vN);
   float fres = 1.0 - clamp(abs(dot(n, normalize(-vView))), 0.0, 1.0);
-  float g = pow(fres, 5.0);
+  float g = pow(fres, 3.0);
   float alpha = smoothstep(0.3, 0.9, vE);
-  gl_FragColor = vec4(uRim * g * 0.6 * alpha * uDim * floorFade(), 1.0);
+  gl_FragColor = vec4(uRim * g * 0.5 * alpha * uDim * floorFade(), 1.0);
 }
 `;
 
@@ -245,14 +259,14 @@ void main() {
   vec3 p = posePoint(position, aHead);
   vec3 n = poseNormal(normal, aHead);
   float crown = smoothstep(0.25, 0.9, n.y) * aHead;
-  vec3 drift = n * (0.015 + 0.28 * life + 0.12 * uAudio * life)
-             + vec3(0.0, 0.5 * life * life * crown + 0.03 * life, 0.0)
+  vec3 drift = n * (0.012 + 0.22 * life + 0.1 * uAudio * life)
+             + vec3(0.0, 0.5 * life * life * crown + 0.12 * life, 0.0)
              + 0.07 * life * vec3(sin(aSeed.z * 40.0 + uT * uMotion * 0.9), cos(aSeed.w * 30.0 + uT * uMotion * 0.7), 0.0);
   vec4 mv = viewMatrix * vec4(p + drift, 1.0);
   float near = smoothstep(-0.05, 0.25, n.z + 0.3);
   vA = pow(1.0 - life, 1.7) * smoothstep(0.0, 0.06, life) * uReady * (0.35 + 0.65 * aSeed.w) * near;
   vWarm = step(0.93, aSeed.z);
-  gl_PointSize = (1.4 + 3.2 * aSeed.z * aSeed.z) * uPx * (1.0 - 0.4 * life);
+  gl_PointSize = (1.0 + 2.4 * aSeed.z * aSeed.z * aSeed.z) * uPx * (1.0 - 0.4 * life);
   gl_Position = projectionMatrix * mv;
 }
 `;
@@ -267,7 +281,7 @@ void main() {
   float d = length(gl_PointCoord - 0.5);
   float a = smoothstep(0.5, 0.0, d);
   vec3 c = mix(mix(uRim, vec3(1.0), 0.35), uCore * 1.4, vWarm);
-  gl_FragColor = vec4(c * a * vA * uDim * 2.4, 1.0);
+  gl_FragColor = vec4(c * a * vA * uDim * 3.0, 1.0);
 }
 `;
 
@@ -292,12 +306,12 @@ uniform float uDim;
 varying vec2 vUv;
 void main() {
   vec2 p = (vUv - 0.5) * 2.0;
-  p.y *= 0.82;
+  p.y *= 1.35;
   float d2 = dot(p, p);
-  float g = exp(-d2 * 3.6) * 0.34 + exp(-d2 * 12.0) * 0.5 + exp(-d2 * 50.0) * 0.3;
+  float g = exp(-d2 * 3.0) * 0.22 + exp(-d2 * 8.0) * 0.2;
   // Fade to nothing well inside the quad, so its edge never shows.
   g *= 1.0 - smoothstep(0.55, 0.98, length(p));
-  vec3 c = mix(uCore, uHot, exp(-d2 * 30.0));
+  vec3 c = mix(uCore, uHot, 0.35 * exp(-d2 * 6.0));
   gl_FragColor = vec4(c * g * uCoreI * uDim, 1.0);
 }
 `;
@@ -336,13 +350,16 @@ varying float vHt;
 void main() {
   vec3 w = vec3(position.x, 0.0, position.y - 30.0);
   float ax = abs(w.x);
-  float side = smoothstep(1.2, 7.5, ax);
+  float side = smoothstep(1.0, 4.5, ax) * (1.0 - 0.55 * smoothstep(7.0, 18.0, ax));
   float tt = uT * uMotion;
-  float m = g_noise(vec3(w.x * 0.085, w.z * 0.085, 0.3)) * 0.5 + 0.5;
-  float m2 = g_noise(vec3(w.x * 0.21 + 3.0, w.z * 0.21, 1.7));
-  float wave = sin(w.x * 0.42 + tt * 0.3) * sin(w.z * 0.34 - tt * 0.24) * 0.45
-             + sin(w.x * 0.16 - w.z * 0.2 + tt * 0.18) * 0.35;
-  float h = side * (0.4 + 5.0 * m * m + 0.9 * m2) + wave * (0.3 + 0.9 * side);
+  // Ridged noise gives sharp crests; a broad swell lifts the near ranges beside the figure.
+  float r1 = 1.0 - abs(g_noise(vec3(w.x * 0.11, w.z * 0.11, 0.3)));
+  float r2 = 1.0 - abs(g_noise(vec3(w.x * 0.27 + 3.0, w.z * 0.27, 1.7)));
+  float swell = exp(-pow((ax - 6.5) / 4.5, 2.0)) * exp(-pow((w.z + 12.0) / 9.0, 2.0));
+  float nearCam = 0.3 + 0.7 * smoothstep(-1.0, -10.0, w.z);
+  float wave = sin(w.x * 0.42 + tt * 0.3) * sin(w.z * 0.34 - tt * 0.24) * 0.4
+             + sin(w.x * 0.16 - w.z * 0.2 + tt * 0.18) * 0.3;
+  float h = side * nearCam * (0.4 + 2.1 * r1 * r1 * r1 + 0.6 * r2 * r2 + 1.6 * swell) + wave * (0.3 + 0.7 * side);
   w.y = -2.6 + h;
   vW = w;
   vHt = h;
@@ -361,35 +378,41 @@ uniform vec3 uStreak;
 varying vec3 vW;
 varying float vHt;
 void main() {
-  vec2 g = vec2(vW.x, vW.z) * 1.2;
+  vec2 g = vec2(vW.x, vW.z) * 1.7;
   vec2 fw = max(fwidth(g), vec2(1e-4));
   vec2 d = (0.5 - abs(fract(g) - 0.5)) / fw;
   float lx = 1.0 - smoothstep(0.15, 1.0, d.x);
   float lz = 1.0 - smoothstep(0.15, 1.0, d.y);
   float far = smoothstep(0.55, 0.15, max(fw.x, fw.y));
-  float grid = max(lx, lz) * 0.32;
+  float grid = max(lx, lz) * 0.22;
   float dots = 1.0 - smoothstep(0.5, 1.7, length(d));
+  // A finer grain of light points between the grid lines.
+  vec2 g3 = g * 3.0;
+  vec2 fw3 = max(fwidth(g3), vec2(1e-4));
+  vec2 d3 = (0.5 - abs(fract(g3) - 0.5)) / fw3;
+  float grain = (1.0 - smoothstep(0.3, 1.1, length(d3))) * smoothstep(0.5, 0.2, max(fw3.x, fw3.y))
+              * (0.45 + 0.55 * g_h11(dot(floor(g3), vec2(7.1, 31.7))));
   float depth = -vW.z;
   float fog = exp(-depth * 0.04) * smoothstep(1.5, 6.0, depth);
-  float ridge = smoothstep(0.3, 3.4, vHt);
+  float ridge = smoothstep(0.5, 5.0, vHt);
   float side = smoothstep(1.2, 5.0, abs(vW.x));
-  vec3 col = uGrid * ((grid + dots * 3.4) * far + (1.0 - far) * 0.16) * (0.3 + 1.3 * ridge);
+  vec3 col = uGrid * ((grid + dots * 3.6 + grain * 3.4) * far + (1.0 - far) * 0.3) * (0.45 + 1.8 * ridge);
   // Warm light runs along a few of the lines, into the distance and across.
   float t = uT * uMotion;
   float ci = floor(g.x + 0.5);
   float hc = g_h11(ci * 3.7);
   float streak = 0.0;
-  if (hc > 0.8) {
+  if (hc > 0.5) {
     float s = fract(g.y * 0.03 + t * (0.04 + 0.05 * hc) + hc * 9.0);
     streak += pow(s, 14.0) * lx;
   }
   float ri = floor(g.y + 0.5);
   float hr = g_h11(ri * 5.3 + 1.0);
-  if (hr > 0.9) {
+  if (hr > 0.66) {
     float s = fract(g.x * sign(vW.x) * 0.04 - t * (0.05 + 0.04 * hr) + hr * 5.0);
     streak += pow(s, 16.0) * lz;
   }
-  col += uStreak * streak * (3.2 + ridge) * far;
+  col += uStreak * streak * (3.0 + 4.0 * ridge) * far;
   vec2 sp = gl_FragCoord.xy / uRes - 0.5;
   float vig = smoothstep(0.85, 0.25, length(sp * vec2(1.0, 1.25)));
   gl_FragColor = vec4(col * fog * side * uFade * (0.35 + 0.65 * vig), 1.0);

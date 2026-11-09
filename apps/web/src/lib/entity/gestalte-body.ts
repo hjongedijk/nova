@@ -55,7 +55,7 @@ export const BASE = -2.9;
 /** Pivot of the head turn: the top of the neck. */
 export const PIVOT: readonly [number, number, number] = [0, -0.62, -0.1];
 /** Centre of the warm core, in the middle of the face. */
-export const CORE: readonly [number, number, number] = [0, -0.08, 0.3];
+export const CORE: readonly [number, number, number] = [0, -0.2, 0.3];
 
 /** Signed distance to the figure: negative inside. Symmetric in x. */
 export function gestalteField(x: number, y: number, z: number): number {
@@ -275,10 +275,10 @@ export function buildGestalte(detail = 1, sparks = 2600): GestalteGeometry {
     const ny = normal[i * 3 + 1];
     const y = position[i * 3 + 1];
     weight[i] = total;
-    if (Math.abs(nz) > 0.42 || y < -2.2) continue;
+    if (Math.abs(nz) > 0.42 || y < -2.5) continue;
     const w =
       (0.25 + 2.4 * Math.max(0, ny) * Math.max(0, ny)) *
-      (y > -0.9 ? 1.6 : 0.8) *
+      (y > -0.9 ? 1.5 : 1.25) *
       (1 - Math.abs(nz) / 0.42);
     total += w;
     weight[i] = total;
