@@ -120,7 +120,8 @@ export class DataBackupService implements OnModuleInit, OnModuleDestroy {
             at: now.toISOString(),
           },
         });
-      } catch {
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
         const attempts = (previous?.attempts ?? 0) + 1;
         this.attempted.set(token, {
           attempts,
@@ -130,10 +131,12 @@ export class DataBackupService implements OnModuleInit, OnModuleDestroy {
               : now.getTime() + RETRY_AFTER_MS,
         });
         if (attempts < MAX_ATTEMPTS_PER_SLOT) {
-          this.logger.warn(`${slot.kind} data backup failed; retry scheduled`);
+          this.logger.warn(
+            `${slot.kind} data backup failed (${reason}); retry scheduled`,
+          );
           continue;
         }
-        this.logger.error(`${slot.kind} data backup failed`);
+        this.logger.error(`${slot.kind} data backup failed: ${reason}`);
         this.alerts.record({
           topic: "jarvis/alerts",
           payload: {
@@ -230,8 +233,20 @@ export class DataBackupService implements OnModuleInit, OnModuleDestroy {
             ? ["--directory", path.dirname(snapshot), `./${SNAPSHOT_NAME}`]
             : []),
         ],
-        { stdio: ["ignore", "pipe", "ignore"] },
+        { stdio: ["ignore", "pipe", "pipe"] },
       );
+      let stderr = "";
+      child.stderr!.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString()).slice(-600);
+      });
+      const failure = (code?: number) =>
+        new Error(
+          `Archive creation failed${code === undefined ? "" : ` (tar exit ${code})`}${
+            stderr.trim()
+              ? `: ${stderr.trim().split("\n").slice(-2).join(" | ")}`
+              : ""
+          }`,
+        );
       const limiter = new Transform({
         transform(chunk: Buffer, _encoding, callback) {
           if (chunk.length + written > MAX_ARCHIVE_BYTES) {
@@ -251,13 +266,19 @@ export class DataBackupService implements OnModuleInit, OnModuleDestroy {
         limiter,
         createWriteStream(file, { flags: "wx", mode: 0o600 }),
       );
+      // GNU tar exits 1 when a file changed while it was read (state files are
+      // rewritten every minute); the archive is still complete and is verified
+      // afterwards. Exit 2 and higher are fatal.
       void Promise.all([closed, writing]).then(
-        ([code]) =>
-          code === 0 ? resolve() : reject(new Error("Archive creation failed")),
-        async () => {
+        ([code]) => (code <= 1 ? resolve() : reject(failure(code))),
+        async (error: unknown) => {
           child.kill("SIGTERM");
           await closed.catch(() => undefined);
-          reject(new Error("Archive creation failed"));
+          reject(
+            error instanceof Error && /size limit/.test(error.message)
+              ? error
+              : failure(),
+          );
         },
       );
     });

@@ -173,6 +173,19 @@ describe("LanDiscoveryService and tool", () => {
     expect(service.proposals()).toEqual([]);
   });
 
+  it("never proposes NOVA's own stack services on the compose network", async () => {
+    const { build } = make(["192.168.1.60"]);
+    const service = build();
+    service.resolveStack = async () => ["192.168.1.2"];
+    await service.scan();
+    expect(service.proposals()).toEqual([]);
+    service.resolveStack = async () => ["172.20.0.2"];
+    await service.scan();
+    expect(service.proposals().map((c) => c.service)).toEqual([
+      "home_assistant",
+    ]);
+  });
+
   it("lan_discover is a read-only tool that never connects anything", async () => {
     const { build } = make();
     const source = new LanDiscoverySource(build());

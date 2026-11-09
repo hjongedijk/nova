@@ -71,6 +71,8 @@ export interface ScanContext {
   ports: ScanPorts;
   /** Heal attempts made recently, so a broken thing is retried at most every 30 minutes. */
   healAttempts: Map<string, number>;
+  /** Finding keys already delivered (key to time), so a scan can skip work that cannot produce news. */
+  sent?: Readonly<Record<string, number>>;
 }
 
 const hash = (text: string) =>
@@ -377,6 +379,8 @@ export function scanNudges(ctx: ScanContext): Finding[] {
 export async function scanToday(ctx: ScanContext): Promise<Finding[]> {
   // Once a day, from eight o'clock local time: a morning heads-up, not a ticker.
   if (localMinutes(ctx.now, ctx.settings.quiet.timezone) < 8 * 60) return [];
+  const day = localDay(ctx.now, ctx.settings.quiet.timezone);
+  if (ctx.sent?.[`today:${day}`]) return [];
   let items = 0;
   let timers = 0;
   const list = await ctx.ports.tools.read("list_show", { list: "taken" });
@@ -386,7 +390,6 @@ export async function scanToday(ctx: ScanContext): Promise<Finding[]> {
   if (timer?.ok)
     timers = Number((timer.result as { count?: unknown })?.count) || 0;
   if (items + timers === 0) return [];
-  const day = localDay(ctx.now, ctx.settings.quiet.timezone);
   return [
     finding("today", "info", `today:${day}`, 20 * 60, T.today(items, timers)),
   ];

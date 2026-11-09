@@ -68,7 +68,7 @@ describe("NOVA's conversational identity", () => {
       "A report is not proof that you diagnosed it or filed a ticket",
     );
     expect(SYSTEM_PROMPT).toContain(
-      "suggest one safe first check or ask a focused question",
+      "check it with your tools and fix it when you can",
     );
   });
 

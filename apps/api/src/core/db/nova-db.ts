@@ -46,6 +46,25 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX audit_session ON audit (session_id, seq);
     `,
   },
+  {
+    version: 2,
+    name: "compact oversized audit results",
+    // Background polls stored full tool results (up to 40 KB per row, about
+    // 12 MB a day). New rows are bounded in AuditService; this shrinks the old ones.
+    sql: `
+      UPDATE audit
+      SET json = json_set(
+        json,
+        '$.result.result',
+        json_object(
+          'truncated', json('true'),
+          'chars', length(json_extract(json, '$.result.result'))
+        )
+      )
+      WHERE length(json) > 16384
+        AND json_type(json, '$.result.result') IS NOT NULL;
+    `,
+  },
 ];
 
 /** Newest audit rows kept; older ones are pruned in batches. */

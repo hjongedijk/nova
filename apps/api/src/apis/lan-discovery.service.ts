@@ -1,4 +1,5 @@
 import { Injectable, Optional } from "@nestjs/common";
+import dns from "node:dns";
 import fs from "node:fs";
 import path from "node:path";
 import { NovaConfig } from "../core/config/nova-config.js";
@@ -17,6 +18,14 @@ const MIN = 60_000;
 export const MANUAL_COOLDOWN_MS = 10 * MIN;
 export const AUTOPILOT_INTERVAL_MS = 24 * 60 * MIN;
 const KEEP_UNSEEN_MS = 30 * 24 * 60 * MIN;
+/** Services NOVA's own compose stack ships; on NOVA's own subnet they are NOVA's own containers. */
+const STACK_SERVICES = new Set([
+  "mqtt",
+  "node_red",
+  "qdrant",
+  "omniroute",
+  "home_assistant",
+]);
 
 interface DiscoveryFile {
   version: 1;
@@ -36,11 +45,53 @@ export class LanDiscoveryService {
   transport: DiscoveryTransport = realTransport;
   limits: ScanLimits = DEFAULT_LIMITS;
   now: () => number = Date.now;
+  /** IPv4 addresses of NOVA's own stack services (compose hostnames). Replaceable in tests. */
+  resolveStack: () => Promise<string[]> = () => this.lookupStack();
+  private stackSubnets = new Set<string>();
 
   constructor(
     private readonly config: NovaConfig,
     @Optional() private readonly registry?: ApiRegistry,
   ) {}
+
+  private async lookupStack(): Promise<string[]> {
+    const hosts = new Set<string>();
+    for (const value of [
+      this.config.mqttUrl,
+      this.config.nodeRedUrl,
+      this.config.qdrantUrl,
+      this.config.omniUrl,
+    ]) {
+      try {
+        const host = new URL(value).hostname;
+        if (host && !/^[\d.]+$/.test(host) && host !== "localhost")
+          hosts.add(host);
+      } catch {
+        /* not a URL: nothing to resolve */
+      }
+    }
+    const found = await Promise.all(
+      [...hosts].map((host) =>
+        dns.promises
+          .lookup(host, { family: 4 })
+          .then(({ address }) => address)
+          .catch(() => null),
+      ),
+    );
+    return found.filter((address): address is string => !!address);
+  }
+
+  private async refreshStack(): Promise<void> {
+    try {
+      this.stackSubnets = new Set(
+        (await this.resolveStack()).map((address) =>
+          address.split(".").slice(0, 3).join("."),
+        ),
+      );
+    } catch {
+      /* keep the previous subnets */
+    }
+  }
 
   private get file(): string {
     return this.config.dataFile("lan-discovery.json");
@@ -94,7 +145,8 @@ export class LanDiscoveryService {
   /** What is worth telling the owner: found, not dismissed, not yet connected. */
   proposals(): Candidate[] {
     return this.candidates().filter(
-      (c) => c.state === "new" || c.state === "proposed",
+      (c) =>
+        (c.state === "new" || c.state === "proposed") && !this.isOwnStack(c),
     );
   }
 
@@ -119,6 +171,7 @@ export class LanDiscoveryService {
     minGapMs = MANUAL_COOLDOWN_MS,
     signal?: AbortSignal,
   ): Promise<{ scanned: boolean; candidates: Candidate[] }> {
+    await this.refreshStack();
     const data = this.load();
     if (this.running) return { scanned: true, candidates: await this.running };
     if (data.lastScanAt && this.now() - data.lastScanAt < minGapMs)
@@ -146,6 +199,19 @@ export class LanDiscoveryService {
     );
     this.save();
     return this.candidates();
+  }
+
+  /**
+   * In a container the "LAN" /24 is the compose network: the gateway and the
+   * stack containers there are NOVA's own MQTT, Node-RED, Qdrant and so on,
+   * already in use. Proposing them again only nags the owner. The compose
+   * subnet is the one the stack hostnames (mqtt, node-red, ...) resolve into.
+   */
+  private isOwnStack(c: Candidate): boolean {
+    return (
+      STACK_SERVICES.has(c.service) &&
+      this.stackSubnets.has(c.host.split(".").slice(0, 3).join("."))
+    );
   }
 
   private markConnected(data: DiscoveryFile): void {

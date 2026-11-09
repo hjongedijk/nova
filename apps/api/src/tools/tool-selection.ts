@@ -151,6 +151,12 @@ export const TOOL_DISCOVERY_NAME = "nova_tools_search";
 export const MAX_MODEL_TOOLS = 24;
 
 /** Shared lexical ranking for initial selection and explicit catalog discovery. */
+/**
+ * Offered with every request when there is room: NOVA must be able to look
+ * something up or remember a stated fact without the right keyword in the message.
+ */
+const ALWAYS_OFFERED = new Set(["web_search", "web_read", "memory_remember"]);
+
 export function rankToolsForRequest<T extends SelectableTool>(
   tools: T[],
   message: string,
@@ -203,7 +209,9 @@ export function rankToolsForRequest<T extends SelectableTool>(
           tool.function.name,
         )
           ? 100
-          : 0;
+          : ALWAYS_OFFERED.has(tool.function.name)
+            ? 0.5
+            : 0;
       for (const word of expanded) {
         if (nameWords.has(word)) score += 3;
         if (descriptionWords.has(word)) score += 1;

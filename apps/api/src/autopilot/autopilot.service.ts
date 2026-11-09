@@ -59,6 +59,7 @@ const RANK: Record<Urgency, number> = { info: 0, warn: 1, urgent: 2 };
 const SEVERITY = { info: "info", warn: "warning", urgent: "critical" } as const;
 const KEY_SERVICES = /omni|mqtt|qdrant|speech|stt|tts|home/i;
 const AGENT_SESSION = "autopilot";
+const BOOTSTRAP_RETRY_MS = 6 * 60 * MIN;
 
 export type Outcome =
   "gemeld" | "cooldown" | "stil" | "budget" | "limiet" | "gedempt";
@@ -80,6 +81,7 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
   private loaded = false;
   private timer?: NodeJS.Timeout;
   private scanning = false;
+  private bootstrapRetryAt = 0;
   private readonly healAttempts = new Map<string, number>();
   private readonly noted = new Map<string, string>();
   /** Replaceable in tests. */
@@ -283,6 +285,7 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
       timezone: this.config.timezone,
       misses: file.homeMisses,
       healAttempts: this.healAttempts,
+      sent: this.file.sent,
       ports: {
         tools: this.readTools(),
         routing: this.routing,
@@ -519,6 +522,8 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
   async bootstrap(): Promise<void> {
     const file = this.file;
     if (file.bootstrapped) return;
+    const now = this.now();
+    if (now < this.bootstrapRetryAt) return;
     file.bootstrapped = true;
     this.trySave();
     if (this.objectives.list().length > 0) {
@@ -564,6 +569,13 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
         });
     }
     this.record({ kind: "bootstrap", outcome: `${created} doelen gemaakt` });
+    // Nothing to watch yet (Proxmox or the services were down at first start):
+    // try again later instead of never.
+    if (created === 0 && this.objectives.list().length === 0) {
+      file.bootstrapped = false;
+      this.bootstrapRetryAt = now + BOOTSTRAP_RETRY_MS;
+      this.trySave();
+    }
   }
 
   // ---- delegation (no model) ------------------------------------------------------------------
@@ -701,6 +713,8 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
     file.activity = [...file.activity, { at: this.now(), ...entry }].slice(
       -LIMITS.activity,
     );
+    // An empty scan is routine; the activity list keeps it, the action log does not.
+    if (entry.kind === "scan" && entry.outcome === "0 bevindingen") return;
     try {
       this.audit.record({
         sessionId: "autopilot",

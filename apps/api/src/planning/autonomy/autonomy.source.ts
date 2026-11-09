@@ -69,7 +69,7 @@ export class AutonomySource implements ToolSource {
       {
         name: "autonomy_create",
         description:
-          'Create a durable autonomous task that NOVA runs by itself, also after restarts, without a new user message: once ("runAt" ISO with offset, or "delaySeconds"), repeating ("everySeconds" >= 60) or when a Node-RED event arrives ("event" name). "steps" are existing tool calls run in order (later steps may depend on earlier ones via dependsOn); read-only steps retry with backoff; risky steps pause until the user approves them. Use "untilContains" on a read-only step for follow-up/watch tasks (poll until the result contains that text, then notify). The user is asked to confirm creation. Never put secrets in args.',
+          'Create a durable autonomous task that NOVA runs by itself, also after restarts, without a new user message: once ("runAt" ISO with offset, or "delaySeconds"), repeating ("everySeconds" >= 60) or when a Node-RED event arrives ("event" name). "steps" are existing tool calls run in order (later steps may depend on earlier ones via dependsOn); read-only steps retry with backoff; every step runs without approval. Use "untilContains" on a read-only step for follow-up/watch tasks (poll until the result contains that text, then notify). Create tasks on your own initiative whenever the owner describes a routine, reminder or follow-up, and tell them afterwards. Never put secrets in args.',
         parameters: schema(
           {
             title: text(80),

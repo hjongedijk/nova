@@ -96,7 +96,17 @@ export interface ModelTool {
 }
 
 /** Sessions that are not a conversation: nothing about them is remembered. */
-const SYSTEM_SESSIONS = new Set(["health", "overview", "dashboard", "sidebar"]);
+const SYSTEM_SESSIONS = new Set([
+  "health",
+  "overview",
+  "dashboard",
+  "sidebar",
+  "autopilot",
+  "objectives",
+]);
+
+/** Background sessions whose read-only polls are not written to the action log. */
+const QUIET_READ_SESSIONS = new Set(["autopilot"]);
 
 /** Personal changes do not enable devices or integrations and still need fresh confirmation. */
 const PERSONAL_SETTINGS_TOOLS = new Set([
@@ -449,40 +459,45 @@ export class ToolsService implements OnModuleInit {
       const privateDocument = documentAuditProjection(name, args, clean);
       const privateRoutine = nodeRedRoutineAuditProjection(name, args, clean);
       const privateRoute = routeAuditProjection(name, args, clean);
-      this.audit.record({
-        sessionId,
-        tool: name,
-        arguments:
-          codeTool(name) || isDesktopTool(name)
-            ? auditArgs(name, args)
-            : (privateMemory?.arguments ??
-              privateNote?.arguments ??
-              privateDocument?.arguments ??
-              privateRoutine?.arguments ??
-              privateRoute?.arguments ??
-              args),
-        risk,
-        confirmation,
-        result: isDesktopTool(name)
-          ? desktopAuditResult(clean)
-          : codeTool(name) || name === "node_red_flow"
-            ? {
-                ok: clean.ok,
-                ...(clean.error ? { error: clean.error } : {}),
-                verified: clean.verified ?? null,
-                ...(name === "node_red_flow" && clean.status !== undefined
-                  ? { status: clean.status }
-                  : {}),
-              }
-            : (privateMemory?.result ??
-              privateNote?.result ??
-              privateDocument?.result ??
-              privateRoutine?.result ??
-              privateRoute?.result ??
-              clean),
-        verification: clean.verified ?? null,
-        durationMs: Date.now() - started,
-      });
+      // Autopilot polls the same read-only tools every few minutes; logging each
+      // poll made thousands of rows a day and buried the real actions.
+      const quietRead =
+        QUIET_READ_SESSIONS.has(sessionId) && risk === "READ_ONLY";
+      if (!quietRead)
+        this.audit.record({
+          sessionId,
+          tool: name,
+          arguments:
+            codeTool(name) || isDesktopTool(name)
+              ? auditArgs(name, args)
+              : (privateMemory?.arguments ??
+                privateNote?.arguments ??
+                privateDocument?.arguments ??
+                privateRoutine?.arguments ??
+                privateRoute?.arguments ??
+                args),
+          risk,
+          confirmation,
+          result: isDesktopTool(name)
+            ? desktopAuditResult(clean)
+            : codeTool(name) || name === "node_red_flow"
+              ? {
+                  ok: clean.ok,
+                  ...(clean.error ? { error: clean.error } : {}),
+                  verified: clean.verified ?? null,
+                  ...(name === "node_red_flow" && clean.status !== undefined
+                    ? { status: clean.status }
+                    : {}),
+                }
+              : (privateMemory?.result ??
+                privateNote?.result ??
+                privateDocument?.result ??
+                privateRoutine?.result ??
+                privateRoute?.result ??
+                clean),
+          verification: clean.verified ?? null,
+          durationMs: Date.now() - started,
+        });
       if (
         !SYSTEM_SESSIONS.has(sessionId) &&
         !codeTool(name) &&

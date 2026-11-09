@@ -76,12 +76,12 @@ describe("nova.db core", () => {
     const file = path.join(dir, "nova.db");
     NovaDb.open(file).close();
     const extra = {
-      version: 2,
+      version: MIGRATIONS.at(-1)!.version + 1,
       name: "test table",
       sql: "CREATE TABLE extra (x INTEGER)",
     };
     const db = NovaDb.open(file, { migrations: [...MIGRATIONS, extra] });
-    expect(db.schemaVersion()).toBe(2);
+    expect(db.schemaVersion()).toBe(extra.version);
     db.close();
     expect(() =>
       NovaDb.open(file, { migrations: [...MIGRATIONS, extra] }).close(),
@@ -100,6 +100,37 @@ describe("nova.db core", () => {
     db.appendAudit({ id: "2", timestamp: "t" });
     expect(db.recentAudit(10)).toHaveLength(2);
     expect(db.recentAudit(10, "s")).toHaveLength(1);
+  });
+
+  it("compacts oversized audit results from before the size bound", () => {
+    const dir = tmp();
+    const file = path.join(dir, "nova.db");
+    const v1 = NovaDb.open(file, { migrations: MIGRATIONS.slice(0, 1) });
+    v1.appendAudit({
+      id: "big",
+      timestamp: "t",
+      tool: "ha_search_entities",
+      result: {
+        ok: true,
+        result: Array.from({ length: 500 }, (_, i) => ({
+          id: `light.l${i}`,
+          pad: "x".repeat(60),
+        })),
+      },
+    } as never);
+    v1.appendAudit({
+      id: "small",
+      timestamp: "t",
+      result: { ok: true, result: [1] },
+    } as never);
+    v1.close();
+    const db = NovaDb.open(file);
+    const rows = db.recentAudit(10).map((json) => JSON.parse(json));
+    const big = rows.find((row) => row.id === "big");
+    expect(big.result.ok).toBe(true);
+    expect(big.result.result.truncated).toBe(true);
+    expect(big.result.result.chars).toBeGreaterThan(16_384);
+    expect(rows.find((row) => row.id === "small").result.result).toEqual([1]);
   });
 
   it("rolls a failed transaction back completely", () => {

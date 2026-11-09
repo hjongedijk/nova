@@ -20,6 +20,46 @@ export interface AuditRecord {
   [key: string]: unknown;
 }
 
+/** Results larger than this (as JSON) are stored shortened. */
+export const AUDIT_RESULT_MAX_CHARS = 16_384;
+const AUDIT_STRING_MAX = 1_000;
+const AUDIT_ARRAY_MAX = 20;
+const AUDIT_DEPTH_MAX = 6;
+
+function bounded(value: unknown, depth = 0): unknown {
+  if (typeof value === "string")
+    return value.length > AUDIT_STRING_MAX
+      ? `${value.slice(0, AUDIT_STRING_MAX)}… (${value.length} chars)`
+      : value;
+  if (!value || typeof value !== "object") return value;
+  if (depth >= AUDIT_DEPTH_MAX) return "[…]";
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, AUDIT_ARRAY_MAX)
+      .map((item) => bounded(item, depth + 1));
+    if (value.length > AUDIT_ARRAY_MAX)
+      items.push(`… ${value.length - AUDIT_ARRAY_MAX} more`);
+    return items;
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, bounded(item, depth + 1)]),
+  );
+}
+
+/**
+ * Keeps the shape of a large tool result (ok, error, first items) but drops
+ * the bulk, so frequent background polls do not grow nova.db by megabytes a day.
+ */
+export function boundAuditResult(result: unknown): unknown {
+  let size: number;
+  try {
+    size = JSON.stringify(result)?.length ?? 0;
+  } catch {
+    return "[unserializable]";
+  }
+  return size > AUDIT_RESULT_MAX_CHARS ? bounded(result) : result;
+}
+
 export type AuditEntry = AuditRecord & { id: string; timestamp: string };
 
 /**
@@ -59,6 +99,9 @@ export class AuditService {
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       ...record,
+      ...("result" in record
+        ? { result: boundAuditResult(record.result) }
+        : {}),
     });
     const db = this.db();
     if (db) db.appendAudit(entry);
