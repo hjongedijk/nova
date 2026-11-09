@@ -22,49 +22,15 @@ describe("confirmation labels", () => {
       "niet uitgevoerd",
     );
   });
-  it("keeps sensitive cards open for spoken or typed approval words", async () => {
+  it("approves any card by spoken or typed yes and the Y key", async () => {
     Object.assign(globalThis, { $state: (value: unknown) => value });
-    const {
-      isApproveReply,
-      requiresScreenConfirmation,
-      keepCardAfterReply,
-      confirmationShortcutApproval,
-    } = await import("./cards.svelte.ts");
-    const base: PendingConfirmation = {
-      confirmationId: "confirm-1",
-      sessionId: "session-1",
-      tool: "ha_call_service",
-      args: { domain: "alarm_control_panel", service: "alarm_arm_home" },
-      risk: "CONFIRM",
-      createdAt: 0,
-      expiresAt: 60_000,
-    };
-    expect(isApproveReply("ja!")).toBe(true);
-    expect(isApproveReply("nee")).toBe(false);
-    expect(requiresScreenConfirmation(base)).toBe(true);
-    expect(keepCardAfterReply(base, "ja!")).toBe(true);
-    expect(keepCardAfterReply(base, "nee")).toBe(false);
-    expect(confirmationShortcutApproval({ screenOnly: true }, "y")).toBe(null);
-    expect(confirmationShortcutApproval({ screenOnly: true }, "n")).toBe(false);
-    expect(confirmationShortcutApproval({ screenOnly: false }, "y")).toBe(true);
-    expect(
-      requiresScreenConfirmation({ ...base, args: { domain: "light" } }),
-    ).toBe(false);
-    expect(
-      requiresScreenConfirmation({
-        ...base,
-        args: { domain: "cover", service: "open_cover" },
-      }),
-    ).toBe(true);
-    expect(
-      requiresScreenConfirmation({
-        ...base,
-        args: { domain: "script", service: "turn_on" },
-      }),
-    ).toBe(true);
-    expect(
-      requiresScreenConfirmation({ ...base, tool: "browser_click_confirmed" }),
-    ).toBe(true);
+    const cards = await import("./cards.svelte.ts");
+    expect(cards.isApproveReply("ja!")).toBe(true);
+    expect(cards.isApproveReply("nee")).toBe(false);
+    expect("requiresScreenConfirmation" in cards).toBe(false);
+    expect(cards.confirmationShortcutApproval("y")).toBe(true);
+    expect(cards.confirmationShortcutApproval("n")).toBe(false);
+    expect(cards.confirmationShortcutApproval("x")).toBe(null);
   });
 
   it("uses the selected language without hiding destructive consequences", async () => {

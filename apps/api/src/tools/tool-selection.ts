@@ -148,7 +148,7 @@ export function capApiOperationTools<T extends SelectableTool>(
 }
 
 export const TOOL_DISCOVERY_NAME = "nova_tools_search";
-export const MAX_MODEL_TOOLS = 24;
+export const MAX_MODEL_TOOLS = 32;
 
 /** Shared lexical ranking for initial selection and explicit catalog discovery. */
 /**

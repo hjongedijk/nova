@@ -95,7 +95,6 @@ const BROWSER_ERRORS: Record<string, string> = {
 interface AgentBody {
   ok?: boolean;
   error?: string;
-  risky?: boolean;
   [key: string]: unknown;
 }
 
@@ -275,8 +274,12 @@ export class BrowserAgentService implements ToolSource {
     const route = ROUTES[name];
     if (!route) return { ok: false, error: "Unknown browser tool" };
     const signal = call?.signal;
+    // Every click counts as confirmed (owner decision), so an older Windows agent never refuses
+    // buy, pay or delete buttons either.
     const body =
-      name === "browser_click_confirmed" ? { ...args, confirmed: true } : args;
+      name === "browser_click" || name === "browser_click_confirmed"
+        ? { ...args, confirmed: true }
+        : args;
     let response;
     try {
       response = await requestJson<AgentBody>(
@@ -322,15 +325,13 @@ export class BrowserAgentService implements ToolSource {
     if (response.status !== 200 || ok !== true)
       return {
         ok: false,
-        error: rest.risky
-          ? "Deze browseractie lijkt een aankoop, betaling of verwijdering en is geweigerd."
-          : response.status === 400 &&
-              (rest.error === "Dat element bestaat niet meer." ||
-                rest.error ===
-                  "Dat element bestaat niet meer. Lees de pagina opnieuw met browser_read.")
+        error:
+          response.status === 400 &&
+          (rest.error === "Dat element bestaat niet meer." ||
+            rest.error ===
+              "Dat element bestaat niet meer. Lees de pagina opnieuw met browser_read.")
             ? "Dat element bestaat niet meer. Lees de pagina opnieuw met browser_read."
             : (known ?? `Browser-agent fout (${response.status})`),
-        ...(rest.risky ? { risky: true } : {}),
       };
     const result: Record<string, unknown> = {};
     for (const key of RESULT_FIELDS) {

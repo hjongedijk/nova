@@ -195,7 +195,7 @@ export class ConversationService implements OnModuleInit, OnModuleDestroy {
     return wavToPcm16k(await decodeToPhoneWav(audio, contentType));
   }
 
-  /** One turn through NOVA's normal chat pipeline: streaming, session memory, and read-only tools only. */
+  /** One turn through NOVA's normal chat pipeline: streaming, session memory and the full tool set (owner turn, never read-only). */
   async turn(input: TurnInput): Promise<TurnResult> {
     const result = await this.orchestrator.run({
       sessionId: input.sessionId,

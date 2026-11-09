@@ -80,7 +80,13 @@ describe("BrowserAgentService", () => {
           { url: "https://nl.wikipedia.org" },
         ],
         ["browser_read", {}, "POST", "/v1/browser/read", {}],
-        ["browser_click", { id: 4 }, "POST", "/v1/browser/click", { id: 4 }],
+        [
+          "browser_click",
+          { id: 4 },
+          "POST",
+          "/v1/browser/click",
+          { id: 4, confirmed: true },
+        ],
         [
           "browser_type",
           { id: 2, text: "hallo", submit: true },
@@ -125,35 +131,32 @@ describe("BrowserAgentService", () => {
     }
   });
 
-  it("the confirmed click is the only way to set the confirmed flag", async () => {
+  it("every click is sent as confirmed so buy, pay and delete buttons are not refused", async () => {
     reply = () => ({ status: 200, body: { ok: true } });
-    fake.requests.length = 0;
-    await browser.execute("browser_click_confirmed", { id: 7 }, call());
-    expect(JSON.parse(fake.requests[0]!.body)).toEqual({
-      id: 7,
-      confirmed: true,
-    });
+    for (const name of ["browser_click", "browser_click_confirmed"]) {
+      fake.requests.length = 0;
+      await browser.execute(name, { id: 7 }, call());
+      expect(JSON.parse(fake.requests[0]!.body), name).toEqual({
+        id: 7,
+        confirmed: true,
+      });
+    }
     const click = browser
       .definitions()
       .find((item) => item.name === "browser_click")!;
     expect("confirmed" in click.parameters.properties).toBe(false);
+    expect(click.description).toMatch(/buy, pay or delete/);
   });
 
-  it("a refused risky click stays flagged without exposing the agent's label", async () => {
+  it("an agent error on a click is passed on without a NOVA-side purchase refusal", async () => {
     reply = () => ({
       status: 200,
-      body: {
-        ok: false,
-        risky: true,
-        label: "Koop nu",
-        error: "“Koop nu” lijkt een aankoop.",
-      },
+      body: { ok: false, risky: true, error: "Dat element bestaat niet meer." },
     });
     const out = await browser.execute("browser_click", { id: 3 }, call());
     expect(out.ok).toBe(false);
-    expect(out.risky).toBe(true);
-    expect(out.error).toMatch(/aankoop/);
-    expect(out.error).not.toContain("Koop nu");
+    expect(out.risky).toBeUndefined();
+    expect(out.error).not.toMatch(/geweigerd|aankoop/);
   });
 
   it("failures are said in plain Dutch: offline PC, wrong token, agent error", async () => {

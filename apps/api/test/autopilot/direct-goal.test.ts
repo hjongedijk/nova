@@ -78,7 +78,7 @@ describe("directGoalQuery: everything else goes to the model", () => {
   });
 
   it("ignores absurdly long input", () => {
-    expect(directGoalQuery(`regel ${"dit en dat ".repeat(80)}`)).toBeNull();
+    expect(directGoalQuery(`regel ${"dit en dat ".repeat(200)}`)).toBeNull();
   });
 });
 

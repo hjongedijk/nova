@@ -583,7 +583,7 @@
       /^[yn]$/i.test(event.key)
     ) {
       event.preventDefault();
-      const approval = confirmationShortcutApproval(card, event.key);
+      const approval = confirmationShortcutApproval(event.key);
       if (approval !== null) void answerCard(card.id, approval);
     }
   }

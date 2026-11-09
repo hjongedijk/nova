@@ -1,59 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { ConfirmationHandler } from "../../src/chat/confirmation-handler.service.js";
-import { requiresScreenConfirmation } from "../../src/confirmations/screen-confirmation.js";
 import { ConfirmationsService } from "../../src/confirmations/confirmations.service.js";
 import type { AuditService } from "../../src/core/audit/audit.service.js";
 import type { SessionMemoryService } from "../../src/memory/session-memory.service.js";
 import type { ToolsService } from "../../src/tools/tools.service.js";
 import type { OutcomeService } from "../../src/chat/outcome.service.js";
 
-describe("on-screen confirmation for sensitive actions", () => {
-  it("classifies doors, alarms and dangerous actions", () => {
-    expect(
-      requiresScreenConfirmation(
-        "ha_call_service",
-        { domain: "lock" },
-        "CONFIRM",
-      ),
-    ).toBe(true);
-    expect(
-      requiresScreenConfirmation(
-        "ha_call_service",
-        { domain: "alarm_control_panel" },
-        "CONFIRM",
-      ),
-    ).toBe(true);
-    expect(
-      requiresScreenConfirmation(
-        "ha_call_service",
-        { domain: "cover", service: "open_cover" },
-        "CONFIRM",
-      ),
-    ).toBe(true);
-    expect(
-      requiresScreenConfirmation(
-        "ha_call_service",
-        { domain: "scene", service: "turn_on" },
-        "CONFIRM",
-      ),
-    ).toBe(true);
-    // Browser clicks on the owner's PC are never held back (no restrictions on the paired PC).
-    expect(
-      requiresScreenConfirmation("browser_click_confirmed", {}, "SAFE"),
-    ).toBe(false);
-    expect(
-      requiresScreenConfirmation("code_file_delete", {}, "DANGEROUS"),
-    ).toBe(true);
-    expect(
-      requiresScreenConfirmation(
-        "ha_call_service",
-        { domain: "light" },
-        "CONFIRM",
-      ),
-    ).toBe(false);
-  });
-
-  it("keeps sensitive actions pending after chat yes, then accepts the button once", async () => {
+describe("confirmations without a screen-only gate", () => {
+  it("runs a sensitive action on a spoken yes, like the button", async () => {
     const audit = { record: vi.fn() };
     const confirmations = new ConfirmationsService(
       audit as unknown as AuditService,
@@ -70,34 +24,14 @@ describe("on-screen confirmation for sensitive actions", () => {
       "chat",
       "ha_call_service",
       { domain: "alarm_control_panel", service: "alarm_arm_home" },
-      "CONFIRM",
+      "DANGEROUS",
     );
     const spoken = await handler.handle("chat", "ja", action.confirmationId);
-    expect(spoken?.reply).toMatch(/knop op het scherm/);
-    expect(execute).not.toHaveBeenCalled();
-    expect(confirmations.peek("chat")?.confirmationId).toBe(
-      action.confirmationId,
-    );
-    const pressed = await handler.handle(
-      "chat",
-      "ja",
-      action.confirmationId,
-      false,
-      "nl",
-      true,
-    );
-    expect(pressed?.reply).toMatch(/Gelukt/);
+    expect(spoken?.reply).not.toMatch(/knop op het scherm/);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(confirmations.has("chat")).toBe(false);
     expect(
-      await handler.handle(
-        "chat",
-        "ja",
-        action.confirmationId,
-        false,
-        "nl",
-        true,
-      ),
+      await handler.handle("chat", "ja", action.confirmationId),
     ).toMatchObject({
       reply: expect.stringMatching(/niets meer/),
     });

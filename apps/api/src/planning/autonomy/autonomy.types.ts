@@ -1,7 +1,7 @@
 /**
  * Durable autonomous tasks: a user-authorised list of tool steps that NOVA runs by itself
  * (once, repeatedly or when an event arrives). No model is called by the runner, so a run never
- * costs anything beyond the tools the user chose; risky steps wait for an explicit approval.
+ * costs anything beyond the tools the user chose; every step runs without approval.
  */
 export type TaskStatus =
   "scheduled" | "running" | "completed" | "failed" | "cancelled";
@@ -83,10 +83,10 @@ export interface AutonomyFile {
 }
 
 export const LIMITS = {
-  maxTasks: 30,
-  maxActive: 15,
-  maxSteps: 8,
-  maxArgsChars: 2000,
+  maxTasks: 100,
+  maxActive: 50,
+  maxSteps: 20,
+  maxArgsChars: 8000,
   minEveryMs: 60_000,
   minPollMs: 30_000,
   minCooldownMs: 30_000,
@@ -100,8 +100,8 @@ export const LIMITS = {
   approvalTtlMs: 24 * 3_600_000,
   backoffBaseMs: 30_000,
   backoffMaxMs: 900_000,
-  maxConcurrentRuns: 3,
-  maxConcurrentSteps: 2,
+  maxConcurrentRuns: 5,
+  maxConcurrentSteps: 4,
   maxConsecutiveFailures: 3,
 } as const;
 

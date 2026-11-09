@@ -105,7 +105,7 @@ describe("desktop agent client", () => {
     expect(requests.every((r) => r.auth === "Bearer tok-123")).toBe(true);
     expect(JSON.parse(requests[2]!.body)).toEqual({
       armed: true,
-      ttlSeconds: 900,
+      ttlSeconds: 1800,
     });
     expect(JSON.parse(requests[3]!.body)).toEqual({ armed: false });
     expect(requests[4]).toMatchObject({

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AutonomyController } from "../../src/planning/autonomy/autonomy.controller.js";
 import { AutonomyService } from "../../src/planning/autonomy/autonomy.service.js";
 import { AutonomyStore } from "../../src/planning/autonomy/autonomy.store.js";
+import { LIMITS } from "../../src/planning/autonomy/autonomy.types.js";
 import type { NovaConfig } from "../../src/core/config/nova-config.js";
 import type { ToolsService } from "../../src/tools/tools.service.js";
 
@@ -174,6 +175,83 @@ describe("event-triggered workflow", () => {
   });
 });
 
+describe("no approval gate", () => {
+  it("runs SAFE, CONFIRM and DANGEROUS steps directly without waiting", async () => {
+    const svc = boot();
+    const { task } = svc.create({
+      title: "Doe het",
+      notifyOnDone: false,
+      steps: [
+        { tool: "do_safe" },
+        { tool: "do_confirm" },
+        { tool: "do_danger" },
+      ],
+    });
+    clock += 1;
+    for (let i = 0; i < 4; i++) await svc.tick();
+    expect(execute.mock.calls.map((c) => c[0])).toEqual([
+      "do_safe",
+      "do_confirm",
+      "do_danger",
+    ]);
+    expect(execute.mock.calls.every((c) => c[5].readOnlyOnly === false)).toBe(
+      true,
+    );
+    expect(svc.get(task.id)).toMatchObject({ status: "completed" });
+    const phases = audit.record.mock.calls.map((c) => c[0].phase);
+    expect(phases).not.toContain("approval_requested");
+    expect(
+      emitted.some((e) => String(e.payload.title).startsWith("Goedkeuring")),
+    ).toBe(false);
+  });
+
+  it("never parks a step when a tool still answers requiresConfirmation", async () => {
+    const svc = boot();
+    handler = async () => ({ ok: false, requiresConfirmation: true });
+    const { task } = svc.create({
+      title: "Oud",
+      steps: [{ tool: "do_confirm" }],
+    });
+    clock += 1;
+    await svc.tick();
+    await svc.tick();
+    expect(svc.get(task.id)!.status).toBe("failed");
+    expect(
+      Object.values(svc.list()[0]!.run?.steps ?? {}).some(
+        (s) => s.status === "waiting_approval",
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts 20 steps and 8000-character arguments, refuses more", () => {
+    const svc = boot();
+    expect(LIMITS.maxSteps).toBe(20);
+    const steps = Array.from({ length: 20 }, (_, i) => ({
+      tool: "read_a",
+      args: { i },
+    }));
+    expect(svc.create({ title: "Lang", steps }).task.steps).toHaveLength(20);
+    expect(() =>
+      svc.create({
+        title: "Te lang",
+        steps: [...steps, { tool: "read_a", args: { i: 99 } }],
+      }),
+    ).toThrow(/maximaal 20/);
+    expect(
+      svc.create({
+        title: "Groot",
+        steps: [{ tool: "read_a", args: { text: "x".repeat(7900) } }],
+      }).task.steps,
+    ).toHaveLength(1);
+    expect(() =>
+      svc.create({
+        title: "Te groot",
+        steps: [{ tool: "read_a", args: { text: "x".repeat(8100) } }],
+      }),
+    ).toThrow(/te groot/);
+  });
+});
+
 describe("restart recovery", () => {
   it("resumes a legacy approval wait without asking for approval again", async () => {
     const service = boot();
@@ -313,7 +391,7 @@ describe("retry, backoff and idempotency", () => {
     };
     clock += 1;
     for (let i = 0; i < 6; i++) await svc.tick();
-    expect(peak).toBeLessThanOrEqual(2);
+    expect(peak).toBeLessThanOrEqual(LIMITS.maxConcurrentSteps);
     expect(svc.list().filter((t) => t.status === "completed")).toHaveLength(4);
   });
 });

@@ -296,6 +296,30 @@ describe("debounce, alerts and recovery", () => {
     expect(s.alerts).toHaveLength(0);
   });
 
+  test("service_online accepts target names with spaces and common characters", () => {
+    const s = setup();
+    const o = s.service.create({
+      title: "plex bewaken",
+      template: "service_online",
+      params: { target: "Plex Media Server (NAS)" },
+    }).objective;
+    expect(o.checks[0]!.args).toEqual({ target: "plex media server (nas)" });
+    expect(() =>
+      s.service.create({
+        title: "te lang doel",
+        template: "service_online",
+        params: { target: "x".repeat(81) },
+      }),
+    ).toThrow(/target/);
+    expect(() =>
+      s.service.create({
+        title: "vreemd doel",
+        template: "service_online",
+        params: { target: "bad\nname" },
+      }),
+    ).toThrow(/target/);
+  });
+
   test("a failing tool is skipped, then becomes an anomaly after three failures", async () => {
     const s = setup();
     const o = s.service.create({
@@ -578,10 +602,12 @@ describe("creation rules", () => {
       }
     };
     try {
-      expect(bad("proxmox_start_guest")).toThrow(/mag niet/);
-      expect(bad("agent_run")).toThrow(/mag niet/);
-      expect(bad("alerts_list")).toThrow(/mag niet/); // READ_ONLY but not in the allowlist
+      expect(bad("proxmox_start_guest")).toThrow(/alleen lezende/);
+      expect(bad("agent_run")).toThrow(/mag niet/); // not a registered tool
       expect(s.service.list()).toHaveLength(0);
+      // Any enabled READ_ONLY tool may be a check, not only a fixed five.
+      expect(bad("alerts_list")()).toMatchObject({ duplicate: false });
+      expect(s.service.list()[0]!.checks[0]!.tool).toBe("alerts_list");
       // Risk is also checked against the registry itself.
       const registry = s.tools.list();
       registry.find((t) => t.name === "calendar_events")!.risk = "SAFE";

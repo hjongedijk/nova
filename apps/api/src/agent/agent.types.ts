@@ -42,13 +42,13 @@ export class AgentError extends Error {}
 
 export const LIMITS = {
   goalMin: 6,
-  goalMax: 600,
-  defaultTurns: 8,
-  maxTurns: 14,
+  goalMax: 2000,
+  defaultTurns: 12,
+  maxTurns: 30,
   defaultMinutes: 10,
-  maxMinutes: 30,
-  concurrent: 2,
-  dailyTurns: 60,
+  maxMinutes: 60,
+  concurrent: 4,
+  dailyTurns: 500,
   keepRuns: 40,
   logEntries: 40,
 } as const;

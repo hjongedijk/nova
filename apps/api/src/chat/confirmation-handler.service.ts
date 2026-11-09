@@ -2,7 +2,6 @@ import { Injectable } from "@nestjs/common";
 import type { PendingConfirmation } from "@nova/contracts";
 import { AuditService } from "../core/audit/audit.service.js";
 import { ConfirmationsService } from "../confirmations/confirmations.service.js";
-import { requiresScreenConfirmation } from "../confirmations/screen-confirmation.js";
 import { confirmationIntent } from "../confirmations/confirmation-words.js";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { ToolsService } from "../tools/tools.service.js";
@@ -70,20 +69,8 @@ export class ConfirmationHandler {
       };
     }
 
-    const pending = this.confirmations.peek(sessionId);
-    if (
-      pending &&
-      pending.expiresAt > this.confirmations.now() &&
-      (!confirmationId || pending.confirmationId === confirmationId) &&
-      requiresScreenConfirmation(pending.tool, pending.args, pending.risk) &&
-      !viaButton
-    )
-      return {
-        reply:
-          language === "en"
-            ? "Please confirm this sensitive action with the button on screen. I have not run it."
-            : "Bevestig deze gevoelige actie met de knop op het scherm. Ik heb niets uitgevoerd.",
-      };
+    // A spoken or typed "ja" counts the same as the button (no screen-only actions any more).
+    void viaButton;
     const action = this.confirmations.take(sessionId, confirmationId);
     if (!action)
       return { reply: language === "en" ? NOTHING_OPEN_EN : NOTHING_OPEN };

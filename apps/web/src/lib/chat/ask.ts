@@ -12,7 +12,6 @@ import {
   addCard,
   finishCard,
   isConfirmReply,
-  keepCardAfterReply,
   openCardIds,
   recordActionReceipt,
   recordConfirmedReceipt,
@@ -153,12 +152,6 @@ export async function ask(
     cardsBefore.length && isConfirmReply(text)
       ? (cardsBefore.at(-1) ?? null)
       : null;
-  const screenOnlyAnswer =
-    answering &&
-    chat.confirmations.some(
-      (action) =>
-        action.confirmationId === answering && keepCardAfterReply(action, text),
-    );
   const responseLanguage = getConversationLanguage();
   const t0 = performance.now();
   chat.latency = null;
@@ -364,7 +357,6 @@ export async function ask(
     showStage(text, fullReply, false);
 
     for (const id of cardsBefore) {
-      if (id === answering && screenOnlyAnswer) continue;
       finishCard(
         id,
         id === answering

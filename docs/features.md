@@ -172,7 +172,7 @@ NOVA can watch a lasting goal without being asked again: "zorg dat mijn servers 
 
 ### What it does
 
-- An objective consists of checks. Each check is a read-only tool (only `READ_ONLY` and only this list: `proxmox_status`, `proxmox_guests`, `network_check`, `ha_get_state`, `calendar_events`), fixed arguments, and a fixed condition describing what is wrong (for example `nodes[].cpu.usagePercent > 90`).
+- An objective consists of checks. Each check is any enabled `READ_ONLY` tool (the templates use `proxmox_status`, `proxmox_guests`, `network_check`, `ha_get_state` and `calendar_events`), fixed arguments, and a fixed condition describing what is wrong (for example `nodes[].cpu.usagePercent > 90`).
 - A light scheduler (`setInterval`, `unref`) runs the objectives that are due. The next time follows from the stored `lastCheckAt`, so after a restart it continues without a flood of catch-up checks; an objective that stood still for long runs once.
 - Checks go through `ToolsService.execute(..., { readOnlyOnly: true })` with session `objective_<id>`. Conditions are evaluated in code: routine checks use no model and cost no free quota.
 - Dedupe: a deviation counts only after N consecutive checks (debounce, per check). Exactly one report goes out when a deviation starts (or changes composition) and a "Hersteld" when it disappears. A tool failing three times in a row counts as a deviation itself ("de controle zelf mislukt").
@@ -207,5 +207,5 @@ Per objective the last 20 results, counters (checks, deviations, reports, suppre
 
 - The investigation may change things: it runs without approval and is expected to fix what it can, then report.
 - `agenda_leeg` cannot tell whether a calendar is connected; without a connection "empty" counts as a deviation.
-- `service_online` uses the target names of `network_check`, not arbitrary host:port.
+- `service_online` uses the target names of `network_check` (up to 80 characters; spaces and common punctuation are allowed), not arbitrary host:port.
 - The investigation summary also arrives through `AgentService`'s own "Klaar" report, which does not count toward the daily budget.

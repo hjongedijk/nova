@@ -499,11 +499,11 @@ describe("desktop control", () => {
   });
 
   describe("takeover start", () => {
-    it("limits the duration to 15 minutes", async () => {
+    it("limits the duration to 30 minutes", async () => {
       enable();
       const tooLong = await run(
         "desktop_takeover_start",
-        { goal: "x", ttlSeconds: 901 },
+        { goal: "x", ttlSeconds: 1801 },
         sid(),
       );
       expect(tooLong).toMatchObject({
@@ -513,7 +513,7 @@ describe("desktop control", () => {
       // The service clamps too, whatever a caller passes.
       const result = await desktop.startTakeover("x", 99_999, "direct");
       expect(result.ok).toBe(true);
-      expect(fake.controls.at(-1)).toEqual({ armed: true, ttl: 900 });
+      expect(fake.controls.at(-1)).toEqual({ armed: true, ttl: 1800 });
     });
 
     it("does not arm when the agent has control off or fails", async () => {
@@ -643,7 +643,7 @@ describe("desktop control", () => {
 
     it("stops at the maximum number of actions and disarms the agent", async () => {
       const sessionId = sid();
-      await takeover(sessionId);
+      await takeover(sessionId, DESKTOP_LIMITS.maxTtlSeconds);
       for (let i = 0; i < DESKTOP_LIMITS.maxActions; i++) {
         if (i % DESKTOP_LIMITS.maxActionsPerObservation === 0) {
           clock += DESKTOP_LIMITS.cacheTtlMs + 1;
@@ -662,6 +662,42 @@ describe("desktop control", () => {
         (await run("desktop_act", { action: "move", x: 1, y: 1 }, sessionId))
           .ok,
       ).toBe(false);
+    });
+
+    it("types long text up to the agent's 4000-character cap", async () => {
+      const sessionId = sid();
+      await takeover(sessionId);
+      await look(sessionId);
+      const prose = "Dit is een lange alinea tekst. "
+        .repeat(125)
+        .slice(0, 3900);
+      expect(
+        classifyAction({ action: "type", text: prose }, [
+          { id: "1", title: "Notities", process: "app", active: true },
+        ]).level,
+      ).toBe("benign");
+      const typed = await run(
+        "desktop_act",
+        { action: "type", text: prose },
+        sessionId,
+      );
+      expect(typed.ok).toBe(true);
+      const tooLong = await run(
+        "desktop_act",
+        { action: "type", text: "a ".repeat(2001) },
+        sessionId,
+      );
+      expect(tooLong).toMatchObject({
+        ok: false,
+        error: "Invalid tool arguments",
+      });
+      expect(DESKTOP_LIMITS).toMatchObject({
+        maxActions: 300,
+        maxObservations: 200,
+        idleTimeoutMs: 300_000,
+        maxTtlSeconds: 1800,
+        maxTypedCharacters: 4000,
+      });
     });
 
     it("ends the session after repeated failures", async () => {
@@ -709,7 +745,7 @@ describe("desktop control", () => {
 
     it("activity keeps a session from going idle", async () => {
       const sessionId = sid();
-      await takeover(sessionId, 600);
+      await takeover(sessionId, 1800);
       for (let i = 0; i < 4; i++) {
         clock += DESKTOP_LIMITS.idleTimeoutMs - 1000;
         await look(sessionId);

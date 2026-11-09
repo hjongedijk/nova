@@ -11,12 +11,26 @@ import {
 import { YoutubeService } from "../youtube/youtube.service.js";
 import { SEARCH_ENGINES, WindowsPcService } from "./windows-pc.service.js";
 
+/** Any program name, app-list name, document or path, as the Windows agent accepts it: no control characters. */
 const app = {
   type: "string",
   minLength: 1,
-  maxLength: 40,
-  pattern: "^[a-z0-9-]+$",
+  maxLength: 260,
+  pattern:
+    "^[^\\u0000-\\u001f\\u007f]*[^\\s\\u0000-\\u001f\\u007f][^\\u0000-\\u001f\\u007f]*$",
 };
+
+/**
+ * Trim the name; a plain name (no path, drive or URI) is lower-cased so "Notepad" still hits the agent's app
+ * list. Windows resolves program names case-insensitively, so this never changes which program opens.
+ */
+export function normalizeApp(value: unknown): string | null {
+  const name = (typeof value === "string" ? value : "").trim();
+  // eslint-disable-next-line no-control-regex -- the agent rejects control characters
+  if (!name || name.length > 260 || /[\u0000-\u001f\u007f]/.test(name))
+    return null;
+  return /[\\/:]/.test(name) ? name : name.toLowerCase();
+}
 
 @ToolSourceProvider()
 export class WindowsTools implements ToolSource {
@@ -39,7 +53,7 @@ export class WindowsTools implements ToolSource {
       {
         name: "windows_open_app",
         description:
-          "Open a program, document or folder on the user's Windows PC: a name from the PC's app list (windows_status shows them, for example notepad, calculator, explorer, terminal, chrome or vscode) or any program name or path as given.",
+          "Open a program, document or folder on the user's Windows PC: a name from the PC's app list (windows_status shows them, for example notepad, calculator, explorer, terminal, chrome or vscode) or any program name, document or full path as given, for example Plex or C:\\Program Files\\App\\app.exe.",
         parameters: schema({ app }),
         risk: "SAFE",
       },
@@ -97,7 +111,7 @@ export class WindowsTools implements ToolSource {
       {
         name: "windows_close_app",
         description:
-          "Politely close all windows of a program on the Windows PC (a name from the app list or a process name such as notepad). Programs may still ask about unsaved work.",
+          "Politely close all windows of a program on the Windows PC (a name from the app list or any process name such as notepad or Plex). Programs may still ask about unsaved work.",
         parameters: schema({ app }),
         risk: "SAFE",
       },
@@ -127,6 +141,11 @@ export class WindowsTools implements ToolSource {
         { url: base + encodeURIComponent(String(args.query).trim()) },
         signal,
       );
+    }
+    if (name === "windows_open_app" || name === "windows_close_app") {
+      const target = normalizeApp(args.app);
+      if (!target) return { ok: false, error: "Geef een programmanaam of pad" };
+      return this.pc.call(name, { ...args, app: target }, signal);
     }
     return this.pc.call(name, args, signal);
   }

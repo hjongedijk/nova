@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { YoutubeVideo } from "@nova/contracts";
 import { WindowsPcService } from "../../src/integrations/windows/windows-pc.service.js";
-import { WindowsTools } from "../../src/integrations/windows/windows.tools.js";
+import {
+  normalizeApp,
+  WindowsTools,
+} from "../../src/integrations/windows/windows.tools.js";
 import { YoutubeService } from "../../src/integrations/youtube/youtube.service.js";
 import { call, fakeConfig, listen } from "./helpers.js";
 
@@ -193,6 +196,54 @@ describe("Windows tools", () => {
     expect(risks.windows_close_app).toBe("SAFE");
     expect(risks.windows_lock).toBe("SAFE");
     expect(Object.keys(risks)).toHaveLength(9);
+  });
+
+  it("opens and closes any program name or path, not only app-list names", async () => {
+    const { fake, tools } = await agent();
+    const schema = tools
+      .definitions()
+      .find((tool) => tool.name === "windows_open_app")!
+      .parameters as unknown as {
+      properties: { app: { pattern: string; maxLength: number } };
+    };
+    const pattern = new RegExp(schema.properties.app.pattern, "u");
+    expect(schema.properties.app.maxLength).toBe(260);
+    for (const ok of [
+      "Plex",
+      "Plex Media Server",
+      "C:\\Program Files\\Plex\\Plex.exe",
+      "ms-settings:",
+    ])
+      expect(pattern.test(ok)).toBe(true);
+    for (const bad of ["", "   ", "evil\nname", "a\u0000b"])
+      expect(pattern.test(bad)).toBe(false);
+    expect(normalizeApp("  Plex ")).toBe("plex");
+    expect(normalizeApp("Plex Media Server")).toBe("plex media server");
+    expect(normalizeApp("C:\\Program Files\\Plex\\Plex.exe")).toBe(
+      "C:\\Program Files\\Plex\\Plex.exe",
+    );
+    expect(normalizeApp("a\nb")).toBeNull();
+    expect(normalizeApp("x".repeat(261))).toBeNull();
+    expect(
+      (await tools.execute("windows_open_app", { app: " Plex " }, call())).ok,
+    ).toBe(true);
+    expect(JSON.parse(fake.requests.at(-1)!.body).app).toBe("plex");
+    await tools.execute(
+      "windows_open_app",
+      { app: "D:\\Games\\My Game\\Game.exe" },
+      call(),
+    );
+    expect(JSON.parse(fake.requests.at(-1)!.body).app).toBe(
+      "D:\\Games\\My Game\\Game.exe",
+    );
+    await tools.execute("windows_close_app", { app: "Plex" }, call());
+    expect(fake.requests.at(-1)?.url).toBe("/v1/close-app");
+    expect(JSON.parse(fake.requests.at(-1)!.body).app).toBe("plex");
+    const count = fake.requests.length;
+    expect(
+      (await tools.execute("windows_open_app", { app: "  " }, call())).ok,
+    ).toBe(false);
+    expect(fake.requests).toHaveLength(count);
   });
 
   it("windows_search opens the results page in the default browser, with the query encoded", async () => {

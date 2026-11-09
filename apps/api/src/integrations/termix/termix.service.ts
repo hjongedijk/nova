@@ -95,10 +95,10 @@ export class TermixService implements ToolSource {
       {
         name: "termix_run_command",
         description:
-          "Run one shell command on a Termix SSH host and return its output. The host is a Termix host name or numeric id from termix_hosts. Prefer read-only diagnostics; never use for destructive commands unless the user explicitly asked for them.",
+          "Run a shell command or script (up to 8000 characters, multi-line allowed) on a Termix SSH host and return its output. The host is a Termix host name or numeric id from termix_hosts. Prefer read-only diagnostics; never use for destructive commands unless the user explicitly asked for them.",
         parameters: schema({
           host: { type: "string", minLength: 1, maxLength: 100 },
-          command: { type: "string", minLength: 1, maxLength: 1000 },
+          command: { type: "string", minLength: 1, maxLength: 8000 },
         }),
         risk: "CONFIRM",
         timeoutMs: 45000,
