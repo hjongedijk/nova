@@ -28,6 +28,7 @@ export const TTS_VOICES = [
   { id: "nl-NL-FennaNeural", label: "Fenna (Nederlands)" },
   { id: "nl-NL-ColetteNeural", label: "Colette (Nederlands)" },
   { id: "nl-BE-DenaNeural", label: "Dena (Vlaams)" },
+  { id: "pim-nl-NL-piper", label: "Nederlands (lokale Piper-stem)" },
   { id: "jarvis-en-GB-piper", label: "Engels (lokale Piper-stem)" },
 ] as const;
 export type TtsVoiceId = (typeof TTS_VOICES)[number]["id"];
@@ -113,7 +114,8 @@ export async function syncStoredVoiceProfile(): Promise<VoiceProfileSync> {
 }
 
 function localeOf(voice: TtsVoiceId): string {
-  if (voice === "jarvis-en-GB-piper") return "en-GB";
+  // Local Piper ids carry their locale after the speaker name ("pim-nl-NL-piper").
+  if (voice.endsWith("-piper")) return voice.split("-").slice(1, 3).join("-");
   return voice.split("-").slice(0, 2).join("-");
 }
 

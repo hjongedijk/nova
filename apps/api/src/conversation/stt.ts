@@ -98,9 +98,11 @@ export function cleanTranscript(raw: string): string {
 }
 
 /**
- * Speech to text through OmniRoute. The model must come from NOVA_STT_MODEL, be declared free
+ * Speech to text through OmniRoute first. The model must come from NOVA_STT_MODEL, be declared free
  * (NOVA_STT_FREE_VERIFIED) and be inside the verified free key scope on every request; otherwise
- * nothing is sent. Credentials never leave OmniRoute, and there is no local model.
+ * nothing is sent to OmniRoute, and credentials never leave it. When that route is unavailable or
+ * fails, the same multipart request goes to the local faster-whisper model (speaches, NOVA_LOCAL_STT_URL),
+ * which runs on this host and costs nothing.
  */
 @Injectable()
 export class OmniRouteStt implements SttPort {
@@ -113,17 +115,42 @@ export class OmniRouteStt implements SttPort {
   ) {}
 
   unavailable(): string | null {
-    if (!this.config.sttModel || !this.config.sttFreeVerified)
-      return "Spraakherkenning is niet ingesteld: kies een gratis model (NOVA_STT_MODEL) en bevestig dat het gratis is (NOVA_STT_FREE_VERIFIED=true).";
-    if (!this.config.omniKey) return "OmniRoute is niet geconfigureerd.";
-    return null;
+    const problem = this.primaryProblem();
+    return problem && !this.localBase() ? problem : null;
   }
 
   async transcribe(
     wav: Buffer,
     options: { language: "nl" | "en"; signal?: AbortSignal },
   ): Promise<SttResult> {
-    const problem = this.unavailable();
+    const primary = await this.viaOmniRoute(wav, options);
+    if (primary.ok || !this.localBase() || options.signal?.aborted)
+      return primary;
+    const local = await this.viaLocal(wav, options);
+    if (local.ok) return local;
+    return {
+      ok: false,
+      retry: local.retry,
+      error: `${primary.error} De lokale spraakherkenning werkt ook niet.`,
+    };
+  }
+
+  private primaryProblem(): string | null {
+    if (!this.config.sttModel || !this.config.sttFreeVerified)
+      return "Spraakherkenning is niet ingesteld: kies een gratis model (NOVA_STT_MODEL) en bevestig dat het gratis is (NOVA_STT_FREE_VERIFIED=true).";
+    if (!this.config.omniKey) return "OmniRoute is niet geconfigureerd.";
+    return null;
+  }
+
+  private localBase(): string {
+    return (this.config.localSttUrl ?? "").trim().replace(/\/$/, "");
+  }
+
+  private async viaOmniRoute(
+    wav: Buffer,
+    options: { language: "nl" | "en"; signal?: AbortSignal },
+  ): Promise<SttResult> {
+    const problem = this.primaryProblem();
     if (problem) return { ok: false, error: problem };
     let key = this.config.omniKey;
     if (this.config.sttKey) {
@@ -146,22 +173,50 @@ export class OmniRouteStt implements SttPort {
         };
       }
     }
-    const signal = options.signal
-      ? AbortSignal.any([options.signal, AbortSignal.timeout(20_000)])
-      : AbortSignal.timeout(20_000);
     const base = this.config.omniUrl.replace(/\/$/, "");
+    return this.attempt(options.signal, 20_000, (signal) =>
+      this.config.sttMode === "chat-audio"
+        ? this.viaChat(base, key, wav, options.language, signal)
+        : this.viaTranscriptions(
+            base,
+            key,
+            this.config.sttModel,
+            wav,
+            options.language,
+            signal,
+          ),
+    );
+  }
+
+  /** The local speaches service: the same multipart request without credentials; CPU inference gets more time. */
+  private viaLocal(
+    wav: Buffer,
+    options: { language: "nl" | "en"; signal?: AbortSignal },
+  ): Promise<SttResult> {
+    const model =
+      this.config.localSttModel?.trim() || "Systran/faster-whisper-small";
+    return this.attempt(options.signal, 30_000, (signal) =>
+      this.viaTranscriptions(
+        this.localBase(),
+        "",
+        model,
+        wav,
+        options.language,
+        signal,
+      ),
+    );
+  }
+
+  private async attempt(
+    outer: AbortSignal | undefined,
+    timeoutMs: number,
+    run: (signal: AbortSignal) => Promise<string>,
+  ): Promise<SttResult> {
+    const signal = outer
+      ? AbortSignal.any([outer, AbortSignal.timeout(timeoutMs)])
+      : AbortSignal.timeout(timeoutMs);
     try {
-      const text =
-        this.config.sttMode === "chat-audio"
-          ? await this.viaChat(base, key, wav, options.language, signal)
-          : await this.viaTranscriptions(
-              base,
-              key,
-              wav,
-              options.language,
-              signal,
-            );
-      return { ok: true, text: cleanTranscript(text) };
+      return { ok: true, text: cleanTranscript(await run(signal)) };
     } catch (error) {
       const aborted = (error as Error)?.name === "AbortError";
       return {
@@ -177,6 +232,7 @@ export class OmniRouteStt implements SttPort {
   private async viaTranscriptions(
     base: string,
     key: string,
+    model: string,
     wav: Buffer,
     language: string,
     signal: AbortSignal,
@@ -187,13 +243,13 @@ export class OmniRouteStt implements SttPort {
       new Blob([new Uint8Array(wav)], { type: "audio/wav" }),
       "speech.wav",
     );
-    form.append("model", this.config.sttModel);
+    form.append("model", model);
     form.append("language", language);
     form.append("prompt", HINT);
     form.append("response_format", "json");
     const response = await fetch(`${base}/audio/transcriptions`, {
       method: "POST",
-      headers: { authorization: `Bearer ${key}` },
+      headers: key ? { authorization: `Bearer ${key}` } : {},
       body: form,
       signal,
     });

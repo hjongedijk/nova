@@ -5,7 +5,25 @@ import { ValidationError } from "../core/errors/validation.error.js";
 import { VoiceProfileStore } from "./voice-profile.store.js";
 
 export const TTS_DEFAULT_VOICE = "nl-NL-FennaNeural";
+/** English Piper voice (en_GB-jarvis-medium); used only for English text. */
 export const TTS_PIPER_VOICE = "jarvis-en-GB-piper";
+/** Dutch Piper voice (nl_NL-pim-medium); the local fallback for everything that is not English. */
+export const TTS_PIPER_NL_VOICE = "pim-nl-NL-piper";
+/** Voice id to the model name the Piper container loads from nova-data/piper-voices. */
+export const TTS_PIPER_MODELS = {
+  [TTS_PIPER_VOICE]: "en_GB-jarvis-medium",
+  [TTS_PIPER_NL_VOICE]: "nl_NL-pim-medium",
+} as const;
+export type PiperVoice = keyof typeof TTS_PIPER_MODELS;
+const isPiperVoice = (voice: unknown): voice is PiperVoice =>
+  typeof voice === "string" && Object.hasOwn(TTS_PIPER_MODELS, voice);
+/** The Piper voice that matches a voice's language: English stays English, the rest is Dutch. */
+export function piperVoiceFor(voice: unknown): PiperVoice {
+  if (isPiperVoice(voice)) return voice;
+  return typeof voice === "string" && voice.startsWith("en-")
+    ? TTS_PIPER_VOICE
+    : TTS_PIPER_NL_VOICE;
+}
 export const TTS_VOICES = [
   "en-US-GuyNeural",
   "en-US-JennyNeural",
@@ -28,7 +46,7 @@ export const TTS_VOICES = [
   "nl-NL-ColetteNeural",
   "nl-BE-DenaNeural",
 ] as const;
-export type TtsVoice = (typeof TTS_VOICES)[number] | typeof TTS_PIPER_VOICE;
+export type TtsVoice = (typeof TTS_VOICES)[number] | PiperVoice;
 const configuredVoice = process.env.TTS_VOICE?.trim();
 export const TTS_VOICE: (typeof TTS_VOICES)[number] = TTS_VOICES.includes(
   configuredVoice as (typeof TTS_VOICES)[number],
@@ -71,13 +89,18 @@ export class TtsService {
     return {
       ok: true,
       voice: TTS_VOICE,
-      voices: this.piperUrl() ? [...TTS_VOICES, TTS_PIPER_VOICE] : TTS_VOICES,
+      voices: this.piperUrl()
+        ? [...TTS_VOICES, TTS_PIPER_NL_VOICE, TTS_PIPER_VOICE]
+        : TTS_VOICES,
       piperAvailable: Boolean(this.piperUrl()),
       ...DEFAULT_PROSODY,
     };
   }
 
-  /** Speech in the voice and prosody saved in Settings (phone calls, spoken conversations, announcements). */
+  /**
+   * Speech in the voice and prosody saved in Settings (phone calls, spoken conversations, announcements). With
+   * `piper`, the local Piper voice in the saved voice's language: Dutch unless the saved voice is English.
+   */
   speakProfile(
     raw: unknown,
     options: { piper?: boolean } = {},
@@ -85,7 +108,7 @@ export class TtsService {
     const saved = this.profile?.get();
     return this.speak(
       raw,
-      options.piper ? TTS_PIPER_VOICE : saved?.voice,
+      options.piper ? piperVoiceFor(saved?.voice ?? TTS_VOICE) : saved?.voice,
       saved ? { rate: saved.rate, pitch: saved.pitch } : undefined,
     );
   }
@@ -107,8 +130,8 @@ export class TtsService {
       requestedVoice as (typeof TTS_VOICES)[number],
     )
       ? (requestedVoice as TtsVoice)
-      : requestedVoice === TTS_PIPER_VOICE && this.piperUrl()
-        ? TTS_PIPER_VOICE
+      : isPiperVoice(requestedVoice) && this.piperUrl()
+        ? requestedVoice
         : TTS_VOICE;
     const options =
       requestedProsody && typeof requestedProsody === "object"
@@ -126,29 +149,52 @@ export class TtsService {
       return {
         audio: hit,
         cached: true,
-        contentType: voice === TTS_PIPER_VOICE ? "audio/wav" : "audio/mpeg",
+        contentType: isPiperVoice(voice) ? "audio/wav" : "audio/mpeg",
       };
     }
+    if (isPiperVoice(voice)) {
+      const audio = await this.synthesizePiper(text, prosody.rate, voice);
+      this.remember(cacheKey, audio);
+      return { audio, cached: false, contentType: "audio/wav" };
+    }
     const varied = variation(text);
-    const audio =
-      voice === TTS_PIPER_VOICE
-        ? await this.synthesizePiper(text, prosody.rate)
-        : await this.engine(text, voice as (typeof TTS_VOICES)[number], {
-            rate: clamp(prosody.rate + varied, -10, 10, prosody.rate),
-            pitch: clamp(prosody.pitch - varied, -5, 5, prosody.pitch),
-          });
-    if (!audio.length) throw new Error("No audio");
+    let audio: Buffer;
+    try {
+      audio = await this.engine(text, voice, {
+        rate: clamp(prosody.rate + varied, -10, 10, prosody.rate),
+        pitch: clamp(prosody.pitch - varied, -5, 5, prosody.pitch),
+      });
+      if (!audio.length) throw new Error("No audio");
+    } catch (error) {
+      if (!this.piperUrl()) throw error;
+      // Edge is unreachable: the local Piper voice in the same language speaks instead. Not cached, so Edge
+      // takes over again as soon as it is back.
+      this.log.warn("Edge speech failed; using the local Piper voice");
+      return {
+        audio: await this.synthesizePiper(
+          text,
+          prosody.rate,
+          piperVoiceFor(voice),
+        ),
+        cached: false,
+        contentType: "audio/wav",
+      };
+    }
+    this.remember(cacheKey, audio);
+    return { audio, cached: false, contentType: "audio/mpeg" };
+  }
+
+  private remember(cacheKey: string, audio: Buffer): void {
     this.cache.set(cacheKey, audio);
     while (this.cache.size > this.cacheSize)
       this.cache.delete(this.cache.keys().next().value as string);
-    return {
-      audio,
-      cached: false,
-      contentType: voice === TTS_PIPER_VOICE ? "audio/wav" : "audio/mpeg",
-    };
   }
 
-  private async synthesizePiper(text: string, rate: number): Promise<Buffer> {
+  private async synthesizePiper(
+    text: string,
+    rate: number,
+    voice: PiperVoice,
+  ): Promise<Buffer> {
     const piperUrl = this.piperUrl();
     let target: URL;
     try {
@@ -173,6 +219,7 @@ export class TtsService {
       headers: { "content-type": "application/json", accept: "audio/wav" },
       body: JSON.stringify({
         text,
+        voice: TTS_PIPER_MODELS[voice],
         length_scale: Math.max(0.75, Math.min(1.3, 1 - rate / 100)),
       }),
       signal: AbortSignal.timeout(45_000),

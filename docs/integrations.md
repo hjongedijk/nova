@@ -249,14 +249,38 @@ NOVA can publish `critical` alerts to an ntfy topic. Subscribe the ntfy app to a
 
 ## Optional local Piper voice
 
-Edge voices are the default. NOVA can use the medium English voice from [jgkawell/jarvis](https://huggingface.co/jgkawell/jarvis) (an emulation of the movie voice, MIT-licensed model) through a separate local Piper container, because Piper's runtime is GPL-3.0-or-later; neither the model nor the runtime is in the NOVA image or repository.
+Edge voices are the default (the voice chosen in Settings, for example `nl-NL-MaartenNeural`). A separate local Piper container adds two voices: the Dutch [`nl_NL-pim-medium`](https://huggingface.co/rhasspy/piper-voices/tree/main/nl/nl_NL/pim/medium) (CC0) and the English medium voice from [jgkawell/jarvis](https://huggingface.co/jgkawell/jarvis) (an emulation of the movie voice, MIT-licensed model). Piper's runtime is GPL-3.0-or-later, so neither the models nor the runtime are in the NOVA image or repository.
+
+When Piper is configured and Edge fails (no internet, service down), NOVA speaks the same text with Piper in the language of the requested voice: an English voice (`en-*`) gets the English Jarvis voice, every other voice gets the Dutch Pim voice. That fallback audio is not cached, so Edge takes over again as soon as it answers. The phone page's "Persoonlijke Piper-stem" follows the same rule with the voice saved in Settings. Both Piper voices can also be chosen directly in the sound settings ("Nederlands/Engels (lokale Piper-stem)"). If a voice file is missing, the Piper server quietly falls back to the English model it was started with, so install both files.
 
 ```sh
-node scripts/download-jarvis-voice.mjs                                              # pinned model (about 61 MiB) into dev-data/piper
+node scripts/download-jarvis-voice.mjs                                              # both pinned models (about 121 MiB) into dev-data/piper
 docker compose -f docker-compose.dev.yml --profile personal-voice up -d --build piper   # port bound to loopback
 ```
 
-Set `NOVA_PIPER_TTS_URL=http://127.0.0.1:5000/synthesize` for the dev API and restart; the voice then appears in the sound settings as "Engels (lokale Piper-stem)" and is synthesized locally as WAV. In production copy `dev-data/piper/en_GB-jarvis-medium.onnx*` to `nova-data/piper-voices/`, set `NOVA_PIPER_TTS_URL=http://piper:5000/synthesize` in the host's private `.env`, then run `docker compose --profile personal-voice up -d --build piper nova`. Keep the model and that `.env` on the personal host.
+Set `NOVA_PIPER_TTS_URL=http://127.0.0.1:5000/synthesize` for the dev API and restart; the voices are synthesized locally as WAV. In production download the models once straight into the voice folder (the script checks size, language and, for the Dutch model, the SHA-256; files already present are skipped), set `NOVA_PIPER_TTS_URL=http://piper:5000/synthesize` in the host's private `.env`, and restart Piper and NOVA:
+
+```sh
+node scripts/download-jarvis-voice.mjs /opt/nova/nova-data/piper-voices   # from a NOVA checkout; or copy dev-data/piper/*.onnx* there
+chown -R 1000:1000 /opt/nova/nova-data/piper-voices
+docker compose --profile personal-voice up -d --build piper nova
+```
+
+Keep the models and that `.env` on the personal host.
+
+## Local speech-to-text fallback
+
+Speech-to-text goes through OmniRoute first (see [Spoken conversations](#spoken-conversations)). When that route is not configured, refuses (key or free-scope check) or fails, NOVA sends the same multipart request (`file`, `model`, `language`, `prompt`) to a local OpenAI-compatible service: [speaches](https://github.com/speaches-ai/speaches) (MIT, faster-whisper on CPU), which is the `speaches` service under the Compose profile `local-stt` (image `ghcr.io/speaches-ai/speaches:0.8.3-cpu`, no host port, model cache in `nova-data/speaches-cache`). Nothing leaves the host and no credentials are sent. Settings (**Instellingen > Geavanceerd > Spraak, nieuws en meldingen**, or `.env`): `NOVA_LOCAL_STT_URL` (default `http://speaches:8000/v1`, `off` in `.env` disables the fallback) and `NOVA_LOCAL_STT_MODEL` (default `Systran/faster-whisper-small`); the language is the conversation language (`nl` by default). If both routes fail, the error names both.
+
+speaches only serves models that were downloaded, so enable the profile and fetch the model once:
+
+```sh
+mkdir -p /opt/nova/nova-data/speaches-cache && chown 1000:1000 /opt/nova/nova-data/speaches-cache
+docker compose --profile local-stt up -d speaches          # or add local-stt to COMPOSE_PROFILES in .env
+docker compose exec speaches curl -fsS -X POST http://localhost:8000/v1/models/Systran/faster-whisper-small
+```
+
+Measured on CPU: a Dutch Piper sentence ("Goedemiddag, de voordeur is open.") came back exactly, in about 5.6 s including the first model load.
 
 ## Node-RED and MQTT
 
@@ -722,7 +746,7 @@ The first transport is the phone: call **700** from a Linphone extension, or hav
 - **Chat pipeline:** the same orchestrator as typed chat (session memory, persona, tools) with `inputMode: "voice"` and **read-only tools only**. Tools that change something are not offered over the phone.
 - **One call at a time** (a second caller hears that NOVA is busy) to protect the free model quotas. Only metadata is audited, no transcripts.
 
-**Speech-to-text.** NOVA never calls a speech provider directly; it goes through OmniRoute, fail-closed, so provider credentials stay there. Whisper models are not in OmniRoute's chat-oriented free-model inventory, so the speech path uses its own dedicated OmniRoute key:
+**Speech-to-text.** NOVA never calls a cloud speech provider directly; it goes through OmniRoute, fail-closed, so provider credentials stay there. When OmniRoute cannot transcribe, the local faster-whisper model takes over (see [Local speech-to-text fallback](#local-speech-to-text-fallback)). Whisper models are not in OmniRoute's chat-oriented free-model inventory, so the speech path uses its own dedicated OmniRoute key:
 
 1. Add a free **Groq** account in OmniRoute (**Instellingen → Slimme modellen → account toevoegen**, or the provider's own dashboard). OmniRoute supports `groq/whisper-large-v3-turbo`; Cloudflare Workers AI is not a transcription provider there.
 2. Create an OmniRoute API key restricted to **exactly** `groq/whisper-large-v3-turbo` and to **that one connection**, and set `NOVA_STT_KEY` to it.

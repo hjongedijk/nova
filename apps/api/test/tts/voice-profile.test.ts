@@ -82,7 +82,19 @@ describe("TtsService.speakProfile", () => {
       { rate: 4, pitch: 1 },
     ]);
     await service.speakProfile("Hallo", { piper: true });
-    expect(calls[1]?.[1]).toBe("jarvis-en-GB-piper");
+    expect(calls[1]?.[1]).toBe("pim-nl-NL-piper");
+    s.set({ voice: "en-GB-RyanNeural", rate: 0, pitch: 0 });
+    await service.speakProfile("Hello", { piper: true });
+    expect(calls[2]?.[1]).toBe("jarvis-en-GB-piper");
+    s.set({ rate: 0, pitch: 0 });
+    await service.speakProfile("Hallo", { piper: true });
+    expect(calls[3]?.[1]).toBe("pim-nl-NL-piper");
+  });
+
+  it("keeps the Dutch Piper voice chosen in Settings", () => {
+    expect(store().store.set({ voice: "pim-nl-NL-piper" }).voice).toBe(
+      "pim-nl-NL-piper",
+    );
   });
 });
 

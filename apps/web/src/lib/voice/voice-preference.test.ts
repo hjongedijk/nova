@@ -62,6 +62,14 @@ describe("TTS voice preference", () => {
     expect(ttsLocale()).toBe("en-GB");
   });
 
+  it("reads the locale of the local Piper voices from their ids", () => {
+    vi.spyOn(storage, "get").mockReturnValue("pim-nl-NL-piper");
+    expect(ttsLocale()).toBe("nl-NL");
+    expect(ttsVoiceForLanguage("nl")).toBe("pim-nl-NL-piper");
+    vi.spyOn(storage, "get").mockReturnValue("jarvis-en-GB-piper");
+    expect(ttsLocale()).toBe("en-GB");
+  });
+
   it("matches the TTS voice to the selected conversation language", () => {
     vi.spyOn(storage, "get").mockReturnValue("nl-NL-FennaNeural");
     expect(ttsVoiceForLanguage("en")).toBe("en-GB-RyanNeural");

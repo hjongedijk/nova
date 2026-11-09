@@ -37,7 +37,9 @@ Managed in Settings (Koppelingen, Apparaten, Models): OmniRoute, Home Assistant,
 MQTT, Node-RED admin token, Windows agent, Termix, Pangolin (`services.json`); CalDAV and IMAP (`mcp-secrets.json`);
 the default voice `TTS_VOICE` (Sound settings). Managed under **Instellingen > Geavanceerd > Spraak, nieuws en meldingen**
 (`runtime-settings.json`; embeddings require a restart, other groups apply immediately): `NOVA_STT_MODEL`, `NOVA_STT_MODE`,
-`NOVA_STT_FREE_VERIFIED`, `NOVA_STT_KEY`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `EMBEDDING_FREE_VERIFIED`,
+`NOVA_STT_FREE_VERIFIED`, `NOVA_STT_KEY`, `NOVA_LOCAL_STT_URL` (local speech-to-text fallback, default
+`http://speaches:8000/v1`; `off` in `.env` disables it), `NOVA_LOCAL_STT_MODEL` (default `Systran/faster-whisper-small`,
+see [local speech-to-text](integrations.md#local-speech-to-text-fallback)), `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `EMBEDDING_FREE_VERIFIED`,
 `NOVA_NEWS_FEEDS`, `NTFY_URL`, `NTFY_TOPIC`, `NTFY_TOKEN`, `NOVA_CHECK_TARGETS`, `NOVA_HOME_LAT`, `NOVA_HOME_LON`.
 Secret fields are never shown again; a blank secret keeps its value.
 
@@ -47,7 +49,7 @@ Defaults shown; none is needed in a normal installation.
 
 ```
 NOVA_OWNER=hjongedijk            # GitHub owner of the image ghcr.io/<owner>/nova (forks)
-NOVA_PIPER_TTS_URL=              # private Piper service instead of the built-in Edge voices
+NOVA_PIPER_TTS_URL=              # private Piper service: Dutch/English local voices and fallback when Edge fails
 OMNIROUTE_MODEL=auto             # must stay auto; see OmniRoute and free routing
 FREE_ONLY=true
 NOVA_OMNIROUTE_COMPRESSION=off   # lite = OmniRoute lite compression header

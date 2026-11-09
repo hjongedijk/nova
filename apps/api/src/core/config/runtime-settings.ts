@@ -46,6 +46,12 @@ export const RUNTIME_GROUPS: RuntimeGroup[] = [
         "boolean",
       ),
       f("key", "NOVA_STT_KEY", "Aparte toegangssleutel", "secret"),
+      f("localUrl", "NOVA_LOCAL_STT_URL", "Lokale terugvaldienst", "url", {
+        hint: "http://speaches:8000/v1",
+      }),
+      f("localModel", "NOVA_LOCAL_STT_MODEL", "Lokaal model", "text", {
+        hint: "Systran/faster-whisper-small",
+      }),
     ],
   },
   {
@@ -242,6 +248,8 @@ export function applyRuntimeOverrides(live: NovaConfig): void {
       sttMode: live.sttMode,
       sttFreeVerified: live.sttFreeVerified,
       sttKey: live.sttKey,
+      localSttUrl: live.localSttUrl,
+      localSttModel: live.localSttModel,
       embeddingModel: live.embeddingModel,
       embeddingDimensions: live.embeddingDimensions,
       embeddingFreeVerified: live.embeddingFreeVerified,
@@ -268,6 +276,8 @@ export function applyRuntimeOverrides(live: NovaConfig): void {
         ? stt.freeVerified
         : config.sttFreeVerified,
     sttKey: str(stt, "key", config.sttKey),
+    localSttUrl: str(stt, "localUrl", config.localSttUrl),
+    localSttModel: str(stt, "localModel", config.localSttModel),
     embeddingModel: str(embeddings, "model", config.embeddingModel),
     embeddingDimensions:
       Number(saved(embeddings, "dimensions") ?? config.embeddingDimensions) ||
@@ -299,6 +309,8 @@ export function environmentDefault(
     "stt.mode": base.sttMode === "transcriptions" ? "" : base.sttMode,
     "stt.freeVerified": base.sttFreeVerified ? "true" : "",
     "stt.key": base.sttKey,
+    "stt.localUrl": base.localSttUrl,
+    "stt.localModel": base.localSttModel,
     "embeddings.model": base.embeddingModel,
     "embeddings.dimensions": base.embeddingDimensions || "",
     "embeddings.freeVerified": base.embeddingFreeVerified ? "true" : "",

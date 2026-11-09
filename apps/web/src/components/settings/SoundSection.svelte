@@ -220,6 +220,8 @@
       {/each}
       {#if piperVoiceAvailable}
         <optgroup label="Lokale stemmen">
+          <option value="pim-nl-NL-piper">Nederlands (lokale Piper-stem)</option
+          >
           <option value="jarvis-en-GB-piper">Engels (lokale Piper-stem)</option>
         </optgroup>
       {/if}

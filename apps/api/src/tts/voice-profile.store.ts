@@ -16,7 +16,7 @@ const clamp = (value: unknown, min: number, max: number, fallback: number) =>
   typeof value === "number" && Number.isFinite(value)
     ? Math.round(Math.max(min, Math.min(max, value)))
     : fallback;
-// Edge ids ("nl-NL-MaartenNeural") and the Piper voice ("jarvis-en-GB-piper"), whose prefix is longer than a locale.
+// Edge ids ("nl-NL-MaartenNeural") and the Piper voices ("pim-nl-NL-piper", "jarvis-en-GB-piper"), whose prefix is longer than a locale.
 const VOICE_ID = /^[A-Za-z]{2,6}-[A-Za-z0-9-]{2,40}$/;
 
 /**

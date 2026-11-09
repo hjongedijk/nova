@@ -1,10 +1,24 @@
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { ApiErrorFilter } from "../../src/core/errors/validation.error.js";
 import { TtsController } from "../../src/tts/tts.controller.js";
-import { TtsService } from "../../src/tts/tts.service.js";
+import {
+  TTS_PIPER_MODELS,
+  TTS_PIPER_NL_VOICE,
+  TTS_PIPER_VOICE,
+  TtsService,
+  piperVoiceFor,
+} from "../../src/tts/tts.service.js";
 
 describe("POST /api/tts", () => {
   let app: INestApplication;
@@ -187,5 +201,103 @@ describe("POST /api/tts", () => {
       localFetch.mockRestore();
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("local Piper fallback voices", () => {
+  const wav = () =>
+    new Response(Buffer.from("RIFF0000WAVE"), {
+      headers: { "content-type": "audio/wav", "content-length": "12" },
+    });
+  const piperBodies = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.map(
+      (call) =>
+        JSON.parse(String((call[1] as RequestInit).body)) as {
+          text: string;
+          voice: string;
+        },
+    );
+  const failingEdge = () => {
+    const service = new TtsService();
+    const voices: string[] = [];
+    service.engine = async (_text, voice) => {
+      voices.push(voice);
+      throw new Error("edge unreachable");
+    };
+    return { service, voices };
+  };
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("maps voices to Piper by language: English to Jarvis, everything else to Dutch", () => {
+    expect(piperVoiceFor("nl-NL-MaartenNeural")).toBe(TTS_PIPER_NL_VOICE);
+    expect(piperVoiceFor("nl-BE-DenaNeural")).toBe(TTS_PIPER_NL_VOICE);
+    expect(piperVoiceFor(undefined)).toBe(TTS_PIPER_NL_VOICE);
+    expect(piperVoiceFor("en-GB-RyanNeural")).toBe(TTS_PIPER_VOICE);
+    expect(piperVoiceFor("en-US-JennyNeural")).toBe(TTS_PIPER_VOICE);
+    expect(piperVoiceFor(TTS_PIPER_VOICE)).toBe(TTS_PIPER_VOICE);
+    expect(TTS_PIPER_MODELS[TTS_PIPER_NL_VOICE]).toBe("nl_NL-pim-medium");
+  });
+
+  it("speaks a Dutch reply with the Dutch Piper voice when Edge fails, and does not cache it", async () => {
+    vi.stubEnv("NOVA_PIPER_TTS_URL", "http://piper:5000/synthesize");
+    const piper = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => wav());
+    const { service, voices } = failingEdge();
+    const first = await service.speak(
+      "De deur is open.",
+      "nl-NL-MaartenNeural",
+    );
+    expect(first).toMatchObject({ cached: false, contentType: "audio/wav" });
+    const again = await service.speak(
+      "De deur is open.",
+      "nl-NL-MaartenNeural",
+    );
+    expect(again.cached).toBe(false);
+    expect(voices).toEqual(["nl-NL-MaartenNeural", "nl-NL-MaartenNeural"]);
+    expect(piperBodies(piper).map((body) => body.voice)).toEqual([
+      "nl_NL-pim-medium",
+      "nl_NL-pim-medium",
+    ]);
+  });
+
+  it("uses the English Piper voice only for an English reply", async () => {
+    vi.stubEnv("NOVA_PIPER_TTS_URL", "http://piper:5000/synthesize");
+    const piper = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => wav());
+    const { service } = failingEdge();
+    await service.speak("The door is open.", "en-GB-RyanNeural");
+    expect(piperBodies(piper)[0]).toMatchObject({
+      text: "The door is open.",
+      voice: "en_GB-jarvis-medium",
+    });
+  });
+
+  it("sends the chosen Dutch Piper voice by name", async () => {
+    vi.stubEnv("NOVA_PIPER_TTS_URL", "http://piper:5000/synthesize");
+    const piper = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => wav());
+    const service = new TtsService();
+    service.engine = async () => {
+      throw new Error("Edge must not be used");
+    };
+    const result = await service.speak("Goedemorgen", TTS_PIPER_NL_VOICE);
+    expect(result.contentType).toBe("audio/wav");
+    expect(piperBodies(piper)[0]?.voice).toBe("nl_NL-pim-medium");
+    expect(service.health().voices).toContain(TTS_PIPER_NL_VOICE);
+  });
+
+  it("still fails without a Piper service", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { service } = failingEdge();
+    await expect(service.speak("Hallo", "nl-NL-MaartenNeural")).rejects.toThrow(
+      "edge unreachable",
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

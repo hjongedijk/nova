@@ -87,6 +87,18 @@ export class NovaConfig {
   readonly sttFreeVerified = flag("NOVA_STT_FREE_VERIFIED", false);
   /** A separate OmniRoute key restricted to exactly the STT model and one connection (see docs/integrations.md#telephony-and-conversations). */
   readonly sttKey = text("NOVA_STT_KEY");
+  /**
+   * Local OpenAI-compatible speech-to-text (speaches, compose profile local-stt), used only when the OmniRoute
+   * route fails or is unavailable. "off" disables the fallback.
+   */
+  readonly localSttUrl =
+    text("NOVA_LOCAL_STT_URL").toLowerCase() === "off"
+      ? ""
+      : url("NOVA_LOCAL_STT_URL", "http://speaches:8000/v1");
+  readonly localSttModel = text(
+    "NOVA_LOCAL_STT_MODEL",
+    "Systran/faster-whisper-small",
+  );
   readonly defaultLanguage = setting(
     "NOVA_DEFAULT_LANGUAGE",
     "JARVIS_DEFAULT_LANGUAGE",

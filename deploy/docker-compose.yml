@@ -95,6 +95,36 @@ services:
       start_period: 30s
     networks: [nova]
 
+  # Optional local speech-to-text fallback (speaches, MIT, faster-whisper on CPU). NOVA uses it only when the
+  # OmniRoute route fails (NOVA_LOCAL_STT_URL, default http://speaches:8000/v1). No host port. Enable with
+  # COMPOSE_PROFILES=...,local-stt, then download the model once (see docs/integrations.md#local-speech-to-text-fallback).
+  speaches:
+    <<: *restart
+    profiles: [local-stt]
+    image: ghcr.io/speaches-ai/speaches:0.8.3-cpu
+    container_name: nova-speaches
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 3g
+    cpus: 2
+    environment:
+      ENABLE_UI: "false"
+      LOG_LEVEL: info
+      WHISPER__INFERENCE_DEVICE: cpu
+      WHISPER__COMPUTE_TYPE: int8
+      # Keep the model loaded for an hour after the last fallback request.
+      WHISPER__TTL: 3600
+    volumes:
+      - ./nova-data/speaches-cache:/home/ubuntu/.cache/huggingface/hub
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks: [nova]
+
   # Optional telephony: Asterisk PBX that NOVA controls over ARI (Settings > Telefonie). Enable with
   # COMPOSE_PROFILES=...,telephony after switching Telefonie on once (that generates the configuration). No host
   # ports: it registers outward to a SIP trunk (for example sip.linphone.org) and only NOVA reaches ARI and
