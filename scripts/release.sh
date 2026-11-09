@@ -109,7 +109,8 @@ if [ -n "$(git status --porcelain)" ]; then
   git add -A
   git commit -m "$msg"
 fi
-git pull --rebase origin main
+# Keep merge commits intact: a flattening rebase replays merged branches and can re-raise resolved conflicts.
+git pull --rebase=merges origin main
 git push origin main
 for s in "${streams[@]}"; do
   git tag -a "${tag[$s]}" -m "NOVA ${s} ${version[$s]}"
