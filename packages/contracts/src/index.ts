@@ -15,3 +15,4 @@ export type * from "./shell.js";
 export type * from "./omniroute.js";
 export type * from "./model-roles.js";
 export type * from "./visualization.js";
+export type * from "./agent-skills.js";

@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AgentSkillsModule } from "../agent-skills/agent-skills.module.js";
 import { ConfirmationsModule } from "../confirmations/confirmations.module.js";
 import { HomeModule } from "../home/home.module.js";
 import { MemoryModule } from "../memory/memory.module.js";
@@ -20,6 +21,7 @@ import { PreferenceLearnerService } from "./preference-learner.service.js";
  */
 @Module({
   imports: [
+    AgentSkillsModule,
     ConfirmationsModule,
     HomeModule,
     MemoryModule,

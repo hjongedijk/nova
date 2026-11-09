@@ -1,5 +1,6 @@
 <script lang="ts">
   import AdminDialog from "#components/admin/AdminDialog.svelte";
+  import AgentSkillsSection from "./AgentSkillsSection.svelte";
   import ApiStudioSection from "./ApiStudioSection.svelte";
   import InstallationWizard from "./InstallationWizard.svelte";
   import RuntimeSection from "./RuntimeSection.svelte";
@@ -52,6 +53,17 @@
   lazy
 >
   <SkillsTab />
+</Disclosure>
+
+<Disclosure
+  group="settings-section"
+  kind="advanced"
+  title="Agent Skills"
+  hint="Werkwijzen uit de open skill-bibliotheek installeren"
+  id="agent-skills"
+  lazy
+>
+  <AgentSkillsSection />
 </Disclosure>
 
 <Disclosure

@@ -45,6 +45,8 @@ export const slugify = (name: unknown): string =>
     .replace(/^_+|_+$/g, "")
     .slice(0, 40);
 
+const RESERVED_SKILL_IDS = new Set(["read", "list", "search", "install"]);
+
 export const toolNameFor = (skill: { id: string }): string =>
   `skill_${skill.id}`;
 
@@ -218,6 +220,9 @@ export function normalizeSkill(
   if (name.length > 60) fail("De naam is te lang (maximaal 60 tekens).");
   const id = existing?.id ?? slugify(name);
   if (!id) fail("Gebruik letters of cijfers in de naam.");
+  // skill_read/list/search/install belong to the Agent Skills tools.
+  if (!existing && RESERVED_SKILL_IDS.has(id))
+    fail(`De naam “${name}” is gereserveerd; kies een andere naam.`);
   if (!existing && takenIds.includes(id))
     fail(`Er bestaat al een vaardigheid met de naam “${name}”.`);
 

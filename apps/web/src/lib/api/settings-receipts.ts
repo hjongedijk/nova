@@ -74,6 +74,9 @@ add(
   "Vaardigheden",
 );
 add("PUT", ["/skills/:id"], "Vaardigheden");
+add("POST", ["/agent-skills/install"], "Agent Skills");
+add("PUT", ["/agent-skills/:id"], "Agent Skills");
+add("DELETE", ["/agent-skills/:id"], "Agent Skills");
 add("DELETE", ["/skills/:id"], "Vaardigheden");
 add("POST", ["/widgets"], "Zijpanelen", "widget");
 add("PUT", ["/widgets/:id"], "Zijpanelen", "widget");

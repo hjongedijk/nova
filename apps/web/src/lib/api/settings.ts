@@ -49,6 +49,10 @@ import type {
   StackServiceId,
   ManagedTargetsAccessHistory,
   WorkspaceProjectsReport,
+  AgentSkillsReport,
+  AgentSkillSearchResult,
+  AgentSkillInstallResult,
+  AgentSkillSummary,
   WorkspaceProjectSelectionHistory,
   WorkspaceProjectSelectionResult,
 } from "@nova/contracts";
@@ -216,6 +220,22 @@ export const rollbackModelRoleHistory = (id: string) =>
     `/model-roles/history/${enc(id)}/rollback`,
     {},
   );
+export const getAgentSkills = () => read<AgentSkillsReport>("/agent-skills");
+export const searchAgentSkills = (query: string) =>
+  read<AgentSkillSearchResult>(`/agent-skills/search?q=${enc(query)}`);
+export const installAgentSkill = (source: string, replace = false) =>
+  write<AgentSkillInstallResult>("POST", "/agent-skills/install", {
+    source,
+    replace,
+  });
+export const setAgentSkillEnabled = (name: string, enabled: boolean) =>
+  write<{ ok: true; skill: AgentSkillSummary }>(
+    "PUT",
+    `/agent-skills/${enc(name)}`,
+    { enabled },
+  );
+export const removeAgentSkill = (name: string) =>
+  write<{ ok: true; name: string }>("DELETE", `/agent-skills/${enc(name)}`);
 export const getWorkspaceProjects = () =>
   read<WorkspaceProjectsReport>("/workspace/projects");
 export const createWorkspaceProject = (name: string) =>
