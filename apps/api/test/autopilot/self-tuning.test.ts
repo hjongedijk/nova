@@ -137,6 +137,17 @@ describe("self-tuning from owner reactions", () => {
     ).toBe(3);
   });
 
+  it("never goes quieter on unanswered nudges alone", async () => {
+    const r = make();
+    for (let day = 0; day < 3; day++) {
+      for (let i = 0; i < 4; i++)
+        await r.service.deliver({ ...nudge("home"), key: `d${day}k${i}` });
+      r.clock.t += 25 * HOUR;
+      await r.service.scan();
+    }
+    expect(tuningNotes(r)).toEqual([]);
+  });
+
   it("'doe dat niet meer' right after a nudge mutes that nudge", async () => {
     const r = make();
     r.world.events = [

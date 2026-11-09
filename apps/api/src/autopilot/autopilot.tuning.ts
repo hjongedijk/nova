@@ -17,12 +17,14 @@ const HOUR = 3_600_000;
 const WINDOW_MS = 48 * HOUR;
 const SCAN_WINDOW_MS = 7 * 24 * HOUR;
 const MIN_BUDGET = 2;
-const MAX_INTERVAL = 30;
 const MAX_FACTOR = 8;
 const QUIET_STEP = 30;
 const QUIET_MAX_SHIFT = 120;
 
-const negative = (r: Reaction) => r !== "acted";
+// Only an explicit rebuff counts against a nudge. Most deliveries (phone, Linphone,
+// speech) have no way to answer, so an unanswered nudge is no evidence either way;
+// counting it made the autopilot only ever quieter.
+const negative = (r: Reaction) => r === "dismissed" || r === "stopped";
 
 export interface TuningChange {
   /** Partial settings to apply with applySettings. */
@@ -166,20 +168,5 @@ export function tune(
       consume((r) => stale.has(r));
     }
   }
-  const ignored = recent().filter((r) => r.reaction === "ignored");
-  if (ignored.length >= 6 && settings.intervalMinutes < MAX_INTERVAL) {
-    ceiling();
-    const next = Math.min(
-      MAX_INTERVAL,
-      Math.ceil(settings.intervalMinutes * 1.5),
-    );
-    changes.push({
-      patch: { intervalMinutes: next },
-      note: `controle-interval ${settings.intervalMinutes} naar ${next} minuten: meldingen blijven onbeantwoord`,
-    });
-    const stale = new Set(ignored);
-    consume((r) => stale.has(r));
-  }
-
   return changes;
 }
