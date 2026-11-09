@@ -685,8 +685,11 @@ export interface NotificationModes {
   timer: NotificationMode;
 }
 export interface HelperPreferences {
-  /** Legacy face values are accepted and normalized to the original orb. */
-  avatar?: "face" | "orb";
+  /**
+   * The body shown on the website, wallpaper and helper. "presence" is the procedural head-and-shoulders
+   * that grows out of the orb. Legacy face values are accepted and normalized to the original orb.
+   */
+  avatar?: "face" | "orb" | "presence";
   wardrobe?: {
     theme: "nova" | "violet" | "gold";
     seasonal: boolean;

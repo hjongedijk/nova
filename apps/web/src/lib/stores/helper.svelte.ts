@@ -9,8 +9,15 @@ import {
   type CuePreferences,
 } from "#lib/voice/helper-cues.ts";
 
+/** The body NOVA shows: the original orb, or the procedural presence that grows out of it. */
+export type Avatar = "orb" | "presence";
+/** Retired face preferences must not reactivate the rejected humanoid; they fall back to the orb. */
+export function normalizeAvatar(value: unknown): Avatar {
+  return value === "presence" ? "presence" : "orb";
+}
+
 export const helper = $state({
-  avatar: "orb" as "face" | "orb",
+  avatar: "orb" as Avatar,
   wardrobe: { theme: "nova", seasonal: false, birthday: "" } as {
     theme: "nova" | "violet" | "gold";
     seasonal: boolean;
@@ -55,8 +62,7 @@ export function loadHelperPreferences(): void {
     );
     if (!value || typeof value !== "object") return;
     const saved = value as Record<string, unknown>;
-    // Retired face preferences must not reactivate the rejected humanoid.
-    helper.avatar = "orb";
+    helper.avatar = normalizeAvatar(saved.avatar);
     if (["orb", "ring", "mist"].includes(String(saved.shape)))
       helper.shape = saved.shape as typeof helper.shape;
     if (saved.notifications && typeof saved.notifications === "object") {

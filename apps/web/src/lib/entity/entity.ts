@@ -3,6 +3,11 @@
 import type { UiState } from "#lib/stores/chat.svelte.ts";
 import { dashboard, guests } from "#lib/stores/dashboard.svelte.ts";
 import { voiceSpectrum } from "#lib/voice/audio.ts";
+import {
+  createPresence,
+  type Presence,
+  type PresenceFrame,
+} from "./presence.ts";
 import { ALERT, STATES, type Look } from "./states.ts";
 
 /**
@@ -30,6 +35,8 @@ export interface EntityHost {
   compact?: { life: Life };
   /** Keep the desktop entity clear of the header and composer on scaled 1080p screens. */
   wallpaper?: boolean;
+  /** "presence": the orb re-forms into the procedural head and shoulders (presence.ts). Default: the orb. */
+  appearance?(): "orb" | "presence";
 }
 
 /** Extra movement for the compact orb, in units of the orb's radius, on top of the state's own look. */
@@ -112,6 +119,17 @@ export interface Life {
   ): void;
 }
 
+/** Top of the reply on screen, or far below the screen while there is no visible reply to keep clear of. */
+function replyTop(stage: HTMLElement | null, H: number): number {
+  if (!stage || stage.offsetHeight < 24) return H * 2;
+  if (
+    stage.checkVisibility &&
+    !stage.checkVisibility({ visibilityProperty: true })
+  )
+    return H * 2;
+  return stage.getBoundingClientRect().top;
+}
+
 /** Start the loop on the host's canvas. Returns the function that stops it. */
 export function startEntity(host: EntityHost): () => void {
   const cv = host.canvas;
@@ -146,6 +164,8 @@ export function startEntity(host: EntityHost): () => void {
   const sx = new Float32Array(N);
   const sy = new Float32Array(N);
   const sz = new Float32Array(N);
+  /** Per-particle visibility; the presence quiets particles that ride behind the head. */
+  const pvis = new Float32Array(N).fill(1);
 
   {
     /* A volumetric cloud: a loose skin plus a denser, dimmer interior,
@@ -204,6 +224,11 @@ export function startEntity(host: EntityHost): () => void {
   let audioLevel = 0;
   let lastT = performance.now() / 1000;
   const born = lastT;
+
+  /* The presence is built on first use only: orb users never pay for its geometry. */
+  let presence: Presence | null = null;
+  let form = 0;
+  let pf: PresenceFrame | null = null;
 
   const onPointerMove = (e: PointerEvent) => {
     tx = (e.clientX / window.innerWidth) * 2 - 1;
@@ -298,6 +323,24 @@ export function startEntity(host: EntityHost): () => void {
     const breath = 1 + 0.018 * Math.sin(t * 0.9) * MOTION;
     let R = span * cur.r * heartbeat * breath * (0.35 + 0.65 * birth);
 
+    /* presence: emerge from the orb once it has formed, dissolve back the same way, interruptible both ways */
+    const wantPresence = host.appearance?.() === "presence" && birth > 0.55;
+    if (wantPresence && !presence) {
+      const pixels =
+        Math.max(window.screen?.width || W, W) * (window.devicePixelRatio || 1);
+      presence = createPresence(
+        compact ? "compact" : pixels > 2600 ? "fine" : "full",
+        N,
+        seed,
+      );
+    }
+    const formRate = reduceMotion ? 1 / 0.35 : wantPresence ? 1 / 1.9 : 1 / 1.2;
+    form = wantPresence
+      ? Math.min(1, form + dt * formRate)
+      : Math.max(0, form - dt * formRate);
+    const fm = presence ? form : 0;
+    let lift = 1;
+
     /* make room: it lifts away as the reply grows */
     if (!compact) {
       const stageTop = host.stage?.()?.getBoundingClientRect().top ?? H;
@@ -312,14 +355,22 @@ export function startEntity(host: EntityHost): () => void {
           : cyCur + (wantCy - cyCur) * (1 - Math.exp(-dt * 4));
       if (Math.abs(wantCy - cyCur) < 0.05) cyCur = wantCy;
       cy = cyCur;
-      R *=
+      lift =
         1 -
         0.3 * Math.min(1, Math.max(0, (baseCy - cy) / (baseCy - H * 0.3 + 1)));
+      R *= lift;
     } else if (mod) {
       R *= mod.grow;
       cx += mod.ox * R;
       cy += mod.oy * R;
     }
+    // Presence unit: sized to the screen height so the shoulders never crowd the side panels.
+    const rb =
+      (compact
+        ? Math.min(W, H) * 0.215
+        : Math.min(span * 0.2, H * 0.15, W * 0.16)) *
+      (0.35 + 0.65 * birth) *
+      lift;
     const squashX = mod ? mod.sx : 1;
     const squashY = mod ? mod.sy : 1;
     const dim = mod ? mod.dim : 1;
@@ -368,7 +419,8 @@ export function startEntity(host: EntityHost): () => void {
     }
 
     /* HUD rings, the instrument around the entity */
-    const hudA = cur.hud * birth;
+    // The instrument steps back while the presence is there, so the figure stays the subject.
+    const hudA = cur.hud * birth * (1 - 0.45 * fm);
     const wide = W >= 1340;
     const fullRadius = Math.max(
       R * 1.7,
@@ -575,6 +627,8 @@ export function startEntity(host: EntityHost): () => void {
     }
 
     /* orbits: scanning arcs while it works */
+    // With the presence the scanning orbits circle the head, not the (smaller) orb inside it.
+    const orbitR = R + (rb * 1.05 - R) * fm;
     if (cur.orb > 0.02) {
       for (let k = 0; k < 2; k++) {
         g.save();
@@ -582,7 +636,7 @@ export function startEntity(host: EntityHost): () => void {
         g.rotate(t * (0.45 + 0.25 * k) * (k ? -1 : 1) * MOTION + k * 1.3);
         const orx = compact
           ? Math.min(R * (1.3 + 0.22 * k), Math.min(W, H) * 0.44)
-          : R * (1.3 + 0.22 * k);
+          : orbitR * (1.3 + 0.22 * k);
         const ory = orx * (0.3 + 0.12 * k);
         const a0 = t * (1.6 + k * 0.7) * MOTION;
         const len = Math.PI * (0.9 + 0.3 * Math.sin(t * 0.7 + k));
@@ -669,11 +723,43 @@ export function startEntity(host: EntityHost): () => void {
       }
     }
 
+    if (presence && fm > 0) {
+      pf = {
+        t,
+        dt,
+        form: fm,
+        state: uiState,
+        h: hue,
+        s: cur.s,
+        l: cur.l,
+        glow: cur.glow,
+        alert: intensity > 0,
+        audio: audioLevel,
+        bands: useBands ? freq : null,
+        gazeX: compact ? (mod?.ox ?? 0) * 2 : gx,
+        gazeY: compact ? (mod?.oy ?? 0) * 2 : gy,
+        ocx: cx,
+        ocy: cy,
+        orbR: R,
+        cx,
+        cy: compact ? H / 2 - 0.95 * rb : cy,
+        rb,
+        floor: compact ? H * 2 : replyTop(host.stage?.() ?? null, H),
+        dim: birth * dim,
+        reduceMotion,
+      };
+      presence.update(pf);
+      presence.drawRings(g, pf);
+      presence.placeParticles(sx, sy, sz, pvis, N, pf);
+    } else if (presence && pvis[0] !== 1) {
+      pvis.fill(1);
+    }
+
     /* filaments */
     g.lineWidth = compact ? 0.6 : 0.7;
-    g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(0.05 + 0.09 * cur.glow) * (compact ? 2.4 : 1) * birth})`;
+    g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(0.05 + 0.09 * cur.glow) * (compact ? 2.4 : 1) * birth * (1 - fm)})`;
     g.beginPath();
-    for (let i = 0; i < N; i++) {
+    for (let i = 0; fm < 0.999 && i < N; i++) {
       if (sz[i] < -0.15) continue;
       const a = nb1[i];
       const b = nb2[i];
@@ -692,7 +778,8 @@ export function startEntity(host: EntityHost): () => void {
     for (let i = 0; i < N; i++) {
       const depth = (sz[i] + 1) / 2;
       const alpha =
-        (0.12 + 0.88 * depth) * (0.4 + 0.6 * cur.glow) * birth * dim;
+        (0.12 + 0.88 * depth) * (0.4 + 0.6 * cur.glow) * birth * dim * pvis[i];
+      if (alpha < 0.01) continue;
       const size =
         (0.6 + 1.7 * depth) *
         (1 + audioLevel * 0.6) *
@@ -701,22 +788,22 @@ export function startEntity(host: EntityHost): () => void {
       g.fillRect(sx[i] - size / 2, sy[i] - size / 2, size, size);
     }
 
-    /* nucleus: it looks where you look */
-    const nx = cx + gx * R * 0.14;
-    const ny = cy + gy * R * 0.14;
+    /* nucleus: it looks where you look; with the presence it becomes a quiet light inside the head */
+    if (presence && pf && fm > 0) presence.drawLights(g, pf);
+    const nx = cx + gx * R * 0.14 + ((presence?.headX ?? cx) - cx) * fm;
+    const ny = cy + gy * R * 0.14 + ((presence?.headY ?? cy) - cy) * fm;
     const nr =
       R *
       ((compact ? 0.3 : 0.2) + 0.1 * audioLevel + 0.025 * Math.sin(t * 1.7)) *
-      birth;
+      birth *
+      (1 - 0.35 * fm);
     const nuc = g.createRadialGradient(nx, ny, 0, nx, ny, nr * 2.6);
+    const nucA = birth * dim * (1 - 0.7 * fm);
     nuc.addColorStop(
       0,
-      `hsla(${hue},${Math.max(30, cur.s - 40)}%,96%,${0.85 * birth * dim})`,
+      `hsla(${hue},${Math.max(30, cur.s - 40)}%,96%,${0.85 * nucA})`,
     );
-    nuc.addColorStop(
-      0.25,
-      `hsla(${hue},${cur.s}%,${cur.l}%,${0.45 * birth * dim})`,
-    );
+    nuc.addColorStop(0.25, `hsla(${hue},${cur.s}%,${cur.l}%,${0.45 * nucA})`);
     nuc.addColorStop(1, `hsla(${hue},${cur.s}%,${cur.l}%,0)`);
     g.fillStyle = nuc;
     g.beginPath();

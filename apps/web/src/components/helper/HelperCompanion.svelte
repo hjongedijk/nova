@@ -34,6 +34,7 @@
         canvas,
         state: currentState,
         shape: () => helper.shape,
+        appearance: () => helper.avatar,
         hue: helperHue,
         night: () => cueQuiet(helper.cues),
         intensity: () => chat.confirmations.length + attentionCount(),

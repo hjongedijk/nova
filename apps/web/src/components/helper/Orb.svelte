@@ -14,6 +14,7 @@
       canvas,
       state: () => chat.uiState,
       shape: () => helper.shape,
+      appearance: () => helper.avatar,
       hue: helperHue,
       night: () => cueQuiet(helper.cues),
       reaction: (event) =>
