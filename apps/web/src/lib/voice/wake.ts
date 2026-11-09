@@ -6,8 +6,8 @@ import { showToast } from "#lib/stores/toasts.svelte.ts";
 import { storage } from "#lib/util/storage.ts";
 import { quietWallpaper } from "#lib/modes/wallpaper.ts";
 import { playback } from "./audio.ts";
-import { isSpeaking, stopSpeech } from "./speaker.ts";
-import { isSpeechEcho } from "./speech-echo.ts";
+import { isSpeaking, speakingText, stopSpeech } from "./speaker.ts";
+import { isOwnSpeech, isSpeechEcho } from "./speech-echo.ts";
 import { cancelActiveAsk } from "#lib/chat/ask.ts";
 import { chime } from "./chime.ts";
 import { findWake } from "./wake-matcher.ts";
@@ -42,6 +42,7 @@ let Ctor: RecognizerCtor | null = null;
 let wakeRec: Recognizer | null = null;
 let awaitIndex = 0;
 let awaitTimer: ReturnType<typeof setTimeout> | undefined;
+let awaitEndsAt = 0;
 let lastLength = 0;
 let ignoreUntil = 0;
 let restartTimer: ReturnType<typeof setTimeout> | undefined;
@@ -81,7 +82,17 @@ function beginAwait({
   showChrome();
   if (withChime) chime();
   clearTimeout(awaitTimer);
+  awaitEndsAt = Date.now() + ms;
   awaitTimer = setTimeout(finishAwait, ms);
+}
+
+/** While the owner is still talking, the follow-up window must not close under them. */
+const STILL_TALKING_MS = 4000;
+function keepAwaitOpen(): void {
+  if (awaitEndsAt - Date.now() >= STILL_TALKING_MS) return;
+  clearTimeout(awaitTimer);
+  awaitEndsAt = Date.now() + STILL_TALKING_MS;
+  awaitTimer = setTimeout(finishAwait, STILL_TALKING_MS);
 }
 
 /** Stop waiting for a command (a click on the sphere while NOVA waits). */
@@ -155,10 +166,15 @@ export function handleWakeResult(event: SpeechResultEvent): void {
       clearTimeout(settleTimer);
       pendingFinalIndex = -1;
     }
-    if (isSpeaking() && findWake(heard) && !isSpeechEcho(heard, lastSpoken)) {
-      stopSpeech();
-      if (chat.busy) cancelActiveAsk();
-      if (!shell.awaiting) beginAwait({ withChime: false, index: i });
+    if (isSpeaking()) {
+      const saying = `${lastSpoken} ${speakingText()}`;
+      // Barge-in: "Hey NOVA", or a sentence of the owner's own (not her echo), stops her at once.
+      const wake = findWake(heard) && !isSpeechEcho(heard, saying);
+      if (wake || isOwnSpeech(heard, saying)) {
+        stopSpeech();
+        if (chat.busy) cancelActiveAsk();
+        if (!shell.awaiting) beginAwait({ withChime: false, index: i });
+      }
     }
     if (busyTalking() && !shell.awaiting) continue; // never answer our own voice
     if (i <= sentIndex) continue; // this phrase was already answered
@@ -166,6 +182,7 @@ export function handleWakeResult(event: SpeechResultEvent): void {
     if (shell.awaiting) {
       if (i < awaitIndex) continue;
       const command = afterWake(heard);
+      if (command) keepAwaitOpen();
       if (!result.isFinal) {
         if (command) chat.you = `“${command}…”`;
         sendWhenSettled(command, i);
@@ -187,27 +204,51 @@ export function handleWakeResult(event: SpeechResultEvent): void {
   }
 }
 
-// A short, silent follow-up window makes voice chat feel continuous without leaving the
-// explicit wake listener in command mode all day.
+// After NOVA has spoken she keeps listening for a while, so the owner can simply answer her
+// without "Hey NOVA" again: that is what makes it a conversation instead of a single question.
+export const FOLLOW_UP_MS = 9000;
+export const FOLLOW_UP_QUESTION_MS = 12_000;
 let lastSpoken = "";
+let lastWasVoice = false;
 const askedSomething = (text: string) => /\?/.test(String(text).slice(-160));
 
-/** Remember what NOVA said last, so afterSpeech knows whether it asked a question. */
-export function noteSpoken(text: string): void {
-  lastSpoken = text;
+/** Listens for one follow-up phrase when "Hey NOVA" is off (tap-to-talk). Set by recognition.ts. */
+let followUpListener: ((ms: number) => void) | null = null;
+export function setFollowUpListener(listener: ((ms: number) => void) | null) {
+  followUpListener = listener;
 }
+/** False while something else owns the microphone (the hands-free Gesprek). */
+let followUpAllowed: () => boolean = () => true;
+export function setFollowUpGuard(guard: () => boolean): void {
+  followUpAllowed = guard;
+}
+
+/** Remember what NOVA said last and whether it answered something spoken. */
+export function noteSpoken(text: string, voiceTurn = false): void {
+  lastSpoken = text;
+  lastWasVoice = voiceTurn;
+}
+
+/** How long to keep listening after NOVA said `text`. */
+export const followUpMs = (text: string): number =>
+  askedSomething(text) ? FOLLOW_UP_QUESTION_MS : FOLLOW_UP_MS;
 
 /** Called when NOVA stops talking. */
 export function afterSpeech(): void {
   ignoreUntil = Date.now() + 900;
+  const ms = followUpMs(lastSpoken);
+  if (!followUpAllowed()) return;
   if (shell.wakeEnabled && shell.wakeActive)
     setTimeout(() => {
       if (!chat.busy && !playback.current && !shell.awaiting)
-        beginAwait({
-          withChime: false,
-          ms: askedSomething(lastSpoken) ? 6000 : 4000,
-        });
+        beginAwait({ withChime: false, ms });
     }, 950);
+  else if (!shell.wakeEnabled && lastWasVoice && followUpListener) {
+    const listen = followUpListener;
+    setTimeout(() => {
+      if (!playback.current && !shell.awaiting && followUpAllowed()) listen(ms);
+    }, 700);
+  }
 }
 
 function stopWake(): void {

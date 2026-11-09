@@ -375,7 +375,7 @@ export async function ask(
       );
     }
     // The voice has been speaking along; wait until it has said the last sentence.
-    noteSpoken(fullReply);
+    noteSpoken(fullReply, inputMode === "voice");
     speaker.finish();
     await speaker.done;
     sent = true;
