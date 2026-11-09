@@ -44,6 +44,8 @@ interface Harness {
   spoken: string[];
   turns: TurnInput[];
   sttCalls: number;
+  /** Size of every WAV sent to speech recognition. */
+  sttBytes: number[];
   ended: string[];
 }
 
@@ -62,12 +64,16 @@ function build(over: {
   const spoken: string[] = [];
   const turns: TurnInput[] = [];
   const ended: string[] = [];
-  const h = { sttCalls: 0 } as Harness;
+  const h = { sttCalls: 0, sttBytes: [] as number[] } as Harness;
   const deps: SessionDeps = {
     stt: {
       unavailable: () => null,
-      transcribe: async () =>
-        over.stt?.(h.sttCalls++) ?? { ok: true, text: "Hoe laat is het?" },
+      transcribe: async (wav) => {
+        h.sttBytes.push(wav.length);
+        return (
+          over.stt?.(h.sttCalls++) ?? { ok: true, text: "Hoe laat is het?" }
+        );
+      },
     },
     speak: async (text) => {
       spoken.push(text);
@@ -384,5 +390,105 @@ describe("conversation session", () => {
     for (let i = 0; i < 40; i++) h.session.feed(speech);
     for (let i = 0; i < 70; i++) h.session.feed(new Int16Array(320));
     await vi.waitFor(() => expect(h.turns).toHaveLength(1));
+  });
+
+  it("keeps a sentence the caller finishes after a pause as one question", async () => {
+    let first!: TurnInput;
+    const h = build({
+      stt: (n) => ({
+        ok: true,
+        text:
+          n === 0 ? "Wat is het weer" : "Wat is het weer morgen in Utrecht?",
+      }),
+      turn: async (input) => {
+        if (!first) {
+          first = input;
+          // The model is still thinking when the caller goes on talking.
+          await new Promise((resolve) =>
+            input.signal.addEventListener("abort", resolve),
+          );
+          throw new Error("Request cancelled");
+        }
+        input.emit("token", { text: "Morgen wordt het zonnig in Utrecht. " });
+        return { reply: "Morgen wordt het zonnig in Utrecht." };
+      },
+    });
+    await started(h);
+    talk(h, 600);
+    await vi.waitFor(() => expect(h.turns).toHaveLength(1));
+    talk(h, 600);
+    await vi.waitFor(() => expect(h.turns).toHaveLength(2));
+    expect(first.signal.aborted).toBe(true);
+    // The second recognition got both parts of the sentence, not only "morgen in Utrecht".
+    expect(h.sttBytes[1]!).toBeGreaterThan(h.sttBytes[0]! * 1.6);
+    expect(h.turns[1]!.message).toBe("Wat is het weer morgen in Utrecht?");
+    await vi.waitFor(() =>
+      expect(h.spoken).toContain("Morgen wordt het zonnig in Utrecht."),
+    );
+  });
+
+  it("still answers when a cough interrupted the thinking", async () => {
+    let calls = 0;
+    const h = build({
+      turn: async (input) => {
+        if (calls++ === 0) {
+          await new Promise((resolve) =>
+            input.signal.addEventListener("abort", resolve),
+          );
+          throw new Error("Request cancelled");
+        }
+        input.emit("token", { text: "Het is half drie. " });
+        return { reply: "Het is half drie." };
+      },
+    });
+    await started(h);
+    talk(h);
+    await vi.waitFor(() => expect(h.turns).toHaveLength(1));
+    frames(h, "speech", 120); // a cough: starts like speech, too short to be a turn
+    frames(h, "silence", 1000);
+    await vi.waitFor(() => expect(h.turns).toHaveLength(2));
+    expect(h.turns[1]!.message).toBe("Hoe laat is het?");
+    await vi.waitFor(() => expect(h.spoken).toContain("Het is half drie."));
+    await vi.waitFor(() => expect(h.session.state).toBe("listening"));
+    expect(h.ended).toEqual([]);
+  });
+
+  it("talking over the answer itself is a new turn, not a continuation", async () => {
+    let calls = 0;
+    const h = build({
+      stt: (n) => ({ ok: true, text: n === 0 ? "Vertel iets" : "Stop maar" }),
+      turn: async (input) => {
+        if (calls++ === 0) {
+          input.emit("token", { text: "Er was eens een lang verhaal. " });
+          await new Promise((resolve) =>
+            input.signal.addEventListener("abort", resolve),
+          );
+          throw new Error("Request cancelled");
+        }
+        return { reply: "Oké." };
+      },
+    });
+    await started(h);
+    h.transport.hold = 100_000;
+    talk(h);
+    await vi.waitFor(() => expect(h.session.state).toBe("speaking"));
+    h.transport.hold = 0;
+    talk(h, 600);
+    await vi.waitFor(() => expect(h.turns).toHaveLength(2));
+    expect(h.sttBytes[1]!).toBeLessThan(h.sttBytes[0]! * 1.6);
+    expect(h.turns[1]!.message).toBe("Stop maar");
+  });
+
+  it("keeps the call open after an answer and closes a goodbye warmly", async () => {
+    const h = build({ idleMs: 5000 });
+    await started(h);
+    talk(h);
+    await vi.waitFor(() => expect(h.spoken).toContain("Fijne dag!"));
+    await vi.waitFor(() => expect(h.session.state).toBe("listening"));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(h.transport.closed).toBe(false);
+    expect(h.ended).toEqual([]);
+    expect(PHRASES.nl.bye).toMatch(/fijn dat je belde/i);
+    h.session.close();
   });
 });
