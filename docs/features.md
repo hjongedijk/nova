@@ -173,7 +173,7 @@ NOVA can watch a lasting goal without being asked again: "zorg dat mijn servers 
 - A light scheduler (`setInterval`, `unref`) runs the objectives that are due. The next time follows from the stored `lastCheckAt`, so after a restart it continues without a flood of catch-up checks; an objective that stood still for long runs once.
 - Checks go through `ToolsService.execute(..., { readOnlyOnly: true })` with session `objective_<id>`. Conditions are evaluated in code: routine checks use no model and cost no free quota.
 - Dedupe: a deviation counts only after N consecutive checks (debounce, per check). Exactly one report goes out when a deviation starts (or changes composition) and a "Hersteld" when it disappears. A tool failing three times in a row counts as a deviation itself ("de controle zelf mislukt").
-- Only for a new or changed deviation with urgency `warn` or `urgent`, `AgentService.start()` starts an investigation ("onderzoek waarom ..."), at most once per 30 minutes per objective, with 5 turns and 8 minutes. The final summary is stored on the objective (`lastInvestigation`) and posted as a follow-up in the alert feed.
+- Only for a new or changed deviation with urgency `warn` or `urgent`, `AgentService.start()` starts an investigation and repair ("onderzoek waarom ...": find the cause, fix it when possible, for example by restarting a service or reloading an integration, and report what was done), at most once per 30 minutes per objective, with 5 turns and 8 minutes. The final summary is stored on the objective (`lastInvestigation`) and posted as a follow-up in the alert feed.
 
 ### Templates
 
@@ -202,7 +202,7 @@ Per objective the last 20 results, counters (checks, deviations, reports, suppre
 
 ### Known limits
 
-- The investigation is read-only only through its instruction text; `AgentService.start()` has no technical read-only mode, and nothing approves its tool calls, so an investigation can run a changing tool.
+- The investigation may change things: it runs without approval and is expected to fix what it can, then report.
 - `agenda_leeg` cannot tell whether a calendar is connected; without a connection "empty" counts as a deviation.
 - `service_online` uses the target names of `network_check`, not arbitrary host:port.
 - The investigation summary also arrives through `AgentService`'s own "Klaar" report, which does not count toward the daily budget.

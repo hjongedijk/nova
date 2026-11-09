@@ -410,7 +410,7 @@ describe("investigation", () => {
     await s.service.tick();
     expect(s.started).toHaveLength(1);
     expect(s.started[0]).toMatch(/^onderzoek waarom/);
-    expect(s.started[0]).toMatch(/Alleen lezen/);
+    expect(s.started[0]).toMatch(/los het zelf op/);
     s.advance(5 * MIN);
     await s.service.tick();
     expect(s.started).toHaveLength(1);

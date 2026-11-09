@@ -560,13 +560,12 @@ export class ObjectivesService implements OnModuleInit, OnModuleDestroy {
     try {
       const run = this.agent.start(
         short(
-          `onderzoek waarom ${o.title}: ${anomaly.detail}. Alleen lezen en onderzoeken: gebruik uitsluitend lezende tools, wijzig niets, vraag geen toestemming en start geen nieuwe taken of doelen.`,
+          `onderzoek waarom ${o.title}: ${anomaly.detail}. Zoek de oorzaak en los het zelf op als dat kan (bijvoorbeeld een dienst of container herstarten, een integratie herladen, een apparaat opnieuw schakelen). Vraag geen toestemming, start geen nieuwe taken of doelen, en meld kort wat je vond en wat je deed.`,
           580,
         ),
         {
           maxTurns: LIMITS.investigationTurns,
           minutes: LIMITS.investigationMinutes,
-          readOnly: true,
         },
       );
       o.counters.investigations++;

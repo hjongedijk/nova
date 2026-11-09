@@ -2002,7 +2002,7 @@ describe("the helper overlay choice", () => {
         timer: "speak",
       },
       rituals: {
-        morning: { enabled: false, time: "08:00" },
+        morning: { enabled: true, time: "08:00" },
         evening: { enabled: false, time: "22:00" },
         checkIn: { enabled: false, afterHours: 4 },
       },

@@ -8,6 +8,8 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
+import { ModuleRef } from "@nestjs/core";
+import { AgentService } from "../agent/agent.service.js";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { SessionMemoryService } from "../memory/session-memory.service.js";
 import { HomeAssistantService } from "../home/home-assistant.service.js";
@@ -17,6 +19,21 @@ import { AlertsFeed } from "./alerts-feed.service.js";
 import { SpeechPresenceService } from "./speech-presence.service.js";
 
 const CHECK_MS = 30_000;
+/** A ritual whose minute was missed (quiet, restart, presence) still runs within this window. */
+const RITUAL_WINDOW_MINUTES = 120;
+const MORNING_BRIEFING_GOAL =
+  "Maak de ochtendbriefing voor vandaag: haal daily_briefing, weather_forecast en news_headlines op en vat ze samen in drie tot vijf natuurlijke zinnen (afspraken, weer, wat belangrijk is). Vraag niets, start geen nieuwe taken.";
+
+function minutesOf(value: string): number {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours! * 60 + minutes!;
+}
+
+/** True from `start` up to the window length after it, on the same day. */
+export function inRitualWindow(now: string, start: string): boolean {
+  const offset = minutesOf(now) - minutesOf(start);
+  return offset >= 0 && offset < RITUAL_WINDOW_MINUTES;
+}
 const QUIET_RITUAL_TEXT: Record<
   "morning" | "evening" | "checkIn",
   { title: string; detail: string }
@@ -91,6 +108,7 @@ export class RitualsService implements OnModuleInit, OnModuleDestroy {
     private readonly presence: SpeechPresenceService,
     private readonly alerts: AlertsFeed,
     private readonly home: HomeAssistantService,
+    private readonly moduleRef: ModuleRef,
   ) {
     this.progressFile = config.dataFile("rituals-progress.json");
   }
@@ -196,7 +214,7 @@ export class RitualsService implements OnModuleInit, OnModuleDestroy {
       let changed = false;
       if (
         rituals.morning.enabled &&
-        time === rituals.morning.time &&
+        inRitualWindow(time, rituals.morning.time) &&
         !progress.morning
       ) {
         this.deliver("morning", now);
@@ -205,7 +223,7 @@ export class RitualsService implements OnModuleInit, OnModuleDestroy {
       }
       if (
         rituals.evening.enabled &&
-        time === rituals.evening.time &&
+        inRitualWindow(time, rituals.evening.time) &&
         !progress.evening
       ) {
         this.deliver("evening", now);
@@ -239,6 +257,9 @@ export class RitualsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private deliver(kind: keyof typeof QUIET_RITUAL_TEXT, now: Date): void {
+    // The morning greeting is a real briefing: an agent run gathers the day
+    // and reports it through its own "Klaar" message. The fixed text is the fallback.
+    if (kind === "morning" && this.startBriefing()) return;
     const copy = QUIET_RITUAL_TEXT[kind];
     this.alerts.record(
       {
@@ -253,6 +274,18 @@ export class RitualsService implements OnModuleInit, OnModuleDestroy {
       },
       now,
     );
+  }
+
+  private startBriefing(): boolean {
+    try {
+      // Resolved lazily: AgentService depends on the chat stack, which depends on this module.
+      const agent = this.moduleRef.get(AgentService, { strict: false });
+      agent.start(MORNING_BRIEFING_GOAL, { maxTurns: 6, minutes: 5 });
+      return true;
+    } catch {
+      this.logger.warn("Morning briefing unavailable; plain greeting sent");
+      return false;
+    }
   }
 
   private readProgress(day: string): RitualProgress {

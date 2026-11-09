@@ -64,14 +64,14 @@ describe("helper preference history", () => {
       }),
     ).toThrow("Ongeldige meldingsvoorkeur.");
     expect(preferences.rituals).toEqual({
-      morning: { enabled: false, time: "08:00" },
+      morning: { enabled: true, time: "08:00" },
       evening: { enabled: false, time: "22:00" },
       checkIn: { enabled: false, afterHours: 4 },
       weeklyOverview: { enabled: false, time: "18:00" },
       dailyHighlight: { enabled: false, time: "20:00" },
       smallSurprises: { enabled: false },
-      welcomeHome: { enabled: false },
-      calendarReminders: { enabled: false, minutesBefore: 15 },
+      welcomeHome: { enabled: true },
+      calendarReminders: { enabled: true, minutesBefore: 15 },
     });
     const legacy = normalize({
       ...preferences,

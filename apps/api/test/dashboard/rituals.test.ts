@@ -11,12 +11,19 @@ afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
+const noAgent = {
+  get: () => {
+    throw new Error("no agent in this test");
+  },
+};
+
 function fixture(
   rituals: unknown,
   quiet = false,
   focused = false,
   climateTemperature: number | null = 19,
   temperatureUnit: string | null = "°C",
+  moduleRef: unknown = noAgent,
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-rituals-"));
   directories.push(dir);
@@ -59,6 +66,7 @@ function fixture(
               },
             ],
     } as never,
+    moduleRef as never,
   );
   return { dir, record, service };
 }
@@ -89,6 +97,28 @@ describe("opt-in assistant rituals", () => {
     expect(dbStat(path.join(f.dir, "rituals-progress.json")).mode & 0o777).toBe(
       0o600,
     );
+  });
+
+  it("starts a real briefing in the morning and still greets after a missed minute", async () => {
+    const start = vi.fn();
+    const f = fixture(
+      {
+        morning: { enabled: true, time: "08:00" },
+        evening: { enabled: false, time: "22:00" },
+        checkIn: { enabled: false, afterHours: 4 },
+      },
+      false,
+      false,
+      undefined,
+      undefined,
+      { get: () => ({ start }) },
+    );
+    // 08:45 local: the 08:00 minute was missed, the window still applies.
+    await f.service.checkSchedule(new Date("2026-10-12T06:45:00.000Z"));
+    await f.service.checkSchedule(new Date("2026-10-12T06:46:00.000Z"));
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]?.[0]).toMatch(/ochtendbriefing/);
+    expect(f.record).not.toHaveBeenCalled();
   });
 
   it("does not issue a silence check-in before the threshold", async () => {
