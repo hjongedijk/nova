@@ -20,6 +20,7 @@ import { chatEvents } from "./events.ts";
 import { getSessionId } from "./session.ts";
 import { getConversationLanguage } from "./session.ts";
 import { readEvents } from "./sse.ts";
+import { dispatchActivity } from "./activity.svelte.ts";
 import { showStage } from "./stage.ts";
 import { nextToolInterjection } from "./tool-interjection.ts";
 import { readCommunicationPreferences } from "./communication-preferences.ts";
@@ -127,6 +128,8 @@ export async function ask(
   chat.toolResult = "";
   chat.activeTool = "";
   chat.busy = true;
+  dispatchActivity({ type: "turn_start" });
+  let turnFailed = false;
 
   addMessage(
     "user",
@@ -218,6 +221,7 @@ export async function ask(
       if (event === "confirmation")
         addCard(data as unknown as Parameters<typeof addCard>[0]);
       if (event === "tool_start") {
+        dispatchActivity({ type: "tool_start", data });
         clearInterjection();
         setState("executing");
         const stepValue = data?.step;
@@ -242,6 +246,7 @@ export async function ask(
           }, 1500);
       }
       if (event === "tool_result") {
+        dispatchActivity({ type: "tool_result", data });
         clearInterjection();
         setState("thinking");
         chat.hint = "";
@@ -372,6 +377,7 @@ export async function ask(
     await speaker.done;
     sent = true;
   } catch (error) {
+    turnFailed = true;
     clearInterjection();
     speaker.cancel();
     if (requestController.signal.aborted) {
@@ -397,6 +403,7 @@ export async function ask(
     if (activeRequest === requestController) activeRequest = null;
     clearInterjection();
     chat.busy = false;
+    dispatchActivity({ type: "turn_end", failed: turnFailed });
     chatEvents.emit("turnDone");
     if (!playback.current) setState("ready");
   }

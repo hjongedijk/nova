@@ -11,6 +11,7 @@ import {
 import { directCurrencyQuery, directCurrencyReply } from "./direct-currency.js";
 import { Injectable } from "@nestjs/common";
 import { sanitize } from "../core/security/sanitize.js";
+import { toolResultPreview, toolStartPreview } from "./tool-preview.js";
 import type {
   ChatAttachment,
   CommunicationPreference,
@@ -680,7 +681,12 @@ export class OrchestratorService {
           throw new Error("Malformed tool call");
         const name = call.function.name;
         const args = parseToolArguments(call.function.arguments);
-        emit("tool_start", { name, step: completedSteps + 1 });
+        const startPreview = toolStartPreview(name, args);
+        emit("tool_start", {
+          name,
+          step: completedSteps + 1,
+          ...(startPreview ? { preview: startPreview } : {}),
+        });
         const result = await this.tools.execute(
           name,
           args,
@@ -722,6 +728,9 @@ export class OrchestratorService {
           )
             requiredEvidenceSucceeded = true;
         }
+        const resultPreview = result.requiresConfirmation
+          ? undefined
+          : toolResultPreview(name, args, result);
         emit("tool_result", {
           name,
           risk,
@@ -731,6 +740,8 @@ export class OrchestratorService {
           accepted: result.accepted === true,
           verified: result.verified ?? null,
           status: (result.status as string | undefined) ?? null,
+          step: completedSteps,
+          ...(resultPreview ? { preview: resultPreview } : {}),
         });
         // Visualisation tools ask the screen to open or refresh the holographic view.
         if (result.ok && isVisualizationEvent(result.visualization)) {
