@@ -260,6 +260,7 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
         findings++;
         const outcome = await this.deliver(f);
         if (outcome === "gemeld") delivered++;
+        this.repair(f);
         summaries.push({
           id: f.id,
           scan: f.scan,
@@ -516,6 +517,62 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  // ---- repair --------------------------------------------------------------------------------
+
+  /**
+   * A device or service that is down is not only reported: NOVA starts an agent run that looks for
+   * the cause and fixes it when she can (restart, reload, reconnect). Independent of the alert gates;
+   * per finding key once an hour, a few per day, and only while self-heal is on.
+   */
+  repair(f: Finding): boolean {
+    const file = this.file;
+    if (!file.settings.selfHeal) return false;
+    if (f.scan !== "health" && f.scan !== "home") return false;
+    if (RANK[f.urgency] < RANK.warn) return false;
+    // Without working models an agent run cannot do anything about it.
+    if (/^health:(?:routing|models-failing)/.test(f.key)) return false;
+    const now = this.now();
+    const day = localDay(now, file.settings.quiet.timezone);
+    const repairs = file.repairs;
+    if (repairs.day !== day) {
+      repairs.day = day;
+      repairs.count = 0;
+    }
+    for (const [key, at] of Object.entries(repairs.lastAt))
+      if (now - at >= LIMITS.repairCooldownMs) delete repairs.lastAt[key];
+    if (repairs.lastAt[f.key] !== undefined) return false;
+    if (repairs.count >= LIMITS.repairsPerDay) return false;
+    // Counted before the start: a failing agent is not hammered every scan.
+    repairs.lastAt[f.key] = now;
+    repairs.count++;
+    try {
+      this.agent.start(repairGoal(f), {
+        maxTurns: LIMITS.repairTurns,
+        minutes: LIMITS.repairMinutes,
+      });
+      this.record({
+        kind: "repair",
+        scan: f.scan,
+        urgency: f.urgency,
+        findingId: f.id,
+        outcome: "herstel gestart",
+      });
+      this.trySave();
+      return true;
+    } catch (error) {
+      this.record({
+        kind: "repair",
+        scan: f.scan,
+        urgency: f.urgency,
+        findingId: f.id,
+        outcome: "herstel niet gestart",
+      });
+      this.log.warn(`repair not started: ${(error as Error).message}`);
+      this.trySave();
+      return false;
+    }
+  }
+
   // ---- standing objectives --------------------------------------------------------------------
 
   /** Once, when there are none: watch the servers (if Proxmox is there) or the key local services. Skips what is missing. */
@@ -739,6 +796,14 @@ export class AutopilotService implements OnModuleInit, OnModuleDestroy {
       /* memory stays authoritative until the next change */
     }
   }
+}
+
+/** The repair goal in Dutch; title and detail come from templates, so no private content. */
+export function repairGoal(f: Finding): string {
+  const task =
+    " Zoek de oorzaak, herstel het zelf als dat kan (bijvoorbeeld herstarten, herladen of opnieuw verbinden) en controleer of het weer werkt. Vraag geen toestemming en start geen nieuwe doelen. Meld kort wat je gevonden en gedaan hebt en of het nu werkt.";
+  const problem = `Los dit zelf op: ${f.title}. ${f.detail}`.trim();
+  return `${problem.slice(0, 590 - task.length)}${task}`;
 }
 
 function describeActivity(a: ActivityEntry) {

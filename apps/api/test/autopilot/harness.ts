@@ -42,6 +42,8 @@ export interface World {
   texts: Array<{ to: string; body: string }>;
   toolCalls: Array<{ name: string; readOnlyOnly?: boolean; session: string }>;
   createdObjectives: Array<Record<string, unknown>>;
+  agentStarts: Array<{ goal: string; options: Record<string, unknown> }>;
+  agentFails: boolean;
 }
 
 export function newWorld(): World {
@@ -88,6 +90,8 @@ export function newWorld(): World {
     texts: [],
     toolCalls: [],
     createdObjectives: [],
+    agentStarts: [],
+    agentFails: false,
   };
 }
 
@@ -201,7 +205,11 @@ export function rig(
   };
   const agent = {
     list: () => world.runs,
-    start: vi.fn(() => ({ id: "run" })),
+    start: vi.fn((goal: string, options: Record<string, unknown> = {}) => {
+      if (world.agentFails) throw new Error("Er lopen al twee taken");
+      world.agentStarts.push({ goal, options });
+      return { id: "run" };
+    }),
   };
   const telephony = {
     get enabled() {

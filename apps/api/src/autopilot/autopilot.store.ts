@@ -28,6 +28,7 @@ export const emptyFile = (): AutopilotFile => ({
   lastFindings: [],
   activity: [],
   tuning: emptyTuning(),
+  repairs: { day: "", count: 0, lastAt: {} },
 });
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -221,6 +222,21 @@ function lenientTuning(raw: unknown): TuningState {
   return tuning;
 }
 
+function lenientRepairs(raw: unknown): AutopilotFile["repairs"] {
+  if (!isObject(raw)) return { day: "", count: 0, lastAt: {} };
+  return {
+    day: typeof raw.day === "string" ? raw.day : "",
+    count: num(raw.count),
+    lastAt: isObject(raw.lastAt)
+      ? Object.fromEntries(
+          Object.entries(raw.lastAt).filter(
+            (e): e is [string, number] => typeof e[1] === "number",
+          ),
+        )
+      : {},
+  };
+}
+
 const num = (value: unknown, fallback = 0) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
@@ -282,6 +298,7 @@ export class AutopilotStore {
         ? (parsed.activity as ActivityEntry[]).slice(-LIMITS.activity)
         : [],
       tuning: lenientTuning(parsed.tuning),
+      repairs: lenientRepairs(parsed.repairs),
     };
   }
 

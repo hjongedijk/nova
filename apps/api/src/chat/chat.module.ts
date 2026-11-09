@@ -11,6 +11,7 @@ import { ContextBuilder } from "./context-builder.service.js";
 import { OrchestratorService } from "./orchestrator.service.js";
 import { OutcomeService } from "./outcome.service.js";
 import { DailyMemorySummaryService } from "./daily-memory-summary.service.js";
+import { PreferenceLearnerService } from "./preference-learner.service.js";
 
 /**
  * Conversation: /api/chat, /api/chat-stream and /api/actions/confirm. It talks to the language model
@@ -33,6 +34,7 @@ import { DailyMemorySummaryService } from "./daily-memory-summary.service.js";
     ConfirmationHandler,
     OutcomeService,
     DailyMemorySummaryService,
+    PreferenceLearnerService,
   ],
   exports: [OrchestratorService, ConfirmationHandler, CorrectionLearner],
 })

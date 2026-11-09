@@ -44,9 +44,13 @@ function localParts(date: Date, timezone: string): Record<string, string> {
 }
 
 /** The prior local calendar date, once the configured local summary time has passed. */
-export function dueSummaryDate(date: Date, timezone: string): string | null {
+export function dueSummaryDate(
+  date: Date,
+  timezone: string,
+  at = SUMMARY_AT,
+): string | null {
   const parts = localParts(date, timezone);
-  if (`${parts.hour}:${parts.minute}` < SUMMARY_AT) return null;
+  if (`${parts.hour}:${parts.minute}` < at) return null;
   const yesterday = new Date(
     Date.UTC(
       Number(parts.year),
@@ -57,21 +61,26 @@ export function dueSummaryDate(date: Date, timezone: string): string | null {
   return yesterday.toISOString().slice(0, 10);
 }
 
+/** The local calendar date (YYYY-MM-DD) of an ISO timestamp; null when unparseable. */
+export function localDayOf(at: string, timezone: string): string | null {
+  try {
+    const parts = localParts(new Date(at), timezone);
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  } catch {
+    return null;
+  }
+}
+
 export function summaryInput(
   messages: StoredMessage[],
   day: string,
   timezone: string,
 ): StoredMessage[] {
   const dated = withoutRefusals(messages)
-    .filter((item) => {
-      if (!item.content.trim()) return false;
-      try {
-        const localDate = localParts(new Date(item.at), timezone);
-        return `${localDate.year}-${localDate.month}-${localDate.day}` === day;
-      } catch {
-        return false;
-      }
-    })
+    .filter(
+      (item) =>
+        item.content.trim() !== "" && localDayOf(item.at, timezone) === day,
+    )
     .sort((a, b) => a.at.localeCompare(b.at));
   let remaining = MAX_TRANSCRIPT_CHARS;
   const bounded: StoredMessage[] = [];

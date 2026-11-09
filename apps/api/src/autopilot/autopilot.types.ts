@@ -54,7 +54,8 @@ export type ActivityKind =
   | "bootstrap"
   | "delegated"
   | "setting"
-  | "tuning";
+  | "tuning"
+  | "repair";
 
 /** Metadata only: never message text, titles of events or names of people. */
 export interface ActivityEntry {
@@ -130,6 +131,15 @@ export interface AutopilotFile {
   lastFindings: FindingSummary[];
   activity: ActivityEntry[];
   tuning: TuningState;
+  /** Repair runs NOVA started by herself. */
+  repairs: RepairState;
+}
+
+/** Today's repair count and, per finding key, when the last repair run started (epoch ms). */
+export interface RepairState {
+  day: string;
+  count: number;
+  lastAt: Record<string, number>;
 }
 
 export const DEFAULT_SETTINGS: AutopilotSettings = {
@@ -167,6 +177,11 @@ export const LIMITS = {
   maxInterval: 60,
   reactions: 60,
   pending: 50,
+  /** Repair runs: per finding key at most once per hour, at most this many per local day. */
+  repairCooldownMs: 60 * 60_000,
+  repairsPerDay: 6,
+  repairTurns: 6,
+  repairMinutes: 8,
 } as const;
 
 export class AutopilotError extends Error {}

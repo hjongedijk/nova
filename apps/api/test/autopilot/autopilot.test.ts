@@ -237,6 +237,94 @@ describe("(c) NOVA's own health", () => {
   });
 });
 
+describe("repair runs", () => {
+  const repairs = (r: Rig) =>
+    r.service.status().activity.filter((a) => a.kind === "repair");
+
+  it("starts a repair run for a device that stays unavailable, and still alerts", async () => {
+    const r = make();
+    r.world.entities = [entity("light.hal", "unavailable", "Hallamp")];
+    await r.service.scan();
+    r.clock.t += 5 * MIN;
+    await r.service.scan();
+    expect(titles(r.world)).toEqual(["Hallamp reageert niet meer"]);
+    expect(r.world.agentStarts).toHaveLength(1);
+    const [start] = r.world.agentStarts;
+    expect(start!.goal).toMatch(/^Los dit zelf op: Hallamp reageert niet meer/);
+    expect(start!.goal).toMatch(/oorzaak.*herstarten.*Meld kort/s);
+    expect(start!.goal.length).toBeLessThanOrEqual(600);
+    expect(start!.options).toEqual({ maxTurns: 6, minutes: 8 });
+    expect(start!.options).not.toHaveProperty("readOnly");
+    expect(repairs(r)).toMatchObject([
+      { scan: "home", urgency: "warn", outcome: "herstel gestart" },
+    ]);
+  });
+
+  it("repairs a key at most once an hour, then again while it persists", async () => {
+    const r = make();
+    r.world.mcp = [{ id: "filesystem", enabled: true, connected: false }];
+    for (let i = 0; i < 11; i++) {
+      await r.service.scan();
+      r.clock.t += 5 * MIN;
+    }
+    expect(r.world.agentStarts).toHaveLength(1);
+    r.clock.t += 10 * MIN;
+    await r.service.scan();
+    expect(r.world.agentStarts).toHaveLength(2);
+  });
+
+  it("respects the daily cap and remembers it across a restart", async () => {
+    const r = make();
+    r.world.entities = ["a", "b", "c"].map((n) =>
+      entity(`light.${n}`, "unavailable"),
+    );
+    r.world.mcp = ["w1", "w2", "w3", "w4"].map((id) => ({
+      id,
+      enabled: true,
+      connected: false,
+    }));
+    await r.service.scan();
+    r.clock.t += 5 * MIN;
+    await r.service.scan();
+    expect(r.world.agentStarts).toHaveLength(6);
+    r.clock.t += 2 * HOUR;
+    r.restart();
+    await r.service.scan();
+    expect(r.world.agentStarts).toHaveLength(6);
+    // The next local day starts a fresh count.
+    r.clock.t += 24 * HOUR;
+    await r.service.scan();
+    expect(r.world.agentStarts.length).toBeGreaterThan(6);
+  });
+
+  it("does not repair info findings, routing problems or when self-heal is off", async () => {
+    const r = make();
+    r.world.events = [event("Tandarts", NOON + 20 * MIN)];
+    r.world.routing = { ready: false, status: "POLICY_CHANGE_PENDING" };
+    await r.service.scan();
+    expect(r.world.alerts).toHaveLength(2);
+    expect(r.world.agentStarts).toHaveLength(0);
+
+    const off = make();
+    off.service.updateSettings({ selfHeal: false });
+    off.world.disk = 3;
+    await off.service.scan();
+    expect(off.world.alerts).toHaveLength(1);
+    expect(off.world.agentStarts).toHaveLength(0);
+  });
+
+  it("keeps alerting when the agent cannot start, and does not retry every scan", async () => {
+    const r = make();
+    r.world.agentFails = true;
+    r.world.disk = 3;
+    await r.service.scan();
+    r.clock.t += 5 * MIN;
+    await r.service.scan();
+    expect(r.world.alerts).toHaveLength(1);
+    expect(repairs(r)).toMatchObject([{ outcome: "herstel niet gestart" }]);
+  });
+});
+
 describe("(d) nudges", () => {
   it("nudges once about a run that has waited longer than 30 minutes", async () => {
     const r = make();
