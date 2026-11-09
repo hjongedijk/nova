@@ -8,6 +8,7 @@ import {
   type Presence,
   type PresenceFrame,
 } from "./presence.ts";
+import { createGestalte, type Gestalte } from "./gestalte.ts";
 import { ALERT, STATES, type Look } from "./states.ts";
 
 /**
@@ -229,6 +230,13 @@ export function startEntity(host: EntityHost): () => void {
   let presence: Presence | null = null;
   let form = 0;
   let pf: PresenceFrame | null = null;
+  /* Full screen: the WebGL Gestalte (gestalte.ts). "failed" falls back to the Canvas2D presence above. */
+  let gestalte: Gestalte | null = null;
+  let glState: "idle" | "loading" | "ready" | "failed" = compact
+    ? "failed"
+    : "idle";
+  let stopped = false;
+  let glIdle = 0;
 
   const onPointerMove = (e: PointerEvent) => {
     tx = (e.clientX / window.innerWidth) * 2 - 1;
@@ -325,7 +333,22 @@ export function startEntity(host: EntityHost): () => void {
 
     /* presence: emerge from the orb once it has formed, dissolve back the same way, interruptible both ways */
     const wantPresence = host.appearance?.() === "presence" && birth > 0.55;
-    if (wantPresence && !presence) {
+    if (wantPresence && glState === "idle") {
+      glState = "loading";
+      createGestalte(cv)
+        .then((made) => {
+          if (stopped) made?.dispose();
+          else if (made) {
+            gestalte = made;
+            glState = "ready";
+          } else glState = "failed";
+        })
+        .catch(() => {
+          glState = "failed";
+        });
+    }
+    const useGl = glState === "ready";
+    if (wantPresence && glState === "failed" && !presence) {
       const pixels =
         Math.max(window.screen?.width || W, W) * (window.devicePixelRatio || 1);
       presence = createPresence(
@@ -335,10 +358,14 @@ export function startEntity(host: EntityHost): () => void {
       );
     }
     const formRate = reduceMotion ? 1 / 0.35 : wantPresence ? 1 / 1.9 : 1 / 1.2;
-    form = wantPresence
-      ? Math.min(1, form + dt * formRate)
-      : Math.max(0, form - dt * formRate);
-    const fm = presence ? form : 0;
+    // While the GPU figure loads, the orb stays the orb.
+    form =
+      wantPresence && glState !== "loading"
+        ? Math.min(1, form + dt * formRate)
+        : Math.max(0, form - dt * formRate);
+    const fm = presence || useGl ? form : 0;
+    // The orb's own light hands over to the figure: halo, instrument, cloud and nucleus fade as it forms.
+    const orbFade = useGl ? 1 - Math.min(1, fm / 0.7) : 1;
     let lift = 1;
 
     /* make room: it lifts away as the reply grows */
@@ -397,7 +424,7 @@ export function startEntity(host: EntityHost): () => void {
     );
     halo.addColorStop(
       0,
-      `hsla(${hue},${cur.s}%,${cur.l}%,${(0.1 + 0.22 * cur.glow * birth + audioLevel * 0.2) * dim})`,
+      `hsla(${hue},${cur.s}%,${cur.l}%,${(0.1 + 0.22 * cur.glow * birth + audioLevel * 0.2) * dim * orbFade})`,
     );
     halo.addColorStop(1, `hsla(${hue},${cur.s}%,${cur.l}%,0)`);
     g.globalCompositeOperation = "lighter";
@@ -412,7 +439,10 @@ export function startEntity(host: EntityHost): () => void {
       if (d.x < 0) d.x += 1;
       if (d.x > 1) d.x -= 1;
       const a =
-        (0.1 + 0.3 * d.z) * (0.5 + 0.5 * Math.sin(t * 0.8 + d.x * 40)) * birth;
+        (0.1 + 0.3 * d.z) *
+        (0.5 + 0.5 * Math.sin(t * 0.8 + d.x * 40)) *
+        birth *
+        (useGl ? 1 - 0.6 * fm : 1);
       const sz = 0.6 + d.z * 1.4;
       g.fillStyle = `hsla(${hue},40%,86%,${a})`;
       g.fillRect(d.x * W - gx * d.z * 28, d.y * H - gy * d.z * 20, sz, sz);
@@ -420,7 +450,8 @@ export function startEntity(host: EntityHost): () => void {
 
     /* HUD rings, the instrument around the entity */
     // The instrument steps back while the presence is there, so the figure stays the subject.
-    const hudA = cur.hud * birth * (1 - 0.45 * fm);
+    // Gestalte fills the screen and needs no instrument around it.
+    const hudA = cur.hud * birth * (useGl ? orbFade : 1 - 0.45 * fm);
     const wide = W >= 1340;
     const fullRadius = Math.max(
       R * 1.7,
@@ -614,7 +645,7 @@ export function startEntity(host: EntityHost): () => void {
         ring.dir > 0
           ? R * (1.1 + age * 1.2 * span2)
           : R * (1.1 + (1 - age) * 1.0 * span2 + (compact ? 0 : 0));
-      g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(1 - age) * 0.32})`;
+      g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${(1 - age) * 0.32 * orbFade})`;
       g.beginPath();
       g.arc(
         cx,
@@ -642,10 +673,10 @@ export function startEntity(host: EntityHost): () => void {
         const len = Math.PI * (0.9 + 0.3 * Math.sin(t * 0.7 + k));
         g.beginPath();
         g.ellipse(0, 0, orx, ory, 0, a0, a0 + len);
-        g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.45 * cur.orb * birth})`;
+        g.strokeStyle = `hsla(${hue},${cur.s}%,${cur.l}%,${0.45 * cur.orb * birth * orbFade})`;
         g.lineWidth = 1.2;
         g.stroke();
-        g.fillStyle = `hsla(${hue},${cur.s}%,92%,${0.9 * cur.orb * birth})`;
+        g.fillStyle = `hsla(${hue},${cur.s}%,92%,${0.9 * cur.orb * birth * orbFade})`;
         g.beginPath();
         g.arc(
           Math.cos(a0 + len) * orx,
@@ -723,7 +754,40 @@ export function startEntity(host: EntityHost): () => void {
       }
     }
 
-    if (presence && fm > 0) {
+    if (useGl && gestalte) {
+      if (fm > 0) {
+        gestalte.render({
+          t,
+          dt,
+          form: fm,
+          state: uiState,
+          h: hue,
+          s: cur.s,
+          l: cur.l,
+          alert: intensity > 0,
+          audio: audioLevel,
+          gazeX: gx,
+          gazeY: gy,
+          ocx: cx,
+          ocy: cy,
+          orbR: R,
+          floor: replyTop(host.stage?.() ?? null, H),
+          dim: birth,
+          reduceMotion,
+        });
+        glIdle = 0;
+      } else {
+        gestalte.hide();
+        // Orb again for a while: give the GPU memory back; it rebuilds quickly if asked again.
+        glIdle += dt;
+        if (glIdle > 20) {
+          gestalte.dispose();
+          gestalte = null;
+          glState = "idle";
+          glIdle = 0;
+        }
+      }
+    } else if (presence && fm > 0) {
       pf = {
         t,
         dt,
@@ -778,7 +842,12 @@ export function startEntity(host: EntityHost): () => void {
     for (let i = 0; i < N; i++) {
       const depth = (sz[i] + 1) / 2;
       const alpha =
-        (0.12 + 0.88 * depth) * (0.4 + 0.6 * cur.glow) * birth * dim * pvis[i];
+        (0.12 + 0.88 * depth) *
+        (0.4 + 0.6 * cur.glow) *
+        birth *
+        dim *
+        pvis[i] *
+        orbFade;
       if (alpha < 0.01) continue;
       const size =
         (0.6 + 1.7 * depth) *
@@ -789,16 +858,17 @@ export function startEntity(host: EntityHost): () => void {
     }
 
     /* nucleus: it looks where you look; with the presence it becomes a quiet light inside the head */
-    if (presence && pf && fm > 0) presence.drawLights(g, pf);
-    const nx = cx + gx * R * 0.14 + ((presence?.headX ?? cx) - cx) * fm;
-    const ny = cy + gy * R * 0.14 + ((presence?.headY ?? cy) - cy) * fm;
+    if (presence && pf && fm > 0 && !useGl) presence.drawLights(g, pf);
+    const lightsOn = presence && !useGl;
+    const nx = cx + gx * R * 0.14 + (lightsOn ? (presence.headX - cx) * fm : 0);
+    const ny = cy + gy * R * 0.14 + (lightsOn ? (presence.headY - cy) * fm : 0);
     const nr =
       R *
       ((compact ? 0.3 : 0.2) + 0.1 * audioLevel + 0.025 * Math.sin(t * 1.7)) *
       birth *
       (1 - 0.35 * fm);
     const nuc = g.createRadialGradient(nx, ny, 0, nx, ny, nr * 2.6);
-    const nucA = birth * dim * (1 - 0.7 * fm);
+    const nucA = birth * dim * (1 - 0.7 * fm) * orbFade;
     nuc.addColorStop(
       0,
       `hsla(${hue},${Math.max(30, cur.s - 40)}%,96%,${0.85 * nucA})`,
@@ -828,6 +898,9 @@ export function startEntity(host: EntityHost): () => void {
 
   raf = requestAnimationFrame(frame);
   return () => {
+    stopped = true;
+    gestalte?.dispose();
+    gestalte = null;
     cancelAnimationFrame(raf);
     watch?.disconnect();
     window.removeEventListener("resize", resize);
