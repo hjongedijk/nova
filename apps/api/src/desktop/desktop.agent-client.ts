@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { NovaConfig } from "../core/config/nova-config.js";
 import { requestJson } from "../core/http/http-json.js";
+import { AGENT_PAUSED } from "../integrations/windows/windows-pc.service.js";
 import { DESKTOP_LIMITS as L } from "./desktop.limits.js";
 import type {
   DesktopAgentStatus,
@@ -35,8 +36,9 @@ export class DesktopAgentClient implements DesktopPort {
       return "Bureaubladbediening is nog niet beschikbaar in deze versie van NOVA voor Windows.";
     if (status === 404)
       return "De Windows-agent op de pc kent bureaubladbediening nog niet. Werk de agent bij.";
-    if (status === 403 || status === 409)
-      return "De Windows-agent weigert dit: bureaubladtoegang staat op de pc uit of is niet actief.";
+    if (status === 409) return AGENT_PAUSED;
+    if (status === 403 || status === 401)
+      return "De Windows-agent weigert het token. Koppel de pc opnieuw in Instellingen, Windows-pc.";
     return "De Windows-agent reageert niet zoals verwacht.";
   }
 

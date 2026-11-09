@@ -190,8 +190,8 @@ describe("Windows tools", () => {
       tools.definitions().map((item) => [item.name, item.risk]),
     );
     expect(risks.windows_open_app).toBe("SAFE");
-    expect(risks.windows_close_app).toBe("CONFIRM");
-    expect(risks.windows_lock).toBe("CONFIRM");
+    expect(risks.windows_close_app).toBe("SAFE");
+    expect(risks.windows_lock).toBe("SAFE");
     expect(Object.keys(risks)).toHaveLength(9);
   });
 

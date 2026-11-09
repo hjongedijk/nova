@@ -35,13 +35,13 @@ describe("BrowserAgentService", () => {
     expect(JSON.stringify(result)).not.toContain(diagnostic);
   });
 
-  it("the tools are listed, valid and risk-ranked: only the buying click needs confirmation", () => {
+  it("the tools are listed, valid and risk-ranked: nothing needs confirmation", () => {
     const defs = browser.definitions();
     const names = defs.map((item) => item.name);
     expect(new Set(names).size).toBe(names.length);
     expect(names.every((name) => name.startsWith("browser_"))).toBe(true);
     const risk = Object.fromEntries(defs.map((item) => [item.name, item.risk]));
-    expect(risk.browser_click_confirmed).toBe("CONFIRM");
+    expect(risk.browser_click_confirmed).toBe("SAFE");
     expect(risk.browser_click).toBe("SAFE");
     expect(risk.browser_read).toBe("READ_ONLY");
     expect(risk.browser_status).toBe("READ_ONLY");
@@ -207,6 +207,26 @@ describe("BrowserAgentService", () => {
       /Browser-agent fout \(502\)/,
     );
     expect((await browser.execute("browser_nope", {}, call())).ok).toBe(false);
+  });
+
+  it("says the owner paused NOVA and translates the agent's fixed errors", async () => {
+    reply = () => ({
+      status: 409,
+      body: { ok: false, error: "Agent is paused" },
+    });
+    expect((await browser.execute("browser_read", {}, call())).error).toMatch(
+      /gepauzeerd/,
+    );
+    reply = () => ({
+      status: 400,
+      body: {
+        ok: false,
+        error: "Element is covered; dismiss the overlay first",
+      },
+    });
+    expect(
+      (await browser.execute("browser_click", { id: 2 }, call())).error,
+    ).toMatch(/Sluit dat eerst/);
   });
 
   it("an old Windows agent without the browser is told to update", async () => {

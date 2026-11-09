@@ -6,7 +6,7 @@ export function requiresScreenConfirmation(
   args: Record<string, unknown>,
   risk?: Risk,
 ): boolean {
-  if (risk === "DANGEROUS" || tool === "browser_click_confirmed") return true;
+  if (risk === "DANGEROUS") return true;
   return (
     tool === "ha_call_service" &&
     (args.domain === "lock" ||

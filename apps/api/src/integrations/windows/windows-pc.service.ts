@@ -95,6 +95,33 @@ interface AgentBody {
   [key: string]: unknown;
 }
 
+/** The one refusal the agent has: the owner paused it (emergency stop or tray). Only the owner can resume. */
+export const AGENT_PAUSED =
+  "De eigenaar heeft NOVA op de pc gepauzeerd (noodstop of systeemvak). Wacht tot hij op Hervatten klikt; probeer het niet opnieuw.";
+
+/**
+ * The agent's fixed Windows error texts that are safe and useful to repeat, mapped to Dutch. Anything else stays a
+ * generic message, so no diagnostic from the other machine reaches the model.
+ */
+const KNOWN_AGENT_ERRORS: Record<string, string> = {
+  "Windows kon het programma of adres niet openen":
+    "Windows kon dit programma of adres niet openen. Controleer de naam (windows_status toont de bekende apps).",
+  "Ongeldige app": "Die appnaam is ongeldig.",
+  "App ontbreekt": "Geef de naam van de app op.",
+  "Deze app kan niet worden gesloten":
+    "Deze app heeft geen procesnaam en kan niet worden gesloten.",
+  "Ongeldige URL": "Dat is geen geldige URL.",
+  "Scherm bestaat niet": "Dat scherm bestaat niet op de pc.",
+  "Helper kon niet worden geopend":
+    "De helper kon op de pc niet worden geopend.",
+  "Windows antwoordt niet op tijd":
+    "Windows op de pc reageerde niet op tijd. Probeer het zo opnieuw.",
+};
+export function agentErrorText(status: number, raw: unknown): string | null {
+  if (status === 409) return AGENT_PAUSED;
+  return typeof raw === "string" ? (KNOWN_AGENT_ERRORS[raw] ?? null) : null;
+}
+
 const controlsWarning =
   "Windows-bediening meldde een probleem. Controleer de agent op de pc.";
 /**
@@ -113,6 +140,14 @@ export function explainAgentWarning(raw: unknown): string {
       : `Sneltoets ${shortcut[2]} kon niet worden gekoppeld (Windows-foutcode ${shortcut[3]}). Kies een andere sneltoets in de instellingen.`;
   if (/^Tray(?: status)?:/.test(raw))
     return "Het NOVA-pictogram bij de klok kon niet worden gemaakt. Start de agent opnieuw in je Windows-sessie.";
+  const failed =
+    /^Agent controls: (open|speak|mute|desktop): ((?:Ctrl|Alt|Shift|Win|Super|Control|Meta)(?:\+(?:Ctrl|Alt|Shift|Win|Super|Control|Meta))*\+[A-Za-z0-9]{1,12})$/i.exec(
+      raw,
+    );
+  if (failed)
+    return `Sneltoets ${failed[2]} kon niet worden gekoppeld; waarschijnlijk gebruikt een ander programma hem al. Kies een andere sneltoets in de instellingen.`;
+  if (raw === "Noodstop Ctrl+Alt+Shift+K kon niet worden geregistreerd")
+    return "De noodstop Ctrl+Alt+Shift+K is bezet door een ander programma. Pauzeren kan altijd via het NOVA-pictogram bij de klok.";
   if (raw === "Shortcut registration did not complete")
     return "De sneltoetsen zijn niet op tijd gekoppeld. Start de agent opnieuw.";
   if (/^Agent controls:/.test(raw))
@@ -156,8 +191,8 @@ const safePreferences = (value: unknown): Record<string, unknown> => {
 };
 
 /**
- * Talks to the native Windows agent in apps/windows. The agent owns the allow-list of
- * programs; NOVA only ever sends an app name or an http(s) URL.
+ * Talks to the native Windows agent in apps/windows. Names from the agent's app list map to a program; any
+ * other name, document or http(s) URL is opened as given. Only the owner's pause refuses.
  */
 @Injectable()
 export class WindowsPcService {
@@ -443,6 +478,7 @@ export class WindowsPcService {
       return {
         ok: false,
         error:
+          agentErrorText(response.status, response.data?.error) ??
           "De Windows-agent reageert niet zoals verwacht. Controleer de verbinding en probeer opnieuw.",
       };
     const result: Record<string, unknown> = { ok: true };

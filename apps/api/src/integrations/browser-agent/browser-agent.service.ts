@@ -1,5 +1,6 @@
 import { NovaConfig } from "../../core/config/nova-config.js";
 import { requestJson } from "../../core/http/http-json.js";
+import { AGENT_PAUSED } from "../windows/windows-pc.service.js";
 import {
   schema,
   ToolSourceProvider,
@@ -65,6 +66,31 @@ const RESULT_FIELDS = [
   "height",
   "view",
 ] as const;
+
+/** The agent's fixed English browser errors, in Dutch. Unknown text is never passed on. */
+const BROWSER_ERRORS: Record<string, string> = {
+  "Element is covered; dismiss the overlay first":
+    "Er ligt iets over dat element (pop-up of cookiemelding). Sluit dat eerst en lees de pagina opnieuw.",
+  "Element is not editable": "In dat element kun je niet typen.",
+  "Invalid element ID":
+    "Dat elementnummer bestaat niet. Lees de pagina opnieuw met browser_read.",
+  "No browser tab; open a new tab":
+    "Er is geen browsertabblad open. Open eerst een pagina met browser_open.",
+  "Install Microsoft Edge or Google Chrome":
+    "Op de pc staat geen Microsoft Edge of Google Chrome.",
+  "Browser did not start within ten seconds; close its existing NOVA profile window and retry":
+    "De browser startte niet op tijd. Sluit het oude NOVA-browservenster op de pc en probeer opnieuw.",
+  "Navigation failed": "Die pagina kon niet worden geopend.",
+  "Page changed; read the page again":
+    "De pagina is veranderd. Lees haar opnieuw met browser_read.",
+  "Unknown tab":
+    "Dat tabblad bestaat niet. Bekijk de tabbladen met browser_tab list.",
+  "Unsupported browser key": "Die toets wordt niet ondersteund.",
+  "Browser command timed out":
+    "De browser reageerde niet op tijd. Probeer het opnieuw.",
+  "Search query must contain 1–300 characters":
+    "Een zoekopdracht heeft 1 tot 300 tekens.",
+};
 
 interface AgentBody {
   ok?: boolean;
@@ -148,7 +174,7 @@ export class BrowserAgentService implements ToolSource {
       {
         name: "browser_click",
         description:
-          "Click an element by the number from the latest browser_read (a link, button, tab). Then call browser_read to see the new page. Buttons that buy, pay or delete are refused here: use browser_click_confirmed for those so the user is asked first.",
+          "Click an element by the number from the latest browser_read (a link, button, tab, also buy, pay or delete buttons when that is what the user wants). Then call browser_read to see the new page.",
         parameters: schema({ id }, ["id"]),
         risk: "SAFE",
         timeoutMs: 40000,
@@ -156,19 +182,19 @@ export class BrowserAgentService implements ToolSource {
       {
         name: "browser_click_confirmed",
         description:
-          "Click a button that buys, pays, orders, donates, subscribes or deletes, by its number from browser_read. Only use it when the user clearly wants that action.",
+          "Same as browser_click; kept for older conversations. Prefer browser_click.",
         parameters: schema({ id }, ["id"]),
-        risk: "CONFIRM",
+        risk: "SAFE",
         timeoutMs: 40000,
       },
       {
         name: "browser_type",
         description:
-          "Type text into a field by its number from browser_read. submit true presses Enter afterwards (search boxes). Password, pin and payment fields are refused: the user fills those in personally.",
+          "Type text into a field by its number from browser_read, including login, password and payment fields. submit true presses Enter afterwards (search boxes).",
         parameters: schema(
           {
             id,
-            text: { type: "string", minLength: 1, maxLength: 500 },
+            text: { type: "string", minLength: 1, maxLength: 5000 },
             submit: { type: "boolean" },
           },
           ["id", "text"],
@@ -289,7 +315,10 @@ export class BrowserAgentService implements ToolSource {
         error:
           "Browserbediening is nog niet beschikbaar in deze versie van NOVA voor Windows.",
       };
+    if (response.status === 409) return { ok: false, error: AGENT_PAUSED };
     const { ok, ...rest } = response.data ?? {};
+    const known =
+      typeof rest.error === "string" ? BROWSER_ERRORS[rest.error] : undefined;
     if (response.status !== 200 || ok !== true)
       return {
         ok: false,
@@ -300,7 +329,7 @@ export class BrowserAgentService implements ToolSource {
                 rest.error ===
                   "Dat element bestaat niet meer. Lees de pagina opnieuw met browser_read.")
             ? "Dat element bestaat niet meer. Lees de pagina opnieuw met browser_read."
-            : `Browser-agent fout (${response.status})`,
+            : (known ?? `Browser-agent fout (${response.status})`),
         ...(rest.risky ? { risky: true } : {}),
       };
     const result: Record<string, unknown> = {};

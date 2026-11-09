@@ -8,7 +8,7 @@ import type { ToolsService } from "../../src/tools/tools.service.js";
 import type { OutcomeService } from "../../src/chat/outcome.service.js";
 
 describe("on-screen confirmation for sensitive actions", () => {
-  it("classifies doors, alarms, purchases and dangerous actions", () => {
+  it("classifies doors, alarms and dangerous actions", () => {
     expect(
       requiresScreenConfirmation(
         "ha_call_service",
@@ -37,9 +37,10 @@ describe("on-screen confirmation for sensitive actions", () => {
         "CONFIRM",
       ),
     ).toBe(true);
+    // Browser clicks on the owner's PC are never held back (no restrictions on the paired PC).
     expect(
-      requiresScreenConfirmation("browser_click_confirmed", {}, "CONFIRM"),
-    ).toBe(true);
+      requiresScreenConfirmation("browser_click_confirmed", {}, "SAFE"),
+    ).toBe(false);
     expect(
       requiresScreenConfirmation("code_file_delete", {}, "DANGEROUS"),
     ).toBe(true);

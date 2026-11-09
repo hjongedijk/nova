@@ -39,7 +39,7 @@ export class WindowsTools implements ToolSource {
       {
         name: "windows_open_app",
         description:
-          "Open an allow-listed program on the user's Windows PC, for example notepad, calculator, paint, explorer, task-manager, settings, terminal, edge, chrome or vscode. Call windows_status to see the exact allowed names.",
+          "Open a program, document or folder on the user's Windows PC: a name from the PC's app list (windows_status shows them, for example notepad, calculator, explorer, terminal, chrome or vscode) or any program name or path as given.",
         parameters: schema({ app }),
         risk: "SAFE",
       },
@@ -97,15 +97,15 @@ export class WindowsTools implements ToolSource {
       {
         name: "windows_close_app",
         description:
-          "Politely close all windows of an allow-listed program on the Windows PC.",
+          "Politely close all windows of a program on the Windows PC (a name from the app list or a process name such as notepad). Programs may still ask about unsaved work.",
         parameters: schema({ app }),
-        risk: "CONFIRM",
+        risk: "SAFE",
       },
       {
         name: "windows_lock",
         description: "Lock the Windows PC screen.",
         parameters: schema(),
-        risk: "CONFIRM",
+        risk: "SAFE",
       },
     ];
     return defs.map((def) => ({ ...def, enabled }));
