@@ -9,11 +9,24 @@ The native agent includes screenshots, desktop input and a visible automated bro
 The release workflow builds `NOVA-Setup-<version>.exe` and `nova-windows.zip`. The portable zip contains only `nova.exe`. The installer runs for the current user and bundles WebView2 bootstrap installation through Tauri when needed.
 
 1. Install NOVA or extract the portable executable into a permanent directory.
-2. Open **Instellen en koppelen** from its tray menu. Enter your NOVA server's HTTP(S) address and save it.
-3. Choose **Verbinding toestaan in Windows**. Windows asks for elevation to create an inbound TCP rule for the agent port (any address, any network profile).
+2. Open the **NOVA** window (left-click the tray icon, or start NOVA again from the Start menu) and go to **Koppelen**. Enter your NOVA server's HTTP(S) address and save it.
+3. Choose **Firewall openen**. Windows asks for elevation to create an inbound TCP rule for the agent port (any address, any network profile).
 4. Select this PC's network address, then copy its pairing code.
 5. In NOVA, open **Instellingen → Windows-pc**, paste the code and save. Restart NOVA to apply the connection, as with other saved service connections.
-6. Enable **Starten met Windows** in the tray if desired.
+6. Enable **Starten met Windows** under **Systeem en updates** if desired.
+
+## The NOVA window and the tray
+
+NOVA is one normal Windows application window (taskbar, Alt+Tab, snap layouts, dark title bar) that opens where it was last closed (`%LOCALAPPDATA%\NOVA\window.json`; a place on a disconnected monitor is pulled back on screen). It paints NOVA's navy before the page loads and appears only when ready. Browser behavior is off in every NOVA window: no reload, print, find, zoom, pinch, swipe navigation, status bar or developer tools (release builds); the app window and wallpaper also have no browser context menu. Pages:
+
+- **Overzicht**: server/listener state, pause or resume control, helper show/hide and login, version.
+- **Weergave**: helper, living wallpaper or both; the helper's screen; wallpaper per screen.
+- **Koppelen**: server address, firewall rule, pairing code.
+- **Systeem en updates**: start with Windows, administrator state, updates, replacing the old agent.
+
+Closing the window keeps NOVA running. Starting NOVA again while it runs only brings this window forward (no second UAC prompt). The tray is deliberately small: **NOVA openen** (also a left click), **Helper tonen/verbergen**, **Pauzeren (noodstop)** / **Hervatten**, **Update installeren** when one is ready, and **Afsluiten**.
+
+When the NOVA server cannot be reached, the helper and wallpaper show a small Dutch "NOVA is niet bereikbaar" screen instead of Edge's error page and reload by themselves after 5, 10, 20, 40 seconds, then every minute. When Explorer restarts (or the desktop is not ready right after sign-in) the helper and wallpaper windows are rebuilt within about five seconds.
 
 The pairing code contains the bearer token. It is the only credential between NOVA and this PC, so treat it as a password. It is available only to the app's local setup page; the remotely hosted helper page cannot read it or modify the firewall. Nothing else is configured or needs approval: with the token, NOVA may look at the screen, drive mouse and keyboard, use the browser and open or close programs.
 
@@ -29,7 +42,7 @@ The existing `%LOCALAPPDATA%\NOVA\desk-profile` WebView2 profile is reused to pr
 
 ## Updates from GitHub
 
-NOVA checks the stable GitHub release 20 seconds after startup and every six hours. A newly discovered version opens the local settings window once per version and appears in the tray menu. **Controleren op updates** runs a manual check. **Bijwerken en herstarten** downloads the update, verifies it and runs the installer after saving the current settings. Checks never install an update automatically.
+NOVA checks the stable GitHub release 20 seconds after startup and every six hours; a failed check (no network yet after sign-in) retries after 2, 4, 8 ... minutes, at most hourly. A newly discovered version opens the NOVA window once per version and appears in the tray menu. **Controleren op updates** runs a manual check. **Bijwerken en herstarten** downloads the update, verifies it and runs the installer after saving the current settings. Checks never install an update automatically.
 
 The [Tauri updater](https://v2.tauri.app/plugin/updater/) verifies the installer with the public key embedded in the app. Signed version binding is required, and downgrades are disabled. A failed download, invalid signature or failed settings save leaves the current app installed. Update commands are granted only to the local setup page; neither remote helper pages nor the agent HTTP API can install updates.
 
@@ -53,7 +66,7 @@ At first startup, the new app imports `agent.json`, `mode.json` and `wallpaper.j
 
 For an installed app whose old files live elsewhere, expand **Oude agent vervangen** in the setup window, enter that directory and choose **Oude instellingen importeren**. This explicit import keeps the previous unified settings as `config.json.before-import`. If the legacy port differs, NOVA restarts automatically to bind the imported port.
 
-Then choose **Oude agent uitschakelen**. This ends PowerShell agents whose script path matches that folder, removes the documented `NOVAAgent`/`JarvisAgent` scheduled tasks, removes NOVA Desk's Run entry and asks the old shell to quit. Import before disabling the old installation. If the old process occupied port 8765, the new app retries its listener afterward. Other processes are left alone.
+Then choose **Oude agent uitschakelen**. This ends PowerShell agents whose script path matches that folder, removes the documented `NOVAAgent`/`JarvisAgent` scheduled tasks, removes NOVA Desk's Run entry and asks the old shell to quit. Import before disabling the old installation. If another process occupies the agent port, NOVA keeps retrying the listener in the background (5, 10, 20 s, then every 30 s) and shows the problem on **Overzicht** until it listens. Other processes are left alone.
 
 Rollback: quit NOVA, disable its Run entry and restart the old scheduled task after re-registering it with the preserved legacy installer. Use the v0.1.73 artifacts and original JSON files. If you paired with a new token instead of importing the old one, restore the corresponding NOVA connection settings too.
 
@@ -80,7 +93,7 @@ Screenshots use native GDI capture and bounded in-memory JPEG encoding. Display 
 
 ### Emergency stop
 
-**Ctrl+Alt+Shift+K** is the owner's off switch. It pauses the agent at once: queued input, screenshots and browser actions are cancelled and every desktop and browser route answers 409 until the owner resumes via **Hervatten** in the tray menu (the tray also has **Pauzeren** and **Pc-bediening stoppen**). NOVA cannot lift a pause. The pause lives in memory only, so a restart resumes. The shortcut is reserved and cannot be assigned to another action. If another program already holds it, the helper shows a warning; NOVA is still not blocked.
+**Ctrl+Alt+Shift+K** is the owner's off switch. It pauses the agent at once: queued input, screenshots and browser actions are cancelled and every desktop and browser route answers 409 until the owner resumes via **Hervatten** in the tray menu or on the NOVA window's **Overzicht**. NOVA cannot lift a pause. NOVA's API reports a paused agent as such, so the assistant waits instead of retrying. The pause lives in memory only, so a restart resumes. The shortcut is reserved and cannot be assigned to another action. If another program already holds it, the helper shows a warning; NOVA is still not blocked.
 
 The `armed` route (`POST /v1/desktop/control`) is kept for NOVA's API contract but nothing needs arming: input works whenever the agent is not paused, and `armed`/`view`/`control` in `GET /v1/desktop/status` are simply `true` then. No arbitrary-script HTTP endpoint is exposed.
 
@@ -98,7 +111,7 @@ Without a verified task, an unelevated start still requests normal UAC approval.
 
 Wallpaper pages receive trusted WebView2 left-button input and mouse moves through a global low-level mouse hook; clicks on application windows are left alone. Clicking an input focuses its WebView2 controller for keyboard input. Owned dropdown popups stay part of the wallpaper interaction. Vertical and horizontal wheel events are forwarded without stealing focus. Right-button forwarding remains deferred. Wallpaper windows are created as native desktop children before WebView2 construction; input uses their actual client origin and DPI, and browser zoom starts at 100%. The small helper is fixed at the top center of the selected display and is a child of the desktop host, above desktop content and below application windows; it is no longer always on top. Native helper diagnostics are not implemented yet; the server reports that no valid helper measurement is available.
 
-The native app must be tried on Windows for transparency, dragging, WebView2 prompts, shortcuts, autostart, old-agent retirement, UAC/firewall, multiple monitors and wallpaper placement. Explorer restart recovery remains a known limitation inherited from NOVA Desk; toggle the wallpaper off/on if its host disappears.
+The native app must be tried on Windows for transparency, dragging, WebView2 prompts, shortcuts, autostart, old-agent retirement, UAC/firewall, multiple monitors and wallpaper placement. Explorer restart recovery rebuilds the helper and wallpaper automatically; confirm it on a real PC by restarting Explorer in Task Manager.
 
 ## Development
 
@@ -139,7 +152,7 @@ Implemented in `apps/windows/crates/nova-win-agent/src/desktop/`. Every route ne
 | `POST /v1/desktop/control`                       | `{ armed: true, ttlSeconds? }` or `{ armed: false }`. Kept for compatibility; only acknowledges the request, because input needs no arming. Refused (409) only while the owner has paused the agent.              |
 | `POST /v1/desktop/input`                         | `{ action, display?, relativeTo?: { width, height }, ... }` with actions `move`, `click`, `doubleclick`, `rightclick`, `drag`, `scroll`, `type`, `key`, `focus_window`.                                           |
 
-With `relativeTo`, coordinates refer to the screenshot and the agent scales them. Input is accepted at any rate, up to 4000 UTF-16 units per typed text, and needs no lease or confirmation. While the agent is paused, or after an emergency stop cancelled a running request, desktop routes answer 409. Windows secure desktops (UAC, Ctrl+Alt+Delete, sign-in) cannot be driven even when NOVA runs elevated.
+With `relativeTo`, coordinates refer to the screenshot and the agent scales them. Navigation, editing, Windows and media keys are sent as extended keys (so Shift+Arrow selects), typed line breaks and tabs become Enter and Tab, and `key` also accepts volume keys, F1-F24, PrintScreen, CapsLock and punctuation such as `Ctrl+/`. `focus_window` restores only minimized windows and works around the Windows foreground lock. Input is accepted at any rate, up to 4000 UTF-16 units per typed text, and needs no lease or confirmation. While the agent is paused, or after an emergency stop cancelled a running request, desktop routes answer 409. Windows secure desktops (UAC, Ctrl+Alt+Delete, sign-in) cannot be driven even when NOVA runs elevated.
 
 ### NOVA tools
 
