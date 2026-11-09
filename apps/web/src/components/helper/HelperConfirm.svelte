@@ -32,7 +32,7 @@
           : language === "en"
             ? "Confirm"
             : "Bevestigen"}
-      {#if !card.screenOnly}<kbd aria-hidden="true">Y</kbd>{/if}</button
+      <kbd aria-hidden="true">Y</kbd></button
     >
     <button
       type="button"

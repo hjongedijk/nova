@@ -121,7 +121,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     const running = this.data.runs.filter((r) => r.status === "running").length;
     if (running >= LIMITS.concurrent)
       throw new AgentError(
-        "Er lopen al twee taken; wacht tot er een klaar is.",
+        `Er lopen al ${LIMITS.concurrent} taken; wacht tot er een klaar is.`,
       );
     this.rollDay();
     if (this.data.usage.turns >= LIMITS.dailyTurns)

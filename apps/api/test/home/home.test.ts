@@ -1,4 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- fixtures left from the removed confirmation flow */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { HttpException } from "@nestjs/common";
 import { Test, type TestingModule } from "@nestjs/testing";
 import {
@@ -135,7 +138,7 @@ describe("Home Assistant", () => {
       mode: "allowlist",
       areaIds: [],
       deviceIds: [],
-      entityIds: [],
+      entityIds: ["light.office"],
     });
     await expect(home.todoItems("todo.groceries")).rejects.toThrow(
       /niet toegestaan/,
@@ -147,6 +150,43 @@ describe("Home Assistant", () => {
       (candidate) => candidate.domain !== "todo",
     );
     request.mockRestore();
+  });
+
+  it("allows every entity when no allowlist is configured", () => {
+    home.setAccessPolicy({
+      mode: "allowlist",
+      areaIds: [],
+      deviceIds: [],
+      entityIds: [],
+    });
+    expect(home.visibleEntities()).toHaveLength(home.entities.length);
+    expect(home.resolve("light.living")).toMatchObject({
+      entity: { entity_id: "light.living" },
+    });
+  });
+
+  it("falls back to all entities when the saved access policy is unreadable", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nova-ha-policy-"));
+    try {
+      fs.writeFileSync(path.join(dir, "home-assistant-access.json"), "{oops");
+      const fresh = new HomeAssistantService({
+        homeAssistant: { url: fake.url, token: TOKEN },
+        dataDir: dir,
+      } as unknown as NovaConfig);
+      expect(fresh.accessPolicy().mode).toBe("all");
+      fs.writeFileSync(
+        path.join(dir, "home-assistant-access.json"),
+        JSON.stringify({ mode: "weird" }),
+      );
+      const second = new HomeAssistantService({
+        homeAssistant: { url: fake.url, token: TOKEN },
+        dataDir: dir,
+      } as unknown as NovaConfig);
+      second.entities = [...home.entities];
+      expect(second.visibleEntities()).toHaveLength(home.entities.length);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("enforces Home Assistant area and device allowlists on lookup, state, registry and service paths", async () => {

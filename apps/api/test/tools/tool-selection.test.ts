@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_MODEL_TOOLS,
   selectToolsForRequest,
   TOOL_DISCOVERY_NAME,
   type SelectableTool,
@@ -198,7 +199,7 @@ describe("request tool selection", () => {
       "Het weer",
       "conversation",
     );
-    expect(selected).toHaveLength(24);
+    expect(selected).toHaveLength(MAX_MODEL_TOOLS);
     expect(selected).toContain(discovery);
   });
 

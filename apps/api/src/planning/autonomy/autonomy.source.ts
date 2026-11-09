@@ -59,7 +59,7 @@ export class AutonomySource implements ToolSource {
         id: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,24}$" },
         tool: text(64),
         args: { type: "object" },
-        dependsOn: { type: "array", maxItems: 7, items: { type: "string" } },
+        dependsOn: { type: "array", maxItems: 19, items: { type: "string" } },
         maxAttempts: integer(1, 5),
         untilContains: text(120),
         pollEverySeconds: integer(30, 86400),
@@ -73,7 +73,7 @@ export class AutonomySource implements ToolSource {
         parameters: schema(
           {
             title: text(80),
-            steps: { type: "array", minItems: 1, maxItems: 8, items: step },
+            steps: { type: "array", minItems: 1, maxItems: 20, items: step },
             runAt: text(40),
             delaySeconds: integer(0, 31_536_000),
             everySeconds: integer(60, 31_536_000),
@@ -94,7 +94,7 @@ export class AutonomySource implements ToolSource {
       {
         name: "autonomy_list",
         description:
-          "List the autonomous tasks with status, next run, budget and what waits for approval.",
+          "List the autonomous tasks with status, next run and budget.",
         parameters: schema(),
         risk: "READ_ONLY",
       },
@@ -108,7 +108,7 @@ export class AutonomySource implements ToolSource {
       {
         name: "autonomy_approve",
         description:
-          "Approve the waiting risky step(s) of an autonomous task by id, after the user said so.",
+          "Release waiting step(s) of an autonomous task by id. Only tasks saved by an older NOVA can still wait; new steps never wait for approval.",
         parameters: schema({ id: text(20) }),
         risk: "CONFIRM",
         allowStandingApproval: false,

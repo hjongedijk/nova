@@ -513,21 +513,12 @@ impl Browser {
                     .as_str()
                     .unwrap_or("")
                     .to_lowercase();
-                if [
-                    "unusual traffic",
-                    "captcha",
-                    "not a robot",
-                    "verify you are human",
-                    "ik ben geen robot",
-                ]
-                .iter()
-                .any(|needle| head.contains(needle))
-                {
-                    if matches!(engine.as_str(), "google" | "bing") {
-                        result = self.navigate(&format!("https://duckduckgo.com/?q={encoded}"), false)?;
-                        result["engine"] = json!("duckduckgo");
+                if robot_check(result["url"].as_str().unwrap_or(""), &head) {
+                    if let Some((name, fallback)) = fallback_engine(&engine) {
+                        result = self.navigate(&format!("{fallback}{encoded}"), false)?;
+                        result["engine"] = json!(name);
                         result["fallback"] = json!(true);
-                        result["note"] = json!("Search engine requested a robot check; used DuckDuckGo instead.");
+                        result["note"] = json!(format!("Search engine requested a robot check; used {name} instead."));
                     } else {
                         result["blocked"] = json!("robotcontrole");
                         result["note"] = json!("Complete the robot check yourself in the browser window.");
@@ -681,9 +672,57 @@ impl Drop for Browser {
         self.stop();
     }
 }
+/// A search engine's robot check: Google's /sorry/ page or a captcha text (lower-cased page head).
+fn robot_check(url: &str, head: &str) -> bool {
+    let url = url.to_lowercase();
+    url.contains("google.") && url.contains("/sorry/")
+        || url.contains("/captcha")
+        || [
+            "unusual traffic",
+            "ongebruikelijk verkeer",
+            "captcha",
+            "not a robot",
+            "geen robot",
+            "verify you are human",
+            "bevestig dat je een mens bent",
+        ]
+        .iter()
+        .any(|needle| head.contains(needle))
+}
+/// Where to search instead after a robot check: DuckDuckGo's plain HTML page, or Bing after DuckDuckGo.
+fn fallback_engine(engine: &str) -> Option<(&'static str, &'static str)> {
+    match engine {
+        "google" | "bing" => Some(("duckduckgo", "https://html.duckduckgo.com/html/?q=")),
+        "duckduckgo" => Some(("bing", "https://www.bing.com/search?q=")),
+        _ => None,
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn robot_check_switches_to_another_engine() {
+        assert!(robot_check("https://www.google.com/sorry/index?continue=x", ""));
+        assert!(robot_check(
+            "https://example.com",
+            "our systems have detected unusual traffic"
+        ));
+        assert!(robot_check(
+            "https://example.com",
+            "onze systemen hebben ongebruikelijk verkeer"
+        ));
+        assert!(!robot_check(
+            "https://www.google.com/search?q=sorry",
+            "gewone resultaten"
+        ));
+        assert_eq!(fallback_engine("google").unwrap().0, "duckduckgo");
+        assert!(fallback_engine("google")
+            .unwrap()
+            .1
+            .starts_with("https://html.duckduckgo.com/"));
+        assert_eq!(fallback_engine("duckduckgo").unwrap().0, "bing");
+        assert!(fallback_engine("youtube").is_none());
+    }
     #[test]
     fn cancelled_generation_never_reaches_network_or_browser() {
         let mut browser = Browser::new(PathBuf::from("unused"));

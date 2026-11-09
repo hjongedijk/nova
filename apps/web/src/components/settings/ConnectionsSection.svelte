@@ -1330,7 +1330,8 @@
                     name="home-access-mode"
                     checked={homeAccess.mode === "allowlist"}
                     onchange={() => (homeAccess!.mode = "allowlist")}
-                  /> Alleen de geselecteerde gebieden en apparaten
+                  /> Alleen de geselecteerde gebieden en apparaten (niets geselecteerd:
+                  alles)
                 </label>
               </fieldset>
               {#if homeAccess.mode === "allowlist"}

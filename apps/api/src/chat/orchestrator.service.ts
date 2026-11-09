@@ -176,7 +176,7 @@ export interface OrchestrateInput {
   stream?: boolean;
   emit?: Emit;
   signal?: AbortSignal;
-  /** Restricted Node-RED generated flows: expose and execute read-only tools only. */
+  /** Only for untrusted background sources (generated flows): read-only tools. Owner chat, voice and phone turns never set it. */
   readOnlyOnly?: boolean;
   /**
    * Whether the owner typed or said this turn. Only owner turns write durable memory, teach corrections or tune

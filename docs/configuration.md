@@ -53,7 +53,7 @@ NOVA_PIPER_TTS_URL=              # private Piper service: Dutch/English local vo
 OMNIROUTE_MODEL=auto             # must stay auto; see OmniRoute and free routing
 FREE_ONLY=true
 NOVA_OMNIROUTE_COMPRESSION=off   # lite = OmniRoute lite compression header
-NOVA_MAX_TOOL_ITERATIONS=8       # 1 to 16
+NOVA_MAX_TOOL_ITERATIONS=16      # 1 to 32
 NOVA_DEFAULT_LANGUAGE=nl-NL
 NOVA_ENABLE_ACTIONS=false         # legacy flag; ignored, actions execute directly
 NOVA_AUTO_EXECUTE_SAFE_ACTIONS=true
@@ -102,7 +102,7 @@ NOVA only talks to language models through [OmniRoute](https://github.com/diegos
 | `OMNIROUTE_DATABASE`         | `/omniroute/storage.sqlite` | Path of OmniRoute's SQLite database, opened **read-only** to verify the free policy. Compose mounts `omniroute-data` there.                                                      | no     |
 | `NOVA_OMNIROUTE_COMPRESSION` | `off`                       | `lite` sends OmniRoute's lite compression header with chat requests; anything else sends `off`.                                                                                  | no     |
 | `FREE_ONLY`                  | `true`                      | Documented switch for free-only routing. In production builds the check is always enforced; see the note in [OmniRoute and free routing](integrations.md#fail-closed-behaviour). | no     |
-| `NOVA_MAX_TOOL_ITERATIONS`   | `8` (range 1 to 16)         | Maximum number of model rounds (tool-call loops) per message.                                                                                                                    | no     |
+| `NOVA_MAX_TOOL_ITERATIONS`   | `16` (range 1 to 32)        | Maximum number of model rounds (tool-call loops) per message.                                                                                                                    | no     |
 
 ## Tools and actions
 

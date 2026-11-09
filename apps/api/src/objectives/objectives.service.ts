@@ -11,11 +11,7 @@ import { sanitize } from "../core/security/sanitize.js";
 import { JarvisStateStore } from "../planning/jarvis-state.store.js";
 import { ToolsService } from "../tools/tools.service.js";
 import { evaluate } from "./objectives.conditions.js";
-import {
-  CHECK_TOOLS,
-  TEMPLATES,
-  type TemplateParams,
-} from "./objectives.templates.js";
+import { TEMPLATES, type TemplateParams } from "./objectives.templates.js";
 import { inQuietHours, localDay, parseClock } from "./objectives.time.js";
 import { ObjectivesStore, emptyFile } from "./objectives.store.js";
 import {
@@ -123,14 +119,14 @@ export class ObjectivesService implements OnModuleInit, OnModuleDestroy {
 
   // ---- control ------------------------------------------------------------------------------
 
-  /** Reject anything that is not an allowlisted, enabled READ_ONLY tool. Runs at creation and before every run. */
+  /** Any enabled READ_ONLY tool may be a check. Runs at creation and before every run. */
   validateChecks(checks: ObjectiveCheck[]): void {
     if (!checks.length)
       throw new ObjectiveError("Een doel heeft controles nodig.");
     const registry = new Map(this.tools.list().map((t) => [t.name, t]));
     for (const c of checks) {
       const info = registry.get(c.tool);
-      if (!CHECK_TOOLS.has(c.tool) || !info)
+      if (!info)
         throw new ObjectiveError(
           `De tool ${c.tool} mag niet voor bewaking worden gebruikt.`,
         );

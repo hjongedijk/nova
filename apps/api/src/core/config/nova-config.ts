@@ -139,9 +139,9 @@ export class NovaConfig {
   readonly freeOnly = flag("FREE_ONLY", true);
   readonly maxToolRounds = numberFrom(
     setting("NOVA_MAX_TOOL_ITERATIONS", "JARVIS_MAX_TOOL_ITERATIONS"),
-    8,
-    1,
     16,
+    1,
+    32,
   );
 
   // Tools and actions

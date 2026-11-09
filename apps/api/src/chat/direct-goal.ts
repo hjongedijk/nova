@@ -16,7 +16,7 @@ export const DELEGATION_REPLY =
   "Ik ga ermee aan de slag en meld me zodra het klaar is.";
 
 const MIN_WORDS = 4;
-const MAX_LENGTH = 600;
+const MAX_LENGTH = 2000;
 
 const POLITE =
   /^(?:(?:nova|hey nova|hallo nova)[,:]?\s+)?(?:(?:(?:kun|kan|kunt|wil|wilt|zou|zouden)\s+(?:je|jij|u|jullie)|(?:could|can|would|will)\s+you|please|alsjeblieft|alstublieft|even|graag|nu)\s+)*/i;

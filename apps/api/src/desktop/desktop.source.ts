@@ -10,6 +10,7 @@ import {
   type ToolResult,
   type ToolSource,
 } from "../tools/tool.types.js";
+import { DESKTOP_LIMITS } from "./desktop.limits.js";
 import { DesktopService } from "./desktop.service.js";
 import { INPUT_ACTIONS, type DesktopInputAction } from "./desktop.types.js";
 
@@ -125,8 +126,8 @@ export class DesktopSource implements ToolSource {
       {
         name: "desktop_takeover_start",
         description:
-          'Start operating the PC mouse and keyboard for a short session requested by the user. Say the goal ("goal") and a duration of at most 900 seconds ("ttlSeconds"). No additional permission or confirmation is needed. Optional: desktop_act starts a session by itself, and calling this again extends the running one. Finish with desktop_takeover_stop.',
-        parameters: schema({ goal: text(200), ttlSeconds: integer(30, 900) }),
+          'Start operating the PC mouse and keyboard for a short session requested by the user. Say the goal ("goal") and a duration of at most 1800 seconds ("ttlSeconds"). No additional permission or confirmation is needed. Optional: desktop_act starts a session by itself, and calling this again extends the running one. Finish with desktop_takeover_stop.',
+        parameters: schema({ goal: text(200), ttlSeconds: integer(30, 1800) }),
         risk: "DANGEROUS",
         allowStandingApproval: false,
         enabled: control,
@@ -134,7 +135,7 @@ export class DesktopSource implements ToolSource {
       {
         name: "desktop_act",
         description:
-          "Do one mouse or keyboard action on the PC at once (a takeover session starts automatically when none runs): action is move, click, doubleclick, rightclick (x,y), drag (x,y,toX,toY), scroll (dy, optional dx,x,y), type (text), key (key such as tab, ctrl+f, enter, media_play_pause or media_stop) or focus_window (windowId). Coordinates are pixels of the latest screenshot. For a target you have not seen, look with desktop_screenshot first; a plain move, key or typing request can be done directly. For Plex, VLC or browser video on the PC, observe the playing state and focus the actual player before pressing space; media_play_pause toggles system media playback, so do not use it blindly." +
+          "Do one mouse or keyboard action on the PC at once (a takeover session starts automatically when none runs): action is move, click, doubleclick, rightclick (x,y), drag (x,y,toX,toY), scroll (dy, optional dx,x,y), type (text, up to 4000 characters), key (key such as tab, ctrl+f, enter, media_play_pause or media_stop) or focus_window (windowId). Coordinates are pixels of the latest screenshot. For a target you have not seen, look with desktop_screenshot first; a plain move, key or typing request can be done directly. For Plex, VLC or browser video on the PC, observe the playing state and focus the actual player before pressing space; media_play_pause toggles system media playback, so do not use it blindly." +
           untrusted,
         parameters: schema(
           {
@@ -145,7 +146,7 @@ export class DesktopSource implements ToolSource {
             toY: integer(0, 10000),
             dx: integer(-5000, 5000),
             dy: integer(-5000, 5000),
-            text: text(300),
+            text: text(DESKTOP_LIMITS.maxTypedCharacters),
             key: text(40),
             windowId: text(80),
           },

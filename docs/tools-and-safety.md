@@ -37,9 +37,9 @@ The default MCP list ships three servers installed in the image: `sequential-thi
 
 ## Risk labels
 
-Each tool still declares a risk (`READ_ONLY`, `SAFE`, `CONFIRM`, `DANGEROUS`). The label no longer gates anything: it is recorded in the audit log, shown in the tool list (**Instellingen → Wat NOVA mag doen**, `GET /api/tools`) and in the AI-activity view, and `READ_ONLY` marks the tools that background checks may use (autopilot, objectives and read-only text chats run with `readOnlyOnly`, which hides every other tool). A source can refine the label per call (for example Home Assistant decides from the exact device and service in `home/risk.ts`). Every tool runs immediately, whatever its label.
+Each tool still declares a risk (`READ_ONLY`, `SAFE`, `CONFIRM`, `DANGEROUS`). The label no longer gates anything: it is recorded in the audit log, shown in the tool list (**Instellingen → Wat NOVA mag doen**, `GET /api/tools`) and in the AI-activity view, and `READ_ONLY` marks the tools that background checks may use (objective checks, read-only autonomy steps and untrusted generated flows run with `readOnlyOnly`, which hides every other tool). Owner-initiated chat, voice and phone turns never run with `readOnlyOnly`. A source can refine the label per call (for example Home Assistant decides from the exact device and service in `home/risk.ts`). Every tool runs immediately, whatever its label.
 
-Examples of how labels are decided: Proxmox power actions and Home Assistant locks, covers, scenes and scripts are labelled `CONFIRM` or `DANGEROUS`; Windows opening apps and URLs is `SAFE` and closing programs or locking is `CONFIRM`; MCP tools that declare `readOnlyHint` are `READ_ONLY`, otherwise the server's `risk` in the config applies (a server with a missing or invalid risk is not started); your own webhook skills declare `READ_ONLY`, `SAFE` or `CONFIRM`. In the Windows browser, `browser_click` refuses buttons that buy, pay, order, donate, subscribe or delete; `browser_click_confirmed` does that click and, like every tool, runs at once.
+Examples of how labels are decided: Proxmox power actions and Home Assistant locks, covers, scenes and scripts are labelled `CONFIRM` or `DANGEROUS`; Windows opening apps and URLs is `SAFE` and closing programs or locking is `CONFIRM`; MCP tools that declare `readOnlyHint` are `READ_ONLY`, otherwise the server's `risk` in the config applies (a server with a missing or invalid risk is not started); your own webhook skills declare `READ_ONLY`, `SAFE` or `CONFIRM`. In the Windows browser, `browser_click` also clicks buttons that buy, pay, order, donate, subscribe or delete (every click is sent as confirmed, so an older Windows agent does not refuse it either); `browser_click_confirmed` is the same tool, kept for older conversations. `browser_type` fills login, password and payment fields. NOVA never invents credentials.
 
 ### The action switch
 
@@ -69,7 +69,20 @@ In order, for each tool call:
 6. **Execution** at once, with a timeout of at most 60 seconds (`NOVA_TOOL_TIMEOUT_MS`).
 7. The result is sanitised, logged, remembered in the session context and a completion event is published on MQTT (`jarvis/events/tool`).
 
-Tools may report `verified`: `true` when NOVA checked the effect (for example by reading the state back), `null` when it was done but could not be checked. A model may run at most eight tool calls from one reply; extra calls are dropped. The number of model rounds per message is limited by `NOVA_MAX_TOOL_ITERATIONS`.
+Tools may report `verified`: `true` when NOVA checked the effect (for example by reading the state back), `null` when it was done but could not be checked. A model may run at most eight tool calls from one reply; extra calls are dropped. The number of model rounds per message is limited by `NOVA_MAX_TOOL_ITERATIONS` (default 16, at most 32). The model sees at most 32 tools per turn (`MAX_MODEL_TOOLS`); `tool_search` finds the rest.
+
+### Limits
+
+These are size and budget caps, not approval steps. Nothing waits for the owner.
+
+- **Background goals** (`agent_run`, `apps/api/src/agent/agent.types.ts`): goal 6 to 2,000 characters (also for direct delegation), 12 turns by default and at most 30, 10 minutes by default and at most 60, at most 4 goals at once, 500 turns per local day.
+- **Autonomous tasks** (`autonomy_create`, `apps/api/src/planning/autonomy/autonomy.types.ts`): at most 20 steps per task, 8,000 characters of arguments per step, 50 active and 100 stored tasks, 5 runs and 4 steps at once. Every step runs directly whatever its risk; nothing waits for approval. A task saved by an older NOVA that still waited for approval is released on load.
+- **Objectives**: a check may use any enabled `READ_ONLY` tool. A `service_online` target is up to 80 characters: letters, digits, spaces and common punctuation.
+- **Home Assistant**: without an owner-set allowlist (mode `all`, or an allowlist with nothing selected) NOVA may use every entity. An unreadable access file falls back to all entities. A non-empty owner allowlist still limits NOVA to those areas, devices and entities.
+- **Windows programs**: `windows_open_app` and `windows_close_app` accept any app-list name, program name, document or full path, up to 260 characters without control characters. Plain names are lower-cased (Windows resolves them case-insensitively); paths are passed as given.
+- **Desktop takeover**: see [Session limits](windows-agent.md#session-limits) (30-1,800 s, 300 actions, 200 screenshots, 300 s idle, typed text up to 4,000 characters).
+- **Termix**: `termix_run_command` accepts commands and multi-line scripts up to 8,000 characters.
+- **Browser search**: on a robot check (Google's `/sorry/` page or a captcha text) the Windows agent switches from Google or Bing to DuckDuckGo's HTML page, and from DuckDuckGo to Bing. The model is told to switch engines instead of retrying.
 
 The dashboard polls a few read-only tools (`proxmox_guests`, `proxmox_storage`, `timer_list`, `list_show`, `alerts_list`) quietly: no log entries and no conversation context.
 

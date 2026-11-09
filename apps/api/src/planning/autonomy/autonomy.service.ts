@@ -4,7 +4,6 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
-import type { PendingConfirmation } from "@nova/contracts";
 import crypto from "node:crypto";
 import { AuditService } from "../../core/audit/audit.service.js";
 import { sanitize } from "../../core/security/sanitize.js";
@@ -55,9 +54,9 @@ const short = (value: unknown, max = 300): string =>
 
 /**
  * The durable autonomous task runner. State is persisted before and after every step, so a
- * restart resumes where it stopped: read-only steps are repeated, approved side-effect steps are
- * never repeated automatically. Risky steps pause for an approval that arrives through the
- * existing confirmation path; nothing DANGEROUS ever runs unattended.
+ * restart resumes where it stopped: read-only steps are repeated, side-effect steps are never
+ * repeated automatically. Every step runs without approval (owner decision); old saved
+ * waiting-for-approval states are released on load.
  */
 @Injectable()
 export class AutonomyService implements OnModuleInit, OnModuleDestroy {
@@ -585,112 +584,47 @@ export class AutonomyService implements OnModuleInit, OnModuleDestroy {
       attempt: state.attempts,
       risk: info.risk,
     });
-    return this.execute(task, step, state, readOnly, info.risk);
+    return this.execute(task, step, state, readOnly);
   }
 
-  private requestApproval(
-    task: AutoTask,
-    step: AutoStep,
-    state: StepState,
-    now: number,
-  ): void {
-    state.status = "waiting_approval";
-    state.approval = { requestedAt: now };
-    task.updatedAt = now;
-    this.record(task, "approval_requested", {
-      step: step.id,
-      tool: step.tool,
-      confirmation: "pending",
-    });
-    this.trySave();
-    this.notify(
-      task,
-      "warning",
-      `Goedkeuring nodig: ${task.title}`,
-      `Stap ${step.tool} ${short(step.args, 100)} wacht op je ok. Zeg: keur taak ${task.id} goed.`,
-    );
-  }
-
+  /** Every step runs directly, whatever its risk (owner decision): NOVA acts and reports. */
   private async execute(
     task: AutoTask,
     step: AutoStep,
     state: StepState,
     readOnly: boolean,
-    risk: "READ_ONLY" | "SAFE" | "CONFIRM" | "DANGEROUS",
   ): Promise<void> {
     const sessionId = `autonomy_${task.id}`;
-    const stamp = (action: Partial<PendingConfirmation>): PendingConfirmation =>
-      ({
-        confirmationId: crypto.randomUUID(),
-        sessionId,
-        tool: step.tool,
-        args: step.args,
-        risk,
-        createdAt: Date.now(),
-        ...action,
-        expiresAt: Date.now() + 60_000,
-      }) as PendingConfirmation;
     let outcome: {
       ok: boolean;
       error?: string;
       summary?: string;
-      waiting?: boolean;
       text?: string;
     };
     try {
-      const approved = state.approval?.grantedAt ? stamp({}) : null;
       const signal = AbortSignal.timeout(60_000);
-      let result = await this.tools.execute(
+      const result = await this.tools.execute(
         step.tool,
         step.args,
         sessionId,
-        approved,
+        null,
         false,
         { signal, readOnlyOnly: readOnly },
       );
-      if (approved && result.requiresConfirmation && result.action) {
-        if (result.action.tool === step.tool && result.action.risk === risk) {
-          // Only argument coercion differed from what the user approved.
-          result = await this.tools.execute(
-            step.tool,
-            step.args,
-            sessionId,
-            stamp(result.action),
-            false,
-            { signal, readOnlyOnly: readOnly },
-          );
-        } else {
-          result = {
-            ok: false,
-            error: "Het risico van de stap is gewijzigd; opnieuw plannen.",
-          };
-        }
-      }
-      if (result.requiresConfirmation && !approved)
-        outcome = { ok: false, waiting: true };
-      else if (result.requiresConfirmation)
-        outcome = { ok: false, error: "Goedkeuring werd niet geaccepteerd." };
-      else {
-        const payload = short(
-          result.ok ? (result.result ?? result) : (result.error ?? "mislukt"),
-        );
-        outcome = {
-          ok: result.ok === true,
-          error: result.ok ? undefined : payload,
-          summary: payload,
-          text: payload.toLowerCase(),
-        };
-      }
+      const payload = short(
+        result.ok ? (result.result ?? result) : (result.error ?? "mislukt"),
+      );
+      outcome = {
+        ok: result.ok === true,
+        error: result.ok ? undefined : payload,
+        summary: payload,
+        text: payload.toLowerCase(),
+      };
     } catch {
       outcome = { ok: false, error: "Tool onbereikbaar of time-out." };
     }
     const now = this.now();
     if (task.status === "cancelled") return;
-    if (outcome.waiting) {
-      state.status = "pending";
-      this.requestApproval(task, step, state, now);
-      return;
-    }
     if (outcome.ok) {
       if (
         step.until &&

@@ -28,7 +28,7 @@ export class ChecksSource implements ToolSource {
         name: "network_check",
         description:
           "Check whether the NOVA services (API, OmniRoute, MQTT, speech, Qdrant, Home Assistant, Proxmox) answer, with response times. Give a target name to check only one. Use it when something seems down or slow.",
-        parameters: schema({ target: text(40) }, []),
+        parameters: schema({ target: text(80) }, []),
         risk: "READ_ONLY",
       },
     ];

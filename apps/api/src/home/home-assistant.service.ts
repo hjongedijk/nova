@@ -123,21 +123,9 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
           Array.isArray(saved.entityIds)
         )
           this.policy = saved;
-        else
-          this.policy = {
-            mode: "allowlist",
-            areaIds: [],
-            deviceIds: [],
-            entityIds: [],
-          };
+        // An unreadable policy falls back to the default: every entity allowed.
       } catch {
-        // Corrupt policy must never silently restore access to every device.
-        this.policy = {
-          mode: "allowlist",
-          areaIds: [],
-          deviceIds: [],
-          entityIds: [],
-        };
+        this.log.warn("ignoring unreadable Home Assistant access policy");
       }
     }
   }
@@ -210,8 +198,15 @@ export class HomeAssistantService implements OnModuleInit, OnModuleDestroy {
     return this.accessPolicy();
   }
 
+  /** Without an owner-set allowlist (mode "all" or an empty list) NOVA may use every entity. */
   isAllowed(entity: HaEntity): boolean {
     if (this.policy.mode === "all") return true;
+    if (
+      !this.policy.entityIds.length &&
+      !this.policy.areaIds.length &&
+      !this.policy.deviceIds.length
+    )
+      return true;
     return (
       this.policy.entityIds.includes(entity.entity_id) ||
       Boolean(entity.area_id && this.policy.areaIds.includes(entity.area_id)) ||

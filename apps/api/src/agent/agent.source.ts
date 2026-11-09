@@ -36,7 +36,7 @@ export class AgentSource implements ToolSource {
         name: "agent_run",
         description:
           "Work on a goal by yourself in the background, for tasks that take several steps or time (research, checking several things, preparing something). It keeps using your tools turn after turn and tells the user when it is done or needs help. Use it when the user says things like 'zoek dit uit', 'regel dat', 'werk aan ... en laat me weten'. Not for simple questions you can answer in this turn. The goal must be a complete, self-contained instruction.",
-        parameters: schema({ goal: text(600), maxMinutes: integer(1, 30) }, [
+        parameters: schema({ goal: text(2000), maxMinutes: integer(1, 60) }, [
           "goal",
         ]),
         risk: "SAFE",

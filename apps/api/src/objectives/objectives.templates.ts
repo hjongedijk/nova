@@ -29,18 +29,10 @@ export interface Template {
   };
 }
 
-/** Only these tools may ever be named by a check, on top of the READ_ONLY risk the registry reports. */
-export const CHECK_TOOLS: ReadonlySet<string> = new Set([
-  "proxmox_status",
-  "proxmox_guests",
-  "network_check",
-  "ha_get_state",
-  "calendar_events",
-]);
-
 const OPERATORS = new Set<string>([">", "<", ">=", "<=", "==", "!="]);
 const ENTITY = /^[a-z_]+\.[a-z0-9_]+$/;
-const TARGET = /^[a-z0-9._-]{1,40}$/i;
+/** A check target name: letters, digits, spaces and common punctuation, up to 80 characters. */
+const TARGET = /^[\p{L}\p{N}][\p{L}\p{N} ._:/()&+@#'-]{0,79}$/u;
 
 function check(
   id: string,

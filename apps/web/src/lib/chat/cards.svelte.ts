@@ -12,8 +12,6 @@ export interface Card {
   id: string;
   tool?: string;
   risk?: PendingConfirmation["risk"];
-  /** Sensitive action: only the visible button may approve it. */
-  screenOnly?: boolean;
   allowAlways?: boolean;
   label: string;
   /** Buttons are locked (answered, or the time ran out). */
@@ -79,33 +77,8 @@ export const isConfirmReply = (text: string): boolean =>
 export const isApproveReply = (text: string): boolean =>
   isConfirmReply(text) && !REJECT_REPLY.test(normalizedReply(text));
 
-/** Mirrors the server rule only to keep a blocked card visible. */
-export const requiresScreenConfirmation = (
-  action: PendingConfirmation,
-): boolean =>
-  action.risk === "DANGEROUS" ||
-  action.tool === "browser_click_confirmed" ||
-  (action.tool === "ha_call_service" &&
-    (action.args.domain === "lock" ||
-      action.args.domain === "cover" ||
-      action.args.domain === "scene" ||
-      action.args.domain === "script" ||
-      action.args.domain === "alarm_control_panel"));
-
-export const keepCardAfterReply = (
-  action: PendingConfirmation,
-  text: string,
-): boolean => isApproveReply(text) && requiresScreenConfirmation(action);
-
-export const confirmationShortcutApproval = (
-  card: Pick<Card, "screenOnly">,
-  key: string,
-): boolean | null =>
-  key.toLowerCase() === "n"
-    ? false
-    : key.toLowerCase() === "y" && !card.screenOnly
-      ? true
-      : null;
+export const confirmationShortcutApproval = (key: string): boolean | null =>
+  key.toLowerCase() === "n" ? false : key.toLowerCase() === "y" ? true : null;
 
 /** The sentence on a card: what is about to happen. */
 export function confirmationLabel(
@@ -254,7 +227,6 @@ export function addCard(action: PendingConfirmation | null | undefined): void {
     id,
     tool: action.tool,
     risk: action.risk,
-    screenOnly: requiresScreenConfirmation(action),
     allowAlways: action.allowAlways,
     label: confirmationLabel(action),
     locked: false,

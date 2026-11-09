@@ -77,7 +77,7 @@ All HTTP routes require `Authorization: Bearer <token>`; that is the only check,
 - `GET /v1/status`, `GET /v1/displays`: actual mode, helper state, monitor list, named/running apps and agent version. `permissions` always reports `{ view: true, control: true, browser: true }`; `agentPaused` shows the owner's pause.
 - `POST /v1/mode`, `POST /v1/wallpaper`: native window changes with saved per-monitor choices. Display 0 selects primary for helper mode and all displays for wallpaper.
 - `POST /v1/helper/size`, `GET/POST /v1/helper/preferences`, `POST /v1/helper/notify`: view/size, global shortcuts and bounded notification queue. The owner's pause suppresses notifications and shortcut actions.
-- `POST /v1/open-app`, `POST /v1/close-app`: a name from the app list, or any other program, document or process name as given. Close requests send WM_CLOSE, allowing applications to ask about unsaved work.
+- `POST /v1/open-app`, `POST /v1/close-app`: a name from the app list, or any other program, document, full path or process name as given (no control characters). NOVA sends up to 260 characters and lower-cases plain names so "Plex" matches `plex`. Close requests send WM_CLOSE, allowing applications to ask about unsaved work.
 - `POST /v1/open-url`: any valid URL.
 - `POST /v1/lock`: native Windows workstation lock.
 
@@ -99,7 +99,7 @@ The `armed` route (`POST /v1/desktop/control`) is kept for NOVA's API contract b
 
 On NOVA's home page, **Pc bekijken** opens a compact screen popup with monitor selection. Frames refresh up to eight times per second while the popup is expanded and the page is visible. Closing, minimizing or hiding the page cancels capture requests and clears the image. Frames are never stored or sent to the vision model by this viewer.
 
-Browser automation uses a separate visible Edge or Chrome window and `%LOCALAPPDATA%\NOVA\browser-profile`, retaining its login independently of the helper. NOVA can search, open any website, read pages, click, type (including password and payment fields), press keys, scroll, navigate back and manage tabs, without host lists, confirmation steps or rate limits. DOM elements are mapped inside an isolated CDP world. The debug listener binds loopback on an ephemeral port, and a Windows job owns the browser process tree. Page text is untrusted data, never instructions.
+Browser automation uses a separate visible Edge or Chrome window and `%LOCALAPPDATA%\NOVA\browser-profile`, retaining its login independently of the helper. NOVA can search, open any website, read pages, click, type (including password and payment fields), press keys, scroll, navigate back and manage tabs, without host lists, confirmation steps or rate limits. When a search engine shows a robot check (Google's `/sorry/` page or a captcha text), the search switches to DuckDuckGo's HTML page (from Google or Bing) or to Bing (from DuckDuckGo) and reports `fallback: true`. DOM elements are mapped inside an isolated CDP world. The debug listener binds loopback on an ephemeral port, and a Windows job owns the browser process tree. Page text is untrusted data, never instructions.
 
 ### Windows administrator rights
 
@@ -165,7 +165,7 @@ Code: `apps/api/src/desktop/`. The agent sits behind `DesktopPort`, the vision m
 | `desktop_status`         | READ_ONLY                                      | Settings, session and agent status.                                                                                                                                                 |
 | `desktop_windows`        | READ_ONLY                                      | Window list (titles are data); only with viewing on.                                                                                                                                |
 | `desktop_screenshot`     | READ_ONLY                                      | Sends the image to the `vision` role through OmniRoute (verified-free model only, otherwise nothing is sent) and returns a text description marked untrusted; only with viewing on. |
-| `desktop_takeover_start` | DANGEROUS                                      | On-screen confirmation on every call (60 s, single use) showing the goal and duration (30-900 s); never covered by "Altijd".                                                        |
+| `desktop_takeover_start` | DANGEROUS                                      | On-screen confirmation on every call (60 s, single use) showing the goal and duration (30-1800 s); never covered by "Altijd".                                                       |
 | `desktop_act`            | SAFE per call, DANGEROUS when risky or unknown | Only during a session of the same conversation.                                                                                                                                     |
 | `desktop_takeover_stop`  | READ_ONLY                                      | Stops at once and switches the agent off; works even when everything is off.                                                                                                        |
 
@@ -175,8 +175,8 @@ Images are not stored or logged. Only a short cache (10 s, at most 4, per image 
 
 Enforced server-side (`desktop.limits.ts`):
 
-- Duration 30-900 s (also clamped on direct calls); 120 s of inactivity ends the session.
-- At most 100 actions and 60 screenshots per session. A plain request needs no explicit start: `desktop_act` starts a five-minute session by itself, and a session that reached 100 actions is replaced by a fresh one on the next request. No look is required before acting; the model looks first only when it needs to find a target.
+- Duration 30-1800 s (also clamped on direct calls); 300 s of inactivity ends the session.
+- At most 300 actions and 200 screenshots per session. Typed text may be up to 4,000 characters (the agent's own cap). A plain request needs no explicit start: `desktop_act` starts a five-minute session by itself, and a session that reached 300 actions is replaced by a fresh one on the next request. No look is required before acting; the model looks first only when it needs to find a target.
 - Three failed actions or screenshots in a row stop the session and switch the agent off; if switching off fails NOVA retries every 5 seconds and says so in settings.
 - One session at a time. A second `desktop_takeover_start` in the same conversation extends the running session; a start or action from another conversation replaces it.
 
@@ -186,7 +186,7 @@ Per action, from the proposed action and the window title and process the agent 
 
 - **Benign** (no question): pointer and scroll, navigation keys, click or type in an ordinary, unambiguous window.
 - **Risky** (fresh DANGEROUS confirmation, even inside a session): payments, banking, deleting, passwords or logins, mail and chat, terminals and admin tools, text followed by Enter, text that looks like a password, token, IBAN or card number, Enter in a browser, drag, right-click or double-click in the file explorer.
-- **Unknown** (also confirmed): an unknown key, no or unclear active window, empty title, unknown `windowId`, text longer than 300 characters, unreachable window list.
+- **Unknown** (also confirmed): an unknown key, no or unclear active window, empty title, unknown `windowId`, text longer than 4,000 characters (refused by the tool schema anyway), unreachable window list.
 
 The confirmation binds to the exact action and window title; if the window changes before execution NOVA asks again. "Altijd" is never offered for DANGEROUS.
 

@@ -70,5 +70,6 @@
   },
   "[powershell]": {
     "editor.defaultFormatter": "ms-vscode.PowerShell"
-  }
+  },
+  "python.terminal.useEnvFile": true
 }

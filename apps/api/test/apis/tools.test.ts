@@ -15,6 +15,7 @@ import { JarvisStateStore } from "../../src/planning/jarvis-state.store.js";
 import { SettingsStore } from "../../src/settings/store/settings.store.js";
 import { ToolsModule } from "../../src/tools/tools.module.js";
 import { ToolsService } from "../../src/tools/tools.service.js";
+import { MAX_MODEL_TOOLS } from "../../src/tools/tool-selection.js";
 import {
   SECRET,
   OPENAPI3,
@@ -236,7 +237,7 @@ describe("api tools through ToolsService", () => {
       );
       expect(operationTools.length).toBeGreaterThan(0);
       expect(operationTools.length).toBeLessThanOrEqual(12);
-      expect(related.length).toBeLessThanOrEqual(24);
+      expect(related.length).toBeLessThanOrEqual(MAX_MODEL_TOOLS);
       const dutch = tools
         .forModel({ message: "koppel een api voor mij", role: "conversation" })
         .map((t) => t.function.name);

@@ -80,7 +80,7 @@ export class ObjectivesSource implements ToolSource {
             intervalMinutes: integer(5, 1440),
             expiresInDays: integer(1, 365),
             cooldownMinutes: integer(0, 1440),
-            target: str(40),
+            target: str(80),
             entity: str(80),
             operator: {
               type: "string",
