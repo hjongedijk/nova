@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import zlib from "node:zlib";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -10,6 +11,10 @@ import {
   BIRTH,
   f,
   FACE,
+  gustAt,
+  hairWind,
+  IDLE,
+  idlePose,
   STARS,
 } from "./aura-data.ts";
 import {
@@ -26,6 +31,7 @@ import {
   gpuTier,
   LOOKS,
   spring,
+  swing,
   LINES,
   TIMING,
 } from "./aura.ts";
@@ -47,11 +53,11 @@ describe("aura artwork", () => {
     expect(png.readUInt32BE(20)).toBe(AURA_DATA.height * 3);
     // RGB, no alpha: nothing for a browser to premultiply.
     expect(png[25]).toBe(2);
-    // The light lines: three 1920x1080 layers, so crossing lines each keep their whole glow.
+    // The light lines: four 1920x1080 layers in a 2x2 sheet (crossing lines each keep their glow), RGBA.
     const lines = fs.readFileSync(path.join(STATIC, AURA_ASSETS.lines));
-    expect(lines.readUInt32BE(16)).toBe(1920);
-    expect(lines.readUInt32BE(20)).toBe(1080 * 3);
-    expect(lines[25]).toBe(2);
+    expect(lines.readUInt32BE(16)).toBe(1920 * 2);
+    expect(lines.readUInt32BE(20)).toBe(1080 * 2);
+    expect(lines[25]).toBe(6);
   });
 
   it("is documented as generated with FLUX.1 schnell, Apache-2.0, owner-approved", () => {
@@ -246,9 +252,8 @@ describe("aura light lines", () => {
   it("draws flowing light lines with easy-to-tune looks: hot core, glow, halo, warm passages, sparks", () => {
     expect(LINES.core).toBeGreaterThan(0.3);
     expect(LINES.core).toBeLessThan(LINES.glow);
-    expect(LINES.glow).toBeLessThan(LINES.wide);
-    // The halo ends inside the raster's reach (40 px), so no glow is ever cut off.
-    expect(LINES.wide * 2.6).toBeLessThan(40);
+    // The per-line glow ends well inside the raster's reach (40 px); the wide halo is summed separately.
+    expect(LINES.glow * 1.3 * 2.6).toBeLessThan(40);
     expect(LINES.warm).toBeGreaterThan(0);
     expect(LINES.warm).toBeLessThan(1);
     expect(LINES.face).toBeLessThan(0.6);
@@ -276,6 +281,37 @@ describe("aura light lines", () => {
     expect(GRADE.gloss).toBeLessThan(0.5);
   });
 
+  it("lays 8 or more faint light lines over the blank face, and no seam down its middle", () => {
+    // The asset script records its counts in the raster's tEXt chunk.
+    const buf = fs.readFileSync(path.join(STATIC, AURA_ASSETS.lines));
+    let meta = { lines: 0, faceLines: 0 };
+    for (let o = 8; o < buf.length;) {
+      const len = buf.readUInt32BE(o);
+      if (buf.toString("ascii", o + 4, o + 8) === "tEXt") {
+        const text = buf.toString("latin1", o + 8, o + 8 + len);
+        if (text.startsWith("aura\0")) meta = JSON.parse(text.slice(5));
+      }
+      o += 12 + len;
+    }
+    expect(meta.faceLines).toBeGreaterThanOrEqual(8);
+    expect(meta.faceLines).toBeLessThanOrEqual(14);
+    expect(meta.lines).toBeGreaterThanOrEqual(80);
+    expect(meta.lines).toBeLessThanOrEqual(115);
+    // No seam down the face: no face line is placed on the centre (u = 0).
+    const src = fs.readFileSync(
+      path.resolve(
+        import.meta.dirname,
+        "../../../../../scripts/aura-assets.mjs",
+      ),
+      "utf8",
+    );
+    const faceBlock = src.slice(
+      src.indexOf("// The blank face:"),
+      src.indexOf("// Star points where lines meet."),
+    );
+    expect(faceBlock).not.toMatch(/\[\s*-?0\.0\d*\s*,/);
+  });
+
   it("adds no facial features: the face stays blank", () => {
     expect(PLATE_FRAG).not.toMatch(
       /\b(eyes?|mouth|lips?|nose|brows?|pupils?)\b/i,
@@ -283,7 +319,124 @@ describe("aura light lines", () => {
   });
 });
 
+/** Read the hair weight (atlas tile 1, red) of the shipped data atlas. Our encoder writes filter 0/2 rows. */
+function hairWeights(): {
+  w: number;
+  h: number;
+  at(u: number, v: number): number;
+} {
+  const buf = fs.readFileSync(path.join(STATIC, AURA_ASSETS.data));
+  const w = buf.readUInt32BE(16);
+  const h3 = buf.readUInt32BE(20);
+  const idat: Buffer[] = [];
+  for (let o = 8; o < buf.length;) {
+    const len = buf.readUInt32BE(o);
+    if (buf.toString("ascii", o + 4, o + 8) === "IDAT")
+      idat.push(buf.subarray(o + 8, o + 8 + len));
+    o += 12 + len;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = w * 3;
+  const px = new Uint8Array(stride * h3);
+  for (let y = 0; y < h3; y++) {
+    const f = raw[y * (stride + 1)]!;
+    for (let i = 0; i < stride; i++) {
+      const v = raw[y * (stride + 1) + 1 + i]!;
+      px[y * stride + i] =
+        (f === 2 && y > 0 ? v + px[(y - 1) * stride + i]! : v) & 255;
+    }
+  }
+  const h = h3 / 3;
+  return {
+    w,
+    h,
+    at: (u, v) =>
+      px[((h + Math.floor(v * h)) * w + Math.floor(u * w)) * 3]! / 255,
+  };
+}
+
+describe("aura hair", () => {
+  it("is rooted: the hair weight is about 0 at the scalp and grows toward the tips", () => {
+    const hw = hairWeights();
+    const { head } = AURA_DATA;
+    // On the crown, the parting and the temples (just outside the face), and on the face itself.
+    for (const [u, v] of [
+      [head.cx, head.top - 0.03],
+      [head.cx - head.radius * 1.1, head.cy - 0.05],
+      [head.cx + head.radius * 1.1, head.cy - 0.05],
+      [head.cx, head.cy],
+    ] as const)
+      expect(hw.at(u, v)).toBeLessThan(0.08);
+    // Far down the long hair beside the shoulders it moves freely.
+    expect(
+      Math.max(hw.at(head.cx - 0.2, 0.55), hw.at(head.cx + 0.2, 0.55)),
+    ).toBeGreaterThan(0.5);
+    // Never on the body.
+    expect(hw.at(AURA_DATA.axis, 0.8)).toBeLessThan(0.02);
+  });
+
+  it("moves in the wind only where it is free, and not at all without motion", () => {
+    for (const t of [0, 1.3, 7.7, 20])
+      for (const g of [0, 1]) {
+        expect(hairWind(0.3, 0.5, 0.9, t, 0, g, 0.5)).toEqual([0, 0]);
+        expect(hairWind(0.3, 0.5, 0, t, 1, g, 0.5)).toEqual([0, 0]);
+      }
+    let max = 0;
+    for (let t = 0; t < 30; t += 0.1)
+      max = Math.max(
+        max,
+        Math.abs(hairWind(0.3, 0.5, 1, t, 1, gustAt(t), 0)[0]),
+      );
+    expect(max).toBeGreaterThan(2);
+    expect(max).toBeLessThan(10);
+    // Gusts come and go: some every 6 to 12 s.
+    let gusts = 0;
+    let was = false;
+    for (let t = 0; t < 60; t += 0.05) {
+      const on = gustAt(t) > 0.5;
+      if (on && !was) gusts++;
+      was = on;
+    }
+    expect(gusts).toBeGreaterThanOrEqual(4);
+    expect(gusts).toBeLessThanOrEqual(10);
+  });
+
+  it("follows the head with a little overshoot and settles within a second", () => {
+    const s = { x: 0, v: 0 };
+    let peak = 0;
+    let settled = Infinity;
+    for (let i = 0; i < 240; i++) {
+      swing(s, 1, 1 / 120);
+      peak = Math.max(peak, s.x);
+      if (Math.abs(s.x - 1) > 0.03) settled = Infinity;
+      else if (settled === Infinity) settled = i / 120;
+    }
+    expect(peak).toBeGreaterThan(1.02);
+    expect(peak).toBeLessThan(1.35);
+    expect(settled).toBeLessThan(1.1);
+  });
+});
+
 describe("aura moods and motion", () => {
+  it("gives the head its own small idle life, still under reduced motion", () => {
+    let maxYaw = 0;
+    let maxRoll = 0;
+    let maxPitch = 0;
+    for (let t = 0; t < 120; t += 0.25) {
+      const p = idlePose(t, 1);
+      maxYaw = Math.max(maxYaw, Math.abs(p.yaw));
+      maxPitch = Math.max(maxPitch, Math.abs(p.pitch));
+      maxRoll = Math.max(maxRoll, Math.abs(p.roll));
+    }
+    expect(maxYaw).toBeGreaterThan(0.03);
+    expect(maxYaw).toBeLessThanOrEqual(IDLE.yaw + IDLE.aside + 1e-6);
+    expect(maxPitch).toBeLessThanOrEqual(IDLE.pitch + 1e-6);
+    expect(maxRoll).toBeLessThanOrEqual(IDLE.roll + 1e-6);
+    expect(idlePose(12.3, 0)).toEqual({ yaw: 0, pitch: 0, roll: 0 });
+    // Within the range where the depth illusion holds.
+    expect(GAZE.yaw + 0.05).toBeLessThan(0.4);
+  });
+
   it("has a look for every state and the alert; at rest the hair keeps the artwork's colour", () => {
     for (const s of [
       "ready",

@@ -1,6 +1,13 @@
 import type * as ThreeModule from "three";
 import type { UiState } from "#lib/stores/chat.svelte.ts";
-import { AURA_ASSETS, auraFraming, BIRTH, FACE } from "./aura-data.ts";
+import {
+  AURA_ASSETS,
+  auraFraming,
+  BIRTH,
+  FACE,
+  gustAt,
+  idlePose,
+} from "./aura-data.ts";
 import {
   loadPixels,
   sampleParticles,
@@ -260,6 +267,23 @@ function loadParticles(image: string, count: number): Promise<AuraParticles> {
   });
 }
 
+/** A soft spring that overshoots a little and settles in about `settle` seconds: for the hair's lag. */
+export function swing(
+  s: { x: number; v: number },
+  target: number,
+  dt: number,
+  settle = 0.85,
+): void {
+  const zeta = 0.42;
+  const w = 4.6 / (zeta * settle);
+  const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
+  const h = Math.min(dt, 0.1) / steps;
+  for (let i = 0; i < steps; i++) {
+    s.v += (w * w * (target - s.x) - 2 * zeta * w * s.v) * h;
+    s.x += s.v * h;
+  }
+}
+
 /** Critically damped spring: glides toward the target, keeps its velocity through a retarget, never overshoots. */
 export function spring(
   s: { x: number; v: number },
@@ -416,6 +440,8 @@ async function createGlAura(
     uT: { value: 0 },
     uMotion: { value: 1 },
     uTurn: { value: new THREE.Vector2() },
+    uRoll: { value: 0 },
+    uWind: { value: new THREE.Vector4() },
     uBreath: { value: 0 },
     uTau: { value: 0 },
     uRoom: { value: new THREE.Vector3(room.r, room.g, room.b) },
@@ -447,6 +473,7 @@ async function createGlAura(
     uTau: U.uTau,
     uBreath: U.uBreath,
     uTurn: U.uTurn,
+    uWind: U.uWind,
     uGain: { value: 0 },
     uTwinkle: { value: 0.15 },
     uFly: { value: new THREE.Vector3(0.8, 0.6, 1) },
@@ -602,7 +629,17 @@ async function createGlAura(
     waveP = instant ? 1 : 0;
   }
 
-  const pose = { yaw: { x: 0, v: 0 }, pitch: { x: 0, v: 0 } };
+  const pose = {
+    yaw: { x: 0, v: 0 },
+    pitch: { x: 0, v: 0 },
+    roll: { x: 0, v: 0 },
+  };
+  // The hair follows the head on its own springs, a little late, with a little overshoot.
+  const hairPose = {
+    yaw: { x: 0, v: 0 },
+    pitch: { x: 0, v: 0 },
+    roll: { x: 0, v: 0 },
+  };
   const weight = { listening: 0, thinking: 0, speaking: 0 };
   let tau = 0;
   let lastForm = 0;
@@ -703,23 +740,56 @@ async function createGlAura(
       weight.speaking +=
         ((f.state === "speaking" ? 1 : 0) - weight.speaking) * kw;
 
-      /* head: toward the pointer, within limits, on springs; facing front it is exactly the artwork */
+      /* head: toward the pointer, plus its own idle life and the mood's posture, on springs; never a snap */
       const clamp = (x: number, m: number) => Math.max(-m, Math.min(m, x));
+      const idle = idlePose(t, motion);
       const yawT =
-        motion * clamp(f.gazeX * GAZE.yaw + weight.thinking * 0.05, GAZE.yaw);
+        motion *
+        clamp(
+          f.gazeX * GAZE.yaw +
+            idle.yaw +
+            weight.thinking * (0.05 + 0.03 * Math.sin(t * 0.23)),
+          GAZE.yaw + 0.05,
+        );
       const pitchT =
         motion *
         clamp(
           -f.gazeY * GAZE.pitch +
-            weight.listening * 0.03 -
-            weight.thinking * 0.03 +
-            weight.speaking * 0.015 * f.audio * Math.sin(t * 2.3),
-          GAZE.pitch,
+            idle.pitch +
+            // Listening leans in a touch; thinking drifts up; speaking nods with the voice.
+            weight.listening * 0.03 +
+            weight.thinking * (-0.035 + 0.015 * Math.sin(t * 0.31)) +
+            weight.speaking *
+              f.audio *
+              (0.025 * Math.sin(t * 5.1) + 0.012 * Math.sin(t * 8.3)),
+          GAZE.pitch + 0.03,
         );
+      const rollT =
+        motion *
+        (idle.roll +
+          weight.listening * 0.045 -
+          weight.thinking * 0.03 +
+          weight.speaking * f.audio * 0.01 * Math.sin(t * 3.7));
       spring(pose.yaw, yawT, dt);
       spring(pose.pitch, pitchT, dt);
+      spring(pose.roll, rollT, dt);
+      swing(hairPose.yaw, pose.yaw.x, dt);
+      swing(hairPose.pitch, pose.pitch.x, dt);
+      swing(hairPose.roll, pose.roll.x, dt);
       const tiny = (v: number) => (Math.abs(v) < 2e-4 ? 0 : v);
       U.uTurn.value.set(tiny(pose.yaw.x), tiny(pose.pitch.x));
+      U.uRoll.value = tiny(pose.roll.x);
+      // The hair's lag, in data px at the tips: behind the head's turn and tilt, swinging past and back.
+      const lagX =
+        (hairPose.yaw.x - pose.yaw.x) * 34 -
+        (hairPose.roll.x - pose.roll.x) * 70;
+      const lagY = (hairPose.pitch.x - pose.pitch.x) * 22;
+      U.uWind.value.set(
+        motion * gustAt(t),
+        motion * weight.speaking * f.audio * 0.6,
+        motion * lagX,
+        motion * lagY,
+      );
 
       U.uT.value = t;
       U.uMotion.value = motion;

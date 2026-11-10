@@ -1,4 +1,12 @@
-import { ARRIVAL_GLSL, AURA_DATA, BIRTH, f, FACE, STARS } from "./aura-data.ts";
+import {
+  ARRIVAL_GLSL,
+  AURA_DATA,
+  BIRTH,
+  f,
+  FACE,
+  STARS,
+  WIND_GLSL,
+} from "./aura-data.ts";
 
 /**
  * The light lines drawn over the blank head and the body (their paths live in the lines raster, built by
@@ -7,13 +15,11 @@ import { ARRIVAL_GLSL, AURA_DATA, BIRTH, f, FACE, STARS } from "./aura-data.ts";
 export const LINES = {
   /** Half-width of the hot, near-white core and of the coloured glow around it, for a line of weight 1. */
   core: 0.72,
-  glow: 4.3,
-  /** A wide, faint halo, as if bloomed (it ends before the raster's reach of 40 px). */
-  wide: 12,
-  /** Strength of core, glow and halo. */
+  glow: 3.0,
+  /** Strength of core, glow and the soft halo of all lines together (the raster's alpha). */
   coreGain: 1.25,
-  glowGain: 1.0,
-  wideGain: 0.2,
+  glowGain: 0.7,
+  wideGain: 0.55,
   /** How much the brightness wanders along a line, and how many swells it has. */
   vary: 0.5,
   swells: 7,
@@ -80,6 +86,7 @@ float hash21(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.y
 const vec2 DATA = vec2(${f(D.width)}, ${f(D.height)});
 const vec2 HEADC = vec2(${f(D.head.cx * D.width)}, ${f(D.head.cy * D.height)});
 ${ARRIVAL_GLSL}
+${WIND_GLSL}
 `;
 
 const starList = STARS.map(([u, v]) => `vec2(${f(u)}, ${f(v)})`).join(", ");
@@ -115,6 +122,8 @@ uniform float uPulse;
 uniform float uAudio;
 uniform float uFloor;
 uniform float uView;     // 0 composed, 1 the bare artwork, 2 particles only
+uniform float uRoll;     // the head's tilt (radians)
+uniform vec4 uWind;      // gust 0..1, lift, the hair's lag behind the head (data px, x and y)
 ${COMMON}
 
 const vec2 STAR[${STARS.length}] = vec2[](${starList});
@@ -136,26 +145,25 @@ float noise(vec2 p) {
  */
 float glowGraw(float d, float w, float px) { return exp(-pow(d / (9.0 * w + px), 2.0)); }
 
-vec3 lightLine(float d, float t, float id, float onFace, float px, vec2 q, vec3 A, vec3 B, float accent) {
+vec3 lightLine(float d, float t, float id, float weight, float warmLine, float onFace, float px, vec2 q, vec3 A, vec3 B, float accent) {
   float h1 = hash11(id * 3.7 + 1.0);
   float h2 = hash11(id * 9.1 + 4.0);
   // Tapered ends.
   float taper = pow(clamp(sin(3.14159 * t), 0.0, 1.0), 0.55) * smoothstep(0.0, 0.05, t) * smoothstep(1.0, 0.95, t);
-  float w = (0.7 + 0.6 * h1) * (0.25 + 1.05 * taper);
+  float w = (0.35 + 0.75 * weight) * (0.25 + 1.05 * taper);
   float along = t * ${f(LINES.swells)} + h2 * 13.0;
   float vary = 1.0 - ${f(LINES.vary)} + ${f(LINES.vary)} * noise(vec2(along, id * 5.3));
   float travel = pow(max(0.0, sin((t * 2.2 - uT * uPulse * ${f(LINES.travel.speed)} * uMotion + h1 * 5.0) * 6.2832)), 14.0);
   float core = exp(-pow(d / (${f(LINES.core)} * w + 0.55 * px), 2.0));
   float glowG = exp(-pow(d / (${f(LINES.glow)} * w + px), 2.0));
-  float wideG = exp(-pow(d / (${f(LINES.wide)} * (0.6 + 0.4 * w)), 2.0)) * (1.0 - smoothstep(30.0, 39.0, d));
+  // (The wide halo comes summed over all lines from the raster's alpha, so it never cuts off.)
   float soft = mix(1.0, ${f(LINES.faceGlow)}, onFace);
   glowG *= soft;
-  wideG *= soft;
   // Colour: violet to magenta per line, warm in passages.
   vec3 c = mix(A, B, smoothstep(0.25, 0.75, noise(vec2(along * 0.6 + 3.0, id))));
   // Some lines run warm (amber, peach) over most of their length; the rest warm only in passages.
   float warm = max(smoothstep(1.0 - ${f(LINES.warm)}, 1.0, noise(vec2(along * 0.8 + 11.0, id * 2.1))),
-    step(0.58, h2) * (0.55 + 0.45 * noise(vec2(along * 0.5, id + 2.0)))) * accent;
+    warmLine * (0.6 + 0.4 * noise(vec2(along * 0.5, id + 2.0)))) * accent;
   c = mix(c, mix(${rgb(LINES.warmColour)}, ${rgb(LINES.amberColour)}, h2), warm * 0.9);
   // Fine dust of light scattered close around the line.
   vec2 dcell = floor(q * DATA / 1.4);
@@ -164,7 +172,8 @@ vec3 lightLine(float d, float t, float id, float onFace, float px, vec2 q, vec3 
   float dotR = max(0.16, 0.25 * px * px);
   float scatter = step(0.84, hz) * exp(-dot(dpt, dpt) / dotR) * glowGraw(d, w, px)
     * (0.4 + 0.6 * sin(uT * (1.0 + 2.0 * hz) * uMotion + hz * 30.0));
-  float lit = taper * vary * (1.0 + ${f(LINES.travel.gain)} * travel);
+  // Faint lines are faint: brightness follows the line's weight.
+  float lit = taper * vary * (1.0 + ${f(LINES.travel.gain)} * travel) * (0.25 + 0.75 * min(weight, 1.2));
   // Sparks: fine dots strung along the core, twinkling.
   vec2 cell = floor(q * DATA / 2.2);
   float hs = hash21(cell + id * 7.0);
@@ -172,8 +181,7 @@ vec3 lightLine(float d, float t, float id, float onFace, float px, vec2 q, vec3 
   float spark = step(0.78, hs) * exp(-dot(spt, spt) / max(0.3, 0.3 * px * px)) * exp(-pow(d / (1.6 + 0.6 * px), 2.0))
     * (0.5 + 0.5 * sin(uT * (1.5 + 3.0 * hs) * uMotion + hs * 50.0));
   return (mix(c, vec3(1.0, 0.88, 0.96), 0.6) * core * ${f(LINES.coreGain)} + c * glowG * ${f(LINES.glowGain)}
-      + mix(c, vec3(1.0), 0.6) * spark * ${f(LINES.sparks)} + mix(c, vec3(1.0), 0.4) * scatter * 0.7) * lit
-    + c * wideG * ${f(LINES.wideGain)} * (0.4 + 0.6 * taper);
+      + mix(c, vec3(1.0), 0.6) * spark * ${f(LINES.sparks)} + mix(c, vec3(1.0), 0.4) * scatter * 0.7) * lit;
 }
 
 void main() {
@@ -191,20 +199,57 @@ void main() {
   float e = ${f(BREATH.amount)} * uBreath * figP;
   vec2 q = anchor + (p - anchor) / vec2(1.0 + e * 0.7, 1.0 + e);
 
+  /* the head's tilt: a smooth rotation about the neck that fades out around the head (no tear, no seam) */
+  if (abs(uRoll) > 1e-5) {
+    vec2 P = q * DATA;
+    vec2 piv = vec2(${f(D.head.cx * D.width)}, ${f((D.head.bottom + 0.03) * D.height)});
+    float wr = 1.0 - smoothstep(0.85, 1.6, length((P - HEADC) / vec2(${f(D.head.radius * D.width * 1.25)}, ${f(D.head.radius * D.width * 1.8)})));
+    float a = -uRoll * wr;
+    vec2 d = P - piv;
+    q = (piv + vec2(d.x * cos(a) - d.y * sin(a), d.x * sin(a) + d.y * cos(a))) / DATA;
+  }
+
+  /* the hair: wind and its lag behind the head. Roots stay; the motion grows toward the tips. A smooth warp of
+     where the picture is read, so strands stretch a little but never tear. */
+  float hw = tile(1.0, q).r;
+  if (hw > 0.002) {
+    vec2 wind = hairWind(q, hw, uT, uMotion, uWind.x, uWind.y);
+    // The side the head turns away from swings outward a little.
+    float sideH = sign(q.x - ${f(D.head.cx)});
+    float away = max(0.0, -sideH * sign(uTurn.x)) * abs(uTurn.x) * 9.0;
+    vec2 dsp = wind + hw * (uWind.zw + vec2(sideH * away, 0.0));
+    q -= dsp / DATA;
+  }
+
   /* head turn: find the surface point that the turned head brings to this pixel (relief mapping on the height) */
   vec2 sY = vec2(sin(uTurn.x), cos(uTurn.x));
   vec2 sP = vec2(sin(uTurn.y), cos(uTurn.y));
   float turned = 0.0;
   float unseen = 0.0;
+  float knownL = 1.0;
   if (abs(uTurn.x) + abs(uTurn.y) > 1e-4) {
     vec2 P = q * DATA;
     vec2 rel = (P - HEADC) / vec2(${f(D.head.radius * D.width * 1.3)}, ${f(D.head.radius * D.width * 1.9)});
     if (dot(rel, rel) < 1.0) {
+      // March from the top of the head's height down and take the first surface the view ray meets (parallax
+      // occlusion): one clear answer per pixel, no fold, no zigzag where the dome turns away.
+      vec2 sh = vec2(sY.x, -sP.x);
       vec2 X = P;
-      for (int i = 0; i < 6; i++) {
-        float h = tile(1.0, X / DATA).g * ${f(D.hmax)} * tile(0.0, X / DATA).g;
-        vec2 nx = HEADC + (P - HEADC - vec2(h * sY.x, -h * sP.x)) / vec2(sY.y, sP.y);
-        X = mix(X, nx, 0.7);
+      float prevGap = -1.0;
+      vec2 prevX = P;
+      for (int i = 0; i <= 24; i++) {
+        float hk = 76.0 * (1.0 - float(i) / 24.0);
+        vec2 Xk = HEADC + (P - HEADC - sh * hk) / vec2(sY.y, sP.y);
+        float hs = tile(1.0, Xk / DATA).g * ${f(D.hmax)} * tile(0.0, Xk / DATA).g;
+        float gap = hs - hk;
+        if (gap >= 0.0) {
+          float k = i == 0 ? 0.0 : prevGap / (prevGap - gap);
+          X = mix(prevX, Xk, k);
+          break;
+        }
+        prevGap = gap;
+        prevX = Xk;
+        X = Xk;
       }
       // The head keeps its outline, as a turning dome does. Where the turn would bring in its unseen back, show
       // plain dark skin instead of stretching what is there.
@@ -212,6 +257,8 @@ void main() {
       float known = smoothstep(0.45, 0.85, tile(0.0, X / DATA).g);
       turned = here;
       unseen = here * (1.0 - known);
+      // Lines only where the turned surface is fully known: half-known blends two places and would double them.
+      knownL = mix(1.0, smoothstep(0.8, 1.0, known), here);
       q = mix(q, X / DATA, here * known);
     }
   }
@@ -230,7 +277,7 @@ void main() {
   float form = t0.r;
   float headM = t0.g;
   float bright = t0.b;
-  float zone = t1.r;
+  float zone = 1.0 - smoothstep(0.78, 1.0, length((q - vec2(${f(D.axis)}, 0.55)) / vec2(0.33, 0.62)));
   float fig = t1.b;
 
   /* the mood: a bloom spreading from the face carries the new palette and intensity */
@@ -299,28 +346,50 @@ void main() {
   float spec = pow(max(dot(nr, hv), 0.0), 72.0) + 0.3 * pow(max(dot(nr, normalize(vec3(0.6, 0.25, 0.75))), 0.0), 60.0);
   col += ${rgb(GRADE.sheen)} * spec * skinM * (1.0 - 0.7 * headM) * ${f(GRADE.gloss)};
   // Hair: brighter, more saturated strands.
-  col = mix(col, col * vec3(0.98, 0.95, 1.12) * 1.1, hair * zone * (1.0 - skinM));
+  // Hair: toward violet and a little quieter; the crown dimmer, with a soft sheen, flowing into the lengths.
+  float crownM = hair * (1.0 - smoothstep(${f(D.head.top - 0.08)}, ${f(D.head.top + 0.12)}, q.y));
+  col = mix(col, col * vec3(0.8, 0.84, 1.02) * 0.86, hair * zone * (1.0 - skinM));
+  col *= 1.0 - 0.22 * crownM;
+  col += ${rgb(GRADE.sheen)} * crownM * 0.05 * smoothstep(0.2, 0.9, sin(q.x * 80.0 + q.y * 20.0) * 0.5 + 0.5);
+  // The arms: a soft highlight running down each arm's length, so it reads as a rounded limb.
+  float armX = t2.b;
+  col += ${rgb(GRADE.sheen)} * exp(-pow((armX - 0.62) / 0.14, 2.0)) * step(0.004, armX) * skinM * 0.06;
+  // Soften the artwork's own outline of the bust where our lines define the round shape.
+  vec2 bl = (q - vec2(${f(D.axis - 0.056)}, 0.822)) * vec2(${f(D.aspect)}, 1.0);
+  vec2 br = (q - vec2(${f(D.axis + 0.056)}, 0.822)) * vec2(${f(D.aspect)}, 1.0);
+  float bustRim = max(exp(-pow((length(bl) - 0.085) / 0.018, 2.0)), exp(-pow((length(br) - 0.085) / 0.018, 2.0)));
+  col = mix(col, col * 0.5, bright * bustRim * smoothstep(0.7, 0.86, q.y));
 
   /* the light lines */
   vec3 lines = vec3(0.0);
   float px = max(fwidth(q.x) * 1920.0, 0.25);
-  vec2 ql = clamp(q, vec2(0.0, 0.5 / 1080.0), vec2(1.0, 1.0 - 0.5 / 1080.0));
-  for (int i = 0; i < 3; i++) {
-    vec3 lr = texture2D(uLines, vec2(ql.x, (ql.y + float(i)) / 3.0)).rgb;
+  vec2 ql = clamp(q, vec2(0.5 / 1920.0, 0.5 / 1080.0), vec2(1.0 - 0.5 / 1920.0, 1.0 - 0.5 / 1080.0));
+  for (int i = 0; i < 4; i++) {
+    vec2 cellL = vec2(mod(float(i), 2.0), floor(float(i) / 2.0));
+    vec3 lr = texture2D(uLines, (ql + cellL) / 2.0).rgb;
     if (lr.r < 0.995 && lr.b > 0.0) {
       float code = floor(lr.b * 255.0 + 0.5);
-      float onFace = step(1.5, mod(code, 4.0));
-      lines += lightLine(lr.r * 40.0, lr.g, floor(code / 4.0), onFace, px, q, A, B, accent)
+      float onFace = mod(code, 2.0);
+      float warmLine = mod(floor(code / 2.0), 2.0);
+      float wc = floor(code / 4.0);
+      lines += lightLine(lr.r * 40.0, lr.g, wc + float(i) * 61.0, (wc - 1.0) / 41.0, warmLine, onFace, px, q, A, B, accent)
         * mix(1.0, ${f(LINES.face)}, onFace);
     }
   }
-  lines *= (1.0 - unseen) * mix(1.0, farSide, turned);
+  // The soft halo of all lines together, coloured like the lines around it.
+  float haloL = texture2D(uLines, ql / 2.0).a;
+  lines += mix(A, B, 0.45) * haloL * haloL * ${f(LINES.wideGain)} * 2.0 + mix(A, B, 0.45) * haloL * ${f(LINES.wideGain)} * 0.4;
+  // A clean dark gap between each arm and the torso: no lines, no glow, a touch darker skin.
+  float gapM = step(t2.b, 0.003) * smoothstep(0.098, 0.106, abs(q.x - ${f(D.axis)})) * smoothstep(0.72, 0.76, q.y) * form;
+  lines *= (1.0 - unseen) * knownL * mix(1.0, farSide, turned) * (1.0 - gapM);
+  col *= 1.0 - 0.35 * gapM;
   // Faint starry dust inside the body.
   vec2 dc = floor(q * DATA / 3.0);
   float hd = hash21(dc + 17.0);
   vec2 dp = (dc + 0.5 + (vec2(hash21(dc + 3.1), hash21(dc + 7.7)) - 0.5) * 0.6) * 3.0;
-  float dust = step(0.93, hd) * exp(-dot(q * DATA - dp, q * DATA - dp) / 0.18)
-    * (0.45 + 0.55 * sin(uT * (0.7 + 2.0 * hd) * uMotion + hd * 60.0)) * form * (1.0 - headM * 0.7);
+  float chest = exp(-pow(length((q - vec2(${f(D.axis)}, 0.8)) * vec2(${f(D.aspect)}, 1.0)) / 0.19, 2.0));
+  float dust = step(mix(0.95, 0.86, chest), hd) * exp(-dot(q * DATA - dp, q * DATA - dp) / 0.18)
+    * (0.45 + 0.55 * sin(uT * (0.7 + 2.0 * hd) * uMotion + hd * 60.0)) * form * (1.0 - headM * 0.6) * (0.7 + 0.8 * chest);
   // Star points where lines meet: a soft core with a fine cross of light, twinkling.
   float stars = 0.0;
   for (int i = 0; i < ${STARS.length}; i++) {
@@ -389,6 +458,7 @@ uniform vec2 uTurn;
 uniform float uGain;     // 0 composed; 1 shows the particles at full strength (the dev comparison)
 uniform float uTwinkle;
 uniform vec3 uFly;       // colour of a particle in flight (sRGB)
+uniform vec4 uWind;      // as on the picture
 varying vec3 vCol;
 ${COMMON}
 void main() {
@@ -409,6 +479,9 @@ void main() {
     P = P * vec2(sY.y, sP.y) + vec2(h * sY.x, -h * sP.x);
     p = (HEADC + P) / DATA;
     hidden = step(z, -0.5);
+  } else if (isBright > 0.5 && aSeed.y > 0.002) {
+    // Hair particles move with the strands they sit on.
+    p += (hairWind(p, aSeed.y, uT, uMotion, uWind.x, uWind.y) + aSeed.y * uWind.zw) / DATA;
   }
   float ar = arrival(home, isHead, aSeed.w);
   float launch = ar - ${f(BIRTH.flight)};

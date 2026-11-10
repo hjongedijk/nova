@@ -19,7 +19,7 @@ export interface AuraParticles {
   home: Float32Array;
   /** sRGB colour and figure weight, 8 bits each. */
   color: Uint8Array;
-  /** Random 0..1, depth in data pixels (head only), kind (PARTICLE_KIND), jitter 0..1. */
+  /** Random 0..1, depth in data pixels (head) or hair weight (bright), kind (PARTICLE_KIND), jitter 0..1. */
   seed: Float32Array;
   /** Grid cell size, in picture widths: sets the point size. */
   cell: number;
@@ -100,7 +100,7 @@ export function sampleParticles(
       const u = x / iw;
       const v = y / ih;
       const [form, headM, bright] = atlasAt(atlas, 0, u, v);
-      const [, height, fig] = atlasAt(atlas, 1, u, v);
+      const [hairW, height, fig] = atlasAt(atlas, 1, u, v);
       if (fig <= 0.04 || n >= cap) continue;
       // The cell's average colour: the points then add up to a smooth picture, not to single-pixel noise.
       let rs = 0;
@@ -135,8 +135,13 @@ export function sampleParticles(
               ? PARTICLE_KIND.body
               : PARTICLE_KIND.room;
       seeds[n * 4] = r;
+      // Head: its depth for the turn. Hair: its weight, for the wind.
       seeds[n * 4 + 1] =
-        kind === PARTICLE_KIND.head ? height * AURA_DATA.hmax : 0;
+        kind === PARTICLE_KIND.head
+          ? height * AURA_DATA.hmax
+          : kind === PARTICLE_KIND.bright
+            ? hairW
+            : 0;
       seeds[n * 4 + 2] = kind;
       seeds[n * 4 + 3] = jitter;
       rank[n] = BAYER[(iy & 3) * 4 + (ix & 3)]!;
