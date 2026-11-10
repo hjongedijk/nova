@@ -59,23 +59,23 @@ test("streams are independent: each sync touches only its own files", () => {
       cpSync(join(repo, file), join(copy, file));
     }
     const windowsBefore = readVersion(copy, "windows");
-    const novaChanged = syncVersion(copy, "0.2.0", "nova");
+    const novaChanged = syncVersion(copy, "9.9.9", "nova");
     assert.ok(novaChanged.length > 0);
     assert.ok(novaChanged.every((file) => !file.startsWith("apps/windows/")));
-    assert.equal(readVersion(copy, "nova"), "0.2.0");
+    assert.equal(readVersion(copy, "nova"), "9.9.9");
     assert.equal(readVersion(copy, "windows"), windowsBefore);
-    const windowsChanged = syncVersion(copy, "0.5.0", "windows");
+    const windowsChanged = syncVersion(copy, "9.8.7", "windows");
     assert.ok(windowsChanged.every((file) => file.startsWith("apps/windows/")));
-    assert.equal(readVersion(copy, "nova"), "0.2.0");
-    assert.deepEqual(driftedFiles(copy, "0.5.0", "windows"), []);
-    assert.deepEqual(syncVersion(copy, "0.5.0", "windows"), []);
+    assert.equal(readVersion(copy, "nova"), "9.9.9");
+    assert.deepEqual(driftedFiles(copy, "9.8.7", "windows"), []);
+    assert.deepEqual(syncVersion(copy, "9.8.7", "windows"), []);
     const conf = JSON.parse(
       readFileSync(
         join(copy, "apps/windows/src-tauri/tauri.conf.json"),
         "utf8",
       ),
     );
-    assert.equal(conf.version, "0.5.0");
+    assert.equal(conf.version, "9.8.7");
   } finally {
     rmSync(copy, { recursive: true, force: true });
   }
