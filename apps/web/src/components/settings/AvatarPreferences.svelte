@@ -56,7 +56,8 @@
   <span
     >Gedaante
     <small
-      >Gestalte: een hoofd en schouders van lichtlijnen die uit de orb groeien.</small
+      >Gestalte: een hoofd en schouders van lichtlijnen die uit de orb groeien.
+      Aura: een bovenlichaam van licht, met lang haar van lichtdraden.</small
     ></span
   >
   <select
@@ -67,6 +68,7 @@
   >
     <option value="orb">Originele orb</option>
     <option value="presence">Gestalte</option>
+    <option value="aura">Aura</option>
   </select>
 </label>
 {#if message}<p class="hint" role="status">{message}</p>{/if}

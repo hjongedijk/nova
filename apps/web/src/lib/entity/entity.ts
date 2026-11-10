@@ -9,6 +9,7 @@ import {
   type PresenceFrame,
 } from "./presence.ts";
 import { createGestalte, type Gestalte } from "./gestalte.ts";
+import { createAura, type Aura } from "./aura.ts";
 import { ALERT, STATES, type Look } from "./states.ts";
 
 /**
@@ -36,8 +37,11 @@ export interface EntityHost {
   compact?: { life: Life };
   /** Keep the desktop entity clear of the header and composer on scaled 1080p screens. */
   wallpaper?: boolean;
-  /** "presence": the orb re-forms into the procedural head and shoulders (presence.ts). Default: the orb. */
-  appearance?(): "orb" | "presence";
+  /**
+   * "presence": the orb re-forms into the procedural head and shoulders (presence.ts / gestalte.ts); "aura": the
+   * upper body of light strokes (aura.ts). Default: the orb.
+   */
+  appearance?(): "orb" | "presence" | "aura";
 }
 
 /** Extra movement for the compact orb, in units of the orb's radius, on top of the state's own look. */
@@ -231,7 +235,9 @@ export function startEntity(host: EntityHost): () => void {
   let form = 0;
   let pf: PresenceFrame | null = null;
   /* Full screen: the WebGL Gestalte (gestalte.ts). "failed" falls back to the Canvas2D presence above. */
-  let gestalte: Gestalte | null = null;
+  let gestalte: Gestalte | Aura | null = null;
+  /* Which GPU figure is (being) built: switching between the two dissolves one before the other forms. */
+  let glKind: "gestalte" | "aura" = "gestalte";
   let glState: "idle" | "loading" | "ready" | "failed" = compact
     ? "failed"
     : "idle";
@@ -332,10 +338,18 @@ export function startEntity(host: EntityHost): () => void {
     let R = span * cur.r * heartbeat * breath * (0.35 + 0.65 * birth);
 
     /* presence: emerge from the orb once it has formed, dissolve back the same way, interruptible both ways */
-    const wantPresence = host.appearance?.() === "presence" && birth > 0.55;
+    const look = host.appearance?.();
+    // Back to the orb keeps the current figure warm for a quick return; only a different figure swaps it.
+    const wantKind =
+      look === "aura" ? "aura" : look === "presence" ? "gestalte" : glKind;
+    const swapping =
+      glState !== "idle" && glState !== "failed" && glKind !== wantKind;
+    const wantPresence =
+      (look === "presence" || look === "aura") && birth > 0.55 && !swapping;
     if (wantPresence && glState === "idle") {
       glState = "loading";
-      createGestalte(cv)
+      glKind = wantKind;
+      (wantKind === "aura" ? createAura(cv) : createGestalte(cv))
         .then((made) => {
           if (stopped) made?.dispose();
           else if (made) {
@@ -780,7 +794,7 @@ export function startEntity(host: EntityHost): () => void {
         gestalte.hide();
         // Orb again for a while: give the GPU memory back; it rebuilds quickly if asked again.
         glIdle += dt;
-        if (glIdle > 20) {
+        if (glIdle > 20 || swapping) {
           gestalte.dispose();
           gestalte = null;
           glState = "idle";

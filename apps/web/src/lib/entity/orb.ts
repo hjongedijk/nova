@@ -21,8 +21,8 @@ export interface OrbHost {
   /** Open confirmations and warnings: the orb waits nervously in orange while this is above zero. */
   intensity(): number;
   shape?(): "orb" | "ring" | "mist";
-  /** "presence": the helper shows the small head and shoulders instead of the orb. */
-  appearance?(): "orb" | "presence";
+  /** "presence" or "aura": the helper shows the small head and shoulders instead of the orb. */
+  appearance?(): "orb" | "presence" | "aura";
   hue?(): number;
   night?(): boolean;
   reaction?(event: OrbEvent): void;
