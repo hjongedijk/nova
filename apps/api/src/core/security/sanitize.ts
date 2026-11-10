@@ -7,8 +7,15 @@
 // This registry is process-local and is never persisted or exposed.
 const registeredSecrets = new Set<string>();
 
+// Switch values are never credentials: COREPACK_ENABLE_AUTO_PIN=0 matched the PIN name rule and
+// turned every "0" in ordinary text into "[redacted]".
+const FLAG_VALUE = /^(?:0|1|true|false|yes|no|on|off)$/i;
+const isSecretValue = (value: string | undefined): value is string =>
+  !!value && !FLAG_VALUE.test(value);
+
 export function registerSecrets(values: Iterable<string>): void {
-  for (const value of values) if (value) registeredSecrets.add(value);
+  for (const value of values)
+    if (isSecretValue(value)) registeredSecrets.add(value);
 }
 
 const secrets = () =>
@@ -16,7 +23,8 @@ const secrets = () =>
     ...registeredSecrets,
     ...Object.entries(process.env)
       .filter(
-        ([key, value]) => /KEY|SECRET|TOKEN|PASSWORD|PIN/i.test(key) && value,
+        ([key, value]) =>
+          /KEY|SECRET|TOKEN|PASSWORD|PIN/i.test(key) && isSecretValue(value),
       )
       .map(([, value]) => value as string),
   ].sort((left, right) => right.length - left.length);
