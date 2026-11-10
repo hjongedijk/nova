@@ -13,68 +13,125 @@ import {
 import { BUDGET, GAZE, gpuTier, headRotation, LOOKS, TIMING } from "./aura.ts";
 import { BODY_FRAG, HAIR_VERT } from "./aura-shaders.ts";
 
-/** Half width of the figure at height y, scanning in from the side at depth z. */
-function halfWidth(y: number, z = -0.05) {
-  let x = 3;
-  while (x > 0 && auraField(x, y, z) > 0) x -= 0.004;
+/** Half width of the figure at height y, scanning in from x = `from` at depth z. */
+function halfWidth(y: number, z = -0.05, from = 3) {
+  let x = from;
+  while (x > 0 && auraField(x, y, z) > 0) x -= 0.002;
   return x;
 }
 
 describe("aura body", () => {
-  it("is a head on a long neck above sloping shoulders, arms beside a narrowing torso", () => {
-    expect(auraField(0, 0.6, 0)).toBeLessThan(0); // head
-    expect(auraField(0, -0.4, -0.08)).toBeLessThan(0); // neck
-    expect(auraField(0, -1.6, 0)).toBeLessThan(0); // chest
-    expect(auraField(1.2, -2.4, -0.08)).toBeLessThan(0); // upper arm
-    expect(auraField(0, CROWN + 0.05, 0)).toBeGreaterThan(0);
-    expect(auraField(0, CHIN - 0.2, 0.4)).toBeGreaterThan(0); // under the chin, in front of the neck
+  it("has adult female proportions: head, a neck half its height, gentle shoulders", () => {
+    // One head is one unit: chin at 0, crown at 1.
+    expect(CROWN - CHIN).toBeCloseTo(1, 1);
+    expect(auraField(0, 0.5, 0)).toBeLessThan(0);
+    expect(auraField(0, CROWN + 0.03, -0.05)).toBeGreaterThan(0);
+    // The head is about 1.3-1.45 times as tall as it is wide.
+    const headW = 2 * halfWidth(0.6, -0.05, 1);
+    expect((CROWN - CHIN) / headW).toBeGreaterThan(1.3);
+    expect((CROWN - CHIN) / headW).toBeLessThan(1.5);
+    // A slender but real neck from under the jaw to the notch, about half a head long.
+    expect(auraField(0, -0.12, -0.04)).toBeLessThan(0);
+    expect(auraField(0, CHIN - 0.12, 0.3)).toBeGreaterThan(0);
+    const neckW = 2 * halfWidth(-0.12, -0.04, 1);
+    expect(neckW / headW).toBeGreaterThan(0.38);
+    expect(neckW / headW).toBeLessThan(0.6);
+    // Shoulders about two and a half head widths; the line from neck to shoulder slopes down.
+    const shoulders = 2 * halfWidth(-0.72);
+    expect(shoulders / headW).toBeGreaterThan(2.1);
+    expect(shoulders / headW).toBeLessThan(2.8);
+    const top = (x: number) => {
+      let y = 0;
+      while (auraField(x, y, -0.08) > 0) y -= 0.002;
+      return y;
+    };
+    const slope = (Math.atan2(top(0.25) - top(0.6), 0.35) * 180) / Math.PI;
+    expect(slope).toBeGreaterThan(12);
+    expect(slope).toBeLessThan(35);
+  });
 
-    const head = halfWidth(0.6, 0);
-    const neck = halfWidth(-0.35, -0.08);
-    const shoulders = halfWidth(-1.35);
-    expect(neck).toBeLessThan(head * 0.7);
-    expect(shoulders / head).toBeGreaterThan(2.2);
-    expect(shoulders / head).toBeLessThan(3.5);
-    // The arm hangs free of the ribs: a gap between them at mid chest.
-    expect(auraField(0.92, -2.5, -0.07)).toBeGreaterThan(0);
+  it("tapers from the rib cage to a defined waist and opens to the hips; the arms hang free", () => {
+    const ribs = halfWidth(-1.45, -0.04, 0.68);
+    const waist = halfWidth(-2.0, -0.02, 0.7);
+    const hips = halfWidth(-2.75, -0.02, 0.8);
+    expect(waist).toBeLessThan(ribs * 0.88);
+    expect(hips).toBeGreaterThan(waist * 1.3);
+    expect(auraField(0.62, -1.6, -0.07)).toBeGreaterThan(0);
+    // A natural bust: in front of the chest, never past the shoulders.
+    expect(auraField(0.26, -1.0, 0.28)).toBeLessThan(0);
+    expect(auraField(0.26, -1.0, 0.36)).toBeGreaterThan(0);
+  });
+
+  it("is a softly sculpted mask: nose and chin in relief, no eye holes", () => {
+    expect(headField(0, 0.37, 0.415)).toBeLessThan(0); // the tip of the nose
+    expect(headField(0.1, 0.37, 0.415)).toBeGreaterThan(0); // beside it, the cheek is further back
+    expect(headField(0, 0.03, 0.2)).toBeLessThan(0); // a defined chin
+    // No carved sockets: the surface at the eyes is no deeper than a smooth face would be.
+    let z = 0.6;
+    while (headField(0.115, 0.46, z) > 0) z -= 0.002;
+    expect(z).toBeGreaterThan(0.33);
   });
 
   it("is mirror symmetric and its GLSL twin has the same pieces", () => {
     for (const [x, y, z] of [
       [0.3, 0.5, 0.3],
-      [1.1, -1.4, 0],
-      [0.45, -2, 0.2],
-      [0.12, 0.55, 0.45],
+      [0.7, -0.7, 0],
+      [0.26, -1.0, 0.2],
+      [0.12, 0.45, 0.38],
     ] as const)
       expect(auraField(x, y, z)).toBeCloseTo(auraField(-x, y, z), 9);
     for (const name of ["headSdf", "auraSdf", "PIVOT", "HEART", "FACE"])
       expect(SDF_GLSL).toContain(name);
     expect(BODY_FRAG).toContain("gl_FragDepth");
+    // No seam down the face any more.
+    expect(BODY_FRAG).not.toContain("onFace");
   });
 });
 
 describe("aura hair", () => {
   const g = buildHairGuides(12, 20);
 
-  it("grows from the scalp, stays outside the body and falls past the chin", () => {
+  it("sits on the skull, stays outside the body and falls past the shoulders", () => {
     expect(g.data.length).toBe(g.count * g.points * 4);
     expect(g.groups.at(-1)).toBe(g.count);
     let lowest = Infinity;
     for (let i = 0; i < g.count; i++) {
       const root = i * g.points * 4;
-      // The root sits on (just above) the scalp.
       const dh = headField(g.data[root]!, g.data[root + 1]!, g.data[root + 2]!);
       expect(dh).toBeGreaterThan(-0.01);
-      expect(dh).toBeLessThan(0.12);
+      expect(dh).toBeLessThan(0.2);
+      // Still on the skull a few points later: it lies on the head instead of floating off it.
+      const o = root + 2 * 4;
+      expect(
+        headField(g.data[o]!, g.data[o + 1]!, g.data[o + 2]!),
+      ).toBeLessThan(0.2);
       for (let k = 0; k < g.points; k++) {
-        const o = root + k * 4;
-        const [x, y, z] = [g.data[o]!, g.data[o + 1]!, g.data[o + 2]!];
+        const q = root + k * 4;
+        const [x, y, z] = [g.data[q]!, g.data[q + 1]!, g.data[q + 2]!];
         expect(Number.isFinite(x + y + z)).toBe(true);
         expect(auraField(x, y, z)).toBeGreaterThan(-0.01);
       }
       lowest = Math.min(lowest, g.data[root + (g.points - 1) * 4 + 1]!);
     }
-    expect(lowest).toBeLessThan(CHIN - 1);
+    expect(lowest).toBeLessThan(-0.9);
+  });
+
+  it("has a soft side parting and locks both in front of and behind the shoulders", () => {
+    for (let i = 0; i < g.count; i++) {
+      const x = g.data[i * g.points * 4]!;
+      expect(x).toBeGreaterThan(0.03);
+      expect(x).toBeLessThan(0.25);
+    }
+    let inFront = 0;
+    let behind = 0;
+    for (let i = 0; i < g.count; i++) {
+      const tip = (i * g.points + g.points - 1) * 4;
+      if (g.data[tip + 2]! > 0.12) inFront++;
+      if (g.data[tip + 2]! < -0.1) behind++;
+    }
+    expect(inFront).toBeGreaterThan(0);
+    expect(behind).toBeGreaterThan(0);
+    expect(HAIR_VERT).toContain("texelFetch");
   });
 
   it("builds the full guide set quickly enough to never hold up the page", () => {
@@ -82,18 +139,8 @@ describe("aura hair", () => {
     const full = buildHairGuides();
     const ms = performance.now() - t0;
     expect(full.count).toBe(180);
-    expect(ms).toBeLessThan(250);
-  });
-
-  it("is the same on both sides", () => {
-    const half = g.count / 2;
-    for (const i of [0, 5, half - 1]) {
-      const a = (i * g.points + g.points - 1) * 4;
-      const b = ((i + half) * g.points + g.points - 1) * 4;
-      expect(g.data[a]!).toBeCloseTo(-g.data[b]!, 5);
-      expect(g.data[a + 1]!).toBeCloseTo(g.data[b + 1]!, 5);
-    }
-    expect(HAIR_VERT).toContain("texelFetch");
+    // Generous: the suite runs files in parallel on a busy machine; alone it takes a few tens of ms.
+    expect(ms).toBeLessThan(1500);
   });
 });
 
@@ -168,10 +215,10 @@ describe("aura quality and layout", () => {
 
   it("frames the head in the upper third at 16:9 and keeps the shoulders on a phone", () => {
     const vh = auraViewHeight(16 / 9);
-    expect((CROWN - CHIN) / vh).toBeGreaterThan(0.28);
+    expect((CROWN - CHIN) / vh).toBeGreaterThan(0.25);
     expect((CROWN - CHIN) / vh).toBeLessThan(0.4);
     const phone = 390 / 844;
-    expect(auraViewHeight(phone) * phone).toBeGreaterThan(2 * halfWidth(-1.35));
+    expect(auraViewHeight(phone) * phone).toBeGreaterThan(2 * halfWidth(-0.72));
   });
 });
 

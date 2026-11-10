@@ -5,6 +5,7 @@ import {
   auraViewHeight,
   buildHairGuides,
   HEART,
+  REST_POSE,
   weaveFront,
   type HairGuides,
 } from "./aura-body.ts";
@@ -128,12 +129,12 @@ export const LOOKS: Record<UiState | "alert", Look> = {
     pulse: 2,
   },
   speaking: {
-    a: "#f06ad8",
+    a: "#e05cd0",
     b: "#ffc49a",
-    r: "#f2a8ec",
-    f: "#ffe1ec",
-    h: "#d070f0",
-    glow: 1.05,
+    r: "#d68ad6",
+    f: "#f2c4e2",
+    h: "#c066e6",
+    glow: 1.0,
     pulse: 1.2,
   },
   alert: {
@@ -244,7 +245,7 @@ export function headRotation(
 }
 
 /** Head turn limits toward the pointer, radians. */
-export const GAZE = { yaw: 0.36, pitch: 0.14 } as const;
+export const GAZE = { yaw: 0.34, pitch: 0.13 } as const;
 
 /** Duration of the weave on mount, and of the state bloom spreading from the face, seconds. */
 export const TIMING = { weave: 3.2, bloom: 1.0 } as const;
@@ -382,6 +383,9 @@ export async function createAura(
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(22, 1, 0.1, 100);
+  // The body writes its ray-marched depth with the very matrices the hair is drawn with (projection here, the
+  // view matrix three hands every shader), so a strand in front of the skin is always drawn in front of it.
+  U.uPV.value = camera.projectionMatrix;
 
   /* background */
   const quad = new THREE.PlaneGeometry(1, 1);
@@ -395,8 +399,8 @@ export async function createAura(
   const bg = new THREE.Mesh(quad, bgMat);
 
   /* body: a bounded quad in front of the figure, ray-marched per pixel */
-  const bodyQuad = new THREE.PlaneGeometry(4.1, 6.9);
-  bodyQuad.translate(0, -1.85, 0.72);
+  const bodyQuad = new THREE.PlaneGeometry(2.9, 4.9);
+  bodyQuad.translate(0, -1.05, 0.6);
   const bodyMat = new THREE.ShaderMaterial({
     uniforms: U,
     vertexShader: BODY_VERT,
@@ -497,9 +501,9 @@ export async function createAura(
         Math.abs(Math.sin(i * 12.9898 + n * 78.233) * 43758.5453) % 1;
       // Mostly near the figure, some wide in the room.
       const near = h(1) < 0.6;
-      pos[i * 3] = (h(2) - 0.5) * (near ? 3.4 : 9);
+      pos[i * 3] = (h(2) - 0.5) * (near ? 2.6 : 7);
       pos[i * 3 + 1] = -3 + h(3) * 6.4;
-      pos[i * 3 + 2] = (h(4) - 0.5) * (near ? 1.6 : 4) + (near ? 0.15 : -1);
+      pos[i * 3 + 2] = (h(4) - 0.5) * (near ? 1.2 : 3) + (near ? 0.12 : -0.8);
       for (let k = 0; k < 4; k++) seed[i * 4 + k] = h(5 + k);
     }
     moteGeo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -584,7 +588,7 @@ export async function createAura(
     const dist = vh / 2 / Math.tan(((camera.fov / 2) * Math.PI) / 180);
     camera.aspect = aspect;
     // A touch above the chest line, looking level: the face is met straight on.
-    camera.position.set(0, camY + 0.12, dist);
+    camera.position.set(0, camY + 0.1, dist);
     camTarget.set(0, camY, 0);
     camera.lookAt(camTarget);
     camera.updateProjectionMatrix();
@@ -593,12 +597,8 @@ export async function createAura(
     U.uPx.value = pr;
     U.uPixAngle.value =
       (2 * Math.tan(((camera.fov / 2) * Math.PI) / 180)) / Math.max(1, H * pr);
-    U.uPV.value.multiplyMatrices(
-      camera.projectionMatrix,
-      camera.matrixWorldInverse,
-    );
     // Where the heart is on screen: the room's light gathers behind it.
-    const hp = new THREE.Vector3(HEART[0], HEART[1] + 0.9, 0).project(camera);
+    const hp = new THREE.Vector3(HEART[0], HEART[1] + 0.7, 0).project(camera);
     U.uCenter.value.set(hp.x * 0.5 * aspect, hp.y * 0.5);
   }
   size(true);
@@ -778,9 +778,10 @@ export async function createAura(
         (weight.listening * 0.05 -
           weight.thinking * 0.02 +
           0.012 * Math.sin(t * 0.23 + 1.3));
-      spring(pose.yaw, yawT, dt);
-      spring(pose.pitch, pitchT, dt);
-      spring(pose.roll, rollT, dt);
+      // The rest pose itself is a gentle three-quarter turn and tilt; motion only adds to it.
+      spring(pose.yaw, REST_POSE.yaw + yawT, dt);
+      spring(pose.pitch, REST_POSE.pitch + pitchT, dt);
+      spring(pose.roll, REST_POSE.roll + rollT, dt);
       const R = headRotation(pose.yaw.x, pose.pitch.x, pose.roll.x);
       Rm.set(R[0]!, R[1]!, R[2]!, R[3]!, R[4]!, R[5]!, R[6]!, R[7]!, R[8]!);
       U.uHead.value.copy(Rm);
