@@ -1289,7 +1289,7 @@
                 bind:value={helper.avatar}
                 ><option value="orb">Originele orb</option><option
                   value="presence">Gestalte</option
-                ></select
+                ><option value="aura">Aura</option></select
               ></label
             >
             <label class="hp-pref"

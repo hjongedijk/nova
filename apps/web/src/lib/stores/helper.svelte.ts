@@ -9,11 +9,11 @@ import {
   type CuePreferences,
 } from "#lib/voice/helper-cues.ts";
 
-/** The body NOVA shows: the original orb, or the procedural presence that grows out of it. */
-export type Avatar = "orb" | "presence";
+/** The body NOVA shows: the original orb, the procedural presence (Gestalte), or Aura, both grown out of the orb. */
+export type Avatar = "orb" | "presence" | "aura";
 /** Retired face preferences must not reactivate the rejected humanoid; they fall back to the orb. */
 export function normalizeAvatar(value: unknown): Avatar {
-  return value === "presence" ? "presence" : "orb";
+  return value === "presence" || value === "aura" ? value : "orb";
 }
 
 export const helper = $state({

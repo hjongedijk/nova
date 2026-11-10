@@ -687,9 +687,10 @@ export interface NotificationModes {
 export interface HelperPreferences {
   /**
    * The body shown on the website, wallpaper and helper. "presence" is the procedural head-and-shoulders
-   * that grows out of the orb. Legacy face values are accepted and normalized to the original orb.
+   * (Gestalte) and "aura" the upper body of light strokes; both grow out of the orb. Legacy face values are
+   * accepted and normalized to the original orb.
    */
-  avatar?: "face" | "orb" | "presence";
+  avatar?: "face" | "orb" | "presence" | "aura";
   wardrobe?: {
     theme: "nova" | "violet" | "gold";
     seasonal: boolean;

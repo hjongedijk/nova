@@ -276,9 +276,9 @@ export function normalizeHelperPreferences(
   const shape = body?.shape;
   if (
     body?.avatar !== undefined &&
-    !["face", "orb", "presence"].includes(String(body.avatar))
+    !["face", "orb", "presence", "aura"].includes(String(body.avatar))
   )
-    throw new ValidationError(["Kies de orb of de gestalte."]);
+    throw new ValidationError(["Kies de orb, de gestalte of aura."]);
   const cues = body?.cues as Record<string, unknown> | undefined;
   const quiet = cues?.quiet as Record<string, unknown> | undefined;
   const notifications = body?.notifications as
@@ -459,7 +459,12 @@ export function normalizeHelperPreferences(
   const preferences: HelperPreferences = {
     // Retired face preferences fall back to the orb; only the procedural presence is a new choice.
     ...(body.avatar !== undefined
-      ? { avatar: body.avatar === "presence" ? "presence" : "orb" }
+      ? {
+          avatar:
+            body.avatar === "presence" || body.avatar === "aura"
+              ? body.avatar
+              : "orb",
+        }
       : {}),
     ...(wardrobe
       ? {
