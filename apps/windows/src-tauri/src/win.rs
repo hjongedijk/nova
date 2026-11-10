@@ -24,7 +24,7 @@ pub type KeySink = fn(Key) -> bool;
 #[cfg(windows)]
 mod imp {
     use super::*;
-    use nova_win_core::autostart::{run_value, task_matches, task_name, task_xml, RUN_KEY, RUN_VALUE_NAME};
+    use nova_win_core::autostart::{run_value, task_mismatch, task_name, task_xml, RUN_KEY, RUN_VALUE_NAME};
     use nova_win_core::desktop::{
         needs_reorder, IconWorker, CHILD_STYLE, REORDER_FLAGS, SHOW_FLAGS, SPAWN_WORKER_MESSAGE,
     };
@@ -592,7 +592,42 @@ mod imp {
             return Ok(false);
         }
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        Ok(decode_task_xml(&output.stdout).is_some_and(|xml| task_matches(&xml, &exe.to_string_lossy(), sid)))
+        let Some(xml) = decode_task_xml(&output.stdout) else {
+            crate::log!("startup task is not used: unreadable task definition");
+            return Ok(false);
+        };
+        match task_mismatch(&xml, &exe.to_string_lossy(), sid) {
+            None => Ok(true),
+            Some(why) => {
+                crate::log!("startup task is not used: {why}");
+                Ok(false)
+            }
+        }
+    }
+
+    /// Brings an existing Run entry up to date (path after an update, startup argument). Needs no admin rights.
+    pub fn refresh_run_value() {
+        use winreg::{enums::HKEY_CURRENT_USER, RegKey};
+        let Ok(key) = RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags(RUN_KEY, winreg::enums::KEY_READ | winreg::enums::KEY_SET_VALUE)
+        else {
+            return;
+        };
+        let Ok(current) = key.get_value::<String, _>(RUN_VALUE_NAME) else {
+            return;
+        };
+        let Some(wanted) = std::env::current_exe()
+            .ok()
+            .and_then(|exe| run_value(&exe.to_string_lossy()))
+        else {
+            return;
+        };
+        if current != wanted {
+            match key.set_value(RUN_VALUE_NAME, &wanted) {
+                Ok(()) => crate::log!("startup entry updated"),
+                Err(error) => crate::log!("startup entry could not be updated: {error}"),
+            }
+        }
     }
 
     static AUTOSTART: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
@@ -767,9 +802,42 @@ mod imp {
     pub fn autostart_enabled() -> bool {
         false
     }
+    pub fn refresh_run_value() {}
     pub fn set_autostart(_on: bool) -> Result<(), String> {
         Err("Starten met Windows werkt alleen op Windows".into())
     }
 }
 
 pub use imp::*;
+
+/// A start by hand that goes through the logon task (which always starts in the tray) leaves this note so the
+/// elevated copy still opens normally.
+fn window_request_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(|dir| std::path::PathBuf::from(dir).join("NOVA").join("open-on-start"))
+}
+
+pub fn request_window_on_start(on: bool) {
+    let Some(path) = window_request_path() else { return };
+    if on {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&path, b"1");
+    } else {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+/// True (once) when a start by hand asked for the window within the last 30 seconds.
+pub fn take_window_request() -> bool {
+    let Some(path) = window_request_path() else {
+        return false;
+    };
+    let fresh = std::fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|at| at.elapsed().ok())
+        .is_some_and(|age| age < std::time::Duration::from_secs(30));
+    let _ = std::fs::remove_file(&path);
+    fresh
+}

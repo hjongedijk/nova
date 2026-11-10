@@ -21,6 +21,8 @@ fn main() {
     #[cfg(windows)]
     {
         let args: Vec<String> = std::env::args().collect();
+        // Started by Windows at logon (Run entry or logon task): never show a UAC prompt then, start in the tray.
+        let autostart = nova_win_core::autostart::is_autostart_launch(&args[1..]);
         if args.get(1).is_some_and(|a| a == "--wait-for-pid") {
             let result = args
                 .get(2)
@@ -31,7 +33,7 @@ fn main() {
                 platform::show_error(&error);
                 return;
             }
-        } else if args.len() == 1 && !platform::is_elevated() && !platform::instance_running() {
+        } else if (args.len() == 1 || autostart) && !platform::is_elevated() && !platform::instance_running() {
             let configured = std::env::var_os("LOCALAPPDATA")
                 .map(std::path::PathBuf::from)
                 .and_then(|dir| std::fs::read_to_string(dir.join("NOVA/config.json")).ok())
@@ -39,13 +41,24 @@ fn main() {
                 // No config yet (first start) counts as "elevated by default".
                 .is_none_or(|(_, agent)| agent.run_elevated);
             if configured {
-                // Refused or impossible elevation is not an error: NOVA simply keeps running unelevated.
-                if win::start_elevated_autostart() || platform::request_elevation(std::process::id()).is_ok() {
+                // The verified logon task starts NOVA elevated without a prompt. It always starts in the tray, so a
+                // start by hand leaves a note that the elevated copy should open its window.
+                if !autostart {
+                    win::request_window_on_start(true);
+                }
+                if win::start_elevated_autostart() {
+                    return;
+                }
+                win::request_window_on_start(false);
+                // At logon there is never a UAC prompt: without a valid task NOVA runs unelevated until it is started
+                // by hand once (which registers the task again). Refused elevation is not an error either.
+                if !autostart && platform::request_elevation(std::process::id()).is_ok() {
                     return;
                 }
             }
         }
-        let ordinary_start = args.len() == 1 || args.get(1).is_some_and(|arg| arg == "--wait-for-pid");
+        win::refresh_run_value();
+        let ordinary_start = args.len() == 1 || autostart || args.get(1).is_some_and(|arg| arg == "--wait-for-pid");
         if ordinary_start && !platform::instance_running() && platform::is_elevated() && win::autostart_enabled() {
             if let Err(error) = win::set_autostart(true) {
                 crate::log!("Windows startup could not be configured: {error}");

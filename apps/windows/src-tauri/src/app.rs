@@ -99,7 +99,7 @@ fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|_| "Windows kan de lokale NOVA-map niet vinden".into())
 }
 
-fn init(app: &AppHandle, args: Args) {
+fn init(app: &AppHandle, mut args: Args) {
     let dir = match data_dir(app) {
         Ok(dir) => dir,
         Err(error) => {
@@ -138,6 +138,11 @@ fn init(app: &AppHandle, args: Args) {
             return;
         }
     };
+    // A start by hand that went through the logon task: behave like an ordinary start.
+    if args.hide && crate::win::take_window_request() {
+        args.hide = false;
+    }
+    let quiet_start = args.hide;
     for warning in config.apply_args(&args, &names) {
         log!("{warning}");
     }
@@ -197,8 +202,12 @@ fn init(app: &AppHandle, args: Args) {
         return;
     }
     crate::agent_http::start_or_retry(app);
-    if !crate::agent_http::listening() {
+    // At logon the port can still be taken for a moment; the agent retries by itself, so stay in the tray then.
+    if !crate::agent_http::listening() && !quiet_start {
         open_setup(app);
+    }
+    if quiet_start && !crate::platform::is_elevated() {
+        log!("started at logon without admin rights; start NOVA once by hand to register the elevated startup task");
     }
     start(app);
     watch_monitors(app);

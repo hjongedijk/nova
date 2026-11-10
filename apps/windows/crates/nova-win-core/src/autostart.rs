@@ -3,13 +3,23 @@
 pub const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 pub const RUN_VALUE_NAME: &str = "NOVA";
 
-/// The command line for the Run key: the quoted path of the executable, nothing else (settings come from config.json).
+/// The only argument a startup entry carries: start quietly in the tray (no helper, no app window).
+pub const AUTOSTART_ARG: &str = "--hide";
+
+/// The command line for the Run key: the quoted path of the executable plus [`AUTOSTART_ARG`] (settings come from
+/// config.json).
 pub fn run_value(exe: &str) -> Option<String> {
     let exe = exe.trim();
     if exe.is_empty() || exe.contains('"') || exe.contains('\0') || exe.contains('\n') {
         return None;
     }
-    Some(format!("\"{exe}\""))
+    Some(format!("\"{exe}\" {AUTOSTART_ARG}"))
+}
+
+/// A launch by Windows startup (Run key or logon task): exactly the startup argument, nothing else.
+/// `args` is without the program name.
+pub fn is_autostart_launch(args: &[String]) -> bool {
+    args.len() == 1 && args[0] == AUTOSTART_ARG
 }
 
 #[cfg(test)]
@@ -20,7 +30,7 @@ mod tests {
     fn the_path_is_quoted() {
         assert_eq!(
             run_value("C:\\Program Files\\NOVA\\nova-desk.exe").as_deref(),
-            Some("\"C:\\Program Files\\NOVA\\nova-desk.exe\"")
+            Some("\"C:\\Program Files\\NOVA\\nova-desk.exe\" --hide")
         );
     }
 
@@ -29,6 +39,15 @@ mod tests {
         assert_eq!(run_value(""), None);
         assert_eq!(run_value("C:\\a\" --evil \"b.exe"), None);
         assert_eq!(run_value("C:\\a\nb.exe"), None);
+    }
+
+    #[test]
+    fn only_the_bare_startup_argument_counts_as_autostart() {
+        let v = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(is_autostart_launch(&v(&["--hide"])));
+        assert!(!is_autostart_launch(&v(&[])));
+        assert!(!is_autostart_launch(&v(&["--hide", "--show"])));
+        assert!(!is_autostart_launch(&v(&["--show"])));
     }
 
     #[test]
@@ -74,31 +93,52 @@ pub fn task_xml(exe: &str, sid: &str) -> Option<String> {
 <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{sid}</UserId></LogonTrigger></Triggers>
 <Principals><Principal id="NOVA"><UserId>{sid}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
 <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><AllowHardTerminate>false</AllowHardTerminate><StartWhenAvailable>true</StartWhenAvailable><Enabled>true</Enabled><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings>
-<Actions Context="NOVA"><Exec><Command>{command}</Command></Exec></Actions>
+<Actions Context="NOVA"><Exec><Command>{command}</Command><Arguments>{AUTOSTART_ARG}</Arguments></Exec></Actions>
 </Task>"#
     ))
 }
 
-/// Only use a scheduled launch of this exact executable for this account, with no extra commands or arguments.
+/// Only use a scheduled launch of this exact executable for this account, with no extra commands or arguments
+/// (the startup argument, or none for a task registered by an older NOVA).
 pub fn task_matches(xml: &str, exe: &str, sid: &str) -> bool {
-    if task_xml(exe, sid).is_none() || xml.len() > 64 * 1024 {
-        return false;
+    task_mismatch(xml, exe, sid).is_none()
+}
+
+/// Why a registered task is not used, for the log (`None` = it matches).
+pub fn task_mismatch(xml: &str, exe: &str, sid: &str) -> Option<&'static str> {
+    if task_xml(exe, sid).is_none() {
+        return Some("invalid path or account");
+    }
+    if xml.len() > 64 * 1024 {
+        return Some("too large");
     }
     let command = format!("<Command>{}</Command>", xml_escape(exe.trim()));
-    xml.contains(&command)
-        && xml.matches("<Exec>").count() == 1
-        && xml.matches("<Command>").count() == 1
-        && xml.matches("<UserId>").count() == 2
-        && xml.matches(&format!("<UserId>{sid}</UserId>")).count() == 2
-        && xml.contains("<RunLevel>HighestAvailable</RunLevel>")
-        && xml.contains("<LogonType>InteractiveToken</LogonType>")
-        && !xml.contains("<Arguments>")
-        && !xml.contains("<ComHandler")
-        && !xml.contains("<SendEmail")
-        && !xml.contains("<ShowMessage")
-        && !xml.contains("<Enabled>false</Enabled>")
-        && !xml.contains("<!DOCTYPE")
-        && !xml.contains("<!ENTITY")
+    let arguments = xml.matches("<Arguments>").count();
+    let checks: [(bool, &'static str); 13] = [
+        (xml.contains(&command), "other executable"),
+        (xml.matches("<Exec>").count() == 1, "extra actions"),
+        (xml.matches("<Command>").count() == 1, "extra commands"),
+        (xml.matches("<UserId>").count() == 2, "unexpected accounts"),
+        (
+            xml.matches(&format!("<UserId>{sid}</UserId>")).count() == 2,
+            "other account",
+        ),
+        (xml.contains("<RunLevel>HighestAvailable</RunLevel>"), "not elevated"),
+        (
+            xml.contains("<LogonType>InteractiveToken</LogonType>"),
+            "not interactive",
+        ),
+        (
+            arguments == 0 || (arguments == 1 && xml.contains(&format!("<Arguments>{AUTOSTART_ARG}</Arguments>"))),
+            "other arguments",
+        ),
+        (!xml.contains("<ComHandler"), "COM handler"),
+        (!xml.contains("<SendEmail"), "mail action"),
+        (!xml.contains("<ShowMessage"), "message action"),
+        (!xml.contains("<Enabled>false</Enabled>"), "disabled"),
+        (!xml.contains("<!DOCTYPE") && !xml.contains("<!ENTITY"), "doctype"),
+    ];
+    checks.iter().find(|(ok, _)| !ok).map(|(_, why)| *why)
 }
 
 #[cfg(test)]
@@ -115,6 +155,17 @@ mod scheduled_tests {
         assert!(!task_matches(&xml, "C:\\Other\\nova.exe", sid));
         assert!(!task_matches(&xml, exe, "S-1-5-21-999-1001"));
         assert!(!xml.contains("Password"));
+        assert!(xml.contains("<Arguments>--hide</Arguments>"));
+        // A task from an older NOVA without the argument is still recognised (and re-registered when elevated).
+        assert!(task_matches(
+            &xml.replace("<Arguments>--hide</Arguments>", ""),
+            exe,
+            sid
+        ));
+        assert_eq!(
+            task_mismatch(&xml, "C:\\Other\\nova.exe", sid),
+            Some("other executable")
+        );
     }
     #[test]
     fn unrelated_extra_or_disabled_actions_are_not_used_for_elevation() {
@@ -123,6 +174,7 @@ mod scheduled_tests {
         let xml = task_xml(exe, sid).unwrap();
         for altered in [
             xml.replace("</Exec>", "<Arguments>--other</Arguments></Exec>"),
+            xml.replace("<Arguments>--hide</Arguments>", "<Arguments>--show</Arguments>"),
             xml.replace("</Actions>", "<Exec><Command>cmd.exe</Command></Exec></Actions>"),
             xml.replace("HighestAvailable", "LeastPrivilege"),
             xml.replace("<Enabled>true", "<Enabled>false"),

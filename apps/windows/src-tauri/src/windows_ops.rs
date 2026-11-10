@@ -268,6 +268,24 @@ fn on_mouse(kind: PointerKind, point: (i32, i32)) -> bool {
     };
     let routed = forwarder.event(kind, point, desktop, &targets);
     drop(forwarder);
+    // The first presses after start are logged (no page content), so a wallpaper that ignores clicks can be traced.
+    if kind == PointerKind::Down {
+        static LOGGED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        if LOGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 8 {
+            log!(
+                "wallpaper press at {:?}: wallpapers={} hit={} over_desktop={} zones={} forwarded={} swallowed={}",
+                point,
+                targets.len(),
+                target.is_some(),
+                desktop,
+                target
+                    .map(|t| t.zones.as_ref().map_or("unknown".to_string(), |z| z.len().to_string()))
+                    .unwrap_or_else(|| "-".into()),
+                routed.inputs.len(),
+                routed.swallow
+            );
+        }
+    }
     if routed.inputs.is_empty() {
         return routed.swallow;
     }
