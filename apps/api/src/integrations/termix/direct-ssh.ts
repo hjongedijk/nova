@@ -46,6 +46,8 @@ export function runDirectSsh(
   command: string,
   fingerprint: string,
   signal?: AbortSignal,
+  /** Live output for the screen as it arrives; the outcome is the same with or without it. */
+  onOutput?: (stream: "stdout" | "stderr", chunk: string) => void,
 ): Promise<SshOutcome> {
   return new Promise((resolve) => {
     const client = new Client();
@@ -77,9 +79,11 @@ export function runDirectSsh(
         let errors = "";
         stream.on("data", (data: Buffer) => {
           if (output.length < 8000) output += data;
+          onOutput?.("stdout", data.toString("utf8"));
         });
         stream.stderr.on("data", (data: Buffer) => {
           if (errors.length < 8000) errors += data;
+          onOutput?.("stderr", data.toString("utf8"));
         });
         stream.on("close", (exitCode: number) =>
           finish({

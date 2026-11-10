@@ -65,6 +65,8 @@ const RESULT_FIELDS = [
   "y",
   "height",
   "view",
+  "point",
+  "secret",
 ] as const;
 
 /** The agent's fixed English browser errors, in Dutch. Unknown text is never passed on. */

@@ -515,6 +515,12 @@ const CAPABILITY_GROUPS = [
 const CAPABILITY_QUESTION =
   /\b(?:wat (?:kun|kan) je(?: allemaal)?|wat kan nova|wat kun je doen|waarmee kun je helpen|what can (?:you|nova) do|what are you able to do|your capabilities)\b/i;
 
+export const WINDOW_NOTES = `
+WINDOWS ON THE USER'S NOVA SCREEN (window_open):
+- "Speel X af", "laat de video van X zien" or "toon die pagina hier" without saying "op de pc": window_open with kind video (query, or a YouTube/Vimeo/mp4 address) or kind page/image/document with the address. It plays or shows it in a floating window right away; say in one sentence what is playing. Several windows can be open at once.
+- "Op de pc" or "in de browser op de pc" means the Windows browser instead (browser_* tools).
+- The user already watches your browser, screen and terminal work live in windows; do not narrate every step.`;
+
 export function capabilityNotes(
   toolNames: string[],
   question = "",
@@ -524,6 +530,7 @@ export function capabilityNotes(
   const notes = [
     ...(has("browser_status") ? [BROWSER_NOTES] : []),
     ...(has("windows_search") ? [WINDOWS_SEARCH_NOTES] : []),
+    ...(has("window_open") ? [WINDOW_NOTES] : []),
   ];
   if (CAPABILITY_QUESTION.test(question)) {
     const names = new Set(toolNames);

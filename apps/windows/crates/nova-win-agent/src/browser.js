@@ -105,6 +105,9 @@
         ...describe(el),
         x,
         y,
+        vw: innerWidth,
+        vh: innerHeight,
+        secret: el.type === "password",
         clear: !!hit && (hit === el || el.contains(hit)),
       };
     }

@@ -11,6 +11,7 @@
   import Header from "#components/shell/Header.svelte";
   import HistoryDrawer from "#components/shell/HistoryDrawer.svelte";
   import LiveActivity from "#components/shell/LiveActivity.svelte";
+  import WindowLayer from "#components/windows/WindowLayer.svelte";
   import Stage from "#components/shell/Stage.svelte";
   import Toasts from "#components/shell/Toasts.svelte";
   import SettingsDialog from "#components/settings/SettingsDialog.svelte";
@@ -121,5 +122,6 @@
 <AdminDialog />
 <WorkspaceCodePanel />
 <LiveDesktop />
+<WindowLayer />
 <CookingMode />
 <HoloPanel />

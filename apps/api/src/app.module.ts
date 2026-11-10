@@ -33,6 +33,7 @@ import { ConversationModule } from "./conversation/conversation.module.js";
 import { ObjectivesModule } from "./objectives/objectives.module.js";
 import { ApisModule } from "./apis/apis.module.js";
 import { AutopilotModule } from "./autopilot/autopilot.module.js";
+import { LiveModule } from "./live/live.module.js";
 
 const config = new NovaConfig();
 
@@ -52,6 +53,7 @@ const config = new NovaConfig();
     RoutingModule,
     SettingsModule,
     ChatModule,
+    LiveModule,
     DashboardModule,
     TtsModule,
     DownloadsModule,

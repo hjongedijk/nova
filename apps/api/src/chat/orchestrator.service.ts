@@ -41,6 +41,8 @@ import { ContextBuilder } from "./context-builder.service.js";
 import { ConfirmationHandler } from "./confirmation-handler.service.js";
 import type { AssistantMood } from "./assistant-mood.js";
 import { isOwnerSession } from "./session-provenance.js";
+import { isTerminalTool, TerminalRelay } from "../live/terminal-relay.js";
+import { resultWindowFor, windowId } from "../live/window-media.js";
 
 /*
  * Questions whose answer lives outside the model: weather, time, device and server state, news,
@@ -162,6 +164,12 @@ const isVisualizationEvent = (
   typeof (value as { id?: unknown }).id === "string";
 
 export type Emit = (event: string, data: Record<string, unknown>) => void;
+
+const isWindowPayload = (value: unknown): boolean =>
+  !!value &&
+  typeof value === "object" &&
+  typeof (value as { id?: unknown }).id === "string" &&
+  typeof (value as { kind?: unknown }).kind === "string";
 
 export interface OrchestrateInput {
   sessionId: string;
@@ -687,14 +695,61 @@ export class OrchestratorService {
           step: completedSteps + 1,
           ...(startPreview ? { preview: startPreview } : {}),
         });
+        // Command tools get a live terminal window; the model's result is unchanged.
+        const terminal =
+          stream && isTerminalTool(name)
+            ? new TerminalRelay(
+                windowId(
+                  "term",
+                  `${Date.now().toString(36)}${completedSteps + 1}`,
+                ),
+                (event, data) => emit(event, { ...data }),
+              )
+            : null;
+        terminal?.start({
+          tool: name,
+          host: typeof args?.host === "string" ? args.host : undefined,
+          command:
+            name === "termix_run_command" && typeof args?.command === "string"
+              ? args.command
+              : `tests ${typeof args?.projectId === "string" ? args.projectId : ""}`.trim(),
+        });
         const result = await this.tools.execute(
           name,
           args,
           sessionId,
           null,
           false,
-          { signal, readOnlyOnly: input.readOnlyOnly },
+          {
+            signal,
+            readOnlyOnly: input.readOnlyOnly,
+            ...(terminal
+              ? {
+                  onOutput: (channel: "stdout" | "stderr", chunk: string) =>
+                    terminal.write(channel, chunk),
+                }
+              : {}),
+          },
         );
+        if (terminal) {
+          const payload = (
+            result.result && typeof result.result === "object"
+              ? result.result
+              : {}
+          ) as Record<string, unknown>;
+          terminal.end({
+            ok: result.ok,
+            exitCode:
+              typeof payload.exitCode === "number" ? payload.exitCode : null,
+            output: typeof payload.output === "string" ? payload.output : "",
+            errors:
+              typeof payload.error === "string"
+                ? payload.error
+                : !result.ok && typeof result.error === "string"
+                  ? result.error
+                  : "",
+          });
+        }
         if (signal?.aborted) throw new Error("Request cancelled");
         if (
           name === TOOL_DISCOVERY_NAME &&
@@ -743,6 +798,13 @@ export class OrchestratorService {
           step: completedSteps,
           ...(resultPreview ? { preview: resultPreview } : {}),
         });
+        // Floating windows: what window_open asked for, and a reader view of a page NOVA read.
+        if (result.ok && isWindowPayload(result.window))
+          emit("window", result.window as Record<string, unknown>);
+        else if (stream) {
+          const big = resultWindowFor(name, args, result, completedSteps);
+          if (big) emit("window", { ...big });
+        }
         // Visualisation tools ask the screen to open or refresh the holographic view.
         if (result.ok && isVisualizationEvent(result.visualization)) {
           inlineCardShown = true;

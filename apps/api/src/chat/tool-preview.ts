@@ -4,7 +4,7 @@
  * device's new state. Everything passes through sanitize(), long tokens are masked, strings are cut,
  * and the whole preview stays under PREVIEW_MAX_BYTES. Full page bodies and raw arguments never leave.
  */
-import type { ToolPreview } from "@nova/contracts";
+import type { NovaActionOverlay, ToolPreview } from "@nova/contracts";
 import { sanitize } from "../core/security/sanitize.js";
 
 export const PREVIEW_MAX_BYTES = 2048;
@@ -27,6 +27,9 @@ const maskTokens = (text: string): string =>
       ? "[redacted]"
       : token,
   );
+
+/** sanitize() plus the long-token mask: for text shown live (terminal output, typed text). */
+export const maskSecrets = (text: string): string => maskTokens(sanitize(text));
 
 /** One line of display text: sanitized, masked, control characters out, at most `max` characters. */
 export function previewText(value: unknown, max: number): string {
@@ -95,7 +98,85 @@ const terminal = (name: string) => /^(termix_run_command|code_)/.test(name);
 const page = (name: string) =>
   name === "web_read" ||
   name === "wikipedia" ||
-  /^browser_(read|open|status|back|tab)$/.test(name);
+  /^browser_(read|open|status|back|tab|click|click_confirmed|type|press|scroll)$/.test(
+    name,
+  );
+
+/** The full address for a live browser window's address bar: http(s), no userinfo, tokens masked, capped. */
+export function previewUrl(value: unknown): string {
+  if (typeof value !== "string") return "";
+  try {
+    const url = new URL(value.trim());
+    if (!/^https?:$/.test(url.protocol)) return "";
+    url.username = "";
+    url.password = "";
+    const text = maskTokens(sanitize(url.href));
+    return text.length > 600 ? "" : text;
+  } catch {
+    return "";
+  }
+}
+
+/** Typed text as the owner may see it: something that looks like a password is shown as dots. */
+export function previewTyped(value: unknown, secret = false): string {
+  if (typeof value !== "string" || !value) return "";
+  const looksSecret =
+    secret ||
+    (!/\s/.test(value) &&
+      value.length >= 6 &&
+      /[A-Za-z]/.test(value) &&
+      /[^A-Za-z]/.test(value));
+  if (looksSecret) return "•".repeat(Math.min(16, value.length));
+  return previewText(value, 80);
+}
+
+const unit = (value: unknown, size: unknown) =>
+  typeof value === "number" &&
+  typeof size === "number" &&
+  size > 0 &&
+  Number.isFinite(value)
+    ? Math.round(Math.min(1, Math.max(0, value / size)) * 1000) / 1000
+    : undefined;
+
+/** Where a browser click or typing landed, normalised to the page viewport. */
+function browserAction(
+  name: string,
+  input: Rec,
+  data: Rec | null,
+): NovaActionOverlay | undefined {
+  const point = rec(data?.point);
+  const x = unit(point?.x, point?.vw);
+  const y = unit(point?.y, point?.vh);
+  const at = x !== undefined && y !== undefined ? { x, y } : {};
+  if (name === "browser_click" || name === "browser_click_confirmed")
+    return { kind: "click", ...at };
+  if (name === "browser_type")
+    return {
+      kind: "type",
+      ...at,
+      text: previewTyped(input.text, data?.secret === true),
+    };
+  if (name === "browser_press")
+    return { kind: "key", key: previewText(input.key, 20) };
+  if (name === "browser_scroll") return { kind: "scroll" };
+  return undefined;
+}
+
+/** What desktop_act did where, normalised to the last screenshot. */
+function desktopAction(input: Rec, outcome: Rec): NovaActionOverlay {
+  const pointer = rec(outcome.pointer);
+  const at =
+    typeof pointer?.x === "number" && typeof pointer.y === "number"
+      ? { x: pointer.x, y: pointer.y }
+      : {};
+  const action = String(input.action ?? "");
+  if (/click/.test(action)) return { kind: "click", ...at };
+  if (action === "type")
+    return { kind: "type", ...at, text: previewTyped(input.text) };
+  if (action === "key") return { kind: "key", key: previewText(input.key, 30) };
+  if (action === "scroll") return { kind: "scroll", ...at };
+  return { kind: "move", ...at };
+}
 const search = (name: string) =>
   name === "web_search" ||
   name === "news_headlines" ||
@@ -119,8 +200,11 @@ export function toolStartPreview(
             previewDomain(input.url) ||
             (name === "wikipedia" ? "wikipedia.org" : ""),
           title: name === "wikipedia" ? previewText(input.query, 120) : "",
+          ...(name.startsWith("browser_")
+            ? { url: previewUrl(input.url) }
+            : {}),
         }
-      : name === "desktop_screenshot"
+      : name === "desktop_screenshot" || name === "desktop_act"
         ? { kind: "screen", question: previewText(input.question, 160) }
         : terminal(name)
           ? {
@@ -175,6 +259,8 @@ export function toolResultPreview(
     };
   } else if (page(name)) {
     const text = first(data, ["text", "extract", "summary", "content"]);
+    const browser = name.startsWith("browser_");
+    const action = browser ? browserAction(name, input, data) : undefined;
     built = {
       kind: "page",
       title: previewText(first(data, ["title", "name"]), 120),
@@ -183,7 +269,13 @@ export function toolResultPreview(
         previewDomain(input.url) ||
         (name === "wikipedia" ? "wikipedia.org" : ""),
       snippet: previewText(text, 360),
+      ...(browser
+        ? { url: previewUrl(first(data, ["url"]) ?? input.url) }
+        : {}),
+      ...(action ? { action } : {}),
     };
+  } else if (name === "desktop_act") {
+    built = { kind: "screen", action: desktopAction(input, outcome) };
   } else if (name === "desktop_screenshot") {
     built = {
       kind: "screen",

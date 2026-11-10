@@ -14,6 +14,8 @@ import { NodeRedEditorProxy } from "./settings/node-red-editor-proxy.service.js"
 import { AppModule } from "./app.module.js";
 import { NovaConfig } from "./core/config/nova-config.js";
 import { requestGuard } from "./core/security/request-origin.js";
+import { LiveStreamsService } from "./live/live-streams.service.js";
+import { LiveSocket } from "./live/live.socket.js";
 
 async function bootstrap() {
   const server = express();
@@ -37,8 +39,14 @@ async function bootstrap() {
   });
   const editor = app.get(NodeRedEditorProxy);
   server.use("/api/node-red-editor", editor.middleware);
+  // Live video for NOVA's windows; the upgrade checks Host and Origin itself (see live.socket.ts).
+  const live = new LiveSocket(app.get(LiveStreamsService), {
+    publicUrl: config.publicUrl,
+    allowedHosts: config.allowedHosts,
+  });
   const attachEditor = (listener: http.Server | https.Server) => {
     listener.on("upgrade", (request, socket, head) => {
+      if (live.upgrade(request, socket, head)) return;
       if (!editor.sockets.upgrade(request, socket, head)) socket.destroy();
     });
     return listener;

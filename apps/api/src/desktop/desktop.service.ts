@@ -620,7 +620,30 @@ export class DesktopService implements OnModuleInit, OnModuleDestroy {
       performed: action.action,
       verified: null,
       actionsLeft: session.maxActions - session.actions,
+      ...pointerFor(action, session.lastScreen),
       hint: "Kijk met desktop_screenshot of het gewenste effect er is.",
     };
   }
+}
+
+/** Where the action landed, normalised to the last screenshot, for the live screen window's overlay. */
+function pointerFor(
+  action: DesktopInputAction,
+  screen: { width: number; height: number } | null | undefined,
+): { pointer?: { x: number; y: number } } {
+  const point = action as { x?: unknown; y?: unknown };
+  if (
+    !screen?.width ||
+    !screen.height ||
+    typeof point.x !== "number" ||
+    typeof point.y !== "number"
+  )
+    return {};
+  const clamp = (value: number) => Math.min(1, Math.max(0, value));
+  return {
+    pointer: {
+      x: Math.round(clamp(point.x / screen.width) * 1000) / 1000,
+      y: Math.round(clamp(point.y / screen.height) * 1000) / 1000,
+    },
+  };
 }

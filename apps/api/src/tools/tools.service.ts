@@ -29,6 +29,7 @@ import {
 } from "./tool-selection.js";
 import {
   TOOL_SOURCE,
+  type ToolCall,
   type ToolDefinition,
   type ToolPlan,
   type ToolResult,
@@ -434,7 +435,11 @@ export class ToolsService implements OnModuleInit {
     _approved: PendingConfirmation | null = null,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _always = false,
-    options: { signal?: AbortSignal; readOnlyOnly?: boolean } = {},
+    options: {
+      signal?: AbortSignal;
+      readOnlyOnly?: boolean;
+      onOutput?: ToolCall["onOutput"];
+    } = {},
   ): Promise<ToolResult> {
     const started = Date.now();
     let args: Record<string, unknown> = (rawArgs ?? {}) as Record<
@@ -555,10 +560,11 @@ export class ToolsService implements OnModuleInit {
       const signal = options.signal
         ? AbortSignal.any([options.signal, timeout])
         : timeout;
-      const call = {
+      const call: ToolCall = {
         sessionId,
         signal,
         readOnlyOnly: options.readOnlyOnly === true,
+        ...(options.onOutput ? { onOutput: options.onOutput } : {}),
       };
       let plan: ToolPlan = { args, risk };
       if (tool.source.prepare) {
