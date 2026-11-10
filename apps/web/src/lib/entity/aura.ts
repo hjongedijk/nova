@@ -164,9 +164,9 @@ export const BUDGET: Record<
   GpuTier,
   { strands: number; motes: number; dpr: number }
 > = {
-  low: { strands: 1400, motes: 260, dpr: 1 },
-  mid: { strands: 3200, motes: 620, dpr: 1.5 },
-  high: { strands: 5200, motes: 900, dpr: 2 },
+  low: { strands: 2200, motes: 260, dpr: 1 },
+  mid: { strands: 5200, motes: 620, dpr: 1.5 },
+  high: { strands: 8400, motes: 900, dpr: 2 },
 };
 
 /** Guess the GPU class from the renderer string; software renderers and old integrated parts get the low budget. */
@@ -379,6 +379,7 @@ export async function createAura(
     uPar: { value: new THREE.Vector2() },
     uGuides: { value: null as ThreeModule.DataTexture | null },
     uPoints: { value: 1 },
+    uHairGain: { value: 1 },
   };
 
   const scene = new THREE.Scene();
@@ -399,8 +400,9 @@ export async function createAura(
   const bg = new THREE.Mesh(quad, bgMat);
 
   /* body: a bounded quad in front of the figure, ray-marched per pixel */
-  const bodyQuad = new THREE.PlaneGeometry(2.9, 4.9);
-  bodyQuad.translate(0, -1.05, 0.6);
+  // Bust portrait: nothing below the upper chest is ever marched.
+  const bodyQuad = new THREE.PlaneGeometry(2.4, 2.65);
+  bodyQuad.translate(0, 0.05, 0.6);
   const bodyMat = new THREE.ShaderMaterial({
     uniforms: U,
     vertexShader: BODY_VERT,
@@ -473,6 +475,7 @@ export async function createAura(
   }
   let strands = budget.strands;
   const setStrands = (n: number) => {
+    U.uHairGain.value = Math.min(1, 3600 / Math.max(1, n));
     strands = n;
     hairGeo.setDrawRange(0, n * (guides.points - 1) * 2);
   };
@@ -584,7 +587,7 @@ export async function createAura(
     const aspect = W / Math.max(1, H);
     const narrow = aspect < 0.8;
     const vh = auraViewHeight(aspect);
-    const camY = auraCameraY(aspect, narrow ? 0.13 : 0.075);
+    const camY = auraCameraY(aspect, narrow ? 0.2 : 0.07);
     const dist = vh / 2 / Math.tan(((camera.fov / 2) * Math.PI) / 180);
     camera.aspect = aspect;
     // A touch above the chest line, looking level: the face is met straight on.
@@ -761,6 +764,7 @@ export async function createAura(
         clamp(
           f.gazeX * GAZE.yaw +
             0.03 * Math.sin(t * 0.17) +
+            0.008 * Math.sin(t * 0.61 + 0.7) +
             weight.thinking * 0.06,
           GAZE.yaw,
         );
@@ -777,7 +781,8 @@ export async function createAura(
         motion *
         (weight.listening * 0.05 -
           weight.thinking * 0.02 +
-          0.012 * Math.sin(t * 0.23 + 1.3));
+          0.012 * Math.sin(t * 0.23 + 1.3) +
+          0.006 * Math.sin(t * 0.47));
       // The rest pose itself is a gentle three-quarter turn and tilt; motion only adds to it.
       spring(pose.yaw, REST_POSE.yaw + yawT, dt);
       spring(pose.pitch, REST_POSE.pitch + pitchT, dt);

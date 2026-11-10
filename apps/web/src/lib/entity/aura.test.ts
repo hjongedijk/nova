@@ -62,7 +62,7 @@ describe("aura body", () => {
     expect(auraField(0.26, -1.0, 0.36)).toBeGreaterThan(0);
   });
 
-  it("is a softly sculpted mask: nose and chin in relief, no eye holes", () => {
+  it("is a softly sculpted mask: closed eyes, nose, lips and chin in relief, no crease down the face", () => {
     expect(headField(0, 0.37, 0.415)).toBeLessThan(0); // the tip of the nose
     expect(headField(0.1, 0.37, 0.415)).toBeGreaterThan(0); // beside it, the cheek is further back
     expect(headField(0, 0.03, 0.2)).toBeLessThan(0); // a defined chin
@@ -70,6 +70,21 @@ describe("aura body", () => {
     let z = 0.6;
     while (headField(0.115, 0.46, z) > 0) z -= 0.002;
     expect(z).toBeGreaterThan(0.33);
+    // Closed lids: the eye area is a shallow hollow under the brow, never a socket.
+    let brow = 0.6;
+    while (headField(0.115, 0.56, brow) > 0) brow -= 0.002;
+    expect(brow - z).toBeLessThan(0.08);
+    // The upper lip has a Cupid's bow: fuller either side of the centre than at it.
+    let lipC = 0.5;
+    while (headField(0, 0.208, lipC) > 0) lipC -= 0.001;
+    let lipS = 0.5;
+    while (headField(0.03, 0.208, lipS) > 0) lipS -= 0.001;
+    expect(lipS).toBeGreaterThanOrEqual(lipC - 0.004);
+    // The mirror fold is smooth: the field has no kink at x = 0.
+    const e = 1e-3;
+    const left = headField(-e, 0.5, 0.35) - headField(0, 0.5, 0.35);
+    const right = headField(e, 0.5, 0.35) - headField(0, 0.5, 0.35);
+    expect(Math.abs(left - right)).toBeLessThan(1e-4);
   });
 
   it("is mirror symmetric and its GLSL twin has the same pieces", () => {
@@ -138,7 +153,7 @@ describe("aura hair", () => {
     const t0 = performance.now();
     const full = buildHairGuides();
     const ms = performance.now() - t0;
-    expect(full.count).toBe(180);
+    expect(full.count).toBe(288);
     // Generous: the suite runs files in parallel on a busy machine; alone it takes a few tens of ms.
     expect(ms).toBeLessThan(1500);
   });
@@ -213,10 +228,10 @@ describe("aura quality and layout", () => {
     expect(BUDGET.mid.dpr).toBeLessThanOrEqual(1.5);
   });
 
-  it("frames the head in the upper third at 16:9 and keeps the shoulders on a phone", () => {
+  it("frames a bust portrait: head about 43% of a 16:9 height, shoulders kept on a phone", () => {
     const vh = auraViewHeight(16 / 9);
-    expect((CROWN - CHIN) / vh).toBeGreaterThan(0.25);
-    expect((CROWN - CHIN) / vh).toBeLessThan(0.4);
+    expect((CROWN - CHIN) / vh).toBeGreaterThan(0.4);
+    expect((CROWN - CHIN) / vh).toBeLessThan(0.46);
     const phone = 390 / 844;
     expect(auraViewHeight(phone) * phone).toBeGreaterThan(2 * halfWidth(-0.72));
   });

@@ -31,6 +31,7 @@ interface Piece {
 }
 
 const ell = (c: V3, r: V3): Shape => ({ k: "ell", c, r });
+const sph = (c: V3, r: number): Shape => ({ k: "sph", c, r });
 const cone = (a: V3, b: V3, r0: number, r1 = r0): Shape => ({
   k: "cone",
   a,
@@ -49,10 +50,15 @@ export const PIECES = {
     { s: ell([0, 0.06, 0.15], [0.085, 0.08, 0.115]), k: 0.08 },
     { s: ell([0.17, 0.37, 0.24], [0.1, 0.075, 0.09]), k: 0.08, m: true },
     { s: ell([0, 0.56, 0.3], [0.23, 0.055, 0.09]), k: 0.08 },
-    // Soft hollows for the eyes, a slim nose bridge to a rounded tip, lips as a faint relief.
+    // Closed, serene eyes: a wide, shallow hollow under the brow, filled again by a softly rounded lid.
+    { s: sph([0.118, 0.462, 0.46], 0.08), k: 0.14, cut: true, m: true },
+    { s: ell([0.118, 0.452, 0.362], [0.064, 0.027, 0.03]), k: 0.035, m: true },
+    // An elegant nose: slim bridge, rounded tip.
     { s: cone([0, 0.49, 0.35], [0, 0.34, 0.41], 0.016, 0.028), k: 0.07 },
-    { s: ell([0, 0.205, 0.335], [0.085, 0.022, 0.035]), k: 0.03 },
-    { s: ell([0, 0.158, 0.328], [0.072, 0.026, 0.035]), k: 0.03 },
+    { s: sph([0, 0.335, 0.4], 0.03), k: 0.03 },
+    // Gentle lips: two halves of the upper lip make the Cupid's bow; a fuller lower lip; a soft chin below.
+    { s: ell([0.028, 0.206, 0.334], [0.05, 0.021, 0.034]), k: 0.025, m: true },
+    { s: ell([0, 0.16, 0.33], [0.068, 0.026, 0.036]), k: 0.03 },
   ],
   neck: [
     { s: cone([0, 0.25, -0.06], [0, -0.5, -0.03], 0.165, 0.185), k: 0 },
@@ -110,12 +116,12 @@ const JOIN = { neck: 0.16, arm: 0.13, head: 0.1 } as const;
 /** The head turns about the top of the neck. */
 export const PIVOT: V3 = [0, 0.05, -0.05];
 /** Where the weave starts (the heart, between the breasts) and where the state bloom spreads from (the face). */
-export const HEART: V3 = [0, -0.84, 0.27];
+export const HEART: V3 = [0, -0.74, 0.25];
 export const FACE: V3 = [0, 0.42, 0.38];
 export const CROWN = 1.01;
 export const CHIN = 0.0;
 /** The weave is complete once its front has passed every point of the body by this distance. */
-export const WEAVE_REACH = 3.9;
+export const WEAVE_REACH = 3.0;
 /** At rest the head is turned and tilted a touch: calm, not a mugshot. */
 export const REST_POSE = { yaw: 0.07, pitch: 0.03, roll: 0.045 } as const;
 
@@ -162,18 +168,24 @@ function group(
   x: number,
   y: number,
   z: number,
+  soft = 0,
 ): number {
   let d = Infinity;
+  // The mirror fold is rounded on the face (`soft`): a hard |x| leaves a crease down the nose wherever a
+  // mirrored piece (the eyes) still reaches the centre line.
+  const mx = soft > 0 ? Math.sqrt(x * x + soft) : Math.abs(x);
   for (const p of pieces) {
-    const e = shape(p.s, p.m ? Math.abs(x) : x, y, z);
+    const e = shape(p.s, p.m ? mx : x, y, z);
     d = d === Infinity ? e : p.cut ? -smin(-d, e, p.k) : smin(d, e, p.k);
   }
   return d;
 }
 
+const HEAD_FOLD = 0.0016;
+
 /** The head alone, rest pose. */
 export function headField(x: number, y: number, z: number): number {
-  return group(PIECES.head, x, y, z);
+  return group(PIECES.head, x, y, z, HEAD_FOLD);
 }
 
 /** The whole figure, rest pose: negative inside. */
@@ -252,7 +264,7 @@ float coneA(vec3 p, vec3 a, vec3 b, float r0, float r1) {
   return length(pa - ba * h) - mix(r0, r1, h);
 }
 float headSdf(vec3 ph) {
-  vec3 qh = vec3(abs(ph.x), ph.yz);
+  vec3 qh = vec3(sqrt(ph.x * ph.x + ${f(HEAD_FOLD)}), ph.yz);
   ${glslGroup("h", PIECES.head, "ph")}
   return h;
 }
@@ -299,8 +311,8 @@ export const PART_X = 0.1;
  * the temples and fall in soft waves: the front locks over the collarbones, the rest behind the shoulders, pushed
  * out of the body wherever they would cut into it. Three layers give the volume. Deterministic.
  */
-export function buildHairGuides(perRow = 30, points = 32): HairGuides {
-  const layers = [0.03, 0.065, 0.1];
+export function buildHairGuides(perRow = 36, points = 36): HairGuides {
+  const layers = [0.025, 0.055, 0.085, 0.12];
   const count = 2 * layers.length * perRow;
   const data = new Float32Array(count * points * 4);
   const front = new Float32Array(count);
@@ -345,13 +357,14 @@ export function buildHairGuides(perRow = 30, points = 32): HairGuides {
         const length =
           (2.7 + 0.6 * u + 0.14 * Math.sin(i * 2.3 + li * 1.7)) * long;
         const step = length / (points - 1);
-        const inFront = u < 0.3 && li > 0 ? 1 : 0;
+        const inFront = u < 0.17 && (li === 1 || li === 2) ? 1 : 0;
         front[g] = inFront;
         const phase = i * 0.9 + li * 2.1 + (side > 0 ? 1.3 : 0);
         // Combed out of the parting toward the side and a little back, so the forehead keeps a hairline.
-        const frame = Math.max(0, 1 - u / 0.22) * (side < 0 ? 0.35 : 1);
+        const frame = Math.max(0, 1 - u / 0.22) * (side < 0 ? 0.2 : 0.55);
         dx = side * (1 - 0.25 * frame);
-        dy = -0.45 - 0.4 * u - 0.3 * frame;
+        // The front of the hairline is combed sideways first, so it clears the face before it falls.
+        dy = -0.12 - 0.75 * u - 0.3 * frame;
         dz = (-0.35 * (1 - u) - 0.2 * u) * (1 - frame) + 0.04 * frame;
         for (let k = 0; k < points; k++) {
           const o = (g * points + k) * 4;
@@ -421,9 +434,10 @@ export function buildHairGuides(perRow = 30, points = 32): HairGuides {
 
 /** Visible height of the scene at the figure's plane for a viewport aspect. */
 export function auraViewHeight(aspect: number): number {
-  // 16:9: the head (chin to crown) takes about 30% of the height and the frame ends near the waist; narrow screens
+  // A bust portrait. 16:9: the head (chin to crown) takes about 43% of the height and the frame ends at the upper
+  // chest; narrow screens
   // widen the view so both shoulders (about 1.8 heads) keep some air.
-  return Math.max(3.6, 2.5 / Math.max(0.2, aspect));
+  return Math.max(2.35, 1.9 / Math.max(0.2, aspect));
 }
 
 /** Camera target height so the crown sits `top` (share of the screen) below the top edge. */
