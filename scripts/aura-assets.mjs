@@ -2,10 +2,13 @@
 //   apps/web/static/aura/aura-2560.webp   desktop image
 //   apps/web/static/aura/aura-1280.webp   low tier and phones
 //   apps/web/static/aura/aura-data.png    three 960x540 RGB tiles stacked vertically (see AURA_DATA in aura-data.ts):
-//     0: form (head + body), head, bright (hair, cyan line, ribbons)
-//     1: stripe offset (arc length minus x), height, figure reveal mask
-//     2: normal x, normal y, figure zone
-// Run under the host's memory cap:  capped 2G -- node scripts/aura-assets.mjs [path/to/aura-base-4k.png]
+//     0: form (head + body), head, bright (hair, rims, ribbons)
+//     1: figure zone, height, figure reveal mask
+//     2: normal x, normal y, (unused)
+//   apps/web/static/aura/aura-lines.png   three 1920x1080 layers: distance to the nearest light line, place along it, which line
+// Run under the host's memory cap:
+//   capped 2G -- node scripts/aura-assets.mjs path/to/aura-base5-4k.png
+// AURA_SKIP_WEBP=1 skips the images; AURA_PREVIEW=out.png also draws the lines over the artwork for tuning.
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import path from "node:path";
@@ -15,7 +18,7 @@ import { decodePng, encodePng } from "./lib/png.mjs";
 const root = path.resolve(import.meta.dirname, "..");
 const src = path.resolve(
   process.argv[2] ??
-    path.join(root, ".claude/previews/aura-ref/aura-base-4k.png"),
+    path.join(root, ".claude/previews/aura-ref/aura-base5-4k.png"),
 );
 const outDir = path.join(root, "apps/web/static/aura");
 fs.mkdirSync(outDir, { recursive: true });
@@ -85,40 +88,81 @@ function blur(src, radius) {
   return a;
 }
 
-/* ---------- head: the dark blank face, flood-filled from its centre and bounded by the bright hair ---------- */
-const head = new Float32Array(N);
-{
-  const box = [0.38 * W, 0.12 * H, 0.62 * W, 0.6 * H];
-  const dark = (k) => Math.max(R[k], G[k], B[k]) < 60;
-  const stack = [Math.round(0.3 * H) * W + Math.round(0.49 * W)];
+function flood(seeds, ok, box) {
+  const m = new Uint8Array(N);
+  const stack = seeds.map(
+    ([u, v]) => Math.round(v * H) * W + Math.round(u * W),
+  );
   while (stack.length) {
     const k = stack.pop();
-    if (head[k] || !dark(k)) continue;
+    if (k < 0 || k >= N || m[k] || !ok(k)) continue;
     const x = k % W;
     const y = (k / W) | 0;
-    if (x < box[0] || x > box[2] || y < box[1] || y > box[3]) continue;
-    head[k] = 1;
+    if (x < box[0] * W || x > box[2] * W || y < box[1] * H || y > box[3] * H)
+      continue;
+    m[k] = 1;
     stack.push(k - 1, k + 1, k - W, k + W);
   }
-  // Fill holes (the shading of the nose): everything the outside cannot reach is head.
-  const outside = new Uint8Array(N);
-  const st = [0];
+  return m;
+}
+/** Everything the outside (from the top corners) cannot reach. */
+function fillHoles(m) {
+  const out = new Uint8Array(N);
+  const st = [0, W - 1];
   while (st.length) {
     const k = st.pop();
-    if (k < 0 || k >= N || outside[k] || head[k]) continue;
-    outside[k] = 1;
+    if (k < 0 || k >= N || out[k] || m[k]) continue;
+    out[k] = 1;
     const x = k % W;
     if (x > 0) st.push(k - 1);
     if (x < W - 1) st.push(k + 1);
     st.push(k - W, k + W);
   }
-  for (let k = 0; k < N; k++) head[k] = outside[k] ? 0 : 1;
+  return Float32Array.from(out, (v) => (v ? 0 : 1));
 }
-// A clean contour: blur and re-threshold (a morphological smoothing), then a soft 1 px edge.
-{
-  const b = blur(head, 4);
-  for (let k = 0; k < N; k++) head[k] = b[k] > 0.5 ? 1 : 0;
-}
+const threshold = (a, t) => Float32Array.from(a, (v) => (v > t ? 1 : 0));
+/** Morphological closing (dilate, then erode) by blurring and re-thresholding: bridges the thin rim lines. */
+const close = (m, r) => threshold(blur(threshold(blur(m, r), 0.12), r), 0.88);
+
+/* ---------- segmentation: the dark indigo skin, bounded by the bright rim lines and the hair ---------- */
+// Skin is dark indigo (blue well above the black room, little red); rims, hair and ribbons are bright violet.
+const skin = (k) => B[k] > 28 && B[k] < 135 && R[k] < 48;
+let head = flood(
+  [
+    [0.5, 0.3],
+    [0.47, 0.38],
+    [0.53, 0.38],
+    [0.5, 0.2],
+  ],
+  skin,
+  [0.4, 0.1, 0.6, 0.47],
+);
+head = threshold(blur(fillHoles(close(head, 2)), 2), 0.5);
+let body = flood(
+  [
+    [0.5, 0.52],
+    [0.5, 0.68],
+    [0.5, 0.86],
+    [0.44, 0.82],
+    [0.56, 0.82],
+    [0.35, 0.8],
+    [0.65, 0.8],
+    [0.35, 0.95],
+    [0.65, 0.95],
+    [0.4, 0.66],
+    [0.6, 0.66],
+  ],
+  (k) => skin(k) && !head[k],
+  [0.24, 0.42, 0.76, 1],
+);
+body = threshold(blur(close(body, 3), 1.5), 0.5);
+// The rim lines along the outline belong to the figure: grow by about their width.
+body = Float32Array.from(
+  threshold(blur(body, 1.2), 0.25),
+  (v, k) => v * (1 - head[k]),
+);
+head = threshold(blur(head, 1.2), 0.3);
+
 let headCx = 0;
 let headCy = 0;
 let headN = 0;
@@ -136,75 +180,66 @@ for (let k = 0; k < N; k++)
   }
 headCx /= headN;
 headCy /= headN;
-
-/* ---------- body: neck and torso, fitted to the faint rim light of the shoulders ---------- */
-// The arms are as dark as the room; only a thin rim marks them. Measure that rim on the lower rows, mirror it.
-const blurB = blur(B, 2);
-const rimRows = [];
-for (let y = Math.round(0.78 * H); y < H - 2; y++) {
-  let best = -1;
-  let at = -1;
-  for (let x = Math.round(0.27 * W); x < 0.36 * W; x++)
-    if (blurB[y * W + x] > best && R[y * W + x] < 60) {
-      best = blurB[y * W + x];
-      at = x;
-    }
-  let bestR = -1;
-  let atR = -1;
-  for (let x = Math.round(0.68 * W); x < 0.77 * W; x++)
-    if (blurB[y * W + x] > bestR && R[y * W + x] < 60) {
-      bestR = blurB[y * W + x];
-      atR = x;
-    }
-  rimRows.push([at, atR]);
-}
-const leftEdge = rimRows.reduce((s, r) => s + r[0], 0) / rimRows.length;
-const rightEdge = rimRows.reduce((s, r) => s + r[1], 0) / rimRows.length;
-const axis = (leftEdge + rightEdge) / 2;
-const torsoHalf = (rightEdge - leftEdge) / 2;
-const shoulderTop = 0.688 * H;
-const corner = 60;
-const neckHalf = 38;
-// Signed distance (px, negative inside) of the neck and torso, smoothly joined: the hair hides the trapezius.
-function bodySdf(x, y) {
-  const px = Math.abs(x - axis);
-  // Torso: a box with rounded shoulders, open below the frame.
-  const qx = px - (torsoHalf - corner);
-  const qy = shoulderTop + corner - y;
-  const torso =
-    Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) +
-    Math.min(Math.max(qx, qy), 0) -
-    corner;
-  // Neck: a column from inside the head down into the chest, a touch wider at its base.
-  const neckW = neckHalf + Math.max(0, y - 0.6 * H) * 0.12;
-  const neck = Math.max(px - neckW, headCy - y);
-  const k = 34;
-  const hm = clamp01(0.5 + (0.5 * (torso - neck)) / k);
-  return torso * (1 - hm) + neck * hm - k * hm * (1 - hm);
-}
-const body = new Float32Array(N);
-for (let y = 0; y < H; y++)
+let headR = 0;
+for (let y = 0; y < H; y++) {
+  let l = -1;
+  let r = -1;
   for (let x = 0; x < W; x++)
-    body[y * W + x] = clamp01(0.5 - bodySdf(x + 0.5, y + 0.5));
+    if (head[y * W + x]) {
+      if (l < 0) l = x;
+      r = x;
+    }
+  if (l >= 0) headR = Math.max(headR, (r - l + 1) / 2);
+}
+const rowExtent = (y) => {
+  let l = -1;
+  let r = -1;
+  for (let x = 0; x < W; x++)
+    if (body[Math.round(y) * W + x]) {
+      if (l < 0) l = x;
+      r = x;
+    }
+  return [l, r];
+};
+let axis = 0;
+let torsoHalf = 0;
+{
+  let n = 0;
+  for (let y = Math.round(0.7 * H); y < 0.95 * H; y++) {
+    const [l, r] = rowExtent(y);
+    axis += (l + r) / 2;
+    torsoHalf += (r - l) / 2;
+    n++;
+  }
+  axis /= n;
+  torsoHalf /= n;
+}
+let shoulderTop = H;
+for (let y = Math.round(headBottom); y < H; y++) {
+  const [l, r] = rowExtent(y);
+  if (r - l > 1.4 * torsoHalf) {
+    shoulderTop = y;
+    break;
+  }
+}
 
-/* ---------- bright: what the artwork already lights (hair strands, the cyan line, ribbons) ---------- */
+/* ---------- bright: what the artwork already lights (hair strands, rims, ribbons) ---------- */
 const bright = new Float32Array(N);
 for (let k = 0; k < N; k++) {
   const m = Math.max(R[k], G[k], B[k]);
-  // Hair and ribbons are violet-pink (red well above the body's), the chest line is cyan.
   const lit = Math.max(smooth(55, 120, R[k]), smooth(90, 170, G[k]));
   bright[k] = lit * smooth(70, 150, m);
 }
 
-/* ---------- zone and figure: the figure is what particles build; the rest is the room ---------- */
+/* ---------- zone and figure: the figure is what the particles build; the rest is the room ---------- */
+const ZONE = { cv: 0.55, ru: 0.33, rv: 0.62 };
 const zone = new Float32Array(N);
 const fig = new Float32Array(N);
 for (let y = 0; y < H; y++)
   for (let x = 0; x < W; x++) {
-    const k = y * W + x;
-    const ex = (x - axis) / (0.27 * W);
-    const ey = (y - 0.55 * H) / (0.62 * H);
-    zone[k] = 1 - smooth(0.78, 1.0, Math.hypot(ex, ey));
+    const ex = (x - axis) / (ZONE.ru * W);
+    const ey = (y - ZONE.cv * H) / (ZONE.rv * H);
+    zone[y * W + x] = 1 - smooth(0.78, 1.0, Math.hypot(ex, ey));
   }
 {
   const formSoft = blur(
@@ -216,9 +251,9 @@ for (let y = 0; y < H; y++)
     fig[k] = zone[k] * Math.max(formSoft[k], Math.min(1, brightSoft[k] * 1.6));
 }
 
-/* ---------- height: the silhouette inflated into a rounded form ---------- */
-// A membrane (Poisson, lap u = -1, u = 0 on the contour) is smooth everywhere, unlike a distance transform with
-// its creases; sqrt(4u) turns it into a round profile: exactly a hemisphere for a disc.
+/* ---------- inflation ---------- */
+// A membrane (Poisson, lap u = -1, u = 0 on the contour) is smooth everywhere; sqrt(4u) turns it into a round
+// profile: exactly a hemisphere for a disc.
 function inflate(mask, openBottom, iterations) {
   const m = Uint8Array.from(mask, (v) => (v > 0.5 ? 1 : 0));
   let x0 = W;
@@ -260,8 +295,15 @@ function inflate(mask, openBottom, iterations) {
         }
   return Float32Array.from(u, (v) => Math.sqrt(Math.max(0, 4 * v)));
 }
+
+/* ---------- height: the silhouette inflated into a rounded form, with the breasts ---------- */
 const HMAX = 128;
-const BUST = { dx: 0.08 * W, y: 0.97 * H, amp: 24, sigma: 58, lens: 0.42 };
+// Breast centres and size from the artwork's own contours (picture units).
+const BREASTS = [
+  { u: axis / W - 0.06, v: 0.815 },
+  { u: axis / W + 0.06, v: 0.815 },
+];
+const BREAST = { amp: 26, sigma: 0.034 * W };
 const headSoft = blur(head, 1);
 const hHead = blur(inflate(head, false, 1500), 1.5);
 const hBodyRaw = inflate(body, true, 4000);
@@ -269,15 +311,14 @@ const hBody = new Float32Array(N);
 for (let y = 0; y < H; y++)
   for (let x = 0; x < W; x++) {
     const k = y * W + x;
-    // A torso is far shallower than it is wide.
-    let hb = hBodyRaw[k] * 0.5;
-    for (const side of [-1, 1]) {
-      const dx = x - (axis + side * BUST.dx);
-      const dy = y - BUST.y;
+    let hb = hBodyRaw[k] * 0.45;
+    for (const b of BREASTS) {
+      const dx = x - b.u * W;
+      const dy = y - b.v * H;
       hb +=
-        BUST.amp *
-        Math.exp(-(dx * dx + dy * dy) / (2 * BUST.sigma * BUST.sigma)) *
-        Math.min(1, hBodyRaw[k] / 40);
+        BREAST.amp *
+        Math.exp(-(dx * dx + dy * dy) / (2 * BREAST.sigma * BREAST.sigma)) *
+        Math.min(1, hBodyRaw[k] / 30);
     }
     hBody[k] = hb;
   }
@@ -286,106 +327,473 @@ const height = new Float32Array(N);
 for (let k = 0; k < N; k++)
   height[k] = hHead[k] * headSoft[k] + hBodyS[k] * (1 - headSoft[k]);
 
-/* ---------- normals ---------- */
 const nx = new Float32Array(N);
 const ny = new Float32Array(N);
 const at = (a, x, y) =>
-  a[Math.max(0, Math.min(H - 1, y)) * W + Math.max(0, Math.min(W - 1, x))];
+  a[
+    Math.max(0, Math.min(H - 1, Math.round(y))) * W +
+      Math.max(0, Math.min(W - 1, Math.round(x)))
+  ];
 for (let y = 0; y < H; y++)
   for (let x = 0; x < W; x++) {
     const hx = (at(height, x + 1, y) - at(height, x - 1, y)) / 2;
     const hy = (at(height, x, y + 1) - at(height, x, y - 1)) / 2;
     const l = Math.hypot(hx, hy, 1);
     nx[y * W + x] = -hx / l;
-    // Image rows run down; the normal's y points up.
     ny[y * W + x] = hy / l;
   }
 
-/* ---------- the stripe coordinate: meridians of each part, as if it were turned on a lathe ---------- */
-// s = longitude * radius. On the head the radius is fixed, so the lines converge at crown and chin like a
-// globe's; on the body it follows the width a little (STRIPE_FLARE), so lines fan out from the neck over the
-// shoulders and new ones come round from behind. A lens around each breast bows the lines around it.
-const STRIPE_FLARE = 0.8;
-const headRows = [];
-let headR = 0;
+/* ---------- the light lines: long, calm curves drawn along the anatomy ---------- */
+// Hand-placed Catmull-Rom curves through points measured on the artwork (u from the body's axis, v down), each
+// side drawn on its own so the figure never looks mirrored by a machine. They flow into each other: down the
+// neck and out along the collarbones, over the shoulder caps and down the arms, around the outer curve and the
+// underside of each breast, down the flanks.
+function mulberry(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rand = mulberry(20261110);
+const L = [
+  // neck: down its side, out along the collarbone
+  {
+    w: 0.7,
+    l: [
+      [-0.022, 0.462],
+      [-0.026, 0.51],
+      [-0.036, 0.558],
+      [-0.07, 0.6],
+      [-0.118, 0.62],
+    ],
+  },
+  {
+    w: 0.65,
+    r: [
+      [0.022, 0.472],
+      [0.027, 0.52],
+      [0.039, 0.565],
+      [0.078, 0.604],
+      [0.114, 0.622],
+    ],
+  },
+  // collarbone over the shoulder cap and down the outer arm
+  {
+    w: 1,
+    l: [
+      [-0.012, 0.604],
+      [-0.055, 0.613],
+      [-0.104, 0.614],
+      [-0.144, 0.624],
+      [-0.163, 0.655],
+      [-0.17, 0.71],
+      [-0.172, 0.8],
+    ],
+  },
+  {
+    w: 0.95,
+    r: [
+      [0.014, 0.606],
+      [0.06, 0.615],
+      [0.108, 0.617],
+      [0.146, 0.628],
+      [0.164, 0.66],
+      [0.17, 0.72],
+      [0.173, 0.83],
+    ],
+  },
+  // a second line over the shoulder, down the front of the arm
+  {
+    w: 0.6,
+    l: [
+      [-0.088, 0.618],
+      [-0.13, 0.628],
+      [-0.151, 0.665],
+      [-0.157, 0.75],
+      [-0.158, 0.88],
+    ],
+  },
+  {
+    w: 0.55,
+    r: [
+      [0.1, 0.622],
+      [0.134, 0.634],
+      [0.152, 0.672],
+      [0.158, 0.77],
+      [0.16, 0.9],
+    ],
+  },
+  // from the sternum, over the top of the breast and around its outer curve to its underside
+  {
+    w: 0.9,
+    l: [
+      [-0.006, 0.605],
+      [-0.028, 0.665],
+      [-0.068, 0.722],
+      [-0.104, 0.752],
+      [-0.12, 0.802],
+      [-0.106, 0.852],
+      [-0.068, 0.878],
+    ],
+  },
+  {
+    w: 0.85,
+    r: [
+      [0.008, 0.612],
+      [0.032, 0.672],
+      [0.072, 0.726],
+      [0.106, 0.758],
+      [0.12, 0.808],
+      [0.104, 0.856],
+      [0.066, 0.877],
+    ],
+  },
+  // the soft arc under each breast, meeting at the centre
+  {
+    w: 0.6,
+    l: [
+      [-0.119, 0.832],
+      [-0.1, 0.87],
+      [-0.07, 0.886],
+      [-0.04, 0.887],
+    ],
+  },
+  {
+    w: 0.55,
+    r: [
+      [0.116, 0.84],
+      [0.098, 0.874],
+      [0.068, 0.888],
+    ],
+  },
+  // flanks: from under the arm toward the waist
+  {
+    w: 0.8,
+    l: [
+      [-0.128, 0.75],
+      [-0.133, 0.83],
+      [-0.124, 0.92],
+      [-0.11, 1.0],
+    ],
+  },
+  {
+    w: 0.75,
+    r: [
+      [0.127, 0.77],
+      [0.132, 0.85],
+      [0.122, 0.93],
+      [0.111, 1.0],
+    ],
+  },
+  // long lines on the upper arms
+  {
+    w: 0.55,
+    l: [
+      [-0.145, 0.69],
+      [-0.15, 0.78],
+      [-0.147, 0.89],
+      [-0.141, 0.99],
+    ],
+  },
+  {
+    w: 0.5,
+    r: [
+      [0.147, 0.72],
+      [0.151, 0.81],
+      [0.148, 0.92],
+    ],
+  },
+  // from under each breast down the belly
+  {
+    w: 0.55,
+    l: [
+      [-0.074, 0.889],
+      [-0.06, 0.92],
+      [-0.056, 0.96],
+      [-0.064, 1.0],
+    ],
+  },
+  {
+    w: 0.5,
+    r: [
+      [0.07, 0.892],
+      [0.058, 0.925],
+      [0.055, 0.965],
+      [0.062, 1.0],
+    ],
+  },
+  // more light over the shoulders and down the arms, like a bundle of strands
+  {
+    w: 0.45,
+    l: [
+      [-0.06, 0.628],
+      [-0.11, 0.636],
+      [-0.14, 0.652],
+      [-0.154, 0.7],
+      [-0.16, 0.76],
+    ],
+  },
+  {
+    w: 0.42,
+    r: [
+      [0.07, 0.632],
+      [0.116, 0.642],
+      [0.143, 0.66],
+      [0.156, 0.71],
+      [0.162, 0.78],
+    ],
+  },
+  {
+    w: 0.5,
+    l: [
+      [-0.168, 0.74],
+      [-0.17, 0.85],
+      [-0.167, 0.95],
+      [-0.162, 1.0],
+    ],
+  },
+  {
+    w: 0.48,
+    r: [
+      [0.169, 0.76],
+      [0.172, 0.87],
+      [0.17, 0.97],
+    ],
+  },
+  // from the collarbones down over the top of each breast
+  {
+    w: 0.55,
+    l: [
+      [-0.04, 0.62],
+      [-0.06, 0.67],
+      [-0.085, 0.72],
+      [-0.11, 0.765],
+    ],
+  },
+  {
+    w: 0.5,
+    r: [
+      [0.046, 0.624],
+      [0.066, 0.676],
+      [0.09, 0.728],
+      [0.112, 0.772],
+    ],
+  },
+  // a long flank line from the armpit, curving in under the breast toward the waist
+  {
+    w: 0.55,
+    l: [
+      [-0.137, 0.7],
+      [-0.14, 0.78],
+      [-0.128, 0.86],
+      [-0.1, 0.93],
+      [-0.088, 1.0],
+    ],
+  },
+  {
+    w: 0.5,
+    r: [
+      [0.138, 0.71],
+      [0.14, 0.8],
+      [0.127, 0.875],
+      [0.1, 0.94],
+      [0.09, 1.0],
+    ],
+  },
+  // a faint line down the centre
+  {
+    w: 0.4,
+    l: [
+      [0.003, 0.635],
+      [-0.003, 0.7],
+      [0.002, 0.77],
+      [0, 0.835],
+    ],
+  },
+];
+/** Catmull-Rom through the points (centripetal enough for these gentle curves), sampled every ~0.5 data px. */
+function catmull(points) {
+  const P = [points[0], ...points, points[points.length - 1]];
+  const out = [];
+  for (let i = 1; i < P.length - 2; i++) {
+    const [p0, p1, p2, p3] = [P[i - 1], P[i], P[i + 1], P[i + 2]];
+    const seg = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+    const n = Math.max(4, Math.ceil(seg / 0.5));
+    for (let j = 0; j < n; j++) {
+      const t = j / n;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const c = (a, b, cc, d) =>
+        0.5 *
+        (2 * b +
+          (-a + cc) * t +
+          (2 * a - 5 * b + 4 * cc - d) * t2 +
+          (-a + 3 * b - 3 * cc + d) * t3);
+      out.push([c(p0[0], p1[0], p2[0], p3[0]), c(p0[1], p1[1], p2[1], p3[1])]);
+    }
+  }
+  out.push(points[points.length - 1]);
+  return out;
+}
+const toPx = ([du, v]) => [axis + du * W, v * H];
+const strokes = [];
+/** A finer companion strand beside a line, over part of its length, as light lines come in bundles. */
+function companion(pts, offset, from, to) {
+  const a = Math.floor(pts.length * from);
+  const b = Math.floor(pts.length * to);
+  const out = [];
+  for (let i = a; i < b; i++) {
+    const p0 = pts[Math.max(0, i - 2)];
+    const p1 = pts[Math.min(pts.length - 1, i + 2)];
+    const dx = p1[0] - p0[0];
+    const dy = p1[1] - p0[1];
+    const l = Math.hypot(dx, dy) || 1;
+    // The gap breathes along the strand.
+    const k = offset * (0.8 + 0.4 * Math.sin((i - a) * 0.02));
+    out.push([pts[i][0] - (dy / l) * k, pts[i][1] + (dx / l) * k]);
+  }
+  return out;
+}
+for (const s of L) {
+  const pts = catmull((s.l ?? s.r).map(toPx));
+  strokes.push({ pts, weight: s.w * (0.9 + 0.2 * rand()), face: false });
+  if (s.w >= 0.7) {
+    const side = s.l ? 1 : -1;
+    const from = 0.08 + 0.2 * rand();
+    strokes.push({
+      pts: companion(
+        pts,
+        side * (4 + 3 * rand()),
+        from,
+        Math.min(0.97, from + 0.45 + 0.3 * rand()),
+      ),
+      weight: 0.32 + 0.12 * rand(),
+      face: false,
+    });
+  }
+}
+// On the blank face only a few faint lines: down from each temple toward the jaw, and a short one at the centre.
 {
-  // Sub-pixel contour per row from a soft mask, then smoothed down the rows: no jitter in the meridians.
-  const soft = blur(head, 1.5);
-  const raw = [];
-  for (let y = 0; y < H; y++) {
-    let l = -1;
-    let r = -1;
-    for (let x = 1; x < W; x++) {
-      const a = soft[y * W + x - 1];
-      const b = soft[y * W + x];
-      if (a < 0.5 && b >= 0.5 && l < 0) l = x - 1 + (0.5 - a) / (b - a);
-      if (a >= 0.5 && b < 0.5) r = x - 1 + (a - 0.5) / (a - b);
-    }
-    raw.push(l < 0 || r < 0 ? null : { c: (l + r) / 2 + 0.5, r: (r - l) / 2 });
-  }
-  for (let y = 0; y < H; y++) {
-    if (!raw[y]) {
-      headRows.push(null);
-      continue;
-    }
-    let c = 0;
-    let r = 0;
-    let n = 0;
-    for (let j = -6; j <= 6; j++) {
-      const row = raw[y + j];
-      if (!row) continue;
-      const wgt = Math.exp(-(j * j) / 18);
-      c += row.c * wgt;
-      r += row.r * wgt;
-      n += wgt;
-    }
-    // Keep the true width at the crown and chin (where the smoothing would widen it).
-    const rr = Math.min(raw[y].r + 1.5, r / n);
-    headRows.push({ c: c / n, r: Math.max(1, rr) });
-    headR = Math.max(headR, rr);
-  }
+  const hu = (u) => headCx + u * headR;
+  const hv = (v) => headTop + v * (headBottom - headTop);
+  const face = [
+    [
+      [hu(-0.8), hv(0.22)],
+      [hu(-0.86), hv(0.5)],
+      [hu(-0.72), hv(0.75)],
+      [hu(-0.38), hv(0.93)],
+    ],
+    [
+      [hu(0.82), hv(0.32)],
+      [hu(0.85), hv(0.55)],
+      [hu(0.68), hv(0.78)],
+      [hu(0.46), hv(0.88)],
+    ],
+    [
+      [hu(0.02), hv(0.1)],
+      [hu(-0.03), hv(0.28)],
+      [hu(0.01), hv(0.48)],
+    ],
+  ];
+  for (const ctrl of face)
+    strokes.push({ pts: catmull(ctrl), weight: 0.32, face: true });
 }
-const bodyRows = [];
-for (let y = 0; y < H; y++) {
-  let r = 0;
-  while (r < W / 2 && bodySdf(axis + r, y + 0.5) < 0) r += 0.25;
-  bodyRows.push(r);
-}
-const DMAX = 256;
-const offset = new Float32Array(N);
-for (let y = 0; y < H; y++) {
-  const hr = headRows[y];
-  const rb = Math.max(bodyRows[y], 4);
-  // The flare follows a smoothed width, so lines bend gradually from the neck into the shoulders.
-  let rs = 0;
-  let ws = 0;
-  for (let j = -14; j <= 14; j++) {
-    const row = bodyRows[Math.max(0, Math.min(H - 1, y + j))];
-    const wgt = Math.exp(-(j * j) / 72);
-    rs += Math.max(row, 4) * wgt;
-    ws += wgt;
-  }
-  const rRef =
-    Math.pow(rs / ws, STRIPE_FLARE) * Math.pow(torsoHalf, 1 - STRIPE_FLARE);
-  for (let x = 0; x < W; x++) {
-    const k = y * W + x;
-    let xl = x + 0.5 - axis;
-    for (const side of [-1, 1]) {
-      const bx = side * BUST.dx;
-      const w = Math.exp(
-        -((xl - bx) ** 2 + (y - BUST.y) ** 2) / (2 * BUST.sigma * BUST.sigma),
-      );
-      xl -= BUST.lens * w * (xl - bx);
+// Star points where lines meet.
+const stars = [
+  [0, 0.606],
+  [-0.146, 0.635],
+  [0.15, 0.64],
+  [-0.07, 0.6],
+  [0.078, 0.604],
+  [-0.12, 0.8],
+].map(toPx);
+
+/* ---------- the lines raster: three 1920x1080 layers, each the nearest of its own lines ---------- */
+// Line i goes to layer i % 3, so lines that cross or run close lie in different layers and each keeps its whole
+// glow (one nearest-line field would cut a glow off where another line takes over).
+const LW = 1920;
+const LH = 1080;
+const LAYERS = 3;
+const LSCALE = LW / W;
+const DMAXL = 40;
+const lineD = new Float32Array(LW * LH * LAYERS).fill(DMAXL);
+const lineT = new Float32Array(LW * LH * LAYERS);
+const lineId = new Int16Array(LW * LH * LAYERS).fill(-1);
+// Each line takes the layer whose nearest line already there is farthest from it.
+const sampleOf = (st) => st.pts.filter((_, i) => i % 6 === 0);
+const gap = (a, b) => {
+  let m = Infinity;
+  for (const p of sampleOf(a))
+    for (const q of sampleOf(b))
+      m = Math.min(m, Math.hypot(p[0] - q[0], p[1] - q[1]));
+  return m;
+};
+strokes.forEach((s, id) => {
+  let best = 0;
+  let bestGap = -1;
+  for (let l = 0; l < LAYERS; l++) {
+    let g = Infinity;
+    for (let j = 0; j < id; j++)
+      if (strokes[j].layer === l) g = Math.min(g, gap(s, strokes[j]));
+    if (g > bestGap) {
+      bestGap = g;
+      best = l;
     }
-    const sBody = Math.asin(Math.max(-1, Math.min(1, xl / rb))) * rRef;
-    let sHead = sBody;
-    if (hr)
-      sHead =
-        Math.asin(Math.max(-1, Math.min(1, (x + 0.5 - hr.c) / hr.r))) * headR;
-    const hm = headSoft[k];
-    offset[k] = sHead * hm + sBody * (1 - hm) - (x + 0.5 - axis);
   }
+  s.layer = best;
+});
+strokes.forEach((s, id) => {
+  const layer = s.layer;
+  const pts = s.pts.map(([x, y]) => [x * LSCALE, y * LSCALE]);
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++)
+    cum.push(
+      cum[i - 1] +
+        Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]),
+    );
+  const total = cum[cum.length - 1] || 1;
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, ay] = pts[i - 1];
+    const [bx, by] = pts[i];
+    const sx = bx - ax;
+    const sy = by - ay;
+    const sl = sx * sx + sy * sy || 1e-9;
+    const x0 = Math.max(0, Math.floor(Math.min(ax, bx) - DMAXL));
+    const x1 = Math.min(LW - 1, Math.ceil(Math.max(ax, bx) + DMAXL));
+    const y0 = Math.max(0, Math.floor(Math.min(ay, by) - DMAXL));
+    const y1 = Math.min(LH - 1, Math.ceil(Math.max(ay, by) + DMAXL));
+    for (let y = y0; y <= y1; y++)
+      for (let x = x0; x <= x1; x++) {
+        const px = x + 0.5 - ax;
+        const py = y + 0.5 - ay;
+        const t = Math.max(0, Math.min(1, (px * sx + py * sy) / sl));
+        const d = Math.hypot(px - t * sx, py - t * sy);
+        const k = (layer * LH + y) * LW + x;
+        if (d < lineD[k]) {
+          lineD[k] = d;
+          lineT[k] = (cum[i - 1] + t * Math.sqrt(sl)) / total;
+          lineId[k] = id;
+        }
+      }
+  }
+});
+const lines = new Uint8Array(LW * LH * LAYERS * 3);
+for (let k = 0; k < LW * LH * LAYERS; k++) {
+  const id = lineId[k];
+  lines[k * 3] = Math.round((Math.min(lineD[k], DMAXL) / DMAXL) * 255);
+  lines[k * 3 + 1] = id < 0 ? 0 : Math.round(lineT[k] * 255);
+  // Which line (for its own width and brightness), and whether it lies on the face (faint there).
+  lines[k * 3 + 2] =
+    id < 0 ? 0 : ((id % 62) + 1) * 4 + (strokes[id].face ? 2 : 0);
 }
+fs.writeFileSync(
+  path.join(outDir, "aura-lines.png"),
+  encodePng(LW, LH * LAYERS, lines),
+);
 
 /* ---------- write the data atlas ---------- */
 const atlas = new Uint8Array(W * H * 3 * 3);
@@ -396,32 +804,75 @@ const put = (tile, k, a, b, c) => {
   atlas[o + 2] = Math.round(clamp01(c) * 255);
 };
 const headFinal = blur(head, 0.8);
+const bodyFinal = blur(body, 0.8);
 for (let k = 0; k < N; k++) {
-  const form = Math.max(headFinal[k], body[k]);
-  const d = Math.round(clamp01((offset[k] + DMAX) / (2 * DMAX)) * 65535);
-  put(0, k, form, headFinal[k], bright[k]);
-  put(1, k, (d >> 8) / 255, height[k] / HMAX, fig[k]);
-  put(2, k, 0.5 + nx[k] * 0.5, 0.5 + ny[k] * 0.5, (d & 255) / 255);
+  put(0, k, Math.max(headFinal[k], bodyFinal[k]), headFinal[k], bright[k]);
+  put(1, k, zone[k], height[k] / HMAX, fig[k]);
+  put(2, k, 0.5 + nx[k] * 0.5, 0.5 + ny[k] * 0.5, 0);
 }
 fs.writeFileSync(
   path.join(outDir, "aura-data.png"),
   encodePng(W, H * 3, atlas),
 );
 
-const meta = {
-  axis: +(axis / W).toFixed(4),
-  headCx: +(headCx / W).toFixed(4),
-  headCy: +(headCy / H).toFixed(4),
-  headTop: +(headTop / H).toFixed(4),
-  headBottom: +(headBottom / H).toFixed(4),
-  headRadius: +(headR / W).toFixed(4),
-  torsoHalf: +(torsoHalf / W).toFixed(4),
-  shoulderTop: +(shoulderTop / H).toFixed(4),
-  dmax: DMAX,
-  hmax: HMAX,
-  heightMax: +height.reduce((a, b) => Math.max(a, b)).toFixed(1),
-};
-console.log(JSON.stringify(meta));
+const r4 = (v) => +v.toFixed(4);
+console.log(
+  JSON.stringify({
+    axis: r4(axis / W),
+    head: {
+      cx: r4(headCx / W),
+      cy: r4(headCy / H),
+      top: r4(headTop / H),
+      bottom: r4(headBottom / H),
+      radius: r4(headR / W),
+    },
+    torsoHalf: r4(torsoHalf / W),
+    shoulderTop: r4(shoulderTop / H),
+    hmax: HMAX,
+    lines: strokes.length,
+    stars: stars.map(([x, y]) => [r4(x / W), r4(y / H)]),
+    heightMax: +height.reduce((a, b) => Math.max(a, b)).toFixed(1),
+  }),
+);
+
+/* ---------- optional preview: the lines over the artwork, for tuning by eye ---------- */
+if (process.env.AURA_PREVIEW) {
+  const out = new Uint8Array(LW * LH * 3);
+  for (let y = 0; y < LH; y++)
+    for (let x = 0; x < LW; x++) {
+      const k = y * LW + x;
+      const o =
+        (Math.floor((y / LH) * img.height) * img.width +
+          Math.floor((x / LW) * img.width)) *
+        4;
+      let best = 0;
+      for (let l = 1; l < LAYERS; l++)
+        if (lineD[l * LW * LH + k] < lineD[best * LW * LH + k]) best = l;
+      const kk = best * LW * LH + k;
+      const d = lineD[kk];
+      const s = strokes[lineId[kk]];
+      const t = lineT[kk];
+      const taper = Math.pow(
+        Math.sin(Math.PI * Math.min(1, Math.max(0, t))),
+        0.5,
+      );
+      const w = (s ? s.weight : 0) * taper;
+      const core = Math.exp(-Math.pow(d / (1.2 * w + 0.3), 2)) * w;
+      const glow = Math.exp(-Math.pow(d / (5 * w + 0.5), 2)) * 0.5 * w;
+      out[k * 3] = Math.min(255, img.data[o] + core * 255 + glow * 230);
+      out[k * 3 + 1] = Math.min(255, img.data[o + 1] + core * 235 + glow * 60);
+      out[k * 3 + 2] = Math.min(255, img.data[o + 2] + core * 255 + glow * 240);
+    }
+  for (const [sx, sy] of stars)
+    for (let j = -3; j <= 3; j++)
+      for (let i = -3; i <= 3; i++) {
+        const k =
+          (Math.round(sy * LSCALE) + j) * LW + Math.round(sx * LSCALE) + i;
+        if (k >= 0 && k < LW * LH && (i === 0 || j === 0))
+          out.fill(255, k * 3, k * 3 + 3);
+      }
+  fs.writeFileSync(process.env.AURA_PREVIEW, encodePng(LW, LH, out));
+}
 
 /* ---------- the images: WebP from the browser's own encoder (no native image tools on the host) ---------- */
 if (!process.env.AURA_SKIP_WEBP) {
