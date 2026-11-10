@@ -8,7 +8,13 @@ import {
   headWeight,
   poseMatrix,
 } from "./gestalte-body.ts";
-import { PALETTE, viewHeight } from "./gestalte.ts";
+import { BIRTH, MOODS, PALETTE, shockAt, viewHeight } from "./gestalte.ts";
+import { buildLand, landAt } from "./gestalte-land.ts";
+import {
+  bandLevel,
+  birthOrder,
+  buildFigurePoints,
+} from "./gestalte-points.ts";
 
 describe("gestalte body", () => {
   it("is a head on a neck above a bust: sloping shoulders, deltoids, arms falling down", () => {
@@ -111,5 +117,84 @@ describe("gestalte framing", () => {
     expect(PALETTE.bg).toBe("#0a1220");
     expect(PALETTE.core).toBe("#ff8a1a");
     expect(PALETTE.hot).toBe("#ffb347");
+  });
+});
+
+describe("gestalte v6 point cloud", () => {
+  const geo = buildGestalte(0.5, 200);
+  const fig = buildFigurePoints(geo, 0.5);
+
+  it("strings dots along contour bands on the surface, veins first", () => {
+    expect(fig.count).toBeGreaterThan(5000);
+    expect(fig.fixed).toBeGreaterThan(100);
+    let bands = 0;
+    for (let i = 0; i < fig.count; i++) {
+      const x = fig.position[i * 3]!;
+      const y = fig.position[i * 3 + 1]!;
+      const z = fig.position[i * 3 + 2]!;
+      const kind = fig.data[i * 4 + 1]!;
+      expect(kind === 1).toBe(i < fig.fixed);
+      // Coarse test grid: dots lie on its chords, within a hair of the true surface.
+      expect(Math.abs(gestalteField(x, y, z))).toBeLessThan(0.03);
+      const ord = fig.data[i * 4 + 3]!;
+      expect(ord).toBeGreaterThan(-0.05);
+      expect(ord).toBeLessThan(1.05);
+      if (kind === 0) {
+        bands++;
+        // A band dot sits on (or very near) an integer level: dark gaps between bands carry the form.
+        const lv = bandLevel(y, z, fig.data[i * 4]!);
+        expect(Math.abs(lv - Math.round(lv))).toBeLessThan(0.12);
+      }
+    }
+    expect(bands / fig.count).toBeGreaterThan(0.7);
+    // Veins run down the front of the neck and chest only.
+    for (let i = 0; i < fig.fixed; i++) {
+      expect(fig.position[i * 3 + 1]!).toBeLessThan(-0.7);
+      expect(fig.position[i * 3 + 1]!).toBeGreaterThan(-2.5);
+      expect(fig.normal[i * 3 + 2]!).toBeGreaterThan(0.1);
+    }
+  });
+
+  it("is deterministic and fills the body from the bottom up", () => {
+    const again = buildFigurePoints(geo, 0.5);
+    expect(again.count).toBe(fig.count);
+    expect(again.position[123]).toBe(fig.position[123]);
+    expect(birthOrder(-3)).toBe(0);
+    expect(birthOrder(CROWN)).toBe(1);
+    expect(birthOrder(-1)).toBeLessThan(birthOrder(0.5));
+  });
+
+  it("builds a land that rises at the sides and leaves the middle dark", () => {
+    const land = buildLand(40000, 3);
+    expect(land.count).toBeGreaterThan(5000);
+    const mid = landAt(0, -20);
+    const side = landAt(14, -20);
+    expect(side.y).toBeGreaterThan(mid.y);
+    for (let i = 0; i < land.count; i++) {
+      const crest = land.data[i * 4]!;
+      const lava = land.data[i * 4 + 1]!;
+      expect(crest).toBeGreaterThanOrEqual(0);
+      expect(crest).toBeLessThanOrEqual(1);
+      expect(lava).toBeGreaterThanOrEqual(0);
+      expect(lava).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("times one shockwave after the face ignites and ends without residue", () => {
+    expect(BIRTH.shock).toBeGreaterThanOrEqual(BIRTH.ignite[0]);
+    expect(shockAt(-0.1)).toBeNull();
+    expect(shockAt(BIRTH.shockLen)).toBeNull();
+    const early = shockAt(0.2)!;
+    const late = shockAt(BIRTH.shockLen * 0.9)!;
+    expect(early.r).toBeLessThan(late.r);
+    expect(late.a).toBeLessThan(early.a);
+    expect(shockAt(BIRTH.shockLen - 1e-3)!.a).toBeLessThan(0.01);
+  });
+
+  it("has a look for every state, rim colours never white", () => {
+    for (const m of Object.values(MOODS)) {
+      expect(Math.min(...m.rim)).toBeLessThan(0.35);
+      expect(m.look[0]).toBeGreaterThan(0.5);
+    }
   });
 });
