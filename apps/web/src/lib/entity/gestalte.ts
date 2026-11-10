@@ -18,6 +18,8 @@ import {
   CORE_VERT,
   LAND_FRAG,
   LAND_VERT,
+  POST_FRAG,
+  POST_VERT,
   SHELL_FRAG,
   SPARK_FRAG,
   SPARK_VERT,
@@ -83,6 +85,8 @@ export const PALETTE = {
   hot: "#ffb347",
   grid: "#1f6fe0",
   streak: "#ff9a2e",
+  /** Distance haze: the far ranges, the nebula and the stars lean toward it. */
+  haze: "#6f9fe0",
 } as const;
 
 /** How much each state tints the rim and the core toward its own colour (the aesthetic stays blue + amber). */
@@ -119,12 +123,13 @@ function webgl2Available(): boolean {
 
 /** three.js and its post-processing passes, loaded only when the figure is first shown. */
 async function loadThree() {
-  const [three, ec, rp, ub, op] = await Promise.all([
+  const [three, ec, rp, ub, op, sp] = await Promise.all([
     import("three"),
     import("three/examples/jsm/postprocessing/EffectComposer.js"),
     import("three/examples/jsm/postprocessing/RenderPass.js"),
     import("three/examples/jsm/postprocessing/UnrealBloomPass.js"),
     import("three/examples/jsm/postprocessing/OutputPass.js"),
+    import("three/examples/jsm/postprocessing/ShaderPass.js"),
   ]);
   return {
     THREE: three as Three,
@@ -132,6 +137,7 @@ async function loadThree() {
     RenderPass: rp.RenderPass,
     UnrealBloomPass: ub.UnrealBloomPass,
     OutputPass: op.OutputPass,
+    ShaderPass: sp.ShaderPass,
   };
 }
 
@@ -145,8 +151,14 @@ export async function createGestalte(
   } catch {
     return null;
   }
-  const { THREE, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } =
-    mods;
+  const {
+    THREE,
+    EffectComposer,
+    RenderPass,
+    UnrealBloomPass,
+    OutputPass,
+    ShaderPass,
+  } = mods;
 
   const canvas = document.createElement("canvas");
   canvas.className = "entity-gl";
@@ -219,6 +231,8 @@ export async function createGestalte(
     uBg2: { value: v3(col(PALETTE.bg2)) },
     uGrid: { value: v3(col(PALETTE.grid)) },
     uStreak: { value: v3(col(PALETTE.streak)) },
+    uHaze: { value: v3(col(PALETTE.haze)) },
+    uPar: { value: new THREE.Vector2() },
     uFade: { value: 0 },
     uCoreC: { value: new THREE.Vector3() },
     uCoreS: { value: 1.5 },
@@ -336,12 +350,27 @@ export async function createGestalte(
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(256, 256),
-    0.95,
+    0.85,
     0.18,
     0.5,
   );
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
+  // Grade, grain, lens fringe and vignette: one cheap full-screen pass after tone mapping.
+  // A material (not a shader description), so the pass keeps these shared uniform objects instead of cloning.
+  const postMat = new THREE.ShaderMaterial({
+    uniforms: {
+      tDiffuse: { value: null },
+      uRes: U.uRes,
+      uT: U.uT,
+      uMotion: U.uMotion,
+      uPx: U.uPx,
+    },
+    vertexShader: POST_VERT,
+    fragmentShader: POST_FRAG,
+  });
+  const post = new ShaderPass(postMat);
+  composer.addPass(post);
 
   /* sizing: the drawing buffer never exceeds 4K, and steps down if frames run long */
   let W = 0;
@@ -385,9 +414,23 @@ export async function createGestalte(
 
   /* pose and state, eased so nothing ever snaps */
   const weight = { listening: 0, thinking: 0, executing: 0, speaking: 0 };
-  let yaw = 0;
-  let pitch = 0;
-  let roll = 0;
+  // Head pose follows its targets on critically damped springs (no overshoot), so a gaze change starts
+  // softly, keeps its velocity through a retarget and settles without a bounce.
+  const pose = {
+    yaw: { x: 0, v: 0 },
+    pitch: { x: 0, v: 0 },
+    roll: { x: 0, v: 0 },
+  };
+  const par = { x: 0, y: 0 };
+  function spring(s: { x: number; v: number }, target: number, dt: number) {
+    const w = (2 * Math.PI) / 1.1;
+    const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
+    const h = Math.min(dt, 0.1) / steps;
+    for (let i = 0; i < steps; i++) {
+      s.v += (w * w * (target - s.x) - 2 * w * s.v) * h;
+      s.x += s.v * h;
+    }
+  }
   let scan = 0;
   const Mh = new Float32Array(9);
   const Mt = new Float32Array(9);
@@ -450,11 +493,20 @@ export async function createGestalte(
           weight.listening * 0.05 +
           weight.speaking * 0.025 * f.audio * Math.sin(t * 2.3));
       const rollT =
-        motion * (weight.listening * 0.04 - weight.thinking * 0.025);
-      const kp = 1 - Math.exp(-dt * 2.2);
-      yaw += (yawT - yaw) * kp;
-      pitch += (pitchT - pitch) * kp;
-      roll += (rollT - roll) * kp;
+        motion *
+        (weight.listening * 0.04 -
+          weight.thinking * 0.025 +
+          0.012 * Math.sin(t * 0.23 + 1.3));
+      spring(pose.yaw, yawT, dt);
+      spring(pose.pitch, pitchT, dt);
+      spring(pose.roll, rollT, dt);
+      const yaw = pose.yaw.x;
+      const pitch = pose.pitch.x;
+      const roll = pose.roll.x;
+      const kpar = 1 - Math.exp(-dt * 1.6);
+      par.x += (motion * f.gazeX - par.x) * kpar;
+      par.y += (motion * f.gazeY - par.y) * kpar;
+      U.uPar.value.set(par.x, par.y);
       // The camera sits a little above the figure: the face is met nearly level, the torso is seen more from
       // above, so the slices across the chest bow toward the viewer like a real body's.
       poseMatrix(Mh, yaw, pitch, roll, 0.1);
@@ -536,6 +588,8 @@ export async function createGestalte(
       ])
         m.dispose();
       bloom.dispose();
+      postMat.dispose();
+      post.dispose();
       composer.dispose();
       renderer.dispose();
       renderer.forceContextLoss();

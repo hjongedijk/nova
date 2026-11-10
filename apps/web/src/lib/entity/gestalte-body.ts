@@ -64,11 +64,32 @@ export function gestalteField(x: number, y: number, z: number): number {
   // Primitives only blend within their smoothing radius, so far-away parts are skipped (same field, cheaper).
   let d = 1e9;
   if (y > -1.5) {
-    // Head: a smooth egg (cranium over a narrower jaw), a soft chin, a whisper of a nose, slight ears.
+    // Head, built like a sculptor's planes of the head: a cranium over a narrower face, then the hard forms
+    // that let contour lines read as a face without drawing one: a brow ridge over shallow sockets, a nose
+    // bridge, cheekbones (the widest point of the front of the face), the angle of the jaw and a chin block.
     d = ellipsoid(x, y, z, 0, 0.3, -0.06, 0.7, 0.88, 0.8);
     d = smin(d, ellipsoid(x, y, z, 0, -0.24, 0.1, 0.55, 0.66, 0.64), 0.42);
-    d = smin(d, ellipsoid(x, y, z, 0, -0.66, 0.27, 0.27, 0.2, 0.24), 0.3);
-    d = smin(d, capsule(x, y, z, 0, 0.02, 0.62, 0, -0.26, 0.74, 0.05), 0.16);
+    d = smin(d, ellipsoid(x, y, z, 0, -0.67, 0.28, 0.25, 0.19, 0.23), 0.26);
+    if (y > -1.25 && z > -0.45) {
+      // Brow ridge: a soft bar across the forehead, lowest at the temples.
+      d = smin(d, capsule(ax, y, z, 0, 0.13, 0.7, 0.34, 0.1, 0.56, 0.06), 0.16);
+      // Sockets: shallow hollows under the brow (a smooth subtraction).
+      const s = ellipsoid(ax, y, z, 0.23, 0.0, 0.71, 0.16, 0.09, 0.08);
+      const k = 0.16;
+      const h = Math.max(k - Math.abs(-s - d), 0) / k;
+      d = Math.max(d, -s) + h * h * k * 0.25;
+      // Nose: a narrow bridge from between the brows to a soft tip.
+      d = smin(d, capsule(x, y, z, 0, 0.05, 0.7, 0, -0.25, 0.77, 0.045), 0.12);
+      d = smin(d, ellipsoid(x, y, z, 0, -0.27, 0.74, 0.08, 0.06, 0.07), 0.08);
+      // Cheekbones.
+      d = smin(d, ellipsoid(ax, y, z, 0.35, -0.18, 0.5, 0.17, 0.1, 0.14), 0.16);
+      // Jaw: from under the ear to the chin, squared off at the angle.
+      d = smin(
+        d,
+        capsule(ax, y, z, 0.46, -0.5, -0.02, 0.2, -0.78, 0.3, 0.09),
+        0.2,
+      );
+    }
     d = smin(d, ellipsoid(ax, y, z, 0.68, -0.08, -0.08, 0.09, 0.2, 0.13), 0.09);
   }
   if (y > 0.2) return d;
@@ -87,7 +108,7 @@ export function gestalteField(x: number, y: number, z: number): number {
   d = smin(
     d,
     capsule(ax, y, z, 0.18, -1.02, -0.22, 1.16, -1.62, -0.14, 0.2),
-    0.3,
+    0.34,
   );
   // Upper chest and rib cage: a broad barrel under the collarbones, narrowing toward the waist.
   d = smin(d, ellipsoid(x, y, z, 0, -1.98, -0.12, 1.05, 0.5, 0.5), 0.3);
