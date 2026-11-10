@@ -24,8 +24,8 @@ import {
 } from "./gestalte-shaders.ts";
 
 /**
- * GESTALTE on the GPU. The head and shoulders fill the screen: crown near the top, chin about two thirds down,
- * shoulders running off the bottom and the sides. Dense dotted contour lines over a dark figure, a bright rim
+ * GESTALTE on the GPU. A head-and-shoulders bust fills the screen: crown near the top, chin a little past half
+ * way, the shoulders and upper arms falling off the bottom. Dense dotted contour lines over a dark figure, a bright rim
  * with bloom, a warm core in the face with filaments down the neck, and a landscape of light on both sides.
  *
  * Runs on a WebGL2 canvas underneath the entity's 2D canvas (which keeps the orb, so the figure can grow out of
@@ -98,9 +98,10 @@ let cachedGeometry: GestalteGeometry | null = null;
 
 /** Visible height of the scene at the figure's plane, in body units, for a viewport aspect. */
 export function viewHeight(aspect: number): number {
-  // Crown ~5% from the top, chin ~65%: the head spans 60% of the height. Narrow screens widen the view so the
-  // head (about 1.5 units with the ears) keeps some air on both sides.
-  const byHeight = (CROWN - CHIN) / 0.6;
+  // Crown ~5% from the top, chin ~57%: the head spans 52% of the height, which leaves room for the collarbones,
+  // the chest and the start of the arms. Narrow screens widen the view so the head (about 1.5 units with the
+  // ears) keeps some air on both sides.
+  const byHeight = (CROWN - CHIN) / 0.52;
   return Math.max(byHeight, 2.3 / Math.max(0.2, aspect));
 }
 
@@ -454,9 +455,10 @@ export async function createGestalte(
       yaw += (yawT - yaw) * kp;
       pitch += (pitchT - pitch) * kp;
       roll += (rollT - roll) * kp;
-      const tilt = 0.1;
-      poseMatrix(Mh, yaw, pitch, roll, tilt);
-      poseMatrix(Mt, yaw * 0.18, pitch * 0.1, 0, tilt);
+      // The camera sits a little above the figure: the face is met nearly level, the torso is seen more from
+      // above, so the slices across the chest bow toward the viewer like a real body's.
+      poseMatrix(Mh, yaw, pitch, roll, 0.1);
+      poseMatrix(Mt, yaw * 0.18, pitch * 0.1, 0, 0.32);
       setMat(U.uHead.value, Mh);
       setMat(U.uTorso.value, Mt);
       const pv = apply(Mt, PIVOT[0], PIVOT[1], PIVOT[2]);

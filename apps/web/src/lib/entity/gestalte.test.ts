@@ -11,14 +11,34 @@ import {
 import { PALETTE, viewHeight } from "./gestalte.ts";
 
 describe("gestalte body", () => {
-  it("is a head on a long neck above broad shoulders", () => {
-    // Inside the head, the neck and the shoulders; outside above the crown, beside the neck, under the chin.
+  it("is a head on a neck above a bust: sloping shoulders, deltoids, arms falling down", () => {
+    // Inside the head, the neck, the chest and the upper arms; outside above the crown, under the chin.
     expect(gestalteField(0, 0.2, 0)).toBeLessThan(0);
     expect(gestalteField(0, -1.1, -0.1)).toBeLessThan(0);
-    expect(gestalteField(2.4, -2.1, -0.1)).toBeLessThan(0);
+    expect(gestalteField(0, -2.1, 0.3)).toBeLessThan(0);
+    expect(gestalteField(1.45, -2.6, 0)).toBeLessThan(0);
     expect(gestalteField(0, CROWN + 0.05, 0)).toBeGreaterThan(0);
-    expect(gestalteField(0.75, -1.1, 0)).toBeGreaterThan(0);
     expect(gestalteField(0, CHIN - 0.12, 0.45)).toBeGreaterThan(0);
+    // Trapezius slope: the top of the shoulder falls 25-35 degrees from the side of the neck to the deltoid.
+    const top = (x: number) => {
+      let y = -0.6;
+      while (gestalteField(x, y, -0.15) > 0) y -= 0.002;
+      return y;
+    };
+    const slope = (Math.atan2(top(0.55) - top(1.1), 0.55) * 180) / Math.PI;
+    expect(slope).toBeGreaterThan(22);
+    expect(slope).toBeLessThan(36);
+    // Shoulders span about twice the head, then the arms go down instead of running off to the sides.
+    const width = (y: number) => {
+      let x = 3;
+      while (x > 0 && gestalteField(x, y, -0.02) > 0) x -= 0.005;
+      return x;
+    };
+    const head = width(-0.05);
+    const shoulders = Math.max(width(-1.9), width(-2.1));
+    expect((2 * shoulders) / (2 * head)).toBeGreaterThan(1.9);
+    expect((2 * shoulders) / (2 * head)).toBeLessThan(2.4);
+    expect(Math.abs(width(-3.2) - shoulders)).toBeLessThan(0.15);
     // Featureless and symmetric.
     for (const [x, y, z] of [
       [0.3, 0.1, 0.5],
@@ -53,8 +73,9 @@ describe("gestalte body", () => {
     }
     expect(maxY).toBeLessThanOrEqual(CROWN + 0.01);
     expect(minY).toBeGreaterThan(BASE - 0.05);
-    // Shoulders run off a 16:9 screen (half width ~3 units).
-    expect(maxX).toBeGreaterThan(3);
+    // The shoulders stay on a 16:9 screen (half width ~3.5 units) and leave through its bottom edge.
+    expect(maxX).toBeGreaterThan(1.5);
+    expect(maxX).toBeLessThan(2);
     // The crown starts first, the chest last.
     expect(g.delay[0]).toBe(0);
     expect(g.delay[n - 1]).toBeCloseTo(0.42, 5);
@@ -78,11 +99,11 @@ describe("gestalte body", () => {
 });
 
 describe("gestalte framing", () => {
-  it("puts the head over 60% of a landscape screen and keeps air on narrow ones", () => {
+  it("puts the head over half a landscape screen and keeps air on narrow ones", () => {
     const wide = viewHeight(16 / 9);
-    expect((CROWN - CHIN) / wide).toBeCloseTo(0.6, 2);
+    expect((CROWN - CHIN) / wide).toBeCloseTo(0.52, 2);
     const tall = viewHeight(9 / 19.5);
-    expect((CROWN - CHIN) / tall).toBeLessThan(0.6);
+    expect((CROWN - CHIN) / tall).toBeLessThan(0.52);
     expect(tall * (9 / 19.5)).toBeGreaterThanOrEqual(2.3 - 1e-9);
   });
 

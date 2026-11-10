@@ -145,17 +145,11 @@ void main() {
   rip += speak * sin(dm * 24.0 - uT * 8.0) * 0.4 * exp(-dm * 1.1);
   float D = 31.0;
   float fFace = r.y * D + rip;
-  // Neck and chest: topographic lines that follow the shoulders, arc over the chest and dip at the sternum.
-  float sx = max(ax - 0.3, 0.0);
-  float shoulder = -1.2 - 0.27 * sx - 0.035 * sx * sx;
-  float chest = smoothstep(-1.35, -2.1, r.y);
-  float pec = 0.34 * exp(-pow(ax - 0.85, 2.0) / 0.22) * chest;
-  float sternum = -0.07 * exp(-r.x * r.x / 0.04) * chest;
-  float wrapS = 0.12 * smoothstep(1.6, 2.6, ax) * (r.z + 0.2);
-  // Offset so the two fields agree on the neck's centre line: no seam where they blend.
-  float flow = g_noise(vec3(r.x * 0.9, r.y * 0.9, t * 0.04 + 2.0));
-  float fBody = (r.y - 0.9 * (shoulder + 1.2) - 0.05 * r.x * r.x - pec - sternum - wrapS) * D
-              + rip * 0.3 + (0.9 * sin(r.x * 1.4 - t * 0.22 + r.y * 0.9) + 4.5 * flow) * smoothstep(0.15, 0.9, ax + max(0.0, -1.5 - r.y));
+  // Neck, shoulders and chest: plane slices of the body, like the face but calm. The planes lean back a little
+  // (the view is from a little above), so the lines bow down over the chest, wrap the deltoids and ring the neck
+  // on top of the shoulders: the torso reads as a volume, not a flat plate. A faint slow drift keeps them alive.
+  float flow = g_noise(vec3(r.x * 0.8, r.y * 0.8, t * 0.04 + 2.0));
+  float fBody = (r.y + 0.2 * r.z) * D + rip * 0.1 + 0.4 * flow;
   float v = mix(fBody, fFace, hw);
 
   float fw = max(fwidth(v), 1e-4);
@@ -199,12 +193,19 @@ void main() {
   float rim = smoothstep(0.36, 0.95, fres);
   col += uRim * (rim * rim * 1.9 + pow(fres, 7.0) * 1.5);
 
-  // Branching filaments from the jaw down the neck into the chest, slowly flickering.
-  float vm = smoothstep(-0.55, -0.8, r.y) * smoothstep(-2.7, -1.75, r.y)
-           * (1.0 - smoothstep(0.55, 1.6, ax)) * smoothstep(-0.08, 0.22, r.z);
+  // Branching filaments from the jaw down the front of the neck, then fanning out from the sternal notch over
+  // the collarbones and the chest, slowly flickering.
+  vec2 nc = vec2(r.x, r.y + 1.52);
+  float vm = smoothstep(-0.55, -0.8, r.y) * smoothstep(-2.5, -1.85, r.y)
+           * (1.0 - smoothstep(0.65, 1.15, ax)) * smoothstep(-0.05, 0.2, r.z);
   if (vm > 0.002) {
     // Zero crossings of warped noise, drawn a pixel or two wide: thin trunks, finer branches off them.
-    vec2 q = vec2(r.x * 6.2, r.y * 1.4);
+    // Above the notch the noise is stretched down the neck; below it, along rays out of the notch.
+    float below = smoothstep(-1.3, -1.65, r.y);
+    float ang = atan(nc.x, -nc.y + 0.25);
+    float rad = length(nc * vec2(1.0, 1.3));
+    // Both run the same way and meet at the blend, so the hand-over never packs the noise into a band.
+    vec2 q = mix(vec2(r.x * 6.2, r.y * 1.4), vec2(ang * 3.4, -2.05 - rad * 1.0), below);
     q.x += 0.55 * g_noise(vec3(r.x * 2.1, r.y * 2.4, 3.1));
     float a = g_noise(vec3(q, t * 0.03 + 1.0));
     float b = g_noise(vec3(q * 2.6 + 4.7, t * 0.045 + 7.0));
@@ -215,9 +216,9 @@ void main() {
     float c3 = g_noise(vec3(q * vec2(1.7, 3.2) + 9.1, t * 0.06 + 3.0));
     float cw = abs(c3) / max(fwidth(c3), 1e-4);
     float twig = (1.0 - smoothstep(0.2, 0.8, cw)) * (1.0 - smoothstep(0.08, 0.3, abs(b)));
-    float vein = trunk + 0.85 * branch + 0.55 * twig;
+    float vein = trunk + (0.85 * branch + 0.55 * twig) * (1.0 - 0.55 * below);
     float flick = 0.55 + 0.45 * g_noise(vec3(r.y * 3.0 - t * 1.4, r.x * 2.0, t * 0.5));
-    col += uHot * vein * vm * (1.0 - 0.6 * rim) * (0.65 + 0.7 * flick) * (1.2 + speak * 0.8);
+    col += uHot * vein * vm * (1.0 - 0.25 * below) * (1.0 - 0.6 * rim) * (0.65 + 0.7 * flick) * (1.2 + speak * 0.8);
   }
 
   float alpha = smoothstep(0.0, 0.45, vE);

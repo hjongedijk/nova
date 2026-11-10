@@ -4,7 +4,8 @@
 /**
  * GESTALTE, the body. A featureless head-and-shoulders as a signed distance field, meshed once into a
  * surface that the GPU shades with contour lines (gestalte.ts). Nothing here is an image or a scan: an egg of a
- * head, slight ears, a long neck and broad, sloping shoulders, all ellipsoids and capsules blended smoothly.
+ * head and slight ears on a bust built like one: tapered neck, trapezius, collarbones and notch, pectorals over a
+ * rib cage, rounded deltoids and the upper arms falling away, all ellipsoids and capsules blended smoothly.
  *
  * Units: the head is about two units tall (crown +1.18, chin -0.86). y up, +z toward the viewer.
  * The mesh is sliced in horizontal rings, so each ring can start life as one of the orb's latitudes.
@@ -51,7 +52,7 @@ function smin(a: number, b: number, k: number): number {
 export const CROWN = 1.18;
 export const CHIN = -0.86;
 /** Lowest ring: below the bottom of the screen at every aspect the camera allows. */
-export const BASE = -2.9;
+export const BASE = -4;
 /** Pivot of the head turn: the top of the neck. */
 export const PIVOT: readonly [number, number, number] = [0, -0.62, -0.1];
 /** Centre of the warm core, in the middle of the face. */
@@ -70,29 +71,47 @@ export function gestalteField(x: number, y: number, z: number): number {
     d = smin(d, capsule(x, y, z, 0, 0.02, 0.62, 0, -0.26, 0.74, 0.05), 0.16);
     d = smin(d, ellipsoid(ax, y, z, 0.68, -0.08, -0.08, 0.09, 0.2, 0.13), 0.09);
   }
-  // A long neck, then broad shoulders falling away to both sides and the upper chest.
-  if (y < 0.2)
-    d = smin(d, capsule(x, y, z, 0, -0.42, -0.1, 0, -1.7, -0.06, 0.32), 0.22);
-  if (y < -0.62) {
+  if (y > 0.2) return d;
+  // Neck: a slightly tapered column, a touch deeper than wide, leaning forward as it rises, with the two
+  // sternocleidomastoids running from behind the ears down to the sternal notch.
+  d = smin(d, capsule(x, y, z, 0, -0.5, -0.14, 0, -1.25, -0.1, 0.35), 0.24);
+  d = smin(d, capsule(x, y, z, 0, -0.95, -0.12, 0, -1.5, -0.12, 0.39), 0.2);
+  if (y < -0.3)
     d = smin(
       d,
-      capsule(ax, y, z, 0, -1.48, -0.14, 2.55, -2.12, -0.12, 0.31),
-      0.5,
+      capsule(ax, y, z, 0.36, -0.52, -0.1, 0.09, -1.5, 0.22, 0.085),
+      0.14,
     );
-    if (ax > 1.5)
-      d = smin(
-        d,
-        ellipsoid(ax, y, z, 2.75, -2.42, -0.06, 0.62, 0.56, 0.55),
-        0.45,
-      );
-    if (ax > 2.1)
-      d = smin(
-        d,
-        capsule(ax, y, z, 2.95, -2.6, -0.08, 3.05, -4.2, -0.1, 0.52),
-        0.3,
-      );
-    if (y < -1.0)
-      d = smin(d, ellipsoid(x, y, z, 0, -2.85, 0.02, 2.25, 1.25, 0.74), 0.55);
+  if (y > -0.75) return d;
+  // Trapezius: from the side of the neck down to the point of the shoulder, about 27 degrees.
+  d = smin(
+    d,
+    capsule(ax, y, z, 0.18, -1.02, -0.22, 1.16, -1.62, -0.14, 0.2),
+    0.3,
+  );
+  // Upper chest and rib cage: a broad barrel under the collarbones, narrowing toward the waist.
+  d = smin(d, ellipsoid(x, y, z, 0, -1.98, -0.12, 1.05, 0.5, 0.5), 0.3);
+  d = smin(d, ellipsoid(x, y, z, 0, -2.75, -0.1, 0.98, 1.2, 0.6), 0.4);
+  // Below the ribs the trunk narrows toward the waist (only tall, narrow screens see this far down).
+  if (y < -2.6)
+    d = smin(d, capsule(x, y, z, 0, -3.1, -0.1, 0, -4.6, -0.1, 0.8), 0.4);
+  // Pectorals: two soft plates over the ribs, slightly apart at the sternum. The sternal notch is the hollow
+  // left between the two sternocleidomastoid heads and the inner ends of the collarbones.
+  d = smin(d, ellipsoid(ax, y, z, 0.47, -2.14, 0.2, 0.5, 0.34, 0.28), 0.24);
+  // Collarbones: a thin ridge from the notch, rising a little toward the shoulder.
+  d = smin(
+    d,
+    capsule(ax, y, z, 0.12, -1.56, 0.25, 1.12, -1.5, -0.02, 0.055),
+    0.1,
+  );
+  // Deltoid caps and the start of the upper arms, falling straight down past the bottom of the screen.
+  if (ax > 0.6) {
+    d = smin(d, ellipsoid(ax, y, z, 1.32, -1.9, 0.0, 0.34, 0.45, 0.38), 0.2);
+    d = smin(
+      d,
+      capsule(ax, y, z, 1.32, -1.95, -0.02, 1.38, -3.9, -0.04, 0.26),
+      0.45,
+    );
   }
   return d;
 }
@@ -115,11 +134,12 @@ export interface GestalteGeometry {
   sparkHead: Float32Array;
 }
 
-/** Ring heights: fine on the head, a little wider on the shoulders. */
+/** Ring heights: fine on the head, finer over the shoulder girdle (its tops are nearly flat), wider below. */
 export function gestalteRings(headStep: number, bodyStep: number): number[] {
   const ys: number[] = [];
-  for (let y = CROWN + 0.004; y > -1.0; y -= headStep) ys.push(y);
-  for (let y = -1.0; y > BASE; y -= bodyStep) ys.push(y);
+  for (let y = CROWN + 0.004; y > -0.9; y -= headStep) ys.push(y);
+  for (let y = -0.9; y > -2.1; y -= headStep * 0.6) ys.push(y);
+  for (let y = -2.1; y > BASE; y -= bodyStep) ys.push(y);
   return ys;
 }
 
@@ -210,7 +230,7 @@ export function buildGestalte(detail = 1, sparks = 2600): GestalteGeometry {
     const y = ys[k];
     const hw = headWeight(y);
     const oz = -0.08 * (1 - hw);
-    const aspect = 1 + 3.2 * smoothstep(-1.15, -1.9, y);
+    const aspect = 1 + 1.7 * smoothstep(-1.0, -1.85, y);
     const dl = 0.42 * Math.pow(k / Math.max(1, rings - 1), 0.85);
     const phi = Math.PI * (0.06 + 0.88 * (k / Math.max(1, rings - 1)));
     let guess = 0;
@@ -275,7 +295,7 @@ export function buildGestalte(detail = 1, sparks = 2600): GestalteGeometry {
     const ny = normal[i * 3 + 1];
     const y = position[i * 3 + 1];
     weight[i] = total;
-    if (Math.abs(nz) > 0.42 || y < -2.5) continue;
+    if (Math.abs(nz) > 0.42 || y < -2.4) continue;
     const w =
       (0.25 + 2.4 * Math.max(0, ny) * Math.max(0, ny)) *
       (y > -0.9 ? 1.5 : 1.25) *
