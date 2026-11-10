@@ -14,14 +14,14 @@ export const AURA_ASSETS = {
   lo: "/aura/aura-1280.webp",
   /** Three 960x540 RGB tiles stacked vertically, see AURA_DATA. */
   data: "/aura/aura-data.png",
-  /** Three 1920x1080 RGB layers stacked: distance to the nearest light line, place along it, which line. */
+  /** Four 1920x1080 RGB layers in a 2x2 sheet: distance to the nearest light line, place along it, its weight. */
   lines: "/aura/aura-lines.png",
 } as const;
 
 /**
  * Measurements of the artwork, in picture units (u across 0..1 left to right, v down 0..1 top to bottom), written
- * by scripts/aura-assets.mjs. Atlas tiles: 0 = form, head, bright; 1 = figure zone, height, figure;
- * 2 = normal x, normal y.
+ * by scripts/aura-assets.mjs. Atlas tiles: 0 = form, head, bright; 1 = hair weight, height, figure;
+ * 2 = normal x, normal y, across the arm.
  */
 export const AURA_DATA = {
   width: 960,
@@ -38,12 +38,13 @@ export const AURA_DATA = {
 
 /** Star points where the light lines meet (picture units), from scripts/aura-assets.mjs. */
 export const STARS: readonly (readonly [number, number])[] = [
-  [0.4963, 0.606],
-  [0.3503, 0.635],
+  [0.4963, 0.608],
+  [0.3493, 0.636],
   [0.6463, 0.64],
-  [0.4263, 0.6],
-  [0.5743, 0.604],
-  [0.3763, 0.8],
+  [0.4903, 0.77],
+  [0.5263, 0.9],
+  [0.3933, 0.81],
+  [0.5863, 0.72],
 ];
 
 /** The face, where moods bloom from and the birth's shockwave starts. */
@@ -150,4 +151,108 @@ float arrival(vec2 p, float head, float jitter) {
 export function f(n: number): string {
   const s = String(n);
   return /[.e]/.test(s) ? s : `${s}.0`;
+}
+
+/**
+ * The hair in the wind, in data pixels (the picture is 960 of them wide). `w` is the hair weight from the atlas:
+ * 0 at the scalp (roots, parting, crown), rising toward the tips, so the roots stay put and the motion grows
+ * smoothly along each strand. Slow sway (about 0.2 Hz) and a slower cross-wave, gusts, and a fine flutter at the
+ * tips; mostly sideways, with a little lift. `motion` 0 (reduced motion) is a still rest pose.
+ */
+export const WIND = {
+  /** Largest sideways reach at the tips, data px. */
+  reach: 5.5,
+  sway: 0.21,
+  cross: 0.13,
+  flutter: 1.3,
+  /** Gusts: one every this many seconds (a range), each this long. */
+  gustEvery: [6, 12] as const,
+  gustLength: 2.6,
+  lift: 1.6,
+} as const;
+
+export function hairWind(
+  u: number,
+  v: number,
+  w: number,
+  t: number,
+  motion: number,
+  gust: number,
+  lift: number,
+): [number, number] {
+  if (motion <= 0 || w <= 0) return [0, 0];
+  const tau = 2 * Math.PI;
+  // A domain warp keeps neighbouring strands in phase but never in lockstep.
+  const vw = v + 0.05 * Math.sin(u * 9 + t * 0.4);
+  const dx =
+    (0.55 + 0.45 * gust) * Math.sin(tau * WIND.sway * t + vw * 3 + u * 2) +
+    0.35 * Math.sin(tau * WIND.cross * t + vw * 7 - u * 5 + 1.3) +
+    0.16 * w * Math.sin(tau * WIND.flutter * t + vw * 31 + u * 17);
+  const dy = -(0.3 * gust + 0.15 * Math.sin(tau * 0.17 * t + u * 6) + lift);
+  const k = WIND.reach * w * motion;
+  return [dx * k, dy * k * (WIND.lift / WIND.reach)];
+}
+
+/** The same in GLSL (keep in step with `hairWind`). */
+export const WIND_GLSL = /* glsl */ `
+vec2 hairWind(vec2 q, float w, float t, float motion, float gust, float lift) {
+  if (motion <= 0.0 || w <= 0.0) return vec2(0.0);
+  float tau = 6.28318;
+  float vw = q.y + 0.05 * sin(q.x * 9.0 + t * 0.4);
+  float dx = (0.55 + 0.45 * gust) * sin(tau * ${f(WIND.sway)} * t + vw * 3.0 + q.x * 2.0)
+    + 0.35 * sin(tau * ${f(WIND.cross)} * t + vw * 7.0 - q.x * 5.0 + 1.3)
+    + 0.16 * w * sin(tau * ${f(WIND.flutter)} * t + vw * 31.0 + q.x * 17.0);
+  float dy = -(0.3 * gust + 0.15 * sin(tau * 0.17 * t + q.x * 6.0) + lift);
+  float k = ${f(WIND.reach)} * w * motion;
+  return vec2(dx * k, dy * k * ${f(WIND.lift / WIND.reach)});
+}
+`;
+
+/** Gust strength 0..1 at time t: a soft swell every 6 to 12 s (deterministic). */
+export function gustAt(t: number): number {
+  let start = 0;
+  for (let i = 0; i < 400; i++) {
+    const gap =
+      WIND.gustEvery[0] +
+      (WIND.gustEvery[1] - WIND.gustEvery[0]) *
+        (0.5 + 0.5 * Math.sin(i * 12.9898 + 4.1));
+    if (t < start + gap) {
+      const x = (t - start) / WIND.gustLength;
+      return x >= 0 && x <= 1 ? Math.sin(Math.PI * x) ** 2 : 0;
+    }
+    start += gap;
+  }
+  return 0;
+}
+
+/**
+ * The head's own life on top of following the pointer: slow, small turns and tilts from layered sines, and now and
+ * then a gentle look aside that returns. Radians; all zero without motion.
+ */
+export const IDLE = { yaw: 0.08, pitch: 0.04, roll: 0.03, aside: 0.1 } as const;
+
+export function idlePose(
+  t: number,
+  motion: number,
+): { yaw: number; pitch: number; roll: number } {
+  if (motion <= 0) return { yaw: 0, pitch: 0, roll: 0 };
+  const n = (a: number, b: number, c: number) =>
+    Math.sin(t * a) * 0.55 +
+    Math.sin(t * b + 1.7) * 0.3 +
+    Math.sin(t * c + 4.2) * 0.15;
+  // A look aside every 9 to 15 s, held for a couple of seconds, eased in and out.
+  const period = 12;
+  const cycle = Math.floor(t / period);
+  const phase =
+    t - cycle * period - 3 - 3 * (0.5 + 0.5 * Math.sin(cycle * 7.3));
+  const look =
+    phase > 0 && phase < 3.2 ? Math.sin((Math.PI * phase) / 3.2) ** 2 : 0;
+  const dir = Math.sin(cycle * 3.7 + 1.1) > 0 ? 1 : -1;
+  return {
+    yaw:
+      motion *
+      (IDLE.yaw * n(0.21, 0.37, 0.71) * 0.75 + dir * IDLE.aside * look),
+    pitch: motion * IDLE.pitch * n(0.17, 0.43, 0.89),
+    roll: motion * IDLE.roll * n(0.13, 0.31, 0.67),
+  };
 }

@@ -88,7 +88,8 @@ function chunk(kind, data) {
 }
 
 /** Encode 8-bit pixels (`channels` 3 = RGB, 4 = RGBA) as a PNG. */
-export function encodePng(width, height, data, channels = 3) {
+/** `text` (optional) is stored as a tEXt chunk with the keyword "aura". */
+export function encodePng(width, height, data, channels = 3, text = "") {
   const stride = width * channels;
   const raw = Buffer.alloc((stride + 1) * height);
   for (let y = 0; y < height; y++) {
@@ -108,6 +109,7 @@ export function encodePng(width, height, data, channels = 3) {
   return Buffer.concat([
     SIGNATURE,
     chunk("IHDR", ihdr),
+    ...(text ? [chunk("tEXt", Buffer.from(`aura\0${text}`, "latin1"))] : []),
     chunk("IDAT", deflateSync(raw, { level: 9 })),
     chunk("IEND", Buffer.alloc(0)),
   ]);
