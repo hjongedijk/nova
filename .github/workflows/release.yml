@@ -14,6 +14,8 @@ jobs:
   image:
     if: startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
+    # A hung multi-arch build otherwise blocks a release for six hours.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-qemu-action@v4
@@ -52,6 +54,8 @@ jobs:
   omniroute-image:
     if: startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
+    # A hung multi-arch build otherwise blocks a release for six hours.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-qemu-action@v4
@@ -136,6 +140,8 @@ jobs:
   agents:
     if: startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
+    # A hung multi-arch build otherwise blocks a release for six hours.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - name: Package Compose runtime sources
