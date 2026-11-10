@@ -134,6 +134,13 @@ impl Drop for Capture {
     }
 }
 pub(super) fn capture(index: u32, max_width: u32) -> Outcome {
+    let (jpeg, width, height, display) = capture_jpeg(index, max_width, 75)?;
+    Ok(
+        json!({"ok":true,"image":STANDARD.encode(jpeg),"mimeType":"image/jpeg","width":width,"height":height,"display":display}),
+    )
+}
+/// One JPEG of a display (cursor drawn in), scaled to at most `max_width`. Shared by screenshots and live video.
+pub(super) fn capture_jpeg(index: u32, max_width: u32, quality: u8) -> Result<super::Jpeg, (u16, String)> {
     let _dpi = Dpi::enter();
     let d = screen(index)?;
     if d.width <= 0 || d.height <= 0 {
@@ -250,15 +257,13 @@ pub(super) fn capture(index: u32, max_width: u32) -> Outcome {
             rgb.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
         }
         let mut jpeg = Vec::new();
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 75)
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, quality)
             .encode(&rgb, width as u32, height as u32, image::ExtendedColorType::Rgb8)
             .map_err(|_| error("Schermbeeld coderen mislukt"))?;
         if jpeg.len() > 6_000_000 {
             return Err(error("Schermbeeld is te groot"));
         }
-        Ok(
-            json!({"ok":true,"image":STANDARD.encode(jpeg),"mimeType":"image/jpeg","width":width,"height":height,"display":d.index}),
-        )
+        Ok((jpeg, width as u32, height as u32, d.index))
     }
 }
 fn send(inputs: &[INPUT]) -> Result<(), (u16, String)> {

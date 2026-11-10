@@ -1,6 +1,11 @@
 import { clearInline, handleVizEvent } from "#lib/holo/store.svelte.ts";
 import { showToast } from "#lib/stores/toasts.svelte.ts";
-import type { ChatAttachment, VizEventInfo } from "@nova/contracts";
+import type {
+  ChatAttachment,
+  NovaTerminalEvent,
+  NovaWindowEvent,
+  VizEventInfo,
+} from "@nova/contracts";
 import { openChatStream } from "#lib/api/chat.ts";
 import { chat, provideAsk, setState } from "#lib/stores/chat.svelte.ts";
 import { playback } from "#lib/voice/audio.ts";
@@ -21,6 +26,8 @@ import { getSessionId } from "./session.ts";
 import { getConversationLanguage } from "./session.ts";
 import { readEvents } from "./sse.ts";
 import { dispatchActivity } from "./activity.svelte.ts";
+import { handledByWindows } from "#lib/windows/feed.ts";
+import { feedWindows } from "#lib/windows/windows.svelte.ts";
 import { showStage } from "./stage.ts";
 import { nextToolInterjection } from "./tool-interjection.ts";
 import { readCommunicationPreferences } from "./communication-preferences.ts";
@@ -218,10 +225,22 @@ export async function ask(
           data as unknown as VizEventInfo,
           chat.history[assistant],
         );
+      if (event === "window" && typeof data?.id === "string")
+        feedWindows({
+          type: "window",
+          data: data as unknown as NovaWindowEvent,
+        });
+      if (event === "terminal" && typeof data?.id === "string")
+        feedWindows({
+          type: "terminal",
+          data: data as unknown as NovaTerminalEvent,
+        });
       if (event === "confirmation")
         addCard(data as unknown as Parameters<typeof addCard>[0]);
       if (event === "tool_start") {
-        dispatchActivity({ type: "tool_start", data });
+        feedWindows({ type: "tool_start", data });
+        if (!handledByWindows(data?.name))
+          dispatchActivity({ type: "tool_start", data });
         clearInterjection();
         setState("executing");
         const stepValue = data?.step;
@@ -246,7 +265,9 @@ export async function ask(
           }, 1500);
       }
       if (event === "tool_result") {
-        dispatchActivity({ type: "tool_result", data });
+        feedWindows({ type: "tool_result", data });
+        if (!handledByWindows(data?.name))
+          dispatchActivity({ type: "tool_result", data });
         clearInterjection();
         setState("thinking");
         chat.hint = "";
@@ -404,6 +425,7 @@ export async function ask(
     clearInterjection();
     chat.busy = false;
     dispatchActivity({ type: "turn_end", failed: turnFailed });
+    feedWindows({ type: "turn_end" });
     chatEvents.emit("turnDone");
     if (!playback.current) setState("ready");
   }

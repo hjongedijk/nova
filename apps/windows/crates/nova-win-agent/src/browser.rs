@@ -89,6 +89,17 @@ fn resume_browser(child: &Child) -> Result<()> {
         result
     }
 }
+/// Where an action landed, in CSS pixels of the viewport, so a live window can show the click or the caret.
+fn point(info: &Value) -> Value {
+    json!({"x":info["x"],"y":info["y"],"vw":info["vw"],"vh":info["vh"]})
+}
+/// Which tab a live window should show: the CDP port and the tab NOVA works in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiveTarget {
+    pub port: u16,
+    pub id: String,
+}
+pub type LiveHandle = Arc<std::sync::Mutex<Option<LiveTarget>>>;
 fn successful(value: Value) -> Value {
     let mut value = value;
     if value.get("error").is_some() {
@@ -110,6 +121,7 @@ pub struct Browser {
     world: Option<(String, i64)>,
     engine: String,
     guard: Option<(Arc<AtomicU64>, u64)>,
+    live: LiveHandle,
 }
 impl Browser {
     pub fn new(profile: PathBuf) -> Self {
@@ -123,6 +135,7 @@ impl Browser {
             world: None,
             engine: "google".into(),
             guard: None,
+            live: LiveHandle::default(),
         }
     }
     /// Imports the default search engine only. There are no host lists: NOVA may open any website.
@@ -262,6 +275,7 @@ impl Browser {
         }
     }
     pub fn shutdown(&mut self) {
+        *self.live.lock().unwrap_or_else(|e| e.into_inner()) = None;
         self.stop();
     }
     fn stop(&mut self) {
@@ -467,10 +481,27 @@ impl Browser {
                 Ok(successful(value))
             });
         self.guard = None;
+        self.mark_live();
         result
     }
     pub fn route(&mut self, path: &str, body: &Value) -> Outcome {
-        self.route_inner(path, body).map(successful)
+        let result = self.route_inner(path, body).map(successful);
+        self.mark_live();
+        result
+    }
+    /// Shared with live streams, which never take the browser lock (a command may hold it for 40 s).
+    pub fn live_handle(&self) -> LiveHandle {
+        self.live.clone()
+    }
+    fn mark_live(&mut self) {
+        if self.current.is_none() && self.port.is_some() {
+            let _ = self.tab();
+        }
+        let target = match (self.port, self.current.clone()) {
+            (Some(port), Some(id)) if self.child.is_some() => Some(LiveTarget { port, id }),
+            _ => None,
+        };
+        *self.live.lock().unwrap_or_else(|e| e.into_inner()) = target;
     }
     fn route_inner(&mut self, path: &str, body: &Value) -> Outcome {
         self.check_guard()?;
@@ -570,6 +601,7 @@ impl Browser {
                     }
                     let mut result = self.after_action(&previous, &tab)?;
                     result["clicked"] = json!(label);
+                    result["point"] = point(&info);
                     Ok(result)
                 } else {
                     let text = body["text"].as_str().ok_or_else(|| failure("Missing text"))?;
@@ -588,6 +620,8 @@ impl Browser {
                     }
                     let mut result = self.after_action(&previous, &tab)?;
                     result["typed"] = json!(text.chars().count());
+                    result["point"] = point(&info);
+                    result["secret"] = json!(info["secret"] == true);
                     result["submitted"] = json!(submit);
                     Ok(result)
                 }
@@ -891,6 +925,21 @@ mod tests {
         }
         let browser = &mut fixture.browser;
         assert_eq!(browser.route("open", &json!({"url":url})).unwrap()["ok"], true);
+        // Live video: the screencast follows NOVA's tab on its own DevTools connection and delivers JPEG frames.
+        let slot = crate::live::LatestFrame::new();
+        let stop = crate::live::Stop::default();
+        let caster = crate::screencast::spawn_screencast(
+            browser.live_handle(),
+            slot.clone(),
+            stop.clone(),
+            crate::live::StreamOptions::default(),
+        );
+        let frame = slot.next_after(0, Duration::from_secs(10)).expect("screencast frame");
+        assert!(frame.jpeg.starts_with(&[0xff, 0xd8]));
+        assert!(frame.width > 0 && frame.height > 0);
+        assert!(frame.meta.contains("NOVA fixture"), "{}", frame.meta);
+        stop.stop();
+        caster.join().unwrap();
         let read = browser.route("read", &json!({})).unwrap();
         let input = element(&read, "Search fixture");
         assert_eq!(

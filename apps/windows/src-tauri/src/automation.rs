@@ -1,7 +1,13 @@
 //! Slow capture/CDP work stays off the GUI thread. The only thing that refuses NOVA here is the owner's pause or
 //! emergency stop; there are no permissions, leases or limits.
 use crate::state::Shared;
-use nova_win_agent::{browser::Browser, desktop::Desktop, transport::Outcome};
+use nova_win_agent::{
+    browser::Browser,
+    desktop::{self, Desktop},
+    live::{spawn_capture, LatestFrame, Stop, StreamOptions},
+    screencast,
+    transport::{LiveSource, Outcome},
+};
 use serde_json::{json, Value};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -45,6 +51,42 @@ pub fn shutdown(app: &AppHandle) {
         cancel(app);
         shutdown_browser(app);
     }
+}
+/// Starts the producer of a live stream: the CDP screencast of NOVA's tab, or repeated captures of a display.
+/// The stream ends when the owner pauses the agent or presses the emergency stop (a new epoch).
+pub fn open_stream(app: &AppHandle, kind: &str, options: StreamOptions) -> Result<LiveSource, (u16, String)> {
+    let runtime = app.state::<Automation>();
+    let expected = runtime.epoch.load(Ordering::SeqCst);
+    let paused = || app.state::<Shared>().lock().paused;
+    if paused() {
+        return Err((409, "Agent is gepauzeerd door de eigenaar".into()));
+    }
+    let slot = LatestFrame::new();
+    let stop = Stop::default();
+    match kind {
+        "browser" => {
+            let handle = runtime.browser.lock().unwrap_or_else(|e| e.into_inner()).live_handle();
+            screencast::spawn_screencast(handle, slot.clone(), stop.clone(), options);
+        }
+        "desktop" => {
+            // Fail now (locked screen, bad display) instead of after the 200 head.
+            let first = desktop::capture_jpeg(options.display, options.max_width, options.quality)?;
+            slot.publish(first.0, first.1, first.2, r#"{"kind":"desktop"}"#.into());
+            spawn_capture(slot.clone(), stop.clone(), options, |o| {
+                desktop::capture_jpeg(o.display, o.max_width, o.quality)
+                    .map(|(jpeg, w, h, _)| (jpeg, w, h))
+                    .map_err(|(_, e)| e)
+            });
+        }
+        _ => return Err((404, "Onbekende stream".into())),
+    }
+    let app = app.clone();
+    let epoch = runtime.epoch.clone();
+    Ok(LiveSource {
+        slot,
+        stop,
+        alive: Box::new(move || !app.state::<Shared>().lock().paused && epoch.load(Ordering::SeqCst) == expected),
+    })
 }
 pub fn route(app: &AppHandle, path: &str, body: Value) -> Outcome {
     let runtime = app.state::<Automation>();

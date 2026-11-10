@@ -1,5 +1,10 @@
 import type { Risk } from "./tools.js";
 import type { ModelRoleId } from "./model-roles.js";
+import type {
+  NovaActionOverlay,
+  NovaTerminalEvent,
+  NovaWindowEvent,
+} from "./windows.js";
 
 /** POST /api/chat-stream sends Server-Sent Events of these kinds. */
 export type ChatEvent =
@@ -18,6 +23,10 @@ export type ChatEvent =
       data: { choices: { entityId: string; label: string }[] };
     }
   | { event: "confirmation"; data: PendingConfirmation }
+  /** Open or update a floating window (video, page, reader, document, ...). */
+  | { event: "window"; data: NovaWindowEvent }
+  /** Live terminal output of a command tool, chunk by chunk. */
+  | { event: "terminal"; data: NovaTerminalEvent }
   | { event: "attachment_notice"; data: { message: string } }
   | { event: "error"; data: { message: string } }
   | {
@@ -42,8 +51,23 @@ export type ToolPreview =
       results?: { title: string; domain: string }[];
       total?: number;
     }
-  | { kind: "page"; title?: string; domain?: string; snippet?: string }
-  | { kind: "screen"; question?: string; text?: string }
+  | {
+      kind: "page";
+      title?: string;
+      domain?: string;
+      snippet?: string;
+      /** browser_* tools: the full http(s) address, for the address bar of the live window. */
+      url?: string;
+      /** browser_click/type: where it landed in the page viewport, normalised 0..1. */
+      action?: NovaActionOverlay;
+    }
+  | {
+      kind: "screen";
+      question?: string;
+      text?: string;
+      /** desktop_act: what was done where, normalised to the last screenshot. */
+      action?: NovaActionOverlay;
+    }
   | {
       kind: "terminal";
       host?: string;

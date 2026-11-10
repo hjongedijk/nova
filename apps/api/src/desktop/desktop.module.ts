@@ -24,6 +24,6 @@ import { DesktopSettingsStore } from "./desktop-settings.store.js";
     DesktopService,
     DesktopSource,
   ],
-  exports: [DesktopService],
+  exports: [DesktopService, DesktopSettingsStore],
 })
 export class DesktopModule {}

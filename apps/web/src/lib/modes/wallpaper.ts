@@ -40,7 +40,7 @@ export function novaZones(): string {
   };
   // Open windows take the whole rectangle, and typing.
   const windows =
-    "dialog[open], #history.open, [role=dialog], .desktop-live, .code-panel";
+    "dialog[open], #history.open, [role=dialog], .desktop-live, .code-panel, .nova-win, .nova-dock";
   for (const dialog of document.querySelectorAll(windows))
     if (shown(dialog)) add(dialog.getBoundingClientRect(), true);
   const field = document.querySelector(".composer");

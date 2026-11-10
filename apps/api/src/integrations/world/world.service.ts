@@ -30,7 +30,7 @@ import { forecast } from "./weather.js";
 import { routeEstimate } from "./route.js";
 import type { CalDavService } from "../../planning/caldav.service.js";
 import { calendarEventStartInstant } from "../../planning/calendar-day.js";
-import { webRead, webSearch, wikipedia } from "./web.js";
+import { searxngSearch, webRead, webSearch, wikipedia } from "./web.js";
 import {
   WORLD_HTTP,
   type HomeSource,
@@ -207,6 +207,40 @@ export class WorldService {
     const configured = this.config.homeLocation;
     if (configured) return { ...configured, name: "thuis" };
     return recallHome(this.homeFile);
+  }
+
+  /**
+   * Videos for "speel X af": SearXNG's videos category first, then an ordinary web search narrowed to YouTube.
+   * Only addresses come back; the caller decides which ones it can play.
+   */
+  async searchVideos(
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<{ title: string; url: string }[]> {
+    const pick = (results: { title: string; url: string }[]) =>
+      results.map(({ title, url }) => ({ title, url }));
+    if (this.config.searxngUrl) {
+      try {
+        const results = await searxngSearch(
+          this.http,
+          this.config.searxngUrl,
+          query,
+          8,
+          { signal, category: "videos" },
+        );
+        if (results.length) return pick(results);
+      } catch (error) {
+        if (signal?.aborted) throw error;
+      }
+    }
+    const { results } = await webSearch(
+      this.http,
+      `${query} youtube`,
+      8,
+      signal,
+      { searxngUrl: this.config.searxngUrl },
+    );
+    return pick(results);
   }
 
   health(): { configured: boolean; home: boolean } {

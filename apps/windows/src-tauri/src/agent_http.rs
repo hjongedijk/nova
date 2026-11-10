@@ -73,12 +73,21 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
     if LISTENING.swap(true, Ordering::SeqCst) {
         return Ok(());
     }
-    // Bounded workers let the stop/status routes run while a CDP call or a screenshot is waiting.
-    for _ in 0..6 {
+    // Bounded workers let the stop/status routes run while a CDP call or a screenshot is waiting. Live streams hold
+    // a worker each (at most nova_win_agent::live::MAX_STREAMS), so there are that many more.
+    for _ in 0..(6 + nova_win_agent::live::MAX_STREAMS) {
         let app = app.clone();
         let server = server.clone();
         std::thread::spawn(move || {
             for request in server.incoming_requests() {
+                if nova_win_agent::transport::is_stream(&request) {
+                    nova_win_agent::transport::respond_stream(
+                        request,
+                        |ip, header| app.state::<Shared>().lock().agent.authorize(ip, header),
+                        |kind, options| crate::automation::open_stream(&app, kind, options),
+                    );
+                    continue;
+                }
                 nova_win_agent::transport::respond(
                     request,
                     |ip, header| app.state::<Shared>().lock().agent.authorize(ip, header),
@@ -160,7 +169,7 @@ fn route(app: &AppHandle, path: &str, method: &Method, body: Value) -> Outcome {
             result["hostname"] = json!(std::env::var("COMPUTERNAME").unwrap_or_default());
             result["user"] = json!(std::env::var("USERNAME").unwrap_or_default());
             result["uptimeHours"] = json!(sysinfo::System::uptime() as f64 / 3600.0);
-            result["features"] = json!(["wallpaper", "helper", "desktop", "browser"]);
+            result["features"] = json!(["wallpaper", "helper", "desktop", "browser", "live"]);
             result["agent"] = json!(VERSION);
             result["appVersion"] = json!(env!("CARGO_PKG_VERSION"));
             result["helperWarnings"] = json!(inner.hotkey_warnings);

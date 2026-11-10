@@ -45,6 +45,11 @@ export interface ToolCall {
   signal: AbortSignal;
   /** Internal execution scope; never supplied by model arguments. */
   readOnlyOnly?: boolean;
+  /**
+   * Live output for the screen (a terminal window), as it arrives. Display only: the tool's result for the
+   * model stays exactly what it would be without it.
+   */
+  onOutput?: (stream: "stdout" | "stderr", chunk: string) => void;
 }
 
 /** What `prepare` decided: possibly adjusted arguments and the real risk for this call. */

@@ -16,3 +16,4 @@ export type * from "./omniroute.js";
 export type * from "./model-roles.js";
 export type * from "./visualization.js";
 export type * from "./agent-skills.js";
+export type * from "./windows.js";

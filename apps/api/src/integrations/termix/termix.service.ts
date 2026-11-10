@@ -142,7 +142,12 @@ export class TermixService implements ToolSource {
   ): Promise<ToolResult> {
     const signal = call?.signal;
     if (name === "termix_run_command")
-      return this.run(String(args.host), String(args.command), signal);
+      return this.run(
+        String(args.host),
+        String(args.command),
+        signal,
+        call?.onOutput,
+      );
     if (name === "termix_status") {
       const [health, me] = await Promise.all([
         requestJson(`${this.url}/health`, { signal }),
@@ -192,6 +197,7 @@ export class TermixService implements ToolSource {
     hostRef: string,
     command: string,
     signal?: AbortSignal,
+    onOutput?: ToolCall["onOutput"],
   ): Promise<ToolResult> {
     const list = await this.get<TermixHost[]>("/host/db/host", signal);
     if (list.status !== 200 || !Array.isArray(list.data))
@@ -227,7 +233,7 @@ export class TermixService implements ToolSource {
       };
     const viaTermix = await this.runSnippet(host, command, signal);
     if (!viaTermix.fallbackAllowed) return viaTermix.outcome;
-    const direct = await this.runSsh(host, command, signal);
+    const direct = await this.runSsh(host, command, signal, onOutput);
     if (direct.ok)
       return {
         ...direct,
@@ -357,6 +363,7 @@ export class TermixService implements ToolSource {
     host: TermixHost,
     command: string,
     signal?: AbortSignal,
+    onOutput?: ToolCall["onOutput"],
   ): Promise<ToolResult> {
     const fingerprint = String(host.hostKeyFingerprint || "").trim();
     if (!fingerprint)
@@ -391,7 +398,13 @@ export class TermixService implements ToolSource {
         ok: false,
         error: "Termix heeft geen wachtwoord of sleutel voor deze host.",
       };
-    const outcome = await runDirectSsh(login, command, fingerprint, signal);
+    const outcome = await runDirectSsh(
+      login,
+      command,
+      fingerprint,
+      signal,
+      onOutput,
+    );
     if (!outcome.ok) return { ok: false, error: outcome.error };
     return {
       ok: true,

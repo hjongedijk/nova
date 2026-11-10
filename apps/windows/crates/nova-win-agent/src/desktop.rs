@@ -268,6 +268,16 @@ fn scale_point(screen: &Display, body: &Value, x: f64, y: f64) -> Result<(i32, i
 }
 #[cfg(windows)]
 use windows::{capture, displays, native_input, native_windows};
+/// A display as JPEG bytes for live video: (jpeg, width, height, display index).
+pub type Jpeg = (Vec<u8>, u32, u32, u32);
+#[cfg(windows)]
+pub fn capture_jpeg(display: u32, max_width: u32, quality: u8) -> Result<Jpeg, (u16, String)> {
+    windows::capture_jpeg(display, max_width.clamp(320, 1920), quality.clamp(30, 90))
+}
+#[cfg(not(windows))]
+pub fn capture_jpeg(_: u32, _: u32, _: u8) -> Result<Jpeg, (u16, String)> {
+    unsupported()
+}
 #[cfg(not(windows))]
 fn unsupported<T>() -> Result<T, (u16, String)> {
     Err((503, "Alleen beschikbaar op Windows".into()))

@@ -45,7 +45,7 @@ interface WikiSearch {
   query?: { search?: { title: string; snippet?: string }[] };
 }
 
-export type SearchCategory = "general" | "news";
+export type SearchCategory = "general" | "news" | "videos";
 
 /** Normalise a SearXNG JSON answer; throws when it is not one, so the caller falls back. */
 export function parseSearxng(body: unknown, limit: number): SearchResult[] {
@@ -102,7 +102,8 @@ export async function searxngSearch(
     language: "nl",
     safesearch: "1",
   });
-  if (options.category === "news") params.set("categories", "news");
+  if (options.category === "news" || options.category === "videos")
+    params.set("categories", options.category);
   const body = await http.getServiceJson(`${base}/search?${params}`, {
     allowedBase: base,
     signal: options.signal,

@@ -1,9 +1,80 @@
 //! Bounded JSON protocol shared by the native app and transport tests.
+use crate::live::{self, LatestFrame, Stop, StreamOptions, StreamPermit};
 use serde_json::{json, Value};
-use std::{io::Read, net::IpAddr};
+use std::{io::Read, net::IpAddr, sync::Arc};
 use tiny_http::{Header, Method, Request, Response};
 pub const BODY_LIMIT: usize = 16 * 1024;
 pub type Outcome = Result<Value, (u16, String)>;
+
+/// What a live route hands to the writer: the frame slot, the producer's stop switch and the owner's pause check.
+pub struct LiveSource {
+    pub slot: Arc<LatestFrame>,
+    pub stop: Stop,
+    pub alive: Box<dyn Fn() -> bool + Send>,
+}
+
+/// `/v1/stream/browser` and `/v1/stream/desktop`: long-lived MJPEG instead of one JSON reply.
+pub fn is_stream(request: &Request) -> bool {
+    request.url().starts_with("/v1/stream/")
+}
+
+fn json_reply(request: Request, status: u16, body: Value) {
+    let response = Response::from_string(body.to_string())
+        .with_status_code(status)
+        .with_header(Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap())
+        .with_header(Header::from_bytes("Cache-Control", "no-store").unwrap())
+        .with_header(Header::from_bytes("Connection", "close").unwrap());
+    let _ = request.respond(response);
+}
+
+/// Same pairing-token check as every other route, then frames until the viewer leaves, the owner pauses or the
+/// stream reaches its time limit. At most `live::MAX_STREAMS` at once.
+pub fn respond_stream(
+    request: Request,
+    authorize: impl FnOnce(IpAddr, Option<&str>) -> Result<(), u16>,
+    open: impl FnOnce(&str, StreamOptions) -> Result<LiveSource, (u16, String)>,
+) {
+    let auth = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Authorization"))
+        .map(|h| h.value.as_str());
+    let allowed = request
+        .remote_addr()
+        .ok_or(403)
+        .and_then(|addr| authorize(addr.ip(), auth));
+    let url = request.url().to_string();
+    let (path, query) = url.split_once('?').unwrap_or((url.as_str(), ""));
+    let started = allowed
+        .map_err(|code| (code, "Niet toegestaan".to_string()))
+        .and_then(|_| {
+            if *request.method() != Method::Get {
+                return Err((405, "Onjuiste HTTP-methode".into()));
+            }
+            let kind = match path {
+                "/v1/stream/browser" => "browser",
+                "/v1/stream/desktop" => "desktop",
+                _ => return Err((404, "Onbekende route".into())),
+            };
+            let options = StreamOptions::parse(query)?;
+            let permit = StreamPermit::acquire().ok_or((429, "Te veel live beelden tegelijk".to_string()))?;
+            open(kind, options).map(|source| (permit, source))
+        });
+    match started {
+        Err((status, error)) => json_reply(request, status, json!({"ok":false,"error":error})),
+        Ok((_permit, source)) => {
+            let mut writer = request.into_writer();
+            let _ = live::pump(
+                &mut *writer,
+                &source.slot,
+                &*source.alive,
+                live::MAX_STREAM,
+                live::STREAM_BYTES_PER_SECOND,
+            );
+            source.stop.stop();
+        }
+    }
+}
 
 pub fn respond(
     mut request: Request,
@@ -100,12 +171,7 @@ pub fn respond(
         Ok(v) => (200, v),
         Err((code, error)) => (code, json!({"ok":false,"error":error})),
     };
-    let response = Response::from_string(body.to_string())
-        .with_status_code(status)
-        .with_header(Header::from_bytes("Content-Type", "application/json; charset=utf-8").unwrap())
-        .with_header(Header::from_bytes("Cache-Control", "no-store").unwrap())
-        .with_header(Header::from_bytes("Connection", "close").unwrap());
-    let _ = request.respond(response);
+    json_reply(request, status, body);
 }
 
 #[cfg(test)]
@@ -204,6 +270,72 @@ mod tests {
         let (response, calls) = request("GET", "/unknown", Some("Bearer abcdefghijklmnopqrstuvwxyz"), "");
         assert!(response.starts_with("HTTP/1.1 404"));
         assert_eq!(calls, 0);
+    }
+    fn stream(path: &str, token: Option<&str>) -> (String, usize) {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let address = server.server_addr().to_ip().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let mut config = AgentConfig::fresh().unwrap();
+        config.token = "abcdefghijklmnopqrstuvwxyz".into();
+        let worker = std::thread::spawn(move || {
+            let request = server.recv().unwrap();
+            assert!(is_stream(&request));
+            respond_stream(
+                request,
+                |ip, header| config.authorize(ip, header),
+                |kind, options| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    let slot = LatestFrame::new();
+                    slot.publish(
+                        vec![0xff, 0xd8, 0xff, 0xd9],
+                        2,
+                        2,
+                        format!(r#"{{"kind":"{kind}","fps":{}}}"#, options.fps),
+                    );
+                    slot.close();
+                    Ok(LiveSource {
+                        slot,
+                        stop: Stop::default(),
+                        alive: Box::new(|| true),
+                    })
+                },
+            )
+        });
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{}\r\n",
+            token.map(|v| format!("Authorization: {v}\r\n")).unwrap_or_default()
+        )
+        .unwrap();
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).unwrap();
+        worker.join().unwrap();
+        (
+            String::from_utf8_lossy(&bytes).into_owned(),
+            calls.load(Ordering::SeqCst),
+        )
+    }
+    #[test]
+    fn live_streams_need_the_pairing_token_and_valid_options() {
+        let (response, calls) = stream("/v1/stream/desktop", None);
+        assert!(response.starts_with("HTTP/1.1 401"), "{response}");
+        assert_eq!(calls, 0);
+        let token = Some("Bearer abcdefghijklmnopqrstuvwxyz");
+        let (response, calls) = stream("/v1/stream/desktop?fps=99&fps=1", token);
+        assert!(response.starts_with("HTTP/1.1 400"), "{response}");
+        assert_eq!(calls, 0);
+        let (response, calls) = stream("/v1/stream/other", token);
+        assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+        assert_eq!(calls, 0);
+        let (response, calls) = stream("/v1/stream/browser?fps=99", token);
+        assert_eq!(calls, 1);
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        assert!(response.contains("multipart/x-mixed-replace; boundary=novaframe"));
+        assert!(response.contains(r#"X-Nova-Meta: {"kind":"browser","fps":30}"#));
+        assert!(response.ends_with("--novaframe--\r\n"));
     }
     #[test]
     fn screenshot_query_is_validated_and_forwarded() {
