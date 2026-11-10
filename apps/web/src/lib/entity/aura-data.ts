@@ -14,29 +14,40 @@ export const AURA_ASSETS = {
   lo: "/aura/aura-1280.webp",
   /** Three 960x540 RGB tiles stacked vertically, see AURA_DATA. */
   data: "/aura/aura-data.png",
+  /** Three 1920x1080 RGB layers stacked: distance to the nearest light line, place along it, which line. */
+  lines: "/aura/aura-lines.png",
 } as const;
 
 /**
  * Measurements of the artwork, in picture units (u across 0..1 left to right, v down 0..1 top to bottom), written
- * by scripts/aura-assets.mjs. Atlas tiles: 0 = form, head, bright; 1 = stripe offset (high byte), height, figure;
- * 2 = normal x, normal y, stripe offset (low byte).
+ * by scripts/aura-assets.mjs. Atlas tiles: 0 = form, head, bright; 1 = figure zone, height, figure;
+ * 2 = normal x, normal y.
  */
 export const AURA_DATA = {
   width: 960,
   height: 540,
   aspect: 16 / 9,
   /** The body's vertical axis. */
-  axis: 0.5188,
-  head: { cx: 0.5216, cy: 0.3464, top: 0.1889, bottom: 0.5204, radius: 0.0714 },
-  torsoHalf: 0.2142,
-  shoulderTop: 0.688,
-  /** Stripe offset range and height range, in data pixels. */
-  dmax: 256,
+  axis: 0.4963,
+  head: { cx: 0.4967, cy: 0.289, top: 0.1426, bottom: 0.4389, radius: 0.0583 },
+  torsoHalf: 0.1705,
+  shoulderTop: 0.6111,
+  /** Height range, in data pixels. */
   hmax: 128,
 } as const;
 
+/** Star points where the light lines meet (picture units), from scripts/aura-assets.mjs. */
+export const STARS: readonly (readonly [number, number])[] = [
+  [0.4963, 0.606],
+  [0.3503, 0.635],
+  [0.6463, 0.64],
+  [0.4263, 0.6],
+  [0.5743, 0.604],
+  [0.3763, 0.8],
+];
+
 /** The face, where moods bloom from and the birth's shockwave starts. */
-export const FACE = { u: AURA_DATA.head.cx, v: 0.36 } as const;
+export const FACE = { u: AURA_DATA.head.cx, v: AURA_DATA.head.cy } as const;
 
 /** Room either side of the shoulders when a narrow screen zooms in on the bust (picture widths). */
 const BUST_MARGIN = 0.04;

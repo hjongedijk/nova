@@ -13,7 +13,7 @@ import {
   POINTS_VERT,
 } from "./aura-shaders.ts";
 
-export { BREATH, LIGHTS, STRIPES } from "./aura-shaders.ts";
+export { BREATH, LIGHTS, LINES } from "./aura-shaders.ts";
 
 /**
  * AURA: the owner's artwork (a blank-faced figure of light, static/aura) brought to life on the GPU. The picture
@@ -345,10 +345,12 @@ async function createGlAura(
   );
   let imageBmp: ImageBitmap;
   let dataBmp: ImageBitmap;
+  let linesBmp: ImageBitmap;
   try {
-    [imageBmp, dataBmp] = await Promise.all([
+    [imageBmp, dataBmp, linesBmp] = await Promise.all([
       bitmap(imageUrl, false),
       bitmap(AURA_ASSETS.data, true),
+      bitmap(AURA_ASSETS.lines, true),
     ]);
   } catch (err) {
     renderer.dispose();
@@ -373,6 +375,14 @@ async function createGlAura(
   dataTex.magFilter = THREE.LinearFilter;
   dataTex.wrapS = dataTex.wrapT = THREE.ClampToEdgeWrapping;
   dataTex.needsUpdate = true;
+  const linesTex = new THREE.Texture(linesBmp);
+  linesTex.colorSpace = THREE.NoColorSpace;
+  linesTex.flipY = false;
+  linesTex.generateMipmaps = false;
+  linesTex.minFilter = THREE.LinearFilter;
+  linesTex.magFilter = THREE.LinearFilter;
+  linesTex.wrapS = linesTex.wrapT = THREE.ClampToEdgeWrapping;
+  linesTex.needsUpdate = true;
 
   const lin = (hex: string) => {
     const c = new THREE.Color(hex);
@@ -399,6 +409,7 @@ async function createGlAura(
   const U = {
     uImage: { value: imageTex },
     uData: { value: dataTex },
+    uLines: { value: linesTex },
     uFrame: { value: new THREE.Vector4(0, 0, 1, 1) },
     uFade: { value: new THREE.Vector4(1e-4, 1e-4, 1e-4, 1e-4) },
     uRes: { value: new THREE.Vector2(1, 1) },
@@ -731,8 +742,10 @@ async function createGlAura(
       pointsMat.dispose();
       imageTex.dispose();
       dataTex.dispose();
+      linesTex.dispose();
       imageBmp.close();
       dataBmp.close();
+      linesBmp.close();
       renderer.dispose();
       renderer.forceContextLoss();
       canvas.remove();

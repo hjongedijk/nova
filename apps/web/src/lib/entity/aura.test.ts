@@ -10,6 +10,7 @@ import {
   BIRTH,
   f,
   FACE,
+  STARS,
 } from "./aura-data.ts";
 import {
   PARTICLE_KIND,
@@ -25,10 +26,10 @@ import {
   gpuTier,
   LOOKS,
   spring,
-  STRIPES,
+  LINES,
   TIMING,
 } from "./aura.ts";
-import { PLATE_FRAG, POINTS_VERT } from "./aura-shaders.ts";
+import { GRADE, PLATE_FRAG, POINTS_VERT } from "./aura-shaders.ts";
 
 const STATIC = path.resolve(import.meta.dirname, "../../../static");
 
@@ -46,6 +47,11 @@ describe("aura artwork", () => {
     expect(png.readUInt32BE(20)).toBe(AURA_DATA.height * 3);
     // RGB, no alpha: nothing for a browser to premultiply.
     expect(png[25]).toBe(2);
+    // The light lines: three 1920x1080 layers, so crossing lines each keep their whole glow.
+    const lines = fs.readFileSync(path.join(STATIC, AURA_ASSETS.lines));
+    expect(lines.readUInt32BE(16)).toBe(1920);
+    expect(lines.readUInt32BE(20)).toBe(1080 * 3);
+    expect(lines[25]).toBe(2);
   });
 
   it("is documented as generated with FLUX.1 schnell, Apache-2.0, owner-approved", () => {
@@ -59,6 +65,8 @@ describe("aura artwork", () => {
     expect(doc).toMatch(/FLUX\.1 schnell/);
     expect(doc).toMatch(/Apache-2\.0/);
     expect(doc).toMatch(/aura-2560\.webp/);
+    expect(doc).toMatch(/aura-base5-4k\.png/);
+    expect(doc).toMatch(/aura-lines\.png/);
   });
 
   it("knows where the head and body are in the picture", () => {
@@ -234,27 +242,38 @@ describe("aura particles", () => {
   });
 });
 
-describe("aura stripes", () => {
-  it("has easy-to-tune stripes: count, width with a clear gap, colour shares", () => {
-    expect(STRIPES.count).toBeGreaterThanOrEqual(12);
-    expect(STRIPES.headCount).toBeGreaterThanOrEqual(5);
-    expect(STRIPES.width).toBeGreaterThan(0.25);
-    expect(STRIPES.width).toBeLessThan(0.6);
-    // Neon made of light: a glow that keeps the gaps dark, a string of dots, a few star points, faint dust.
-    expect(STRIPES.halo).toBeGreaterThan(0);
-    expect(STRIPES.halo).toBeLessThan(0.6);
-    expect(STRIPES.dots.step).toBeGreaterThan(1);
-    expect(STRIPES.dots.step).toBeLessThan(8);
-    expect(STRIPES.stars).toBeGreaterThan(0);
-    expect(STRIPES.stars).toBeLessThan(0.2);
-    expect(STRIPES.dust).toBeLessThan(0.5);
-    expect(PLATE_FRAG).toContain("neonStripe(");
-    const m = STRIPES.mix;
-    expect(m.a + m.b + m.pink + m.cyan + m.peach).toBeCloseTo(1, 5);
-    // Mostly violet and magenta.
-    expect(m.a + m.b).toBeGreaterThan(0.6);
-    for (const c of Object.values(STRIPES.accents))
+describe("aura light lines", () => {
+  it("draws flowing light lines with easy-to-tune looks: hot core, glow, halo, warm passages, sparks", () => {
+    expect(LINES.core).toBeGreaterThan(0.3);
+    expect(LINES.core).toBeLessThan(LINES.glow);
+    expect(LINES.glow).toBeLessThan(LINES.wide);
+    // The halo ends inside the raster's reach (40 px), so no glow is ever cut off.
+    expect(LINES.wide * 2.6).toBeLessThan(40);
+    expect(LINES.warm).toBeGreaterThan(0);
+    expect(LINES.warm).toBeLessThan(1);
+    expect(LINES.face).toBeLessThan(0.6);
+    expect(LINES.faceGlow).toBeLessThan(LINES.face);
+    for (const c of [LINES.warmColour, LINES.amberColour])
       expect(c).toMatch(/^#[0-9a-f]{6}$/);
+    expect(PLATE_FRAG).toContain("lightLine(");
+    // Each line tapers at both ends.
+    expect(PLATE_FRAG).toContain("float taper = ");
+    // Star points where lines meet lie on the figure.
+    expect(STARS.length).toBeGreaterThan(2);
+    for (const [u, v] of STARS) {
+      expect(Math.abs(u - AURA_DATA.axis)).toBeLessThan(
+        AURA_DATA.torsoHalf + 0.02,
+      );
+      expect(v).toBeGreaterThan(AURA_DATA.head.bottom);
+    }
+  });
+
+  it("grades the artwork violet, keeps the room dark and the skin darker still", () => {
+    expect(GRADE.violet).toBeGreaterThan(0);
+    expect(GRADE.blue).toBeLessThanOrEqual(1);
+    expect(GRADE.room).toBeLessThan(1);
+    expect(GRADE.skin).toBeLessThan(1);
+    expect(GRADE.gloss).toBeLessThan(0.5);
   });
 
   it("adds no facial features: the face stays blank", () => {
