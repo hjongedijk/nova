@@ -355,6 +355,9 @@ export function startEntity(host: EntityHost): () => void {
           else if (made) {
             gestalte = made;
             glState = "ready";
+            if (import.meta.env.DEV)
+              (window as unknown as { __novaGestalte?: Gestalte }).__novaGestalte =
+                made;
           } else glState = "failed";
         })
         .catch(() => {
