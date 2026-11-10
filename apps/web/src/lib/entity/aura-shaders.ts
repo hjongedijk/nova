@@ -257,19 +257,21 @@ vec2 sdBez(vec2 pos, vec2 A, vec2 B, vec2 C) {
  * One drawn line on the body, as a small bundle of strands (a bright core and two fainter companions), like
  * light caught in folds of silk. Widths are in screen pixels (foot = world size of a pixel); the ends taper.
  */
+/* Companion strands beside each line: on for the body's veins, off for the fine lines of the face. */
+float gBundle = 1.0;
 vec3 silk(vec2 xy, vec2 A, vec2 B, vec2 C, float foot, float bright, float warm, float id, vec3 cA, vec3 cB) {
   vec2 dt = sdBez(xy, A, B, C);
   float dpx = dt.x / foot;
   float tt = dt.y;
   float ends = smoothstep(0.0, 0.16, tt) * (1.0 - smoothstep(0.84, 1.0, tt));
-  float core = clamp(1.0 - dpx / 1.4, 0.0, 1.0);
+  float core = clamp(1.0 - dpx / (0.9 + 0.9 * bright), 0.0, 1.0);
   float o1 = clamp(1.0 - abs(dt.x - 0.022) / foot / 0.9, 0.0, 1.0);
   float o2 = clamp(1.0 - abs(dt.x - 0.045) / foot / 0.8, 0.0, 1.0);
   float glow = exp(-dpx * 0.16) * 0.22;
   float shimmer = 0.75 + 0.25 * sin(tt * 9.0 + id * 4.0 + uT * uMotion * 0.4);
   float travel = pow(0.5 + 0.5 * sin(tt * 6.0 - uT * uPulse * uMotion * 1.4 + id * 2.3), 16.0);
   vec3 c = mix(cA, cB, warm * (0.6 + 0.4 * tt));
-  return c * (core * 2.2 + o1 * 0.55 + o2 * 0.28 + glow) * bright * ends * shimmer * (1.0 + 1.2 * travel);
+  return c * (core * 2.2 + (o1 * 0.55 + o2 * 0.28) * gBundle + glow) * bright * ends * shimmer * (1.0 + 1.2 * travel);
 }
 
 #define GRAD(fn, q, e) vec3(fn(q + vec3(e, 0, 0)) - fn(q - vec3(e, 0, 0)), fn(q + vec3(0, e, 0)) - fn(q - vec3(0, e, 0)), fn(q + vec3(0, 0, e)) - fn(q - vec3(0, 0, e))) / (2.0 * e)
@@ -324,7 +326,10 @@ void main() {
   float fillOn = 1.0 - smoothstep(front - 0.85, front - 0.2, dH);
   // One-sided: sharp ahead of the front (no ghost of the unwoven body), a short trail behind it.
   float weaveEdge = exp(-max(dH - front, 0.0) * 40.0 - max(front - dH, 0.0) * 18.0) * (1.0 - uWeave) * smoothstep(0.0, 0.04, uWeave);
-  float bottom = smoothstep(-3.05, -2.35, p.y);
+  // A bust portrait: below the upper chest the figure dissolves into the dark, leaving its sparkle behind.
+  float bottom = smoothstep(-1.08, -0.55, p.y);
+  float dust = smoothstep(-1.2, -0.75, p.y) * (1.0 - bottom);
+  if (bottom < 0.02 && dust < 0.02) discard;
 
   /* which part of the body: soft weights */
   vec4 wpart = exp(-max(parts, 0.0) * 28.0);
@@ -337,20 +342,51 @@ void main() {
   const float E = 0.003;
   vec2 xy = q.xy + vec2(warp * 0.4, 0.0);
   float fxy = foot / (0.35 + 0.65 * ndv);
-  // A drawn composition, mirrored: collarbones up over the shoulders and down the arms, a sweep across the upper
-  // chest to the underarm, the flank into the waist and out to the hips, and quieter lines under the bust and
-  // over the ribs. Light gathers where they meet, at the heart.
+  // A drawn composition, mirrored, like veins of light: up the neck, along the collarbones and over the shoulders,
+  // across the upper chest; branches split off and taper, and the light gathers where they meet.
   vec3 body = vec3(0.0);
   body += silk(xy, vec2(0.06, -0.5), vec2(0.43, -0.57), vec2(0.78, -0.47), fxy, 1.0, 0.8, 1.0, A, B);
-  body += silk(xy, vec2(0.78, -0.47), vec2(0.92, -0.6), vec2(0.96, -1.3), fxy, 0.85, 0.35, 2.0, A, B);
+  body += silk(xy, vec2(0.78, -0.47), vec2(0.92, -0.6), vec2(0.96, -1.3), fxy, 0.8, 0.35, 2.0, A, B);
   body += silk(xy, vec2(0.03, -0.63), vec2(0.36, -0.6), vec2(0.63, -0.84), fxy, 0.95, 0.15, 3.0, A, B);
-  body += silk(xy, vec2(0.62, -0.84), vec2(0.44, -1.5), vec2(0.35, -2.0), fxy, 0.9, 0.0, 4.0, A, B);
-  body += silk(xy, vec2(0.35, -2.0), vec2(0.33, -2.38), vec2(0.58, -2.78), fxy, 0.6, 0.0, 5.0, A, B);
-  body += silk(xy, vec2(0.06, -1.47), vec2(0.3, -1.56), vec2(0.42, -1.86), fxy, 0.4, 0.2, 8.0, A, B);
-  body += silk(xy, vec2(0.16, -0.3), vec2(0.44, -0.37), vec2(0.76, -0.46), fxy, 0.55, 0.3, 11.0, A, B);
-  body += silk(xy, vec2(0.66, -0.95), vec2(0.73, -1.5), vec2(0.8, -2.05), fxy, 0.5, 0.0, 12.0, A, B);
-  body += silk(xy, vec2(0.155, 0.04), vec2(0.11, -0.22), vec2(0.035, -0.46), fxy, 0.32, 0.4, 13.0, A, B);
+  body += silk(xy, vec2(0.16, -0.3), vec2(0.44, -0.37), vec2(0.76, -0.46), fxy, 0.6, 0.3, 11.0, A, B);
+  body += silk(xy, vec2(0.155, 0.04), vec2(0.11, -0.22), vec2(0.035, -0.46), fxy, 0.55, 0.5, 13.0, A, B);
+  body += silk(xy, vec2(0.02, -0.45), vec2(0.06, -0.25), vec2(0.12, -0.04), fxy, 0.45, 0.9, 14.0, A, B);
+  body += silk(xy, vec2(0.13, -0.2), vec2(0.17, -0.36), vec2(0.31, -0.42), fxy, 0.5, 0.4, 15.0, A, B);
+  body += silk(xy, vec2(0.25, -0.545), vec2(0.31, -0.45), vec2(0.44, -0.4), fxy, 0.55, 0.7, 16.0, A, B);
+  body += silk(xy, vec2(0.2, -0.61), vec2(0.33, -0.72), vec2(0.4, -0.92), fxy, 0.6, 0.85, 17.0, A, B);
+  body += silk(xy, vec2(0.0, -0.52), vec2(0.07, -0.62), vec2(0.13, -0.84), fxy, 0.7, 0.2, 18.0, A, B);
+  body += silk(xy, vec2(0.6, -0.55), vec2(0.8, -0.58), vec2(0.86, -0.82), fxy, 0.6, 0.1, 19.0, A, B);
+  body += silk(xy, vec2(0.1, -0.7), vec2(0.45, -0.68), vec2(0.7, -0.6), fxy, 0.5, 0.5, 20.0, A, B);
+  body += silk(xy, vec2(0.04, -0.79), vec2(0.22, -0.86), vec2(0.5, -0.79), fxy, 0.35, 0.3, 21.0, A, B);
+  body += silk(xy, vec2(0.165, 0.0), vec2(0.17, -0.2), vec2(0.23, -0.32), fxy, 0.4, 0.0, 22.0, A, B);
+  body += silk(xy, vec2(0.45, -0.4), vec2(0.62, -0.38), vec2(0.72, -0.5), fxy, 0.4, 0.6, 23.0, A, B);
   lines += body * (1.0 - wpart.w);
+  // Bright points where lines meet, twinkling.
+  vec3 accents = vec3(0.0);
+  for (int k = 0; k < 7; k++) {
+    vec2 c = k == 0 ? vec2(0.06, -0.5) : k == 1 ? vec2(0.25, -0.545) : k == 2 ? vec2(0.2, -0.61)
+           : k == 3 ? vec2(0.13, -0.2) : k == 4 ? vec2(0.78, -0.47) : k == 5 ? vec2(0.45, -0.4) : vec2(0.0, -0.63);
+    float dpx = length(q.xy - c) / fxy;
+    float tw = 0.65 + 0.35 * sin(uT * uMotion * (1.3 + 0.37 * float(k)) + float(k) * 2.1);
+    accents += mix(vec3(1.0, 0.9, 0.95), B, 0.35) * (exp(-dpx * 0.45) * 1.6 + exp(-dpx * 0.08) * 0.12) * tw;
+  }
+  lines += accents * (1.0 - wpart.w);
+  // Light veins on the face: over the brow to the temple, down the cheekbone, along the jaw; the closed lids, the
+  // brows and the parting of the lips drawn as fine lines.
+  if (wpart.w > 0.01) {
+    gBundle = 0.0;
+    vec2 fh = vec2(abs(qh.x), qh.y);
+    float fh2 = fxy;
+    vec3 face = vec3(0.0);
+    face += silk(fh, vec2(0.3, 0.64), vec2(0.325, 0.48), vec2(0.29, 0.32), fh2, 0.4, 0.2, 31.0, A, B);
+    face += silk(fh, vec2(0.25, 0.22), vec2(0.18, 0.07), vec2(0.04, 0.025), fh2, 0.22, 0.3, 33.0, A, B);
+    face += silk(fh, vec2(0.065, 0.452), vec2(0.118, 0.432), vec2(0.172, 0.452), fh2, 0.4, 0.5, 34.0, F, B);
+    face += silk(fh, vec2(0.06, 0.53), vec2(0.13, 0.56), vec2(0.2, 0.53), fh2, 0.22, 0.2, 35.0, F, B);
+    face += silk(fh, vec2(0.0, 0.18), vec2(0.035, 0.177), vec2(0.064, 0.186), fh2, 0.28, 0.7, 36.0, F, B);
+    float front = smoothstep(0.05, 0.4, nh.z);
+    lines += face * wpart.w * (0.45 + 0.55 * front);
+    gBundle = 1.0;
+  }
   if (wpart.z > 0.01) {
     float psi = psiArm(q) + warp * 2.0;
     vec3 g = GRAD(psiArm, q, E);
@@ -358,11 +394,17 @@ void main() {
     lines += wpart.z * strokes(psi, g, n, 1.0, foot, 5.0, p, A, B, p.y, 0.35);
   }
 
-  /* skin: nearly black inside, glossy violet in the light, bright at the silhouette */
+  /* skin: dark glass on the body, porcelain on the face, a fresnel rim at the silhouette */
   vec3 L = normalize(uKey);
   float diff = max(dot(n, L), 0.0);
-  float spec = pow(max(dot(n, normalize(L + v)), 0.0), mix(70.0, 32.0, wpart.w)) * (1.0 - 0.2 * wpart.w);
-  vec3 base = vec3(0.004, 0.0015, 0.011) + A * (0.003 + mix(0.03, 0.05, wpart.w) * diff * diff) + R * spec * mix(0.2, 0.3, wpart.w);
+  float wrap = max(dot(n, L) * 0.5 + 0.5, 0.0);
+  float spec = pow(max(dot(n, normalize(L + v)), 0.0), mix(70.0, 26.0, wpart.w));
+  vec3 base = vec3(0.004, 0.0015, 0.011) + A * (0.003 + mix(0.03 * diff * diff, 0.03 * wrap * wrap, wpart.w)) + R * spec * mix(0.2, 0.28, wpart.w);
+  // Porcelain: a soft wrapped light and an inner glow that is strongest where the face meets the eye.
+  base += F * wpart.w * (0.03 * wrap * wrap + 0.045 * pow(ndv, 3.0));
+  // A warm blush of inner light on the cheekbones.
+  vec3 dck = (vec3(abs(qh.x), qh.yz) - vec3(0.17, 0.36, 0.3)) * vec3(1.0, 1.3, 1.0);
+  base += mix(F, B, 0.45) * wpart.w * 0.05 * exp(-dot(dck, dck) / 0.006);
   base += A * pow(fres, 3.0) * 0.06;
   // Wide enough to cover a few pixels at the silhouette: a sub-pixel rim would flicker into dashes along
   // slanted edges (the stair steps of the pixel grid).
@@ -370,36 +412,38 @@ void main() {
 
   /* the face light: a soft glow on the forehead and the cheekbones, brightest in front */
   vec3 dfc = (qh - vec3(0.0, 0.5, 0.34)) * vec3(1.0, 0.7, 1.0);
-  float faceLight = 0.2 * exp(-dot(dfc, dfc) / 0.06) * smoothstep(0.0, 0.7, nh.z) * wpart.w;
+  float faceLight = 0.28 * exp(-dot(dfc, dfc) / 0.06) * smoothstep(0.0, 0.7, nh.z) * wpart.w;
 
-  /* a warm glow where the strokes meet, at the heart */
-  vec3 dh = p - HEART;
-  float heart = exp(-dot(dh, dh) / 0.008) * 0.12;
+  /* the heart light: a soft glow in the chest, breathing */
+  vec3 dh = (p - HEART) * vec3(1.0, 1.2, 1.0);
+  float heart = (exp(-dot(dh, dh) / 0.03) * 0.22 + exp(-dot(dh, dh) / 0.004) * 0.35) * (0.85 + 0.15 * uBreath);
 
   /* starry interior: points just under the skin, with parallax */
   vec3 stars = vec3(0.0);
-  for (int k = 0; k < 2; k++) {
-    float sc = k == 0 ? 35.0 : 56.0;
-    vec3 pp = (p - n * (0.015 + 0.04 * float(k))) * sc;
+  for (int k = 0; k < 3; k++) {
+    float sc = k == 0 ? 35.0 : k == 1 ? 56.0 : 84.0;
+    vec3 pp = (p - n * (0.015 + 0.035 * float(k))) * sc;
     vec3 c = floor(pp);
     vec3 hh = hash33(c + float(k) * 19.0);
-    float on = step(0.62, hh.x) * (k == 0 ? 1.0 : 0.7);
+    float on = step(0.6, hh.x) * (k == 0 ? 1.0 : k == 1 ? 0.75 : 0.5);
     float d = length(fract(pp) - (0.2 + 0.6 * hh));
     float tw = 0.55 + 0.45 * sin(uT * uMotion * (1.2 + 3.0 * hh.y) + hh.z * 6.2831);
     stars += on * (1.0 - smoothstep(0.0, 0.13, d)) * tw * mix(A, vec3(1.0, 0.82, 0.92), hh.y);
   }
-  float starDensity = 0.35 + 0.65 * smoothstep(0.25, 0.7, vnoise3(p * 2.2 + 3.0)) * smoothstep(0.12, 0.4, ndv);
+  float starDensity = (0.35 + 0.65 * smoothstep(0.25, 0.7, vnoise3(p * 2.2 + 3.0))) * smoothstep(0.12, 0.4, ndv) * (1.0 - 0.7 * wpart.w);
 
   float glow = uGlow * (1.0 + 0.45 * uAudio);
-  // Lines bunch up where the skin turns away: let the rim own the silhouette. The waist stays quieter than the chest.
-  lines *= smoothstep(0.06, 0.3, ndv) * (0.45 + 0.55 * smoothstep(-2.8, -1.8, p.y));
+  // Lines bunch up where the skin turns away: let the rim own the silhouette.
+  lines *= smoothstep(0.06, 0.3, ndv);
   vec3 lit = lines * glow * (1.0 + ring * 1.5);
   vec3 col = (base + rim * glow + F * faceLight * 0.9 * glow + (A + B) * 0.5 * heart * glow + stars * starDensity * 3.0) * fillOn;
   col += R * ring * pow(fres, 1.5) * 1.2 * fillOn;
   col += lit * lineOn;
   col += (A + B) * weaveEdge * 0.55;
   float alpha = fillOn * bottom * cover;
-  col *= bottom * cover;
+  // Where the body has dissolved, only its sparkle is left, drifting into the dark.
+  vec3 left = stars * starDensity * 4.0 * dust * fillOn * cover;
+  col = col * bottom * cover + left;
 
   vec4 clip = uPV * viewMatrix * vec4(p, 1.0);
   gl_FragDepth = clamp((clip.z / clip.w) * 0.5 + 0.5, 0.0, 1.0);
@@ -414,6 +458,7 @@ ${COMMON}
 attribute vec4 aStrand;
 uniform sampler2D uGuides;
 uniform float uPoints;
+uniform float uHairGain;
 varying vec3 vCol;
 varying float vA;
 void main() {
@@ -428,6 +473,9 @@ void main() {
   float smax = 0.68 + 0.32 * hash11(seed * 17.3 + 4.1);
   float taper = 1.0 - 0.6 * smoothstep(0.55, 1.0, s / smax);
   pos += h3 * vec3(0.04, 0.012, 0.04) * (0.2 + 0.9 * s) * taper;
+  // A few fine flyaways lift off the lock in the middle of their length.
+  float fly = step(0.965, hash11(seed * 53.1));
+  pos += fly * (hash33(vec3(seed * 7.7, 3.1, seed * 2.3)) - 0.5) * vec3(0.16, 0.06, 0.12) * sin(3.14159 * s);
   pos += vec3(sin(s * 7.0 + seed * 21.0), 0.0, cos(s * 5.0 + seed * 13.0)) * 0.01 * s;
   float sw = s * s * uMotion;
   pos.x += sw * (0.04 * sin(uT * 0.55 + seed * 2.0 + pos.y * 1.4) + 0.012 * sin(uT * 1.35 + seed * 17.0));
@@ -444,13 +492,21 @@ void main() {
   vec3 c = hs > 0.9 ? B : (hs > 0.55 ? A : H);
   // Light gathers along the length of the hair, not at the roots: no hot spot on the crown.
   float sheen = 0.55 + 0.45 * smoothstep(0.08, 0.45, s);
-  float glint = 0.65 + 0.35 * sin(s * 16.0 - uT * uMotion * 0.6 * uPulse + seed * 50.0);
+  float glint = 0.7 + 0.3 * sin(s * 16.0 + seed * 50.0);
+  // Light travels down the strands, a little faster when NOVA thinks.
+  float travel = pow(0.5 + 0.5 * sin(s * 9.0 - uT * uMotion * (0.9 + 0.5 * uPulse) + seed * 6.2831), 10.0);
+  // Sheen: a soft highlight band where the hair rounds over the top of the head.
+  float band = exp(-pow((pos.y - 0.78) / 0.09, 2.0)) * (1.0 - smoothstep(0.15, 0.45, s));
   float rev = (uWeave - 0.3) / 0.62 * 1.4 - seed * 0.3;
   float shown = 1.0 - smoothstep(rev - 0.06, rev, s);
   float ends = 1.0 - smoothstep(smax - 0.14, smax, s);
-  float roots = smoothstep(0.0, 0.025, s);
-  vCol = c * sheen * (0.4 + 0.9 * hs * hs) * glint * uGlow * (1.0 + 0.35 * uAudio) * (1.0 + waveRing(pos));
-  vA = (0.036 + 0.04 * hs + 0.15 * step(0.94, hs)) * roots * ends * shown;
+  // The face stays clear: strands that would fall across it (in the head's own frame) fade out there.
+  vec3 hp = uHeadInv * (pos - PIVOT) + PIVOT;
+  float overFace = (1.0 - smoothstep(0.17, 0.26, abs(hp.x))) * smoothstep(0.0, 0.12, hp.y) * (1.0 - smoothstep(0.74, 0.84, hp.y)) * smoothstep(0.12, 0.25, hp.z);
+  ends *= 1.0 - overFace;
+  float roots = smoothstep(0.0, 0.025, s) * smoothstep(-1.25, -0.7, pos.y);
+  vCol = c * sheen * (0.4 + 0.9 * hs * hs) * (glint + 1.4 * travel + 0.9 * band) * (1.0 - 0.45 * fly) * uGlow * (1.0 + 0.35 * uAudio) * (1.0 + waveRing(pos));
+  vA = (0.036 + 0.04 * hs + 0.15 * step(0.94, hs)) * roots * ends * shown * uHairGain;
   gl_Position = projectionMatrix * viewMatrix * vec4(pos, 1.0);
 }
 `;
