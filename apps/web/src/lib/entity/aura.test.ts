@@ -1,200 +1,271 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
-  auraField,
-  auraViewHeight,
-  buildHairGuides,
-  CHIN,
-  CROWN,
-  headField,
-  SDF_GLSL,
-  weaveEase,
-  weaveFront,
-} from "./aura-body.ts";
-import { BUDGET, GAZE, gpuTier, headRotation, LOOKS, TIMING } from "./aura.ts";
-import { BODY_FRAG, HAIR_VERT } from "./aura-shaders.ts";
+  ARRIVAL_GLSL,
+  arrival,
+  AURA_ASSETS,
+  AURA_DATA,
+  auraFraming,
+  BIRTH,
+  f,
+  FACE,
+} from "./aura-data.ts";
+import {
+  PARTICLE_KIND,
+  sampleParticles,
+  type Pixels,
+} from "./aura-particles.ts";
+import {
+  BLOOM_REACH,
+  bloomFront,
+  BUDGET,
+  createAura,
+  GAZE,
+  gpuTier,
+  LOOKS,
+  spring,
+  STRIPES,
+  TIMING,
+} from "./aura.ts";
+import { PLATE_FRAG, POINTS_VERT } from "./aura-shaders.ts";
 
-/** Half width of the figure at height y, scanning in from x = `from` at depth z. */
-function halfWidth(y: number, z = -0.05, from = 3) {
-  let x = from;
-  while (x > 0 && auraField(x, y, z) > 0) x -= 0.002;
-  return x;
-}
+const STATIC = path.resolve(import.meta.dirname, "../../../static");
 
-describe("aura body", () => {
-  it("has adult female proportions: head, a neck half its height, gentle shoulders", () => {
-    // One head is one unit: chin at 0, crown at 1.
-    expect(CROWN - CHIN).toBeCloseTo(1, 1);
-    expect(auraField(0, 0.5, 0)).toBeLessThan(0);
-    expect(auraField(0, CROWN + 0.03, -0.05)).toBeGreaterThan(0);
-    // The head is about 1.3-1.45 times as tall as it is wide.
-    const headW = 2 * halfWidth(0.6, -0.05, 1);
-    expect((CROWN - CHIN) / headW).toBeGreaterThan(1.3);
-    expect((CROWN - CHIN) / headW).toBeLessThan(1.5);
-    // A slender but real neck from under the jaw to the notch, about half a head long.
-    expect(auraField(0, -0.12, -0.04)).toBeLessThan(0);
-    expect(auraField(0, CHIN - 0.12, 0.3)).toBeGreaterThan(0);
-    const neckW = 2 * halfWidth(-0.12, -0.04, 1);
-    expect(neckW / headW).toBeGreaterThan(0.38);
-    expect(neckW / headW).toBeLessThan(0.6);
-    // Shoulders about two and a half head widths; the line from neck to shoulder slopes down.
-    const shoulders = 2 * halfWidth(-0.72);
-    expect(shoulders / headW).toBeGreaterThan(2.1);
-    expect(shoulders / headW).toBeLessThan(2.8);
-    const top = (x: number) => {
-      let y = 0;
-      while (auraField(x, y, -0.08) > 0) y -= 0.002;
-      return y;
+describe("aura artwork", () => {
+  it("ships the approved picture in two sizes and its data atlas", () => {
+    for (const url of [AURA_ASSETS.hi, AURA_ASSETS.lo]) {
+      const buf = fs.readFileSync(path.join(STATIC, url));
+      expect(buf.toString("ascii", 0, 4)).toBe("RIFF");
+      expect(buf.toString("ascii", 8, 12)).toBe("WEBP");
+      // Compressed, not a raw dump: the large one stays well under a megabyte.
+      expect(buf.length).toBeLessThan(1_000_000);
+    }
+    const png = fs.readFileSync(path.join(STATIC, AURA_ASSETS.data));
+    expect(png.readUInt32BE(16)).toBe(AURA_DATA.width);
+    expect(png.readUInt32BE(20)).toBe(AURA_DATA.height * 3);
+    // RGB, no alpha: nothing for a browser to premultiply.
+    expect(png[25]).toBe(2);
+  });
+
+  it("is documented as generated with FLUX.1 schnell, Apache-2.0, owner-approved", () => {
+    const doc = fs.readFileSync(
+      path.resolve(
+        import.meta.dirname,
+        "../../../../../docs/third-party-assets.md",
+      ),
+      "utf8",
+    );
+    expect(doc).toMatch(/FLUX\.1 schnell/);
+    expect(doc).toMatch(/Apache-2\.0/);
+    expect(doc).toMatch(/aura-2560\.webp/);
+  });
+
+  it("knows where the head and body are in the picture", () => {
+    const { head, axis, torsoHalf } = AURA_DATA;
+    // Head and chest centred as in the artwork.
+    expect(Math.abs(axis - 0.5)).toBeLessThan(0.04);
+    expect(Math.abs(head.cx - axis)).toBeLessThan(0.01);
+    expect(head.top).toBeLessThan(head.cy);
+    expect(head.bottom).toBeGreaterThan(head.cy);
+    expect(torsoHalf).toBeGreaterThan(head.radius * 2.5);
+    expect(FACE.v).toBeGreaterThan(head.top);
+    expect(FACE.v).toBeLessThan(head.bottom);
+  });
+});
+
+describe("aura framing", () => {
+  it("shows a 16:9 screen the artwork exactly as it is", () => {
+    expect(auraFraming(1920, 1080)).toEqual({ x: 0, y: 0, w: 1920, h: 1080 });
+    expect(auraFraming(2560, 1440)).toEqual({ x: 0, y: 0, w: 2560, h: 1440 });
+  });
+
+  it("covers wide and tall desktop windows with the figure kept in view", () => {
+    for (const [W, H] of [
+      [2560, 1080],
+      [1440, 900],
+      [1280, 1024],
+    ] as const) {
+      const fr = auraFraming(W, H);
+      expect(fr.x).toBeLessThanOrEqual(0);
+      expect(fr.y).toBeLessThanOrEqual(0);
+      expect(fr.x + fr.w).toBeGreaterThanOrEqual(W - 1e-6);
+      expect(fr.y + fr.h).toBeGreaterThanOrEqual(H - 1e-6);
+      const faceY = fr.y + FACE.v * fr.h;
+      expect(faceY).toBeGreaterThan(0.2 * H);
+      expect(faceY).toBeLessThan(0.6 * H);
+      const shoulders = [
+        fr.x + (AURA_DATA.axis - AURA_DATA.torsoHalf) * fr.w,
+        fr.x + (AURA_DATA.axis + AURA_DATA.torsoHalf) * fr.w,
+      ];
+      expect(shoulders[0]).toBeGreaterThanOrEqual(0);
+      expect(shoulders[1]).toBeLessThanOrEqual(W);
+    }
+  });
+
+  it("crops a phone (390x844) to the bust: head and both shoulders in the width", () => {
+    const W = 390;
+    const H = 844;
+    const fr = auraFraming(W, H);
+    const left = fr.x + (AURA_DATA.axis - AURA_DATA.torsoHalf) * fr.w;
+    const right = fr.x + (AURA_DATA.axis + AURA_DATA.torsoHalf) * fr.w;
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(right).toBeLessThanOrEqual(W);
+    // Zoomed in: the shoulders fill most of the width.
+    expect((right - left) / W).toBeGreaterThan(0.8);
+    const top = fr.y + AURA_DATA.head.top * fr.h;
+    expect(top).toBeGreaterThan(0);
+    expect(fr.y + FACE.v * fr.h).toBeLessThan(H * 0.45);
+  });
+});
+
+describe("aura birth", () => {
+  it("settles bottom to top, the centre ahead of the sides, and the face last", () => {
+    expect(arrival(AURA_DATA.axis, 0.95, 0)).toBeLessThan(
+      arrival(AURA_DATA.axis, 0.5, 0),
+    );
+    expect(arrival(AURA_DATA.axis, 0.7, 0)).toBeLessThan(arrival(0.3, 0.7, 0));
+    let latestBody = 0;
+    // Everything the particles build (the figure's zone: hair, head, shoulders).
+    for (let v = 0.05; v <= 1; v += 0.05)
+      for (let u = AURA_DATA.axis - 0.27; u <= AURA_DATA.axis + 0.27; u += 0.03)
+        latestBody = Math.max(latestBody, arrival(u, v, 0, 1));
+    let earliestFace = Infinity;
+    for (let v = AURA_DATA.head.top; v <= AURA_DATA.head.bottom; v += 0.02)
+      earliestFace = Math.min(earliestFace, arrival(FACE.u, v, 1, 0));
+    expect(earliestFace).toBeGreaterThan(latestBody - 0.25);
+    expect(arrival(FACE.u, FACE.v, 1, 0.5)).toBeGreaterThan(latestBody);
+  });
+
+  it("ends with one shockwave, then the rest frame", () => {
+    const lastLanding = arrival(FACE.u, AURA_DATA.head.top, 1, 1);
+    expect(BIRTH.ringAt).toBeGreaterThanOrEqual(lastLanding - 0.1);
+    expect(BIRTH.ringAt + BIRTH.ringTime).toBeLessThanOrEqual(BIRTH.total);
+    expect(lastLanding + BIRTH.settle).toBeLessThanOrEqual(BIRTH.total);
+    expect(TIMING.birth).toBe(BIRTH.total);
+  });
+
+  it("uses the same timing on the GPU", () => {
+    for (const n of [
+      BIRTH.lead,
+      BIRTH.spread,
+      BIRTH.arch,
+      BIRTH.faceAt,
+      BIRTH.flight,
+    ])
+      expect(ARRIVAL_GLSL).toContain(f(n));
+    expect(PLATE_FRAG).toContain("arrival(p, hp, 0.5)");
+    expect(PLATE_FRAG).toContain("float arRoom = ar - 0.25");
+    expect(POINTS_VERT).toContain("arrival(home, isHead, aSeed.w)");
+  });
+});
+
+describe("aura particles", () => {
+  /** A synthetic picture (grey) and atlas: the figure is a rectangle, the head a disc inside it. */
+  function synthetic() {
+    const iw = 640;
+    const ih = 360;
+    const image: Pixels = {
+      width: iw,
+      height: ih,
+      data: new Uint8Array(iw * ih * 4).fill(120),
     };
-    const slope = (Math.atan2(top(0.25) - top(0.6), 0.35) * 180) / Math.PI;
-    expect(slope).toBeGreaterThan(12);
-    expect(slope).toBeLessThan(35);
+    const tw = 96;
+    const th = 54;
+    const data = new Uint8Array(tw * th * 3 * 4);
+    for (let y = 0; y < th; y++)
+      for (let x = 0; x < tw; x++) {
+        const u = (x + 0.5) / tw;
+        const v = (y + 0.5) / th;
+        const inFig = u > 0.3 && u < 0.7 && v > 0.1;
+        const inHead = Math.hypot((u - 0.5) * 1.78, v - 0.3) < 0.12;
+        const set = (tile: number, r: number, g: number, b: number) => {
+          const o = ((tile * th + y) * tw + x) * 4;
+          data[o] = r;
+          data[o + 1] = g;
+          data[o + 2] = b;
+          data[o + 3] = 255;
+        };
+        set(0, inFig ? 255 : 0, inHead ? 255 : 0, 0);
+        set(1, 128, inHead ? 200 : 0, inFig ? 255 : 0);
+        set(2, 128, 128, 0);
+      }
+    return { image, atlas: { width: tw, height: th * 3, data } };
+  }
+
+  it("samples the lit figure to about the budget, coloured from the picture", () => {
+    const { image, atlas } = synthetic();
+    const p = sampleParticles(image, atlas, 20_000);
+    expect(p.count).toBeGreaterThan(16_000);
+    expect(p.count).toBeLessThan(24_000);
+    expect(p.home.length).toBe(p.count * 2);
+    let heads = 0;
+    for (let i = 0; i < p.count; i++) {
+      const u = p.home[i * 2]!;
+      const v = p.home[i * 2 + 1]!;
+      expect(u).toBeGreaterThan(0.29);
+      expect(u).toBeLessThan(0.71);
+      expect(v).toBeGreaterThan(0.09);
+      expect(p.color[i * 4]).toBe(120);
+      if (p.seed[i * 4 + 2] === PARTICLE_KIND.head) {
+        heads++;
+        // Head particles carry a depth for the turn.
+        expect(p.seed[i * 4 + 1]).toBeGreaterThan(50);
+      }
+    }
+    expect(heads).toBeGreaterThan(500);
   });
 
-  it("tapers from the rib cage to a defined waist and opens to the hips; the arms hang free", () => {
-    const ribs = halfWidth(-1.45, -0.04, 0.68);
-    const waist = halfWidth(-2.0, -0.02, 0.7);
-    const hips = halfWidth(-2.75, -0.02, 0.8);
-    expect(waist).toBeLessThan(ribs * 0.88);
-    expect(hips).toBeGreaterThan(waist * 1.3);
-    expect(auraField(0.62, -1.6, -0.07)).toBeGreaterThan(0);
-    // A natural bust: in front of the chest, never past the shoulders.
-    expect(auraField(0.26, -1.0, 0.28)).toBeLessThan(0);
-    expect(auraField(0.26, -1.0, 0.36)).toBeGreaterThan(0);
-  });
-
-  it("is a softly sculpted mask: closed eyes, nose, lips and chin in relief, no crease down the face", () => {
-    expect(headField(0, 0.37, 0.415)).toBeLessThan(0); // the tip of the nose
-    expect(headField(0.1, 0.37, 0.415)).toBeGreaterThan(0); // beside it, the cheek is further back
-    expect(headField(0, 0.03, 0.2)).toBeLessThan(0); // a defined chin
-    // No carved sockets: the surface at the eyes is no deeper than a smooth face would be.
-    let z = 0.6;
-    while (headField(0.115, 0.46, z) > 0) z -= 0.002;
-    expect(z).toBeGreaterThan(0.33);
-    // Closed lids: the eye area is a shallow hollow under the brow, never a socket.
-    let brow = 0.6;
-    while (headField(0.115, 0.56, brow) > 0) brow -= 0.002;
-    expect(brow - z).toBeLessThan(0.08);
-    // The upper lip has a Cupid's bow: fuller either side of the centre than at it.
-    let lipC = 0.5;
-    while (headField(0, 0.208, lipC) > 0) lipC -= 0.001;
-    let lipS = 0.5;
-    while (headField(0.03, 0.208, lipS) > 0) lipS -= 0.001;
-    expect(lipS).toBeGreaterThanOrEqual(lipC - 0.004);
-    // The mirror fold is smooth: the field has no kink at x = 0.
-    const e = 1e-3;
-    const left = headField(-e, 0.5, 0.35) - headField(0, 0.5, 0.35);
-    const right = headField(e, 0.5, 0.35) - headField(0, 0.5, 0.35);
-    expect(Math.abs(left - right)).toBeLessThan(1e-4);
-  });
-
-  it("is mirror symmetric and its GLSL twin has the same pieces", () => {
-    for (const [x, y, z] of [
-      [0.3, 0.5, 0.3],
-      [0.7, -0.7, 0],
-      [0.26, -1.0, 0.2],
-      [0.12, 0.45, 0.38],
-    ] as const)
-      expect(auraField(x, y, z)).toBeCloseTo(auraField(-x, y, z), 9);
-    for (const name of ["headSdf", "auraSdf", "PIVOT", "HEART", "FACE"])
-      expect(SDF_GLSL).toContain(name);
-    expect(BODY_FRAG).toContain("gl_FragDepth");
-    // No seam down the face any more.
-    expect(BODY_FRAG).not.toContain("onFace");
+  it("orders them so a smaller budget is still an even spread", () => {
+    const { image, atlas } = synthetic();
+    const p = sampleParticles(image, atlas, 20_000);
+    const n = Math.floor(p.count / 4);
+    const bins = new Array<number>(16).fill(0);
+    for (let i = 0; i < n; i++) {
+      const bx = Math.min(3, Math.floor(((p.home[i * 2]! - 0.3) / 0.4) * 4));
+      const by = Math.min(
+        3,
+        Math.floor(((p.home[i * 2 + 1]! - 0.1) / 0.9) * 4),
+      );
+      bins[by * 4 + bx]!++;
+    }
+    const mean = n / 16;
+    for (const b of bins) expect(Math.abs(b - mean) / mean).toBeLessThan(0.12);
   });
 });
 
-describe("aura hair", () => {
-  const g = buildHairGuides(12, 20);
-
-  it("sits on the skull, stays outside the body and falls past the shoulders", () => {
-    expect(g.data.length).toBe(g.count * g.points * 4);
-    expect(g.groups.at(-1)).toBe(g.count);
-    let lowest = Infinity;
-    for (let i = 0; i < g.count; i++) {
-      const root = i * g.points * 4;
-      const dh = headField(g.data[root]!, g.data[root + 1]!, g.data[root + 2]!);
-      expect(dh).toBeGreaterThan(-0.01);
-      expect(dh).toBeLessThan(0.2);
-      // Still on the skull a few points later: it lies on the head instead of floating off it.
-      const o = root + 2 * 4;
-      expect(
-        headField(g.data[o]!, g.data[o + 1]!, g.data[o + 2]!),
-      ).toBeLessThan(0.2);
-      for (let k = 0; k < g.points; k++) {
-        const q = root + k * 4;
-        const [x, y, z] = [g.data[q]!, g.data[q + 1]!, g.data[q + 2]!];
-        expect(Number.isFinite(x + y + z)).toBe(true);
-        expect(auraField(x, y, z)).toBeGreaterThan(-0.01);
-      }
-      lowest = Math.min(lowest, g.data[root + (g.points - 1) * 4 + 1]!);
-    }
-    expect(lowest).toBeLessThan(-0.9);
+describe("aura stripes", () => {
+  it("has easy-to-tune stripes: count, width with a clear gap, colour shares", () => {
+    expect(STRIPES.count).toBeGreaterThanOrEqual(12);
+    expect(STRIPES.headCount).toBeGreaterThanOrEqual(5);
+    expect(STRIPES.width).toBeGreaterThan(0.25);
+    expect(STRIPES.width).toBeLessThan(0.6);
+    // Neon made of light: a glow that keeps the gaps dark, a string of dots, a few star points, faint dust.
+    expect(STRIPES.halo).toBeGreaterThan(0);
+    expect(STRIPES.halo).toBeLessThan(0.6);
+    expect(STRIPES.dots.step).toBeGreaterThan(1);
+    expect(STRIPES.dots.step).toBeLessThan(8);
+    expect(STRIPES.stars).toBeGreaterThan(0);
+    expect(STRIPES.stars).toBeLessThan(0.2);
+    expect(STRIPES.dust).toBeLessThan(0.5);
+    expect(PLATE_FRAG).toContain("neonStripe(");
+    const m = STRIPES.mix;
+    expect(m.a + m.b + m.pink + m.cyan + m.peach).toBeCloseTo(1, 5);
+    // Mostly violet and magenta.
+    expect(m.a + m.b).toBeGreaterThan(0.6);
+    for (const c of Object.values(STRIPES.accents))
+      expect(c).toMatch(/^#[0-9a-f]{6}$/);
   });
 
-  it("has a soft side parting and locks both in front of and behind the shoulders", () => {
-    for (let i = 0; i < g.count; i++) {
-      const x = g.data[i * g.points * 4]!;
-      expect(x).toBeGreaterThan(0.03);
-      expect(x).toBeLessThan(0.25);
-    }
-    let inFront = 0;
-    let behind = 0;
-    for (let i = 0; i < g.count; i++) {
-      const tip = (i * g.points + g.points - 1) * 4;
-      if (g.data[tip + 2]! > 0.12) inFront++;
-      if (g.data[tip + 2]! < -0.1) behind++;
-    }
-    expect(inFront).toBeGreaterThan(0);
-    expect(behind).toBeGreaterThan(0);
-    expect(HAIR_VERT).toContain("texelFetch");
-  });
-
-  it("builds the full guide set quickly enough to never hold up the page", () => {
-    const t0 = performance.now();
-    const full = buildHairGuides();
-    const ms = performance.now() - t0;
-    expect(full.count).toBe(288);
-    // Generous: the suite runs files in parallel on a busy machine; alone it takes a few tens of ms.
-    expect(ms).toBeLessThan(1500);
+  it("adds no facial features: the face stays blank", () => {
+    expect(PLATE_FRAG).not.toMatch(
+      /\b(eyes?|mouth|lips?|nose|brows?|pupils?)\b/i,
+    );
   });
 });
 
-describe("aura motion", () => {
-  it("ends the weave and the bloom exactly at rest (no pop)", () => {
-    for (const ease of [weaveEase, weaveFront]) {
-      expect(ease(0)).toBe(0);
-      expect(ease(1)).toBe(1);
-      expect(ease(2)).toBe(1);
-      let last = 0;
-      for (let x = 0; x <= 1; x += 0.05) {
-        expect(ease(x)).toBeGreaterThanOrEqual(last);
-        last = ease(x);
-      }
-    }
-    expect(TIMING.bloom).toBeCloseTo(1, 1);
-    expect(TIMING.weave).toBeGreaterThan(2);
-  });
-
-  it("turns the head within limits, as a pure rotation", () => {
-    const id = headRotation(0, 0, 0);
-    expect(id).toEqual([1, 0, 0, 0, 1, 0, 0, 0, 1]);
-    const r = headRotation(GAZE.yaw, GAZE.pitch, 0.04);
-    // Orthonormal rows.
-    for (let i = 0; i < 3; i++)
-      for (let j = 0; j < 3; j++) {
-        const dot =
-          r[i * 3]! * r[j * 3]! +
-          r[i * 3 + 1]! * r[j * 3 + 1]! +
-          r[i * 3 + 2]! * r[j * 3 + 2]!;
-        expect(dot).toBeCloseTo(i === j ? 1 : 0, 9);
-      }
-    // Pointer to the right: the face (+z) turns toward +x. Positive pitch looks down.
-    expect(headRotation(0.3, 0, 0)[2]).toBeGreaterThan(0);
-    expect(headRotation(0, 0.1, 0)[5]).toBeGreaterThan(0);
-    expect(GAZE.yaw).toBeLessThan(0.5);
-  });
-
-  it("has a look for every state and the alert", () => {
+describe("aura moods and motion", () => {
+  it("has a look for every state and the alert; at rest the hair keeps the artwork's colour", () => {
     for (const s of [
       "ready",
       "listening",
@@ -203,15 +274,48 @@ describe("aura motion", () => {
       "speaking",
       "alert",
     ] as const) {
-      expect(LOOKS[s].a).toMatch(/^#[0-9a-f]{6}$/);
+      for (const c of [LOOKS[s].a, LOOKS[s].b, LOOKS[s].r, LOOKS[s].h])
+        expect(c).toMatch(/^#[0-9a-f]{6}$/);
       expect(LOOKS[s].glow).toBeGreaterThan(0.8);
       expect(LOOKS[s].glow).toBeLessThan(1.4);
+      expect(LOOKS[s].tint).toBeGreaterThanOrEqual(0);
+      expect(LOOKS[s].tint).toBeLessThanOrEqual(1);
     }
+    expect(LOOKS.ready.tint).toBe(0);
+    expect(new Set(Object.values(LOOKS).map((l) => l.a)).size).toBe(6);
+  });
+
+  it("blooms from the face in about a second and ends exactly at rest", () => {
+    expect(TIMING.bloom).toBeCloseTo(1, 1);
+    expect(bloomFront(0)).toBe(0);
+    expect(bloomFront(1)).toBe(1);
+    expect(bloomFront(2)).toBe(1);
+    let last = 0;
+    for (let x = 0; x <= 1; x += 0.05) {
+      expect(bloomFront(x)).toBeGreaterThanOrEqual(last);
+      last = bloomFront(x);
+    }
+    // At the end the radius has passed the farthest corner of the picture.
+    const corner = Math.hypot(FACE.u * AURA_DATA.aspect, 1 - FACE.v);
+    expect(BLOOM_REACH).toBeGreaterThan(corner);
+  });
+
+  it("turns the head on a spring that settles without overshoot, within limits", () => {
+    const s = { x: 0, v: 0 };
+    let max = 0;
+    for (let i = 0; i < 300; i++) {
+      spring(s, GAZE.yaw, 1 / 60);
+      max = Math.max(max, s.x);
+    }
+    expect(s.x).toBeCloseTo(GAZE.yaw, 3);
+    expect(max).toBeLessThanOrEqual(GAZE.yaw + 1e-6);
+    expect(GAZE.yaw).toBeLessThan(0.4);
+    expect(GAZE.pitch).toBeLessThan(GAZE.yaw);
   });
 });
 
-describe("aura quality and layout", () => {
-  it("budgets strands and motes per GPU class", () => {
+describe("aura quality", () => {
+  it("budgets particles and resolution per GPU class", () => {
     expect(
       gpuTier(
         "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device), SwiftShader driver)",
@@ -223,17 +327,16 @@ describe("aura quality and layout", () => {
     );
     expect(gpuTier("ANGLE (AMD, AMD Radeon(TM) Graphics)", 1920)).toBe("mid");
     expect(gpuTier("Apple GPU", 390)).toBe("low");
-    expect(BUDGET.low.strands).toBeLessThan(BUDGET.mid.strands);
-    expect(BUDGET.mid.strands).toBeLessThan(BUDGET.high.strands);
+    expect(BUDGET.high.particles).toBeGreaterThanOrEqual(150_000);
+    expect(BUDGET.high.particles).toBeLessThanOrEqual(300_000);
+    expect(BUDGET.low.particles).toBeLessThan(BUDGET.mid.particles);
+    expect(BUDGET.mid.particles).toBeLessThan(BUDGET.high.particles);
+    expect(BUDGET.low.image).toBe("lo");
     expect(BUDGET.mid.dpr).toBeLessThanOrEqual(1.5);
   });
 
-  it("frames a bust portrait: head about 43% of a 16:9 height, shoulders kept on a phone", () => {
-    const vh = auraViewHeight(16 / 9);
-    expect((CROWN - CHIN) / vh).toBeGreaterThan(0.4);
-    expect((CROWN - CHIN) / vh).toBeLessThan(0.46);
-    const phone = 390 / 844;
-    expect(auraViewHeight(phone) * phone).toBeGreaterThan(2 * halfWidth(-0.72));
+  it("builds nothing outside a browser", async () => {
+    expect(await createAura({} as unknown as HTMLCanvasElement)).toBeNull();
   });
 });
 

@@ -1,34 +1,30 @@
 import type * as ThreeModule from "three";
 import type { UiState } from "#lib/stores/chat.svelte.ts";
+import { AURA_ASSETS, auraFraming, BIRTH, FACE } from "./aura-data.ts";
 import {
-  auraCameraY,
-  auraViewHeight,
-  buildHairGuides,
-  HEART,
-  REST_POSE,
-  weaveFront,
-  type HairGuides,
-} from "./aura-body.ts";
+  loadPixels,
+  sampleParticles,
+  type AuraParticles,
+} from "./aura-particles.ts";
 import {
-  BG_FRAG,
-  BG_VERT,
-  BODY_FRAG,
-  BODY_VERT,
-  HAIR_FRAG,
-  HAIR_VERT,
-  MOTE_FRAG,
-  MOTE_VERT,
-  POST_FRAG,
-  POST_VERT,
+  PLATE_FRAG,
+  PLATE_VERT,
+  POINTS_FRAG,
+  POINTS_VERT,
 } from "./aura-shaders.ts";
 
+export { BREATH, LIGHTS, STRIPES } from "./aura-shaders.ts";
+
 /**
- * AURA on the GPU: an elegant upper body of dark glass, drawn with neon strokes that follow its form, long hair
- * of fine light strands, a starry interior, in a room of violet smoke and slow ribbons.
+ * AURA: the owner's artwork (a blank-faced figure of light, static/aura) brought to life on the GPU. The picture
+ * is shown as it is, with neon stripes laid over the head and body that follow its rounded form; it is also
+ * sampled into particles that fly in from a glow and settle into it at birth. Moods bloom out from the face; the
+ * head turns toward the pointer as a depth illusion; the chest breathes. At rest, facing front, the frame is the
+ * artwork plus its stripes.
  *
- * Same contract as the Gestalte (entity.ts drives both): a WebGL2 canvas under the entity's 2D canvas, built
- * lazily, `null` when WebGL2 or three.js is not available (entity.ts then falls back to the Canvas2D presence).
- * Nothing here waits on chat or audio: the frame only reads the values it is handed.
+ * Same contract as the Gestalte (entity.ts drives both): a canvas under the entity's 2D canvas, built lazily.
+ * Without WebGL2 it is the still picture with a soft CSS glow. Nothing here waits on chat or audio: a frame only
+ * reads the values it is handed.
  */
 
 type Three = typeof ThreeModule;
@@ -36,13 +32,13 @@ type Three = typeof ThreeModule;
 export interface AuraFrame {
   t: number;
   dt: number;
-  /** 0 = orb, 1 = figure: the weave runs while this rises and unravels with it when it falls. */
+  /** 0 = orb, 1 = figure: the birth runs while this rises and runs back when it falls. */
   form: number;
   state: UiState;
   alert: boolean;
   /** Smoothed voice level 0..1. */
   audio: number;
-  /** Smoothed pointer, -1..1. */
+  /** Smoothed pointer, -1..1 (y down). */
   gazeX: number;
   gazeY: number;
   /** Top of the visible reply in CSS pixels (far below the screen when there is none). */
@@ -53,7 +49,7 @@ export interface AuraFrame {
 }
 
 export interface Aura {
-  readonly canvas: HTMLCanvasElement;
+  readonly canvas: HTMLElement;
   render(f: AuraFrame): void;
   /** Hide without disposing (the orb is showing). */
   hide(): void;
@@ -62,111 +58,120 @@ export interface Aura {
 }
 
 export interface AuraStats {
+  mode: "webgl" | "static";
   tier: GpuTier;
   scale: number;
   pixels: number;
-  strands: number;
-  motes: number;
+  /** Particles drawn now, of those sampled. */
+  particles: number;
+  sampled: number;
+  /** Particle diameter on screen, CSS px. */
+  pointPx: number;
   /** Smoothed interval between rendered frames, ms. */
   frameMs: number;
 }
 
 export type GpuTier = "low" | "mid" | "high";
 
-/** Colours per look, as sRGB hex; converted to linear once. */
-interface Look {
-  /** Main stroke colour. */
+/** Colours per mood, as sRGB hex; converted to linear once. */
+export interface Look {
+  /** Main stripe colour (most stripes). */
   a: string;
-  /** Accent strokes (the warm ones). */
+  /** Second stripe colour. */
   b: string;
-  /** Rim light. */
+  /** Rim light and the bloom's edge. */
   r: string;
-  /** Face light. */
-  f: string;
-  /** Hair. */
+  /** Hair tint. */
   h: string;
-  /** Overall stroke and rim intensity. */
+  /** How far the hair takes the tint, 0 = the artwork's own colour. */
+  tint: number;
+  /** How much of the accent colours (pink, cyan, peach) the stripes keep. */
+  accent: number;
+  /** Stripe and rim intensity. */
   glow: number;
-  /** Speed of the light travelling along the strokes. */
+  /** Speed of the light travelling along the stripes. */
   pulse: number;
 }
 
 export const LOOKS: Record<UiState | "alert", Look> = {
+  // Idle: the artwork's own violet and magenta, accents of pink, cyan and peach.
   ready: {
-    a: "#b955ff",
-    b: "#ffb27a",
-    r: "#c99bff",
-    f: "#d9b8ff",
-    h: "#a85cff",
+    a: "#9a5cff",
+    b: "#e050f0",
+    r: "#c8a0ff",
+    h: "#b070ff",
+    tint: 0,
+    accent: 1,
+    glow: 1,
+    pulse: 0.35,
+  },
+  // Listening: cooler, toward periwinkle and ice blue.
+  listening: {
+    a: "#6f7bff",
+    b: "#52c2ff",
+    r: "#a8c8ff",
+    h: "#7f8cff",
+    tint: 0.38,
+    accent: 0.8,
     glow: 1.12,
     pulse: 0.6,
   },
-  listening: {
-    a: "#8a72ff",
-    b: "#9fc8ff",
-    r: "#a7a8ff",
-    f: "#d8e2ff",
-    h: "#8f7cff",
-    glow: 1.16,
+  // Thinking: orchid and hot pink, the light running faster.
+  thinking: {
+    a: "#d25cff",
+    b: "#ff4fb8",
+    r: "#ffa8f0",
+    h: "#e05ad8",
+    tint: 0.36,
+    accent: 0.85,
+    glow: 1.1,
+    pulse: 1.5,
+  },
+  // At work: violet with warm amber-peach.
+  executing: {
+    a: "#b45cff",
+    b: "#ffa86a",
+    r: "#ffc8a0",
+    h: "#f08ad0",
+    tint: 0.3,
+    accent: 1,
+    glow: 1.12,
+    pulse: 1.9,
+  },
+  // Speaking: warm pink; the brightness follows the voice.
+  speaking: {
+    a: "#ff5ccf",
+    b: "#c45cff",
+    r: "#ffb0e8",
+    h: "#f070e0",
+    tint: 0.3,
+    accent: 1,
+    glow: 1,
     pulse: 0.9,
   },
-  thinking: {
-    a: "#e45cf0",
-    b: "#ffc06b",
-    r: "#e69cff",
-    f: "#ffd0f4",
-    h: "#c55cf5",
-    glow: 1.12,
-    pulse: 2.4,
-  },
-  executing: {
-    a: "#d26cff",
-    b: "#ffcf73",
-    r: "#e0a8ff",
-    f: "#ffe0b8",
-    h: "#b866ff",
-    glow: 1.1,
-    pulse: 2,
-  },
-  speaking: {
-    a: "#e05cd0",
-    b: "#ffc49a",
-    r: "#d68ad6",
-    f: "#f2c4e2",
-    h: "#c066e6",
-    glow: 1.0,
-    pulse: 1.2,
-  },
   alert: {
-    a: "#ff4a6a",
-    b: "#ffa070",
+    a: "#ff3d6e",
+    b: "#ff7a5c",
     r: "#ff8a9a",
-    f: "#ffd0d0",
-    h: "#ff5a8a",
-    glow: 1.15,
-    pulse: 1.6,
+    h: "#ff4a78",
+    tint: 0.6,
+    accent: 0.25,
+    glow: 1.2,
+    pulse: 1.3,
   },
 };
 
-/** The room. */
-export const ROOM = {
-  bg0: "#07040e",
-  bg1: "#030106",
-  smoke: "#1e0f36",
-  ribbon: "#7f62b8",
-  star: "#d8ccf4",
-  aura: "#211040",
-  clear: "#05030b",
-} as const;
+/** The room around the picture where it does not reach (phones): the artwork's own darkness. */
+export const ROOM = "#040113";
 
-/** Strand, mote and resolution budgets per GPU class. */
+/** Particle and resolution budgets per GPU class. */
 export const BUDGET: Record<
   GpuTier,
-  { strands: number; motes: number; dpr: number }
+  { particles: number; dpr: number; image: "hi" | "lo" }
 > = {
-  low: { strands: 2200, motes: 260, dpr: 1 },
-  mid: { strands: 5200, motes: 620, dpr: 1.5 },
-  high: { strands: 8400, motes: 900, dpr: 2 },
+  low: { particles: 70_000, dpr: 1, image: "lo" },
+  mid: { particles: 170_000, dpr: 1.5, image: "hi" },
+  high: { particles: 280_000, dpr: 2, image: "hi" },
 };
 
 /** Guess the GPU class from the renderer string; software renderers and old integrated parts get the low budget. */
@@ -183,7 +188,26 @@ export function gpuTier(renderer: string, width: number): GpuTier {
   return "mid";
 }
 
-let cachedHair: HairGuides | null = null;
+/** Head turn limits toward the pointer, radians. */
+export const GAZE = { yaw: 0.3, pitch: 0.12 } as const;
+
+/** Birth length, and how long a mood takes to bloom out from the face, seconds. */
+export const TIMING = { birth: BIRTH.total, bloom: 1.0 } as const;
+
+/** Ease of the bloom's radius: it gathers, spreads over the body, and settles as it reaches the edges. */
+export function bloomFront(p: number): number {
+  const x = Math.max(0, Math.min(1, p));
+  return 0.5 - 0.5 * Math.cos(Math.PI * x);
+}
+
+/** The bloom has covered the whole frame (from the face past the farthest corner) when its radius reaches this. */
+export const BLOOM_REACH = 1.3;
+
+/** Particle radius in grid cells (the fragment shader normalises its weight for this). */
+const KERNEL = 2;
+
+/** Dev only: which layers to show, to compare the particles and the artwork. */
+export type AuraView = "composed" | "artwork" | "particles";
 
 function webgl2Available(): boolean {
   try {
@@ -197,79 +221,85 @@ function webgl2Available(): boolean {
   }
 }
 
-async function loadThree() {
-  const [three, ec, rp, ub, op, sp] = await Promise.all([
-    import("three"),
-    import("three/examples/jsm/postprocessing/EffectComposer.js"),
-    import("three/examples/jsm/postprocessing/RenderPass.js"),
-    import("three/examples/jsm/postprocessing/UnrealBloomPass.js"),
-    import("three/examples/jsm/postprocessing/OutputPass.js"),
-    import("three/examples/jsm/postprocessing/ShaderPass.js"),
-  ]);
-  return {
-    THREE: three as Three,
-    EffectComposer: ec.EffectComposer,
-    RenderPass: rp.RenderPass,
-    UnrealBloomPass: ub.UnrealBloomPass,
-    OutputPass: op.OutputPass,
-    ShaderPass: sp.ShaderPass,
-  };
+async function bitmap(url: string, raw: boolean): Promise<ImageBitmap> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  // Decoded off the main thread. Data stays exactly as stored; the picture is plain sRGB.
+  return createImageBitmap(await res.blob(), {
+    colorSpaceConversion: raw ? "none" : "default",
+    premultiplyAlpha: "none",
+  });
 }
 
-/** Row-major rotation, yaw (y) · pitch (x) · roll (z). */
-export function headRotation(
-  yaw: number,
-  pitch: number,
-  roll: number,
-): number[] {
-  const cy = Math.cos(yaw);
-  const sy = Math.sin(yaw);
-  const cp = Math.cos(pitch);
-  const sp = Math.sin(pitch);
-  const cr = Math.cos(roll);
-  const sr = Math.sin(roll);
-  // Ry
-  const ry = [cy, 0, sy, 0, 1, 0, -sy, 0, cy];
-  // Rx: positive pitch turns the face down.
-  const rx = [1, 0, 0, 0, cp, sp, 0, -sp, cp];
-  const rz = [cr, -sr, 0, sr, cr, 0, 0, 0, 1];
-  const mul = (a: number[], b: number[]) => {
-    const o = new Array<number>(9).fill(0);
-    for (let i = 0; i < 3; i++)
-      for (let j = 0; j < 3; j++)
-        for (let k = 0; k < 3; k++)
-          o[i * 3 + j]! += a[i * 3 + k]! * b[k * 3 + j]!;
-    return o;
-  };
-  return mul(mul(ry, rx), rz);
+/** Sample the artwork into particles in a worker (on the page if workers are unavailable). */
+function loadParticles(image: string, count: number): Promise<AuraParticles> {
+  const local = async () =>
+    sampleParticles(
+      await loadPixels(image),
+      await loadPixels(AURA_ASSETS.data),
+      count,
+    );
+  return new Promise<AuraParticles>((resolve, reject) => {
+    try {
+      const w = new Worker(new URL("./aura.worker.ts", import.meta.url), {
+        type: "module",
+      });
+      w.onmessage = (e: MessageEvent<AuraParticles | { error: string }>) => {
+        w.terminate();
+        if ("error" in e.data) local().then(resolve, reject);
+        else resolve(e.data);
+      };
+      w.onerror = () => {
+        w.terminate();
+        local().then(resolve, reject);
+      };
+      w.postMessage({ image, data: AURA_ASSETS.data, count });
+    } catch {
+      local().then(resolve, reject);
+    }
+  });
 }
 
-/** Head turn limits toward the pointer, radians. */
-export const GAZE = { yaw: 0.34, pitch: 0.13 } as const;
-
-/** Duration of the weave on mount, and of the state bloom spreading from the face, seconds. */
-export const TIMING = { weave: 3.2, bloom: 1.0 } as const;
+/** Critically damped spring: glides toward the target, keeps its velocity through a retarget, never overshoots. */
+export function spring(
+  s: { x: number; v: number },
+  target: number,
+  dt: number,
+  period = 1.4,
+): void {
+  const w = (2 * Math.PI) / period;
+  const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
+  const h = Math.min(dt, 0.1) / steps;
+  for (let i = 0; i < steps; i++) {
+    s.v += (w * w * (target - s.x) - 2 * w * s.v) * h;
+    s.x += s.v * h;
+  }
+}
 
 export async function createAura(
   under: HTMLCanvasElement,
-  options: { tier?: GpuTier } = {},
+  options: { tier?: GpuTier; forceStatic?: boolean } = {},
 ): Promise<Aura | null> {
-  if (typeof document === "undefined" || !webgl2Available()) return null;
-  let mods: Awaited<ReturnType<typeof loadThree>>;
+  if (typeof document === "undefined") return null;
+  if (options.forceStatic || !webgl2Available()) return createStaticAura(under);
+  let THREE: Three;
   try {
-    mods = await loadThree();
+    THREE = (await import("three")) as Three;
   } catch {
-    return null;
+    return createStaticAura(under);
   }
-  const {
-    THREE,
-    EffectComposer,
-    RenderPass,
-    UnrealBloomPass,
-    OutputPass,
-    ShaderPass,
-  } = mods;
+  try {
+    return await createGlAura(THREE, under, options.tier);
+  } catch {
+    return createStaticAura(under);
+  }
+}
 
+async function createGlAura(
+  THREE: Three,
+  under: HTMLCanvasElement,
+  forcedTier: GpuTier | undefined,
+): Promise<Aura> {
   const canvas = document.createElement("canvas");
   canvas.className = "entity-gl entity-aura";
   canvas.setAttribute("aria-hidden", "true");
@@ -281,22 +311,16 @@ export async function createAura(
     display: "none",
     pointerEvents: "none",
   } satisfies Partial<CSSStyleDeclaration>);
-  let renderer: ThreeModule.WebGLRenderer;
-  try {
-    renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: false,
-      alpha: false,
-      powerPreference: "high-performance",
-      stencil: false,
-    });
-  } catch {
-    return null;
-  }
-  under.before(canvas);
-  renderer.setClearColor(ROOM.clear, 1);
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: false,
+    alpha: false,
+    depth: false,
+    stencil: false,
+    powerPreference: "high-performance",
+  });
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.NoToneMapping;
 
   let rendererName = "";
   try {
@@ -308,264 +332,187 @@ export async function createAura(
   } catch {
     /* unknown GPU: mid budget */
   }
-  const tier = options.tier ?? gpuTier(rendererName, window.innerWidth);
+  const tier = forcedTier ?? gpuTier(rendererName, window.innerWidth);
   const budget = BUDGET[tier];
+  const wide =
+    window.innerWidth * Math.min(window.devicePixelRatio || 1, budget.dpr) >
+    1400;
+  const imageUrl =
+    budget.image === "hi" && wide ? AURA_ASSETS.hi : AURA_ASSETS.lo;
 
-  const col = (hex: string) => new THREE.Color(hex);
-  const vec = (hex: string) => {
-    const c = col(hex);
+  const particlesPromise = loadParticles(imageUrl, budget.particles).catch(
+    () => null,
+  );
+  let imageBmp: ImageBitmap;
+  let dataBmp: ImageBitmap;
+  try {
+    [imageBmp, dataBmp] = await Promise.all([
+      bitmap(imageUrl, false),
+      bitmap(AURA_ASSETS.data, true),
+    ]);
+  } catch (err) {
+    renderer.dispose();
+    throw err;
+  }
+  under.before(canvas);
+
+  const imageTex = new THREE.Texture(imageBmp);
+  imageTex.colorSpace = THREE.SRGBColorSpace;
+  imageTex.flipY = false;
+  imageTex.generateMipmaps = true;
+  imageTex.minFilter = THREE.LinearMipmapLinearFilter;
+  imageTex.magFilter = THREE.LinearFilter;
+  imageTex.wrapS = imageTex.wrapT = THREE.ClampToEdgeWrapping;
+  imageTex.anisotropy = 4;
+  imageTex.needsUpdate = true;
+  const dataTex = new THREE.Texture(dataBmp);
+  dataTex.colorSpace = THREE.NoColorSpace;
+  dataTex.flipY = false;
+  dataTex.generateMipmaps = false;
+  dataTex.minFilter = THREE.LinearFilter;
+  dataTex.magFilter = THREE.LinearFilter;
+  dataTex.wrapS = dataTex.wrapT = THREE.ClampToEdgeWrapping;
+  dataTex.needsUpdate = true;
+
+  const lin = (hex: string) => {
+    const c = new THREE.Color(hex);
     return new THREE.Vector3(c.r, c.g, c.b);
   };
-  const lin = Object.fromEntries(
+  type Key = UiState | "alert";
+  const looks = Object.fromEntries(
     Object.entries(LOOKS).map(([k, l]) => [
       k,
-      {
-        a: vec(l.a),
-        b: vec(l.b),
-        r: vec(l.r),
-        f: vec(l.f),
-        h: vec(l.h),
-        glow: l.glow,
-        pulse: l.pulse,
-      },
+      { ...l, A: lin(l.a), B: lin(l.b), R: lin(l.r), H: lin(l.h) },
     ]),
   ) as Record<
-    UiState | "alert",
-    {
-      a: ThreeModule.Vector3;
-      b: ThreeModule.Vector3;
-      r: ThreeModule.Vector3;
-      f: ThreeModule.Vector3;
-      h: ThreeModule.Vector3;
-      glow: number;
-      pulse: number;
+    Key,
+    Look & {
+      A: ThreeModule.Vector3;
+      B: ThreeModule.Vector3;
+      R: ThreeModule.Vector3;
+      H: ThreeModule.Vector3;
     }
   >;
+  const ready = looks.ready;
+  const room = new THREE.Color(ROOM);
 
   const U = {
+    uImage: { value: imageTex },
+    uData: { value: dataTex },
+    uFrame: { value: new THREE.Vector4(0, 0, 1, 1) },
+    uFade: { value: new THREE.Vector4(1e-4, 1e-4, 1e-4, 1e-4) },
+    uRes: { value: new THREE.Vector2(1, 1) },
     uT: { value: 0 },
     uMotion: { value: 1 },
-    uWeave: { value: 0 },
-    uWaveR: { value: 100 },
-    uWaveEdge: { value: 0 },
-    uAudio: { value: 0 },
-    uPulse: { value: 0.6 },
-    uGlow: { value: 1 },
-    uA0: { value: lin.ready.a.clone() },
-    uA1: { value: lin.ready.a.clone() },
-    uB0: { value: lin.ready.b.clone() },
-    uB1: { value: lin.ready.b.clone() },
-    uR0: { value: lin.ready.r.clone() },
-    uR1: { value: lin.ready.r.clone() },
-    uF0: { value: lin.ready.f.clone() },
-    uF1: { value: lin.ready.f.clone() },
-    uH0: { value: lin.ready.h.clone() },
-    uH1: { value: lin.ready.h.clone() },
-    uHead: { value: new THREE.Matrix3() },
-    uHeadInv: { value: new THREE.Matrix3() },
+    uTurn: { value: new THREE.Vector2() },
     uBreath: { value: 0 },
-    uPV: { value: new THREE.Matrix4() },
-    uPixAngle: { value: 0.001 },
-    uKey: { value: new THREE.Vector3(-0.45, 0.65, 0.75) },
+    uTau: { value: 0 },
+    uRoom: { value: new THREE.Vector3(room.r, room.g, room.b) },
+    uA0: { value: ready.A.clone() },
+    uA1: { value: ready.A.clone() },
+    uB0: { value: ready.B.clone() },
+    uB1: { value: ready.B.clone() },
+    uR0: { value: ready.R.clone() },
+    uR1: { value: ready.R.clone() },
+    uH0: { value: ready.H.clone() },
+    uH1: { value: ready.H.clone() },
+    uGlow: { value: new THREE.Vector2(ready.glow, ready.glow) },
+    uTint: { value: new THREE.Vector2(ready.tint, ready.tint) },
+    uAccent: { value: new THREE.Vector2(ready.accent, ready.accent) },
+    uBloomR: { value: 100 },
+    uBloomEdge: { value: 0 },
+    uPulse: { value: ready.pulse },
+    uAudio: { value: 0 },
+    uFloor: { value: -1 },
+    uView: { value: 0 },
+  };
+  const P = {
+    uFrame: { value: new THREE.Vector4(0, 0, 1, 1) },
+    uView: { value: new THREE.Vector2(1, 1) },
     uPx: { value: 1 },
-    uRes: { value: new THREE.Vector2(1, 1) },
-    uBg0: { value: vec(ROOM.bg0) },
-    uBg1: { value: vec(ROOM.bg1) },
-    uSmoke: { value: vec(ROOM.smoke) },
-    uRibbon: { value: vec(ROOM.ribbon) },
-    uStar: { value: vec(ROOM.star) },
-    uAuraC: { value: vec(ROOM.aura) },
-    uCenter: { value: new THREE.Vector2(0, 0) },
-    uPar: { value: new THREE.Vector2() },
-    uGuides: { value: null as ThreeModule.DataTexture | null },
-    uPoints: { value: 1 },
-    uHairGain: { value: 1 },
+    uSize: { value: 1 },
+    uT: U.uT,
+    uMotion: U.uMotion,
+    uTau: U.uTau,
+    uBreath: U.uBreath,
+    uTurn: U.uTurn,
+    uGain: { value: 0 },
+    uTwinkle: { value: 0.15 },
+    uFly: { value: new THREE.Vector3(0.8, 0.6, 1) },
   };
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(22, 1, 0.1, 100);
-  // The body writes its ray-marched depth with the very matrices the hair is drawn with (projection here, the
-  // view matrix three hands every shader), so a strand in front of the skin is always drawn in front of it.
-  U.uPV.value = camera.projectionMatrix;
-
-  /* background */
-  const quad = new THREE.PlaneGeometry(1, 1);
-  const bgMat = new THREE.ShaderMaterial({
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const tri = new THREE.BufferGeometry();
+  tri.setAttribute(
+    "position",
+    new THREE.BufferAttribute(
+      new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]),
+      3,
+    ),
+  );
+  const plateMat = new THREE.ShaderMaterial({
     uniforms: U,
-    vertexShader: BG_VERT,
-    fragmentShader: BG_FRAG,
+    vertexShader: PLATE_VERT,
+    fragmentShader: PLATE_FRAG,
     depthTest: false,
     depthWrite: false,
   });
-  const bg = new THREE.Mesh(quad, bgMat);
+  const plate = new THREE.Mesh(tri, plateMat);
+  plate.frustumCulled = false;
+  plate.renderOrder = 0;
+  scene.add(plate);
 
-  /* body: a bounded quad in front of the figure, ray-marched per pixel */
-  // Bust portrait: nothing below the upper chest is ever marched.
-  const bodyQuad = new THREE.PlaneGeometry(2.4, 2.65);
-  bodyQuad.translate(0, 0.05, 0.6);
-  const bodyMat = new THREE.ShaderMaterial({
-    uniforms: U,
-    vertexShader: BODY_VERT,
-    fragmentShader: BODY_FRAG,
-    transparent: true,
-    depthWrite: true,
-    depthTest: true,
-    blending: THREE.CustomBlending,
-    blendSrc: THREE.OneFactor,
-    blendDst: THREE.OneMinusSrcAlphaFactor,
-  });
-  const body = new THREE.Mesh(bodyQuad, bodyMat);
-
-  /* hair: strands interpolated between guides on the GPU */
-  const guides = (cachedHair ??= buildHairGuides());
-  const guideTex = new THREE.DataTexture(
-    guides.data,
-    guides.points,
-    guides.count,
-    THREE.RGBAFormat,
-    THREE.FloatType,
-  );
-  guideTex.minFilter = THREE.NearestFilter;
-  guideTex.magFilter = THREE.NearestFilter;
-  guideTex.needsUpdate = true;
-  U.uGuides.value = guideTex;
-  U.uPoints.value = guides.points;
-  const maxStrands = BUDGET.high.strands;
-  const hairGeo = new THREE.BufferGeometry();
-  {
-    const pts = guides.points;
-    const strand = new Float32Array(maxStrands * pts * 4);
-    const index = new Uint32Array(maxStrands * (pts - 1) * 2);
-    let rnd = 1234567;
-    const rand = () => {
-      rnd = (rnd * 1103515245 + 12345) & 0x7fffffff;
-      return rnd / 0x7fffffff;
-    };
-    const groups = guides.groups;
-    let ii = 0;
-    for (let s = 0; s < maxStrands; s++) {
-      // Interleave the groups so a lower budget (a shorter draw range) keeps every layer and both sides.
-      const gi = s % (groups.length - 1);
-      const g0 = groups[gi]!;
-      const g1 = groups[gi + 1]!;
-      const span = g1 - g0 - 1;
-      const pos = rand() * span;
-      const ga = g0 + Math.min(span - 1, Math.floor(pos));
-      const mix = pos - Math.floor(pos);
-      const seed = rand();
-      for (let k = 0; k < pts; k++) {
-        const o = (s * pts + k) * 4;
-        strand[o] = ga;
-        strand[o + 1] = mix;
-        strand[o + 2] = seed;
-        strand[o + 3] = k;
-        if (k < pts - 1) {
-          index[ii++] = s * pts + k;
-          index[ii++] = s * pts + k + 1;
-        }
-      }
-    }
-    hairGeo.setAttribute("aStrand", new THREE.BufferAttribute(strand, 4));
-    // three needs a position attribute to count vertices; the shader ignores it.
-    hairGeo.setAttribute(
-      "position",
-      new THREE.BufferAttribute(new Float32Array(maxStrands * pts * 3), 3),
-    );
-    hairGeo.setIndex(new THREE.BufferAttribute(index, 1));
-  }
-  let strands = budget.strands;
-  const setStrands = (n: number) => {
-    U.uHairGain.value = Math.min(1, 3600 / Math.max(1, n));
-    strands = n;
-    hairGeo.setDrawRange(0, n * (guides.points - 1) * 2);
-  };
-  setStrands(strands);
-  const additive = {
+  const pointsMat = new THREE.ShaderMaterial({
+    uniforms: P,
+    vertexShader: POINTS_VERT,
+    fragmentShader: POINTS_FRAG,
     transparent: true,
     blending: THREE.AdditiveBlending,
+    depthTest: false,
     depthWrite: false,
-  } as const;
-  const hairMat = new THREE.ShaderMaterial({
-    uniforms: U,
-    vertexShader: HAIR_VERT,
-    fragmentShader: HAIR_FRAG,
-    ...additive,
   });
-  const hair = new THREE.LineSegments(hairGeo, hairMat);
-
-  /* drifting motes */
-  const maxMotes = BUDGET.high.motes;
-  const moteGeo = new THREE.BufferGeometry();
-  {
-    const pos = new Float32Array(maxMotes * 3);
-    const seed = new Float32Array(maxMotes * 4);
-    for (let i = 0; i < maxMotes; i++) {
-      const h = (n: number) =>
-        Math.abs(Math.sin(i * 12.9898 + n * 78.233) * 43758.5453) % 1;
-      // Mostly near the figure, some wide in the room.
-      const near = h(1) < 0.6;
-      pos[i * 3] = (h(2) - 0.5) * (near ? 2.6 : 7);
-      pos[i * 3 + 1] = -3 + h(3) * 6.4;
-      pos[i * 3 + 2] = (h(4) - 0.5) * (near ? 1.2 : 3) + (near ? 0.12 : -0.8);
-      for (let k = 0; k < 4; k++) seed[i * 4 + k] = h(5 + k);
-    }
-    moteGeo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    moteGeo.setAttribute("aSeed", new THREE.BufferAttribute(seed, 4));
+  let pointsGeo: ThreeModule.BufferGeometry | null = null;
+  let points: ThreeModule.Points | null = null;
+  let sampled = 0;
+  let drawn = 0;
+  let cell = 0.002;
+  const setDrawn = (n: number) => {
+    drawn = Math.max(0, Math.min(sampled, Math.round(n)));
+    pointsGeo?.setDrawRange(0, drawn);
+  };
+  const particles = await particlesPromise;
+  if (particles && particles.count > 0) {
+    pointsGeo = new THREE.BufferGeometry();
+    // The home position doubles as `position` (two components): three counts vertices by it.
+    pointsGeo.setAttribute(
+      "position",
+      new THREE.BufferAttribute(particles.home, 2),
+    );
+    pointsGeo.setAttribute(
+      "aColor",
+      new THREE.BufferAttribute(particles.color, 4, true),
+    );
+    pointsGeo.setAttribute(
+      "aSeed",
+      new THREE.BufferAttribute(particles.seed, 4),
+    );
+    // Two-component positions: give three the bounds instead of letting it compute them.
+    pointsGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
+    points = new THREE.Points(pointsGeo, pointsMat);
+    points.frustumCulled = false;
+    points.renderOrder = 1;
+    scene.add(points);
+    sampled = particles.count;
+    cell = particles.cell;
+    setDrawn(sampled);
   }
-  let motes = budget.motes;
-  moteGeo.setDrawRange(0, motes);
-  const moteMat = new THREE.ShaderMaterial({
-    uniforms: U,
-    vertexShader: MOTE_VERT,
-    fragmentShader: MOTE_FRAG,
-    ...additive,
-  });
-  const moteMesh = new THREE.Points(moteGeo, moteMat);
-
-  const order: [ThreeModule.Object3D, number][] = [
-    [bg, -10],
-    [body, 0],
-    [hair, 1],
-    [moteMesh, 2],
-  ];
-  for (const [o, r] of order) {
-    o.renderOrder = r;
-    o.frustumCulled = false;
-    scene.add(o);
-  }
-
-  const composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(
-    new THREE.Vector2(256, 256),
-    1.05,
-    0.5,
-    0.6,
-  );
-  composer.addPass(bloom);
-  composer.addPass(new OutputPass());
-  const postMat = new THREE.ShaderMaterial({
-    uniforms: {
-      tDiffuse: { value: null },
-      uRes: U.uRes,
-      uT: U.uT,
-      uMotion: U.uMotion,
-      uPx: U.uPx,
-      uFloor: { value: -1e4 },
-    },
-    vertexShader: POST_VERT,
-    fragmentShader: POST_FRAG,
-  });
-  const post = new ShaderPass(postMat);
-  composer.addPass(post);
 
   /* sizing: the buffer is capped per GPU class and steps down while frames run long */
   let W = 0;
   let H = 0;
-  // Software and old integrated GPUs start a step lower; the loop below finds the rest.
-  let scale = tier === "low" ? 0.75 : 1;
+  let scale = tier === "low" ? 0.8 : 1;
   let pr = 1;
-  const camTarget = new THREE.Vector3();
   function size(force = false) {
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -582,30 +529,28 @@ export async function createAura(
     pr = next;
     renderer.setPixelRatio(pr);
     renderer.setSize(W, H, false);
-    composer.setPixelRatio(pr);
-    composer.setSize(W, H);
-    const aspect = W / Math.max(1, H);
-    const narrow = aspect < 0.8;
-    const vh = auraViewHeight(aspect);
-    const camY = auraCameraY(aspect, narrow ? 0.2 : 0.07);
-    const dist = vh / 2 / Math.tan(((camera.fov / 2) * Math.PI) / 180);
-    camera.aspect = aspect;
-    // A touch above the chest line, looking level: the face is met straight on.
-    camera.position.set(0, camY + 0.1, dist);
-    camTarget.set(0, camY, 0);
-    camera.lookAt(camTarget);
-    camera.updateProjectionMatrix();
-    camera.updateMatrixWorld();
-    U.uRes.value.set(W * pr, H * pr);
-    U.uPx.value = pr;
-    U.uPixAngle.value =
-      (2 * Math.tan(((camera.fov / 2) * Math.PI) / 180)) / Math.max(1, H * pr);
-    // Where the heart is on screen: the room's light gathers behind it.
-    const hp = new THREE.Vector3(HEART[0], HEART[1] + 0.7, 0).project(camera);
-    U.uCenter.value.set(hp.x * 0.5 * aspect, hp.y * 0.5);
+    const fr = auraFraming(W, H);
+    U.uFrame.value.set(fr.x * pr, fr.y * pr, fr.w * pr, fr.h * pr);
+    P.uFrame.value.set(fr.x, fr.y, fr.w, fr.h);
+    P.uView.value.set(W, H);
+    P.uPx.value = pr;
+    U.uRes.value.set(Math.round(W * pr), Math.round(H * pr));
+    // Fade the picture into the room only along edges that are on screen.
+    const top = fr.y > 0.5 ? 0.07 : 1e-4;
+    const bottom = fr.y + fr.h < H - 0.5 ? 0.16 : 1e-4;
+    const side = fr.x > 0.5 ? 0.04 : 1e-4;
+    U.uFade.value.set(top, bottom, side, side);
+    sizePoints();
+  }
+  function sizePoints() {
+    // An even grid of kernels of the cell's size adds up to the picture; fewer drawn, each a little larger.
+    P.uSize.value =
+      KERNEL *
+      cell *
+      P.uFrame.value.z *
+      Math.sqrt(sampled / Math.max(1, drawn));
   }
   size(true);
-  // Compile every program off the frame (parallel where the driver allows): the first shown frame must not hitch.
   try {
     await renderer.compileAsync(scene, camera);
   } catch {
@@ -613,79 +558,77 @@ export async function createAura(
   }
 
   /* state: a bloom spreading from the face carries the new look outward */
-  type Key = UiState | "alert";
   let key: Key = "ready";
   let waveP = 1;
-  const glowPulse = { glow: lin.ready.glow, pulse: lin.ready.pulse };
-  const prevGP = { glow: lin.ready.glow, pulse: lin.ready.pulse };
-  const nextGP = { glow: lin.ready.glow, pulse: lin.ready.pulse };
-  const pairs: [keyof typeof U, keyof typeof U, "a" | "b" | "r" | "f" | "h"][] =
-    [
-      ["uA0", "uA1", "a"],
-      ["uB0", "uB1", "b"],
-      ["uR0", "uR1", "r"],
-      ["uF0", "uF1", "f"],
-      ["uH0", "uH1", "h"],
-    ];
+  const pairs = [
+    ["uA0", "uA1", "A"],
+    ["uB0", "uB1", "B"],
+    ["uR0", "uR1", "R"],
+    ["uH0", "uH1", "H"],
+  ] as const;
+  const scalars = [
+    ["uGlow", "glow"],
+    ["uTint", "tint"],
+    ["uAccent", "accent"],
+  ] as const;
+  let pulse0 = ready.pulse;
   function retarget(next: Key, instant: boolean) {
-    const k = waveP >= 1 ? 1 : weaveFront(waveP);
+    // Interrupted mid-bloom: start from what most of the figure shows now.
+    const k = waveP >= 1 ? 1 : bloomFront(waveP);
     for (const [p0, p1, c] of pairs) {
-      const v0 = U[p0].value as ThreeModule.Vector3;
-      const v1 = U[p1].value as ThreeModule.Vector3;
-      // Interrupted mid-bloom: start from what most of the body shows now.
-      v0.lerp(v1, k);
-      v1.copy(lin[next][c]);
-      if (instant) v0.copy(v1);
+      U[p0].value.lerp(U[p1].value, k);
+      U[p1].value.copy(looks[next][c]);
+      if (instant) U[p0].value.copy(U[p1].value);
     }
-    prevGP.glow = glowPulse.glow;
-    prevGP.pulse = glowPulse.pulse;
-    nextGP.glow = lin[next].glow;
-    nextGP.pulse = lin[next].pulse;
+    for (const [u, c] of scalars) {
+      const v = U[u].value;
+      v.x += (v.y - v.x) * k;
+      v.y = looks[next][c];
+      if (instant) v.x = v.y;
+    }
+    pulse0 = U.uPulse.value;
     key = next;
     waveP = instant ? 1 : 0;
   }
 
-  const pose = {
-    yaw: { x: 0, v: 0 },
-    pitch: { x: 0, v: 0 },
-    roll: { x: 0, v: 0 },
-  };
-  function spring(s: { x: number; v: number }, target: number, dt: number) {
-    // Critically damped: glides toward the pointer, keeps velocity through a retarget, never overshoots.
-    const w = (2 * Math.PI) / 1.6;
-    const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
-    const h = Math.min(dt, 0.1) / steps;
-    for (let i = 0; i < steps; i++) {
-      s.v += (w * w * (target - s.x) - 2 * w * s.v) * h;
-      s.x += s.v * h;
-    }
-  }
+  const pose = { yaw: { x: 0, v: 0 }, pitch: { x: 0, v: 0 } };
   const weight = { listening: 0, thinking: 0, speaking: 0 };
-  const par = { x: 0, y: 0 };
-  let weave = 0;
+  let tau = 0;
   let lastForm = 0;
   let lastT = -1;
   let slow = 0;
   let fast = 0;
   let frameMs = 16.7;
-  const Rm = new THREE.Matrix3();
+  let view: AuraView = "composed";
 
-  return {
+  const aura: Aura & { view(v: AuraView): void; particles(n: number): void } = {
     canvas,
-    get stats() {
+    get stats(): AuraStats {
       return {
+        mode: "webgl",
         tier,
         scale,
         pixels: Math.round(W * pr) * Math.round(H * pr),
-        strands,
-        motes,
+        particles: drawn,
+        sampled,
+        pointPx: Math.round(P.uSize.value * 200) / 100,
         frameMs: Math.round(frameMs * 10) / 10,
       };
+    },
+    particles(n) {
+      setDrawn(n);
+      sizePoints();
+    },
+    view(v) {
+      view = v;
+      U.uView.value = v === "artwork" ? 1 : v === "particles" ? 2 : 0;
+      P.uGain.value = v === "particles" ? 1 : 0;
+      if (points) points.visible = v !== "artwork";
     },
     render(f) {
       const { t } = f;
       const dt = Math.max(0, Math.min(0.1, f.dt));
-      // Adaptive quality: long frames first thin the hair and motes, then lower the buffer, never the frame rate.
+      // Adaptive quality: long frames first thin the particles, then lower the buffer, never the frame rate.
       if (lastT >= 0) {
         const gap = (t - lastT) * 1000;
         if (gap < 200) {
@@ -695,15 +638,11 @@ export async function createAura(
         }
         if (slow > 0.6) {
           slow = 0;
-          if (strands > BUDGET.low.strands)
-            setStrands(
-              Math.max(BUDGET.low.strands, Math.round(strands * 0.75)),
-            );
-          else if (scale > 0.55) scale = Math.max(0.55, scale * 0.85);
-          motes = Math.max(BUDGET.low.motes, Math.round(motes * 0.8));
-          moteGeo.setDrawRange(0, motes);
+          if (drawn > BUDGET.low.particles) {
+            setDrawn(Math.max(BUDGET.low.particles, drawn * 0.75));
+            sizePoints();
+          } else if (scale > 0.55) scale = Math.max(0.55, scale * 0.85);
         } else if (fast > 12 && scale < 1) {
-          // A long run of quick frames: give back one step of resolution.
           fast = 0;
           scale = Math.min(1, scale / 0.85);
         }
@@ -716,35 +655,31 @@ export async function createAura(
       );
 
       const motion = f.reduceMotion ? 0 : 1;
-      // Birth: woven from the heart outward while the figure forms; unravels with it. Skipped without motion.
-      if (f.reduceMotion) weave = f.form > 0 ? 1 : 0;
+      // Birth: forward while the figure forms, back toward the glow when it dissolves. Skipped without motion.
+      if (f.reduceMotion) tau = f.form > 0 ? BIRTH.total : 0;
       else if (f.form >= lastForm && f.form > 0)
-        weave = Math.min(1, weave + dt / TIMING.weave);
-      else weave = Math.min(weave, f.form);
+        tau = Math.min(BIRTH.total, tau + dt);
+      else tau = Math.min(tau, f.form * BIRTH.total);
       lastForm = f.form;
-      U.uWeave.value = weave >= 1 ? 1 : weaveFront(weave);
+      U.uTau.value = view === "composed" ? tau : BIRTH.total;
 
       const want: Key = f.alert ? "alert" : f.state;
       if (want !== key) retarget(want, f.reduceMotion);
       if (waveP < 1) {
         waveP = Math.min(1, waveP + dt / TIMING.bloom);
-        const e = weaveFront(waveP);
-        // Soft growing radius from the face; reaches the hips (about 5.5 units away) as the second ends.
-        U.uWaveR.value = e * 6.6;
-        U.uWaveEdge.value =
-          0.9 * Math.sin(Math.PI * Math.min(1, waveP * 1.15)) * (1 - waveP);
-        glowPulse.glow = prevGP.glow + (nextGP.glow - prevGP.glow) * e;
-        glowPulse.pulse = prevGP.pulse + (nextGP.pulse - prevGP.pulse) * e;
-        if (waveP >= 1)
-          for (const [p0, p1] of pairs)
-            (U[p0].value as ThreeModule.Vector3).copy(
-              U[p1].value as ThreeModule.Vector3,
-            );
+        const e = bloomFront(waveP);
+        U.uBloomR.value = e * BLOOM_REACH;
+        U.uBloomEdge.value =
+          Math.sin(Math.PI * Math.min(1, waveP * 1.1)) * (1 - waveP * 0.6);
+        U.uPulse.value = pulse0 + (looks[key].pulse - pulse0) * e;
+        if (waveP >= 1) {
+          for (const [p0, p1] of pairs) U[p0].value.copy(U[p1].value);
+          for (const [u] of scalars) U[u].value.x = U[u].value.y;
+        }
       } else {
-        U.uWaveR.value = 100;
-        U.uWaveEdge.value = 0;
-        glowPulse.glow = nextGP.glow;
-        glowPulse.pulse = nextGP.pulse;
+        U.uBloomR.value = 100;
+        U.uBloomEdge.value = 0;
+        U.uPulse.value = looks[key].pulse;
       }
 
       const kw = 1 - Math.exp(-dt * 3);
@@ -757,77 +692,151 @@ export async function createAura(
       weight.speaking +=
         ((f.state === "speaking" ? 1 : 0) - weight.speaking) * kw;
 
-      /* head: toward the pointer, within limits, on springs */
+      /* head: toward the pointer, within limits, on springs; facing front it is exactly the artwork */
       const clamp = (x: number, m: number) => Math.max(-m, Math.min(m, x));
       const yawT =
-        motion *
-        clamp(
-          f.gazeX * GAZE.yaw +
-            0.03 * Math.sin(t * 0.17) +
-            0.008 * Math.sin(t * 0.61 + 0.7) +
-            weight.thinking * 0.06,
-          GAZE.yaw,
-        );
+        motion * clamp(f.gazeX * GAZE.yaw + weight.thinking * 0.05, GAZE.yaw);
       const pitchT =
         motion *
         clamp(
-          f.gazeY * GAZE.pitch -
-            weight.thinking * 0.05 +
-            weight.listening * 0.04 +
-            weight.speaking * 0.02 * f.audio * Math.sin(t * 2.3),
+          -f.gazeY * GAZE.pitch +
+            weight.listening * 0.03 -
+            weight.thinking * 0.03 +
+            weight.speaking * 0.015 * f.audio * Math.sin(t * 2.3),
           GAZE.pitch,
         );
-      const rollT =
-        motion *
-        (weight.listening * 0.05 -
-          weight.thinking * 0.02 +
-          0.012 * Math.sin(t * 0.23 + 1.3) +
-          0.006 * Math.sin(t * 0.47));
-      // The rest pose itself is a gentle three-quarter turn and tilt; motion only adds to it.
-      spring(pose.yaw, REST_POSE.yaw + yawT, dt);
-      spring(pose.pitch, REST_POSE.pitch + pitchT, dt);
-      spring(pose.roll, REST_POSE.roll + rollT, dt);
-      const R = headRotation(pose.yaw.x, pose.pitch.x, pose.roll.x);
-      Rm.set(R[0]!, R[1]!, R[2]!, R[3]!, R[4]!, R[5]!, R[6]!, R[7]!, R[8]!);
-      U.uHead.value.copy(Rm);
-      U.uHeadInv.value.copy(Rm).transpose();
-
-      const kp = 1 - Math.exp(-dt * 1.6);
-      par.x += (motion * f.gazeX - par.x) * kp;
-      par.y += (motion * f.gazeY - par.y) * kp;
-      U.uPar.value.set(par.x, par.y);
+      spring(pose.yaw, yawT, dt);
+      spring(pose.pitch, pitchT, dt);
+      const tiny = (v: number) => (Math.abs(v) < 2e-4 ? 0 : v);
+      U.uTurn.value.set(tiny(pose.yaw.x), tiny(pose.pitch.x));
 
       U.uT.value = t;
       U.uMotion.value = motion;
       // A slow breath, about eleven a minute.
       U.uBreath.value = motion * Math.sin((t * 2 * Math.PI) / 5.4);
       U.uAudio.value = f.audio * weight.speaking;
-      U.uGlow.value =
-        glowPulse.glow *
-        (1 + weight.listening * 0.04 * Math.sin(t * 2.2) * motion);
-      U.uPulse.value = glowPulse.pulse;
-      postMat.uniforms.uFloor!.value = f.floor > H ? -1e4 : (H - f.floor) * pr;
+      U.uFloor.value = f.floor > H ? -1 : (H - f.floor) * pr;
 
       if (document.hidden) return;
-      composer.render(dt);
+      renderer.render(scene, camera);
     },
     hide() {
       canvas.style.display = "none";
       lastT = -1;
     },
     dispose() {
-      quad.dispose();
-      bodyQuad.dispose();
-      hairGeo.dispose();
-      moteGeo.dispose();
-      guideTex.dispose();
-      for (const m of [bgMat, bodyMat, hairMat, moteMat, postMat]) m.dispose();
-      bloom.dispose();
-      post.dispose();
-      composer.dispose();
+      tri.dispose();
+      pointsGeo?.dispose();
+      plateMat.dispose();
+      pointsMat.dispose();
+      imageTex.dispose();
+      dataTex.dispose();
+      imageBmp.close();
+      dataBmp.close();
       renderer.dispose();
       renderer.forceContextLoss();
       canvas.remove();
+    },
+  };
+  if (import.meta.env?.DEV)
+    (window as unknown as { __novaAura?: typeof aura }).__novaAura = aura;
+  return aura;
+}
+
+/** Without WebGL2: the picture itself, framed the same way, with a soft glow breathing at the face. */
+function createStaticAura(under: HTMLCanvasElement): Aura {
+  const root = document.createElement("div");
+  root.className = "entity-gl entity-aura entity-aura-static";
+  root.setAttribute("aria-hidden", "true");
+  Object.assign(root.style, {
+    position: "fixed",
+    inset: "0",
+    overflow: "hidden",
+    display: "none",
+    pointerEvents: "none",
+    background: ROOM,
+  } satisfies Partial<CSSStyleDeclaration>);
+  const img = document.createElement("img");
+  img.alt = "";
+  img.decoding = "async";
+  img.src =
+    window.innerWidth * (window.devicePixelRatio || 1) > 1400
+      ? AURA_ASSETS.hi
+      : AURA_ASSETS.lo;
+  Object.assign(img.style, {
+    position: "absolute",
+    maxWidth: "none",
+    userSelect: "none",
+  } satisfies Partial<CSSStyleDeclaration>);
+  const glow = document.createElement("div");
+  Object.assign(glow.style, {
+    position: "absolute",
+    borderRadius: "50%",
+    mixBlendMode: "screen",
+    transition: "background 1s ease",
+  } satisfies Partial<CSSStyleDeclaration>);
+  root.append(img, glow);
+  under.before(root);
+  let breathing: Animation | null = null;
+  let lastKey = "";
+  let W = 0;
+  let H = 0;
+  return {
+    canvas: root,
+    get stats(): AuraStats {
+      return {
+        mode: "static",
+        tier: "low",
+        scale: 1,
+        pixels: 0,
+        particles: 0,
+        sampled: 0,
+        pointPx: 0,
+        frameMs: 0,
+      };
+    },
+    render(f) {
+      root.style.display = "block";
+      root.style.opacity = String(
+        Math.min(1, f.form / 0.3) * (0.35 + 0.65 * f.dim),
+      );
+      if (window.innerWidth !== W || window.innerHeight !== H) {
+        W = window.innerWidth;
+        H = window.innerHeight;
+        const fr = auraFraming(W, H);
+        Object.assign(img.style, {
+          left: `${fr.x}px`,
+          top: `${fr.y}px`,
+          width: `${fr.w}px`,
+          height: `${fr.h}px`,
+        });
+        const r = fr.h * 0.34;
+        Object.assign(glow.style, {
+          left: `${fr.x + FACE.u * fr.w - r}px`,
+          top: `${fr.y + FACE.v * fr.h - r}px`,
+          width: `${2 * r}px`,
+          height: `${2 * r}px`,
+        });
+      }
+      const k = f.alert ? "alert" : f.state;
+      if (k !== lastKey) {
+        lastKey = k;
+        glow.style.background = `radial-gradient(closest-side, ${LOOKS[k].a}55, ${LOOKS[k].b}22 55%, transparent)`;
+      }
+      if (!breathing && !f.reduceMotion && typeof glow.animate === "function")
+        breathing = glow.animate([{ opacity: 0.55 }, { opacity: 1 }], {
+          duration: 2700,
+          iterations: Infinity,
+          direction: "alternate",
+          easing: "ease-in-out",
+        });
+    },
+    hide() {
+      root.style.display = "none";
+    },
+    dispose() {
+      breathing?.cancel();
+      root.remove();
     },
   };
 }

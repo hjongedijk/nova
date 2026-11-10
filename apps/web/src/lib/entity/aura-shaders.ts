@@ -1,589 +1,412 @@
-import { PIECES, SDF_GLSL, WEAVE_REACH } from "./aura-body.ts";
+import { ARRIVAL_GLSL, AURA_DATA, BIRTH, f, FACE } from "./aura-data.ts";
 
 /**
- * AURA shaders. Linear colour throughout; tone mapping and sRGB happen in the output pass.
- *
- * - BG: smoke (domain-warped fbm), sparse stars and a few long ribbons, drawn first, full screen.
- * - BODY: a bounded quad in front of the figure; each pixel ray-marches the distance field, shades a dark glossy
- *   skin with contour strokes, rim light and inner sparkle, and writes its real depth so hair and motes sort.
- * - HAIR: line strands interpolated between CPU-grown guides on the GPU, swaying.
- * - MOTES: drifting points.
- * - POST: vignette, grain, the reply floor.
+ * The neon stripes drawn over the blank head and the body. Everything here is meant to be tuned by eye.
+ * Units: "data pixels", the artwork is 960 of them wide.
  */
+export const STRIPES = {
+  /** Stripes across the front half of the torso (from silhouette to silhouette). */
+  count: 24,
+  /** Stripes across the front of the head; they meet at crown and chin like a globe's meridians. */
+  headCount: 8,
+  /** Lit share of each period (core plus its dots); the rest is the dark gap between stripes. */
+  width: 0.42,
+  /** The coloured glow around each stripe, as if bloomed (0 = none). */
+  halo: 0.3,
+  /** The thin, whiter neon core (it thins out where the dots thin out). */
+  core: 0.5,
+  /** The stripe is a string of fine glowing dots: their spacing along it (data pixels), size, and brightness. */
+  dots: { step: 2.6, size: 0.85, gain: 2.2 },
+  /** Share of dots that are brighter star points with a small cross of light. */
+  stars: 0.07,
+  /** Faint sparkle dust in the dark gaps. */
+  dust: 0.28,
+  /** Brightness of a stripe that faces the viewer, and how much dimmer it gets as the surface turns away. */
+  gain: 0.9,
+  falloff: 0.85,
+  /** The bright rim at the silhouette. */
+  rim: 0.5,
+  /** Light travelling slowly along each stripe: glint length in data pixels, and its strength. */
+  travel: { length: 170, gain: 0.9 },
+  /** Share of the stripes per colour: the mood's main and second colour, then the accents. */
+  mix: { a: 0.45, b: 0.27, pink: 0.11, cyan: 0.08, peach: 0.09 },
+  accents: { pink: "#ff70d2", cyan: "#58e2ff", peach: "#ffb48c" },
+} as const;
 
-const f = (n: number) => (Number.isInteger(n) ? `${n}.0` : String(n));
+/** Hair shimmer and the living lights on the ribbons behind. */
+export const LIGHTS = {
+  shimmer: 0.2,
+  ribbons: 0.45,
+} as const;
+
+/** Breath: how much the chest swells (share of its size), anchored below the frame. */
+export const BREATH = { amount: 0.0045, anchor: 1.25 } as const;
+
+const D = AURA_DATA;
+const bodyPeriod = (Math.PI * D.torsoHalf * D.width) / STRIPES.count;
+const headPeriod = (Math.PI * D.head.radius * D.width) / STRIPES.headCount;
+
+function rgb(hex: string): string {
+  // sRGB hex to a linear vec3 literal.
+  const n = parseInt(hex.slice(1), 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const s = v / 255;
+    return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return `vec3(${c.map((v) => v.toFixed(4)).join(", ")})`;
+}
 
 const COMMON = /* glsl */ `
-uniform float uT;
-uniform float uMotion;
-uniform float uWeave;
-uniform float uWaveR;
-uniform float uWaveEdge;
-uniform float uAudio;
-uniform float uPulse;
-uniform float uGlow;
-uniform vec3 uA0; uniform vec3 uA1;
-uniform vec3 uB0; uniform vec3 uB1;
-uniform vec3 uR0; uniform vec3 uR1;
-uniform vec3 uF0; uniform vec3 uF1;
-uniform vec3 uH0; uniform vec3 uH1;
-uniform mat3 uHead;
-uniform mat3 uHeadInv;
-uniform float uBreath;
-
-float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
-float hash13(vec3 p3) { p3 = fract(p3 * 0.1031); p3 += dot(p3, p3.zyx + 31.32); return fract((p3.x + p3.y) * p3.z); }
-vec3 hash33(vec3 p3) {
-  p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
-  p3 += dot(p3, p3.yxz + 33.33);
-  return fract((p3.xxy + p3.yxx) * p3.zyx);
-}
-float vnoise3(vec3 p) {
-  vec3 i = floor(p);
-  vec3 u = fract(p);
-  u = u * u * (3.0 - 2.0 * u);
-  return mix(mix(mix(hash13(i), hash13(i + vec3(1, 0, 0)), u.x),
-                 mix(hash13(i + vec3(0, 1, 0)), hash13(i + vec3(1, 1, 0)), u.x), u.y),
-             mix(mix(hash13(i + vec3(0, 0, 1)), hash13(i + vec3(1, 0, 1)), u.x),
-                 mix(hash13(i + vec3(0, 1, 1)), hash13(i + vec3(1, 1, 1)), u.x), u.y), u.z);
-}
-${SDF_GLSL}
-/* The state bloom: inside the growing radius around the face the new look, outside still the old one. */
-float waveK(vec3 p) {
-  float d = length(p - FACE);
-  return 1.0 - smoothstep(uWaveR - 0.9, uWaveR, d);
-}
-float waveRing(vec3 p) {
-  return uWaveEdge * exp(-abs(length(p - FACE) - uWaveR) * 2.6);
-}
+float hash11(float x) { return fract(sin(x * 127.1 + 11.3) * 43758.5453); }
+float hash21(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+const vec2 DATA = vec2(${f(D.width)}, ${f(D.height)});
+const vec2 HEADC = vec2(${f(D.head.cx * D.width)}, ${f(D.head.cy * D.height)});
+${ARRIVAL_GLSL}
 `;
 
-/* ---------------- background ---------------- */
+/* ---------------- the picture: the artwork, warped by breath and the head turn, with stripes and moods ---------------- */
 
-export const BG_VERT = /* glsl */ `
-void main() { gl_Position = vec4(position.xy * 2.0, 0.0, 1.0); }
+export const PLATE_VERT = /* glsl */ `
+void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }
 `;
 
-export const BG_FRAG = /* glsl */ `
+export const PLATE_FRAG = /* glsl */ `
+precision highp float;
+uniform sampler2D uImage;
+uniform sampler2D uData;
+uniform vec4 uFrame;     // picture rect in device px from the top-left: x, y, w, h
+uniform vec4 uFade;      // fade widths at the picture's visible edges: top, bottom, left, right (picture units)
 uniform vec2 uRes;
 uniform float uT;
 uniform float uMotion;
-uniform float uWeave;
-uniform vec3 uBg0;
-uniform vec3 uBg1;
-uniform vec3 uSmoke;
-uniform vec3 uRibbon;
-uniform vec3 uStar;
-uniform vec2 uCenter;
-uniform vec3 uAuraC;
-uniform vec2 uPar;
-
-float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
-float vnoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 u = fract(p);
-  u = u * u * (3.0 - 2.0 * u);
-  return mix(mix(hash12(i), hash12(i + vec2(1, 0)), u.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), u.x), u.y);
-}
-float fbm(vec2 p) {
-  float s = 0.0;
-  float a = 0.5;
-  mat2 r = mat2(0.8, -0.6, 0.6, 0.8);
-  for (int i = 0; i < 5; i++) { s += a * vnoise(p); p = r * p * 2.03 + 17.1; a *= 0.5; }
-  return s;
-}
-
-/* One ribbon: a long curve whose width breathes along its length, as if a silk band twists in the light. */
-float ribbon(vec2 p, float px, float c, float a1, float f1, float ph1, float a2, float f2, float ph2, float wid, float tw) {
-  float y = c + a1 * sin(p.x * f1 + ph1) + a2 * sin(p.x * f2 + ph2);
-  float dy = a1 * f1 * cos(p.x * f1 + ph1) + a2 * f2 * cos(p.x * f2 + ph2);
-  float d = abs(p.y - y) / sqrt(1.0 + dy * dy);
-  float w = wid * (0.15 + 0.85 * pow(abs(sin(p.x * tw + ph2 * 0.7)), 1.6));
-  float edge = exp(-abs(d - w) / (1.1 * px));
-  float fill = (1.0 - smoothstep(0.0, w + px, d)) * 0.22;
-  float glow = exp(-d / (w * 2.0 + 6.0 * px)) * 0.18;
-  return edge * 0.55 + fill + glow;
-}
-
-void main() {
-  vec2 uv = gl_FragCoord.xy / uRes;
-  float aspect = uRes.x / uRes.y;
-  vec2 p = (uv - 0.5) * vec2(aspect, 1.0);
-  float px = 1.0 / uRes.y;
-  float tt = uT * uMotion;
-
-  vec3 col = mix(uBg1, uBg0, smoothstep(-0.2, 1.1, uv.y + 0.15 * (1.0 - abs(p.x))));
-
-  /* smoke: slow, warped, mostly at the sides and the top */
-  vec2 q = p * 1.7 + uPar * 0.04;
-  vec2 w = vec2(fbm(q + vec2(0.0, tt * 0.012)), fbm(q + vec2(5.2, 1.3) - tt * 0.01));
-  float s = fbm(q * 1.15 + w * 1.7 + vec2(tt * 0.006, 0.0));
-  float wisps = smoothstep(0.42, 0.95, s);
-  float edges = 0.55 + 0.45 * smoothstep(0.15, 0.75, abs(p.x));
-  col += uSmoke * (wisps * 1.3 + pow(wisps, 3.0) * 1.8) * edges;
-  /* thin filaments inside the smoke */
-  float fil = abs(fract(s * 9.0) - 0.5);
-  col += uSmoke * 0.35 * (1.0 - smoothstep(0.0, 0.08, fil)) * wisps;
-
-  /* an aura of light behind the figure */
-  vec2 dc = (p - uCenter) * vec2(1.0, 0.8);
-  col += uAuraC * (exp(-dot(dc, dc) * 4.0) * 0.55 + exp(-dot(dc, dc) * 1.2) * 0.25) * uWeave;
-
-  /* sparse stars, some of them twinkling */
-  vec2 sg = gl_FragCoord.xy / 3.0;
-  vec2 cell = floor(sg / 9.0);
-  float h = hash12(cell);
-  if (h > 0.93) {
-    vec2 o = (vec2(hash12(cell + 3.1), hash12(cell + 7.7)) * 0.8 + 0.1) * 9.0;
-    float d = length(sg - cell * 9.0 - o);
-    float tw = 0.55 + 0.45 * sin(tt * (0.6 + 2.0 * fract(h * 37.0)) + h * 40.0);
-    col += uStar * (1.0 - smoothstep(0.0, 1.0, d)) * tw * (h - 0.93) * 14.0;
-  }
-
-  /* ribbons sweeping across the frame */
-  float r = 0.0;
-  float ts = tt * 0.03;
-  r += ribbon(p, px, 0.12, 0.22, 1.6, 0.6 + ts, 0.07, 3.1, 1.7 - ts * 1.3, 0.010, 1.2) * 0.9;
-  r += ribbon(p, px, -0.18, 0.18, 1.2, 2.4 - ts, 0.05, 2.7, 0.4 + ts, 0.007, 1.7) * 0.7;
-  r += ribbon(p, px, 0.33, 0.12, 2.1, 4.1 + ts * 0.7, 0.04, 4.3, 2.2, 0.005, 2.3) * 0.5;
-  r += ribbon(p, px, -0.38, 0.1, 1.9, 5.3 - ts * 0.5, 0.05, 3.7, 3.3 + ts, 0.006, 1.4) * 0.45;
-  float fadeX = smoothstep(0.0, 0.25, uv.x) * (1.0 - smoothstep(0.75, 1.0, uv.x)) * 0.6 + 0.4;
-  col += uRibbon * r * fadeX * (0.35 + 0.35 * wisps);
-
-  gl_FragColor = vec4(col, 1.0);
-}
-`;
-
-/* ---------------- body ---------------- */
-
-export const BODY_VERT = /* glsl */ `
-varying vec3 vWorld;
-void main() {
-  vec4 w = modelMatrix * vec4(position, 1.0);
-  vWorld = w.xyz;
-  gl_Position = projectionMatrix * viewMatrix * w;
-}
-`;
-
-const ARM = PIECES.arm[1]!.s as { a: readonly number[]; b: readonly number[] };
-const ARM_A = `vec3(${ARM.a.map(f).join(", ")})`;
-const ARM_B = `vec3(${ARM.b.map(f).join(", ")})`;
-
-export const BODY_FRAG = /* glsl */ `
+uniform vec2 uTurn;      // yaw, pitch of the head (radians)
+uniform float uBreath;
+uniform float uTau;      // seconds into the birth; >= total is rest
+uniform vec3 uRoom;
+uniform vec3 uA0; uniform vec3 uA1; uniform vec3 uB0; uniform vec3 uB1;
+uniform vec3 uR0; uniform vec3 uR1; uniform vec3 uH0; uniform vec3 uH1;
+uniform vec2 uGlow;      // old, new
+uniform vec2 uTint;      // old, new: how far the hair takes the mood's colour
+uniform vec2 uAccent;    // old, new: how much of the accents survive (alert keeps few)
+uniform float uBloomR;
+uniform float uBloomEdge;
+uniform float uPulse;
+uniform float uAudio;
+uniform float uFloor;
+uniform float uView;     // 0 composed, 1 the bare artwork, 2 particles only
 ${COMMON}
-varying vec3 vWorld;
-uniform mat4 uPV;
-uniform float uPixAngle;
-uniform vec3 uKey;
 
-float mapD(vec3 p) {
-  vec4 parts;
-  vec3 ph = uHeadInv * (p - PIVOT) + PIVOT;
-  return auraSdf(p, ph, uBreath, parts);
-}
-vec3 calcNormal(vec3 p) {
-  const vec2 k = vec2(1.0, -1.0);
-  const float e = 0.0012;
-  return normalize(k.xyy * mapD(p + k.xyy * e) + k.yyx * mapD(p + k.yyx * e) +
-                   k.yxy * mapD(p + k.yxy * e) + k.xxx * mapD(p + k.xxx * e));
+vec3 tile(float i, vec2 p) {
+  p = clamp(p, 0.5 / DATA, 1.0 - 0.5 / DATA);
+  return texture2D(uData, vec2(p.x, (p.y + i) / 3.0)).rgb;
 }
 
-/* The arms keep a quiet field of lines along their length, under the drawn curves. */
-float psiArm(vec3 q) {
-  float h = clamp((q.y - ${ARM_A}.y) / (${ARM_B}.y - ${ARM_A}.y), 0.0, 1.0);
-  vec3 axis = mix(${ARM_A}, ${ARM_B}, h);
-  float th = atan(q.z - axis.z, q.x - axis.x);
-  return th * 5.0 / 6.2831853 + 0.35 * q.y;
-}
-/* One family's contribution: colour of its lines at this point. */
-vec3 strokes(float psi, vec3 grad, vec3 n, float freq, float foot, float fam, vec3 p, vec3 A, vec3 B, float along, float detail) {
-  float u = psi * freq;
-  vec3 gt = grad - n * dot(n, grad);
-  float fw = max(length(gt) * freq * foot, 1e-4);
-  float d = abs(fract(u + 0.5) - 0.5) / fw;
-  float idx = floor(u + 0.5);
-  float h = hash11(idx * 7.13 + fam * 31.7);
-  float core = clamp(1.0 - d / (0.9 + 1.4 * h * h), 0.0, 1.0);
-  float halo = exp(-d * 0.22) * 0.28;
-  // Lines closer than a few pixels fade instead of aliasing into grey.
-  float resolve = 1.0 - smoothstep(0.12, 0.35, fw);
-  // Each line is a stroke of its own length: it swells in and fades out along its way.
-  float seg = vnoise3(p * vec3(1.7, 2.2, 1.7) + vec3(idx * 1.37 + fam * 5.1));
-  float keep = smoothstep(0.3, 0.68, seg) * (0.55 + 0.45 * step(0.35, h));
-  float travel = pow(0.5 + 0.5 * sin(along * 5.0 - uT * uPulse * uMotion * 1.6 + h * 40.0), 14.0);
-  vec3 c = mix(A, B, step(0.84, h) * 0.85 + 0.1 * smoothstep(0.5, 1.0, seg));
-  float bright = (0.2 + 1.3 * h * h * h) * keep * (1.0 + 1.1 * travel);
-  return c * (core * 1.9 + halo) * bright * resolve * detail;
+float noise(vec2 p) {
+  vec2 i = floor(p); vec2 u = fract(p); u = u * u * (3.0 - 2.0 * u);
+  return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x), mix(hash21(i + vec2(0.0, 1.0)), hash21(i + 1.0), u.x), u.y);
 }
 
-/* Distance to a quadratic Bezier in the plane, and the curve parameter of the closest point. */
-vec2 sdBez(vec2 pos, vec2 A, vec2 B, vec2 C) {
-  vec2 a = B - A;
-  vec2 b = A - 2.0 * B + C;
-  vec2 c = a * 2.0;
-  vec2 d = A - pos;
-  float kk = 1.0 / dot(b, b);
-  float kx = kk * dot(a, b);
-  float ky = kk * (2.0 * dot(a, a) + dot(d, b)) / 3.0;
-  float kz = kk * dot(d, a);
-  float pp = ky - kx * kx;
-  float qq = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
-  float h = qq * qq + 4.0 * pp * pp * pp;
-  float res;
-  float tt;
-  if (h >= 0.0) {
-    h = sqrt(h);
-    vec2 x = (vec2(h, -h) - qq) / 2.0;
-    vec2 uv = sign(x) * pow(abs(x), vec2(1.0 / 3.0));
-    tt = clamp(uv.x + uv.y - kx, 0.0, 1.0);
-    vec2 r = d + (c + b * tt) * tt;
-    res = dot(r, r);
-  } else {
-    float z = sqrt(-pp);
-    float v = acos(qq / (pp * z * 2.0)) / 3.0;
-    float m = cos(v);
-    float n = sin(v) * 1.732050808;
-    vec3 t3 = clamp(vec3(m + m, -n - m, n - m) * z - kx, 0.0, 1.0);
-    vec2 rx = d + (c + b * t3.x) * t3.x;
-    vec2 ry = d + (c + b * t3.y) * t3.y;
-    float dx = dot(rx, rx);
-    float dy = dot(ry, ry);
-    if (dx < dy) { res = dx; tt = t3.x; } else { res = dy; tt = t3.y; }
-  }
-  return vec2(sqrt(res), tt);
+vec3 stripeColour(float id, vec3 A, vec3 B, float accent) {
+  float h = hash11(id * 1.618 + 3.7);
+  vec3 c = A;
+  if (h > ${f(STRIPES.mix.a)}) c = B;
+  float k = ${f(STRIPES.mix.a + STRIPES.mix.b)};
+  if (h > k) c = mix(A, ${rgb(STRIPES.accents.pink)}, accent);
+  k += ${f(STRIPES.mix.pink)};
+  if (h > k) c = mix(B, ${rgb(STRIPES.accents.cyan)}, accent);
+  k += ${f(STRIPES.mix.cyan)};
+  if (h > k) c = mix(A, ${rgb(STRIPES.accents.peach)}, accent);
+  return c;
 }
 
 /*
- * One drawn line on the body, as a small bundle of strands (a bright core and two fainter companions), like
- * light caught in folds of silk. Widths are in screen pixels (foot = world size of a pixel); the ends taper.
+ * One neon stripe as light made of particles: a string of fine glowing dots along its centre line (some of them
+ * star points that twinkle), a thin whiter core, a wide coloured glow as if bloomed, and faint dust in the gap.
+ * Its density varies along its length and it breaks up into stardust where its segments end.
+ * across: data px from the stripe's centre line; along: data px down the picture; s: the stripe coordinate.
  */
-/* Companion strands beside each line: on for the body's veins, off for the fine lines of the face. */
-float gBundle = 1.0;
-vec3 silk(vec2 xy, vec2 A, vec2 B, vec2 C, float foot, float bright, float warm, float id, vec3 cA, vec3 cB) {
-  vec2 dt = sdBez(xy, A, B, C);
-  float dpx = dt.x / foot;
-  float tt = dt.y;
-  float ends = smoothstep(0.0, 0.16, tt) * (1.0 - smoothstep(0.84, 1.0, tt));
-  float core = clamp(1.0 - dpx / (0.9 + 0.9 * bright), 0.0, 1.0);
-  float o1 = clamp(1.0 - abs(dt.x - 0.022) / foot / 0.9, 0.0, 1.0);
-  float o2 = clamp(1.0 - abs(dt.x - 0.045) / foot / 0.8, 0.0, 1.0);
-  float glow = exp(-dpx * 0.16) * 0.22;
-  float shimmer = 0.75 + 0.25 * sin(tt * 9.0 + id * 4.0 + uT * uMotion * 0.4);
-  float travel = pow(0.5 + 0.5 * sin(tt * 6.0 - uT * uPulse * uMotion * 1.4 + id * 2.3), 16.0);
-  vec3 c = mix(cA, cB, warm * (0.6 + 0.4 * tt));
-  return c * (core * 2.2 + (o1 * 0.55 + o2 * 0.28) * gBundle + glow) * bright * ends * shimmer * (1.0 + 1.2 * travel);
+vec3 neonStripe(float across, float along, float s, float id, float hwd, vec3 c) {
+  float px = max(fwidth(along), 1e-3);
+  float tw = uMotion;
+  float dens = smoothstep(0.2, 0.8, noise(vec2(id * 3.1, along / 70.0)));
+  float seg = smoothstep(0.16, 0.46, noise(vec2(id * 7.3 + 11.0, along / 230.0)));
+  float coreG = exp(-pow(across / (hwd * 0.16 + px * 0.6), 2.0));
+  float haloG = exp(-pow(across / (hwd * 0.8), 2.0));
+  float wideG = exp(-pow(across / (hwd * 1.5), 2.0));
+  float dots = 0.0;
+  float stars = 0.0;
+  float stepD = ${f(STRIPES.dots.step)};
+  float j0 = floor(along / stepD);
+  for (int k = -1; k <= 1; k++) {
+    float j = j0 + float(k);
+    float h1 = hash21(vec2(id, j));
+    float h2 = hash21(vec2(j * 1.3, id + 17.0));
+    float h3 = hash21(vec2(id * 1.7 + 0.5, j * 2.1 + 3.0));
+    // Fewer dots where the stripe is thin or ending; there they scatter wider: stardust.
+    float keep = step(h1, mix(0.3, 0.97, dens * seg));
+    float ya = (j + h2) * stepD;
+    float xa = (h3 - 0.5) * hwd * mix(0.5, 2.4, 1.0 - seg);
+    float r = ${f(STRIPES.dots.size)} * mix(0.55, 1.2, h2);
+    float sd = max(r, px * 0.6);
+    vec2 dd = vec2(across - xa, along - ya) / sd;
+    float twinkle = 0.6 + 0.4 * sin(uT * (1.1 + 3.0 * h3) * tw + h1 * 40.0);
+    float b = keep * (0.3 + 0.7 * h3 * h3) * twinkle * (r * r) / (sd * sd);
+    dots += b * exp(-dot(dd, dd));
+    if (h1 < ${f(STRIPES.stars)}) {
+      float st = keep * (0.7 + 0.6 * sin(uT * (0.7 + h2) * tw + h3 * 20.0));
+      stars += st * (exp(-dot(dd, dd) * 0.35) + 0.6 * exp(-dd.x * dd.x * 8.0 - dd.y * dd.y * 0.08)
+        + 0.6 * exp(-dd.y * dd.y * 8.0 - dd.x * dd.x * 0.08)) * (r * r) / (sd * sd);
+    }
+  }
+  // Sparkle dust in the gap: rare, faint, twinkling.
+  vec2 cellD = floor(vec2(s, along) / 7.0);
+  float hd = hash21(cellD + id * 0.0);
+  vec2 pd = (cellD + 0.5 + (vec2(hash21(cellD + 3.1), hash21(cellD + 7.7)) - 0.5) * 0.7) * 7.0;
+  float sdd = max(0.5, px * 0.6);
+  float dust = step(0.93, hd) * exp(-dot(vec2(s, along) - pd, vec2(s, along) - pd) / (sdd * sdd))
+    * (0.5 + 0.5 * sin(uT * (0.8 + 2.0 * hd) * tw + hd * 60.0)) * (1.0 - haloG);
+  vec3 white = vec3(1.0);
+  return mix(c, white, 0.45) * coreG * ${f(STRIPES.core)} * dens * seg
+    + mix(c, white, 0.3) * dots * ${f(STRIPES.dots.gain)}
+    + mix(c, white, 0.7) * stars
+    + c * (haloG * ${f(STRIPES.halo)} * (0.35 + 0.65 * seg) + wideG * 0.025)
+    + mix(c, white, 0.5) * dust * ${f(STRIPES.dust)};
 }
-
-#define GRAD(fn, q, e) vec3(fn(q + vec3(e, 0, 0)) - fn(q - vec3(e, 0, 0)), fn(q + vec3(0, e, 0)) - fn(q - vec3(0, e, 0)), fn(q + vec3(0, 0, e)) - fn(q - vec3(0, 0, e))) / (2.0 * e)
 
 void main() {
-  vec3 ro = cameraPosition;
-  vec3 rd = normalize(vWorld - ro);
-  vec3 p = vWorld;
-  float t = 0.0;
-  bool hit = false;
-  float dmin = 1e9;
-  float tmin = 0.0;
-  for (int i = 0; i < 80; i++) {
-    float d = mapD(p);
-    if (d < 0.001) { hit = true; break; }
-    if (d < dmin) { dmin = d; tmin = t; }
-    t += d * 0.9;
-    p = vWorld + rd * t;
-    if (t > 2.2) break;
-  }
-  // A ray that grazes the silhouette counts as a partial hit: smooth edges instead of a dotted rim.
-  float cover = 1.0;
-  if (!hit) {
-    float edge = 2.0 * length(vWorld + rd * tmin - cameraPosition) * uPixAngle;
-    if (dmin > edge) discard;
-    t = tmin;
-    p = vWorld + rd * t;
-    cover = 1.0 - dmin / edge;
-  }
+  vec2 fc = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
+  vec2 p = (fc - uFrame.xy) / uFrame.zw;
+  float edge = smoothstep(0.0, uFade.x, p.y) * smoothstep(0.0, uFade.y, 1.0 - p.y)
+    * smoothstep(0.0, uFade.z, p.x) * smoothstep(0.0, uFade.w, 1.0 - p.x);
+  if (edge <= 0.0) { gl_FragColor = linearToOutputTexel(vec4(uRoom, 1.0)); return; }
 
-  vec4 parts;
-  vec3 ph = uHeadInv * (p - PIVOT) + PIVOT;
-  auraSdf(p, ph, uBreath, parts);
-  vec3 n = calcNormal(p);
-  vec3 nh = uHeadInv * n;
-  vec3 v = -rd;
-  float ndv = clamp(dot(n, v), 0.0, 1.0);
-  float fres = 1.0 - ndv;
-  float foot = length(p - ro) * uPixAngle * (1.0 + 1.2 * fres);
+  vec3 t1p = tile(1.0, p);
+  float figP = t1p.b;
 
-  float wk = waveK(p);
-  vec3 A = mix(uA0, uA1, wk);
-  vec3 B = mix(uB0, uB1, wk);
-  vec3 R = mix(uR0, uR1, wk);
-  vec3 F = mix(uF0, uF1, wk);
-  float ring = waveRing(p);
+  /* breath: the figure swells a touch about a point below the frame */
+  vec2 anchor = vec2(${f(D.axis)}, ${f(BREATH.anchor)});
+  float e = ${f(BREATH.amount)} * uBreath * figP;
+  vec2 q = anchor + (p - anchor) / vec2(1.0 + e * 0.7, 1.0 + e);
 
-  /* birth: woven from the heart outward */
-  float front = uWeave * ${f(WEAVE_REACH)};
-  float dH = length(p - HEART);
-  float lineOn = 1.0 - smoothstep(front - 0.3, front + 0.04, dH);
-  float fillOn = 1.0 - smoothstep(front - 0.85, front - 0.2, dH);
-  // One-sided: sharp ahead of the front (no ghost of the unwoven body), a short trail behind it.
-  float weaveEdge = exp(-max(dH - front, 0.0) * 40.0 - max(front - dH, 0.0) * 18.0) * (1.0 - uWeave) * smoothstep(0.0, 0.04, uWeave);
-  // A bust portrait: below the upper chest the figure dissolves into the dark, leaving its sparkle behind.
-  float bottom = smoothstep(-1.08, -0.55, p.y);
-  float dust = smoothstep(-1.2, -0.75, p.y) * (1.0 - bottom);
-  if (bottom < 0.02 && dust < 0.02) discard;
-
-  /* which part of the body: soft weights */
-  vec4 wpart = exp(-max(parts, 0.0) * 28.0);
-  wpart /= max(1e-4, wpart.x + wpart.y + wpart.z + wpart.w);
-
-  vec3 q = vec3(abs(p.x), p.y, p.z);
-  vec3 qh = ph;
-  float warp = (vnoise3(p * 2.0 + vec3(0.0, 0.0, uT * 0.05 * uMotion)) - 0.5) * 0.05;
-  vec3 lines = vec3(0.0);
-  const float E = 0.003;
-  vec2 xy = q.xy + vec2(warp * 0.4, 0.0);
-  float fxy = foot / (0.35 + 0.65 * ndv);
-  // A drawn composition, mirrored, like veins of light: up the neck, along the collarbones and over the shoulders,
-  // across the upper chest; branches split off and taper, and the light gathers where they meet.
-  vec3 body = vec3(0.0);
-  body += silk(xy, vec2(0.06, -0.5), vec2(0.43, -0.57), vec2(0.78, -0.47), fxy, 1.0, 0.8, 1.0, A, B);
-  body += silk(xy, vec2(0.78, -0.47), vec2(0.92, -0.6), vec2(0.96, -1.3), fxy, 0.8, 0.35, 2.0, A, B);
-  body += silk(xy, vec2(0.03, -0.63), vec2(0.36, -0.6), vec2(0.63, -0.84), fxy, 0.95, 0.15, 3.0, A, B);
-  body += silk(xy, vec2(0.16, -0.3), vec2(0.44, -0.37), vec2(0.76, -0.46), fxy, 0.6, 0.3, 11.0, A, B);
-  body += silk(xy, vec2(0.155, 0.04), vec2(0.11, -0.22), vec2(0.035, -0.46), fxy, 0.55, 0.5, 13.0, A, B);
-  body += silk(xy, vec2(0.02, -0.45), vec2(0.06, -0.25), vec2(0.12, -0.04), fxy, 0.45, 0.9, 14.0, A, B);
-  body += silk(xy, vec2(0.13, -0.2), vec2(0.17, -0.36), vec2(0.31, -0.42), fxy, 0.5, 0.4, 15.0, A, B);
-  body += silk(xy, vec2(0.25, -0.545), vec2(0.31, -0.45), vec2(0.44, -0.4), fxy, 0.55, 0.7, 16.0, A, B);
-  body += silk(xy, vec2(0.2, -0.61), vec2(0.33, -0.72), vec2(0.4, -0.92), fxy, 0.6, 0.85, 17.0, A, B);
-  body += silk(xy, vec2(0.0, -0.52), vec2(0.07, -0.62), vec2(0.13, -0.84), fxy, 0.7, 0.2, 18.0, A, B);
-  body += silk(xy, vec2(0.6, -0.55), vec2(0.8, -0.58), vec2(0.86, -0.82), fxy, 0.6, 0.1, 19.0, A, B);
-  body += silk(xy, vec2(0.1, -0.7), vec2(0.45, -0.68), vec2(0.7, -0.6), fxy, 0.5, 0.5, 20.0, A, B);
-  body += silk(xy, vec2(0.04, -0.79), vec2(0.22, -0.86), vec2(0.5, -0.79), fxy, 0.35, 0.3, 21.0, A, B);
-  body += silk(xy, vec2(0.165, 0.0), vec2(0.17, -0.2), vec2(0.23, -0.32), fxy, 0.4, 0.0, 22.0, A, B);
-  body += silk(xy, vec2(0.45, -0.4), vec2(0.62, -0.38), vec2(0.72, -0.5), fxy, 0.4, 0.6, 23.0, A, B);
-  lines += body * (1.0 - wpart.w);
-  // Bright points where lines meet, twinkling.
-  vec3 accents = vec3(0.0);
-  for (int k = 0; k < 7; k++) {
-    vec2 c = k == 0 ? vec2(0.06, -0.5) : k == 1 ? vec2(0.25, -0.545) : k == 2 ? vec2(0.2, -0.61)
-           : k == 3 ? vec2(0.13, -0.2) : k == 4 ? vec2(0.78, -0.47) : k == 5 ? vec2(0.45, -0.4) : vec2(0.0, -0.63);
-    float dpx = length(q.xy - c) / fxy;
-    float tw = 0.65 + 0.35 * sin(uT * uMotion * (1.3 + 0.37 * float(k)) + float(k) * 2.1);
-    accents += mix(vec3(1.0, 0.9, 0.95), B, 0.35) * (exp(-dpx * 0.45) * 1.6 + exp(-dpx * 0.08) * 0.12) * tw;
-  }
-  lines += accents * (1.0 - wpart.w);
-  // Light veins on the face: over the brow to the temple, down the cheekbone, along the jaw; the closed lids, the
-  // brows and the parting of the lips drawn as fine lines.
-  if (wpart.w > 0.01) {
-    gBundle = 0.0;
-    vec2 fh = vec2(abs(qh.x), qh.y);
-    float fh2 = fxy;
-    vec3 face = vec3(0.0);
-    face += silk(fh, vec2(0.3, 0.64), vec2(0.325, 0.48), vec2(0.29, 0.32), fh2, 0.4, 0.2, 31.0, A, B);
-    face += silk(fh, vec2(0.25, 0.22), vec2(0.18, 0.07), vec2(0.04, 0.025), fh2, 0.22, 0.3, 33.0, A, B);
-    face += silk(fh, vec2(0.065, 0.452), vec2(0.118, 0.432), vec2(0.172, 0.452), fh2, 0.4, 0.5, 34.0, F, B);
-    face += silk(fh, vec2(0.06, 0.53), vec2(0.13, 0.56), vec2(0.2, 0.53), fh2, 0.22, 0.2, 35.0, F, B);
-    face += silk(fh, vec2(0.0, 0.18), vec2(0.035, 0.177), vec2(0.064, 0.186), fh2, 0.28, 0.7, 36.0, F, B);
-    float front = smoothstep(0.05, 0.4, nh.z);
-    lines += face * wpart.w * (0.45 + 0.55 * front);
-    gBundle = 1.0;
-  }
-  if (wpart.z > 0.01) {
-    float psi = psiArm(q) + warp * 2.0;
-    vec3 g = GRAD(psiArm, q, E);
-    g.x *= sign(p.x + 1e-5);
-    lines += wpart.z * strokes(psi, g, n, 1.0, foot, 5.0, p, A, B, p.y, 0.35);
+  /* head turn: find the surface point that the turned head brings to this pixel (relief mapping on the height) */
+  vec2 sY = vec2(sin(uTurn.x), cos(uTurn.x));
+  vec2 sP = vec2(sin(uTurn.y), cos(uTurn.y));
+  float turned = 0.0;
+  if (abs(uTurn.x) + abs(uTurn.y) > 1e-4) {
+    vec2 P = q * DATA;
+    vec2 rel = (P - HEADC) / vec2(${f(D.head.radius * D.width * 1.3)}, ${f(D.head.radius * D.width * 1.9)});
+    if (dot(rel, rel) < 1.0) {
+      vec2 X = P;
+      for (int i = 0; i < 6; i++) {
+        float h = tile(1.0, X / DATA).g * ${f(D.hmax)} * tile(0.0, X / DATA).g;
+        vec2 nx = HEADC + (P - HEADC - vec2(h * sY.x, -h * sP.x)) / vec2(sY.y, sP.y);
+        X = mix(X, nx, 0.7);
+      }
+      // The head keeps its outline (a turning dome does); where the turn would bring in its unseen back, stay
+      // on the near edge of what is there.
+      float here = tile(0.0, q).g;
+      for (int i = 0; i < 4; i++)
+        if (tile(0.0, X / DATA).g < 0.7) X = mix(X, HEADC, 0.08);
+      turned = here;
+      q = mix(q, X / DATA, here);
+    }
   }
 
-  /* skin: dark glass on the body, porcelain on the face, a fresnel rim at the silhouette */
-  vec3 L = normalize(uKey);
-  float diff = max(dot(n, L), 0.0);
-  float wrap = max(dot(n, L) * 0.5 + 0.5, 0.0);
-  float spec = pow(max(dot(n, normalize(L + v)), 0.0), mix(70.0, 26.0, wpart.w));
-  vec3 base = vec3(0.004, 0.0015, 0.011) + A * (0.003 + mix(0.03 * diff * diff, 0.03 * wrap * wrap, wpart.w)) + R * spec * mix(0.2, 0.28, wpart.w);
-  // Porcelain: a soft wrapped light and an inner glow that is strongest where the face meets the eye.
-  base += F * wpart.w * (0.03 * wrap * wrap + 0.045 * pow(ndv, 3.0));
-  // A warm blush of inner light on the cheekbones.
-  vec3 dck = (vec3(abs(qh.x), qh.yz) - vec3(0.17, 0.36, 0.3)) * vec3(1.0, 1.3, 1.0);
-  base += mix(F, B, 0.45) * wpart.w * 0.05 * exp(-dot(dck, dck) / 0.006);
-  base += A * pow(fres, 3.0) * 0.06;
-  // Wide enough to cover a few pixels at the silhouette: a sub-pixel rim would flicker into dashes along
-  // slanted edges (the stair steps of the pixel grid).
-  vec3 rim = R * (pow(fres, 2.2) * 0.14 * (1.0 - 0.6 * wpart.w) + pow(fres, 4.0) * 0.8) + vec3(1.0, 0.93, 1.0) * pow(fres, 5.0) * 0.35;
-
-  /* the face light: a soft glow on the forehead and the cheekbones, brightest in front */
-  vec3 dfc = (qh - vec3(0.0, 0.5, 0.34)) * vec3(1.0, 0.7, 1.0);
-  float faceLight = 0.28 * exp(-dot(dfc, dfc) / 0.06) * smoothstep(0.0, 0.7, nh.z) * wpart.w;
-
-  /* the heart light: a soft glow in the chest, breathing */
-  vec3 dh = (p - HEART) * vec3(1.0, 1.2, 1.0);
-  float heart = (exp(-dot(dh, dh) / 0.03) * 0.22 + exp(-dot(dh, dh) / 0.004) * 0.35) * (0.85 + 0.15 * uBreath);
-
-  /* starry interior: points just under the skin, with parallax */
-  vec3 stars = vec3(0.0);
-  for (int k = 0; k < 3; k++) {
-    float sc = k == 0 ? 35.0 : k == 1 ? 56.0 : 84.0;
-    vec3 pp = (p - n * (0.015 + 0.035 * float(k))) * sc;
-    vec3 c = floor(pp);
-    vec3 hh = hash33(c + float(k) * 19.0);
-    float on = step(0.6, hh.x) * (k == 0 ? 1.0 : k == 1 ? 0.75 : 0.5);
-    float d = length(fract(pp) - (0.2 + 0.6 * hh));
-    float tw = 0.55 + 0.45 * sin(uT * uMotion * (1.2 + 3.0 * hh.y) + hh.z * 6.2831);
-    stars += on * (1.0 - smoothstep(0.0, 0.13, d)) * tw * mix(A, vec3(1.0, 0.82, 0.92), hh.y);
+  vec3 col = texture2D(uImage, q).rgb;
+  if (uView > 0.5) {
+    if (uView > 1.5) col = vec3(0.0);
+    gl_FragColor = linearToOutputTexel(vec4(col * edge, 1.0));
+    return;
   }
-  float starDensity = (0.35 + 0.65 * smoothstep(0.25, 0.7, vnoise3(p * 2.2 + 3.0))) * smoothstep(0.12, 0.4, ndv) * (1.0 - 0.7 * wpart.w);
+  vec3 t0 = tile(0.0, q);
+  vec3 t1 = tile(1.0, q);
+  vec3 t2 = tile(2.0, q);
+  float form = t0.r;
+  float headM = t0.g;
+  float bright = t0.b;
+  float fig = t1.b;
+  float zone = 1.0 - smoothstep(0.78, 1.0, length((q - vec2(${f(D.axis)}, 0.55)) / vec2(0.27, 0.62)));
 
-  float glow = uGlow * (1.0 + 0.45 * uAudio);
-  // Lines bunch up where the skin turns away: let the rim own the silhouette.
-  lines *= smoothstep(0.06, 0.3, ndv);
-  vec3 lit = lines * glow * (1.0 + ring * 1.5);
-  vec3 col = (base + rim * glow + F * faceLight * 0.9 * glow + (A + B) * 0.5 * heart * glow + stars * starDensity * 3.0) * fillOn;
-  col += R * ring * pow(fres, 1.5) * 1.2 * fillOn;
-  col += lit * lineOn;
-  col += (A + B) * weaveEdge * 0.55;
-  float alpha = fillOn * bottom * cover;
-  // Where the body has dissolved, only its sparkle is left, drifting into the dark.
-  vec3 left = stars * starDensity * 4.0 * dust * fillOn * cover;
-  col = col * bottom * cover + left;
+  /* the mood: a bloom spreading from the face carries the new palette and intensity */
+  float dist = length((p - vec2(${f(FACE.u)}, ${f(FACE.v)})) * vec2(${f(D.aspect)}, 1.0));
+  float inside = 1.0 - smoothstep(uBloomR - 0.09, uBloomR, dist);
+  vec3 A = mix(uA0, uA1, inside);
+  vec3 B = mix(uB0, uB1, inside);
+  vec3 Rc = mix(uR0, uR1, inside);
+  vec3 Hc = mix(uH0, uH1, inside);
+  float glow = mix(uGlow.x, uGlow.y, inside) * (1.0 + uAudio * 0.75);
+  float tint = mix(uTint.x, uTint.y, inside);
+  float accent = mix(uAccent.x, uAccent.y, inside);
 
-  vec4 clip = uPV * viewMatrix * vec4(p, 1.0);
-  gl_FragDepth = clamp((clip.z / clip.w) * 0.5 + 0.5, 0.0, 1.0);
-  gl_FragColor = vec4(col, alpha);
+  /* hair and ribbons: the artwork's own light, tinted by the mood, shimmering along the strands */
+  float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  float hair = bright * (1.0 - form * (1.0 - bright));
+  vec3 tinted = Hc * (lum / max(1e-3, dot(Hc, vec3(0.2126, 0.7152, 0.0722))));
+  // (The cyan line on the chest keeps its colour.)
+  float cyanish = smoothstep(0.16, 0.28, col.g / max(1e-3, col.r + col.g + col.b));
+  col = mix(col, mix(col, tinted, 0.85), tint * hair * zone * (1.0 - cyanish));
+  float strand = noise(vec2(q.x * 150.0, q.y * 6.0 - uT * 0.35)) * noise(vec2(q.x * 70.0 + 3.0, q.y * 2.5 + uT * 0.21));
+  col *= 1.0 + ${f(LIGHTS.shimmer)} * uMotion * hair * zone * (strand * 2.2 - 0.35) * (1.0 + uAudio * 0.6);
+  // Living lights: two slow highlights drift along the bright ribbons.
+  float ribbon = bright * (1.0 - zone) * smoothstep(0.05, 0.4, lum);
+  float sweep = exp(-pow((q.x - fract(uT * 0.011) * 1.6 + 0.3 + 0.12 * sin(q.y * 6.0)) / 0.09, 2.0))
+    + exp(-pow((q.x - 1.3 + fract(uT * 0.0085 + 0.5) * 1.6 + 0.1 * sin(q.y * 5.0 + 1.0)) / 0.07, 2.0));
+  col *= 1.0 + ${f(LIGHTS.ribbons)} * uMotion * ribbon * sweep;
+
+  /* the stripes: meridians of a rounded form, lit where the surface faces the viewer */
+  float dhi = t1.r * 255.0;
+  float dlo = t2.b * 255.0;
+  float d = ((dhi * 256.0 + dlo) / 65535.0 - 0.5) * ${f(2 * D.dmax)};
+  float s = (q.x - ${f(D.axis)}) * DATA.x + d;
+  float period = mix(${f(bodyPeriod)}, ${f(headPeriod)}, step(0.5, headM));
+  // Even count on the head: a gap, not a stripe, runs down the middle of the face.
+  float sigma = s / period + 0.5 * step(0.5, headM);
+  float id = floor(sigma + 0.5);
+  float fr = sigma - id;
+  float hw = ${f(STRIPES.width * 0.5)};
+  // Where the lines crowd (the chin, the crown, the very edge) they fade out instead of shimmering.
+  float crowd = 1.0 - smoothstep(0.25, 0.55, fwidth(sigma));
+  vec3 n = vec3(t2.r * 2.0 - 1.0, t2.g * 2.0 - 1.0, 0.0);
+  n.z = sqrt(max(0.0, 1.0 - dot(n.xy, n.xy)));
+  vec3 nr = n;
+  if (turned > 0.0) {
+    nr = vec3(n.x * sY.y + n.z * sY.x, n.y, -n.x * sY.x + n.z * sY.y);
+    nr = vec3(nr.x, nr.y * sP.y + nr.z * sP.x, -nr.y * sP.x + nr.z * sP.y);
+    nr = mix(n, nr, turned);
+  }
+  float facing = max(nr.z, 0.0);
+  // Stripes fade out right at the silhouette, where the surface turns fully away (the rim takes over there).
+  float lit = (1.0 - ${f(STRIPES.falloff)} * (1.0 - pow(facing, 1.6))) * smoothstep(0.02, 0.22, facing);
+  lit += 0.22 * max(dot(nr, normalize(vec3(-0.45, 0.55, 0.7))), 0.0);
+  // Shade under the chin.
+  lit *= 1.0 - 0.55 * tile(0.0, q - vec2(0.0, 0.045)).g * (1.0 - headM);
+  float id2 = id + step(0.5, headM) * 41.0;
+  float travel = pow(max(0.0, sin((q.y * DATA.y / ${f(STRIPES.travel.length)} + (hash11(id2 + 9.0) > 0.5 ? -1.0 : 1.0) * uT * uPulse * 0.11 * uMotion + hash11(id2 + 5.0) * 7.0) * 3.14159)), 8.0);
+  // The crown sits in the shadow of the hair: the head's stripes fade in below it.
+  float crown = mix(1.0, smoothstep(${f(D.head.top)}, ${f(D.head.top + 0.07)}, q.y), headM);
+  float surface = form * (1.0 - bright * 0.92) * crown;
+  vec3 sc = stripeColour(id2, A, B, accent);
+  vec3 stripe = neonStripe(fr * period, q.y * DATA.y, s, id2, hw * period, sc) * lit * crowd
+    * (1.0 + ${f(STRIPES.travel.gain)} * travel) * ${f(STRIPES.gain)};
+  // The rim: bright where the form turns away, more so on the far side of a turned head.
+  float rimW = pow(1.0 - facing, 4.0) * (1.0 + turned * abs(uTurn.x) * 4.0);
+  // Only the sides catch it: not edges that face up (the shoulder line, the crown) nor edges against the hair.
+  rimW *= 1.0 - smoothstep(0.25, 0.7, n.y);
+  rimW *= 1.0 - tile(0.0, q + vec2(n.x, -n.y) * 0.012).b;
+  // The far side of a turned head darkens.
+  float farSide = clamp(1.0 - turned * max(0.0, n.z - nr.z) * 3.0, 0.25, 1.0);
+  stripe *= mix(1.0, farSide, turned);
+  col *= mix(1.0, farSide, headM);
+
+  /* birth: the picture appears where the particles have landed, the face last, then one shockwave */
+  float vis = 1.0;
+  float ignite = 0.0;
+  vec3 extra = vec3(0.0);
+  if (uTau < ${f(BIRTH.total)}) {
+    float hp = tile(0.0, p).g;
+    float ar = arrival(p, hp, 0.5);
+    float reveal = smoothstep(ar - 0.1, ar + ${f(BIRTH.settle)}, uTau);
+    // The room comes up with the figure, row by row, a touch ahead: no dark cut-out waits for the particles.
+    float arRoom = ar - 0.25;
+    vis = mix(smoothstep(arRoom - 0.5, arRoom + 0.5, uTau), reveal, figP);
+    ignite = hp * step(ar - 0.1, uTau) * exp(-max(0.0, uTau - ar) / 0.55);
+    vec2 sp = (p - vec2(${f(BIRTH.source.u)}, ${f(BIRTH.source.v)})) * vec2(${f(D.aspect)}, 1.0);
+    float env = smoothstep(0.0, ${f(BIRTH.lead)}, uTau) * (1.0 - smoothstep(1.4, 2.6, uTau));
+    extra += mix(A, vec3(1.0), 0.35) * env * (exp(-dot(sp, sp) / 0.0016) * 1.6 + exp(-dot(sp, sp) / 0.02) * 0.25);
+    float rp = (uTau - ${f(BIRTH.ringAt)}) / ${f(BIRTH.ringTime)};
+    if (rp > 0.0 && rp < 1.0) {
+      float rr = (1.0 - pow(1.0 - rp, 3.0)) * 1.5;
+      float ring = exp(-pow((dist - rr) / (0.03 + 0.05 * rp), 2.0)) * pow(1.0 - rp, 2.0);
+      extra += mix(Rc, A, 0.4) * ring * (0.25 + 0.55 * fig);
+    }
+  }
+
+  // The bloom's front: a soft ring of light that brightens the stripes as it passes.
+  float bloomRing = exp(-pow((dist - uBloomR) / 0.05, 2.0));
+  stripe *= glow * (1.0 + ignite * 1.6 + bloomRing * uBloomEdge * 1.4);
+  col += (stripe + Rc * rimW * ${f(STRIPES.rim)} * glow * (0.5 + 0.5 * ignite)) * surface;
+  // The bloom's soft glowing rim.
+  col += Rc * bloomRing * uBloomEdge * (0.1 + 0.9 * fig);
+  col = col * vis + extra;
+
+  float below = 1.0 - smoothstep(uFloor - 90.0, uFloor, gl_FragCoord.y);
+  col *= mix(1.0, 0.42, below * step(0.0, uFloor));
+  col = mix(uRoom, col, edge);
+  gl_FragColor = linearToOutputTexel(vec4(col, 1.0));
 }
 `;
 
-/* ---------------- hair ---------------- */
+/* ---------------- the particles: the artwork sampled into points ---------------- */
 
-export const HAIR_VERT = /* glsl */ `
-${COMMON}
-attribute vec4 aStrand;
-uniform sampler2D uGuides;
-uniform float uPoints;
-uniform float uHairGain;
-varying vec3 vCol;
-varying float vA;
-void main() {
-  ivec2 ia = ivec2(int(aStrand.w + 0.5), int(aStrand.x + 0.5));
-  vec3 pa = texelFetch(uGuides, ia, 0).xyz;
-  vec3 pb = texelFetch(uGuides, ia + ivec2(0, 1), 0).xyz;
-  float seed = aStrand.z;
-  float s = aStrand.w / (uPoints - 1.0);
-  vec3 pos = mix(pa, pb, aStrand.y);
-  vec3 h3 = hash33(vec3(seed * 91.7, seed * 13.3, seed * 47.1)) - 0.5;
-  // Every strand has its own length; its lock narrows toward the end (tapered tips, not a cut fringe).
-  float smax = 0.68 + 0.32 * hash11(seed * 17.3 + 4.1);
-  float taper = 1.0 - 0.6 * smoothstep(0.55, 1.0, s / smax);
-  pos += h3 * vec3(0.04, 0.012, 0.04) * (0.2 + 0.9 * s) * taper;
-  // A few fine flyaways lift off the lock in the middle of their length.
-  float fly = step(0.965, hash11(seed * 53.1));
-  pos += fly * (hash33(vec3(seed * 7.7, 3.1, seed * 2.3)) - 0.5) * vec3(0.16, 0.06, 0.12) * sin(3.14159 * s);
-  pos += vec3(sin(s * 7.0 + seed * 21.0), 0.0, cos(s * 5.0 + seed * 13.0)) * 0.01 * s;
-  float sw = s * s * uMotion;
-  pos.x += sw * (0.04 * sin(uT * 0.55 + seed * 2.0 + pos.y * 1.4) + 0.012 * sin(uT * 1.35 + seed * 17.0));
-  pos.z += sw * 0.025 * sin(uT * 0.42 + seed * 3.0 + pos.y);
-  pos.y += uBreath * 0.008 * smoothstep(0.3, 0.8, s);
-  float hw = 1.0 - 0.5 * smoothstep(0.3, 0.95, s);
-  pos = mix(pos, uHead * (pos - PIVOT) + PIVOT, hw);
-
-  float wk = waveK(pos);
-  vec3 H = mix(uH0, uH1, wk);
-  vec3 B = mix(uB0, uB1, wk);
-  vec3 A = mix(uA0, uA1, wk);
-  float hs = hash11(seed * 311.0);
-  vec3 c = hs > 0.9 ? B : (hs > 0.55 ? A : H);
-  // Light gathers along the length of the hair, not at the roots: no hot spot on the crown.
-  float sheen = 0.55 + 0.45 * smoothstep(0.08, 0.45, s);
-  float glint = 0.7 + 0.3 * sin(s * 16.0 + seed * 50.0);
-  // Light travels down the strands, a little faster when NOVA thinks.
-  float travel = pow(0.5 + 0.5 * sin(s * 9.0 - uT * uMotion * (0.9 + 0.5 * uPulse) + seed * 6.2831), 10.0);
-  // Sheen: a soft highlight band where the hair rounds over the top of the head.
-  float band = exp(-pow((pos.y - 0.78) / 0.09, 2.0)) * (1.0 - smoothstep(0.15, 0.45, s));
-  float rev = (uWeave - 0.3) / 0.62 * 1.4 - seed * 0.3;
-  float shown = 1.0 - smoothstep(rev - 0.06, rev, s);
-  float ends = 1.0 - smoothstep(smax - 0.14, smax, s);
-  // The face stays clear: strands that would fall across it (in the head's own frame) fade out there.
-  vec3 hp = uHeadInv * (pos - PIVOT) + PIVOT;
-  float overFace = (1.0 - smoothstep(0.17, 0.26, abs(hp.x))) * smoothstep(0.0, 0.12, hp.y) * (1.0 - smoothstep(0.74, 0.84, hp.y)) * smoothstep(0.12, 0.25, hp.z);
-  ends *= 1.0 - overFace;
-  float roots = smoothstep(0.0, 0.025, s) * smoothstep(-1.25, -0.7, pos.y);
-  vCol = c * sheen * (0.4 + 0.9 * hs * hs) * (glint + 1.4 * travel + 0.9 * band) * (1.0 - 0.45 * fly) * uGlow * (1.0 + 0.35 * uAudio) * (1.0 + waveRing(pos));
-  vA = (0.036 + 0.04 * hs + 0.15 * step(0.94, hs)) * roots * ends * shown * uHairGain;
-  gl_Position = projectionMatrix * viewMatrix * vec4(pos, 1.0);
-}
-`;
-
-export const HAIR_FRAG = /* glsl */ `
-varying vec3 vCol;
-varying float vA;
-void main() { gl_FragColor = vec4(vCol * vA, 1.0); }
-`;
-
-/* ---------------- motes ---------------- */
-
-export const MOTE_VERT = /* glsl */ `
-${COMMON}
+export const POINTS_VERT = /* glsl */ `
+attribute vec4 aColor;
 attribute vec4 aSeed;
+uniform vec4 uFrame;     // css px
+uniform vec2 uView;      // css px
 uniform float uPx;
-varying vec3 vCol;
-void main() {
-  vec3 pos = position;
-  float tt = uT * uMotion;
-  pos.y = mod(pos.y + 3.0 + tt * (0.02 + 0.05 * aSeed.x), 6.4) - 3.0 + 0.0;
-  pos.x += 0.08 * sin(tt * 0.2 + aSeed.y * 6.2831) ;
-  pos.z += 0.06 * cos(tt * 0.17 + aSeed.z * 6.2831);
-  vec4 mv = viewMatrix * vec4(pos, 1.0);
-  float wk = waveK(pos);
-  vec3 A = mix(uA0, uA1, wk);
-  vec3 B = mix(uB0, uB1, wk);
-  float tw = 0.5 + 0.5 * sin(tt * (0.8 + 2.0 * aSeed.w) + aSeed.x * 30.0);
-  vCol = mix(A, B, step(0.75, aSeed.w)) * (0.25 + 0.9 * aSeed.y * aSeed.y) * tw * uWeave * uGlow;
-  gl_PointSize = (1.0 + 2.2 * aSeed.z * aSeed.z) * uPx * (14.0 / -mv.z);
-  gl_Position = projectionMatrix * mv;
-}
-`;
-
-export const MOTE_FRAG = /* glsl */ `
-varying vec3 vCol;
-void main() {
-  vec2 c = gl_PointCoord - 0.5;
-  float a = (1.0 - smoothstep(0.0, 0.5, length(c)));
-  gl_FragColor = vec4(vCol * a * a, 1.0);
-}
-`;
-
-/* ---------------- post ---------------- */
-
-export const POST_VERT = /* glsl */ `
-varying vec2 vUv;
-void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
-`;
-
-export const POST_FRAG = /* glsl */ `
-uniform sampler2D tDiffuse;
-uniform vec2 uRes;
+uniform float uSize;     // point radius, css px
 uniform float uT;
 uniform float uMotion;
-uniform float uFloor;
-uniform float uPx;
-varying vec2 vUv;
-float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+uniform float uTau;
+uniform float uBreath;
+uniform vec2 uTurn;
+uniform float uGain;     // 0 composed; 1 shows the particles at full strength (the dev comparison)
+uniform float uTwinkle;
+uniform vec3 uFly;       // colour of a particle in flight (sRGB)
+varying vec3 vCol;
+${COMMON}
 void main() {
-  vec2 d = vUv - 0.5;
-  // A whisper of lens fringe toward the corners.
-  vec2 off = d * dot(d, d) * 0.006;
-  vec3 c;
-  c.r = texture2D(tDiffuse, vUv + off).r;
-  c.g = texture2D(tDiffuse, vUv).g;
-  c.b = texture2D(tDiffuse, vUv - off).b;
-  float vig = (1.0 - smoothstep(0.25, 1.05, length(d * vec2(1.0, 1.15))));
-  c *= mix(0.55, 1.0, vig);
-  // Saturated, not blown out: pull the brightest values back toward their own hue.
-  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  c = mix(vec3(l), c, 1.08);
-  // The reply floats over the figure: below its top the figure steps back.
-  float below = 1.0 - smoothstep(uFloor - 90.0 * uPx, uFloor, gl_FragCoord.y);
-  c *= mix(1.0, 0.42, below * step(0.0, uFloor));
-  float g = hash12(gl_FragCoord.xy + fract(uT * uMotion) * 113.0) - 0.5;
-  c += g * 0.018;
-  gl_FragColor = vec4(max(c, 0.0), 1.0);
+  vec2 home = position.xy;
+  vec2 p = home;
+  float isHead = 1.0 - step(0.5, abs(aSeed.z - 1.0));
+  float isBright = 1.0 - step(0.5, abs(aSeed.z - 2.0));
+  vec2 anchor = vec2(${f(D.axis)}, ${f(BREATH.anchor)});
+  float e = ${f(BREATH.amount)} * uBreath * aColor.a;
+  p = anchor + (p - anchor) * vec2(1.0 + e * 0.7, 1.0 + e);
+  float hidden = 0.0;
+  if (isHead > 0.5) {
+    float h = aSeed.y;
+    vec2 sY = vec2(sin(uTurn.x), cos(uTurn.x));
+    vec2 sP = vec2(sin(uTurn.y), cos(uTurn.y));
+    vec2 P = p * DATA - HEADC;
+    float z = -P.x * sY.x + h * sY.y;
+    P = P * vec2(sY.y, sP.y) + vec2(h * sY.x, -h * sP.x);
+    p = (HEADC + P) / DATA;
+    hidden = step(z, -0.5);
+  }
+  float ar = arrival(home, isHead, aSeed.w);
+  float launch = ar - ${f(BIRTH.flight)};
+  float k = clamp((uTau - launch) / ${f(BIRTH.flight)}, 0.0, 1.0);
+  vec2 src = vec2(${f(BIRTH.source.u)}, ${f(BIRTH.source.v)}) + (vec2(hash11(aSeed.x * 91.0), hash11(aSeed.x * 37.0 + 2.0)) - 0.5) * vec2(0.03, 0.02);
+  vec2 mid = mix(src, p, 0.5) + vec2((aSeed.x - 0.5) * 0.42, -0.06 - 0.1 * aSeed.w);
+  float ek = 1.0 - pow(1.0 - k, 3.0);
+  vec2 pos = mix(mix(src, mid, ek), mix(mid, p, ek), ek);
+  float landed = smoothstep(ar, ar + ${f(BIRTH.settle)}, uTau);
+  float twinkle = isBright * uTwinkle * uMotion * pow(0.5 + 0.5 * sin(uT * (0.5 + aSeed.x * 1.3) + aSeed.w * 60.0), 60.0);
+  float gain = step(launch, uTau) * mix(1.0, max(uGain, twinkle), landed);
+  vec3 c = aColor.rgb * aColor.a;
+  // In flight a point is larger; its light is spread over that size, so a dense landing does not burn out.
+  float grow = 1.0 + (1.0 - k) * 0.8;
+  // In flight a particle is light: its own colour plus a violet glow, brighter for the face that ignites last.
+  vec3 flying = uFly * (0.22 + 0.45 * isHead) + c * 0.9;
+  vCol = mix(flying, c * (1.0 + 0.5 * (1.0 - landed)), smoothstep(0.55, 1.0, k)) * gain / (grow * grow);
+  if (gain < 0.003 || hidden > 0.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
+  vec2 sc = uFrame.xy + pos * uFrame.zw;
+  gl_Position = vec4(sc.x / uView.x * 2.0 - 1.0, 1.0 - sc.y / uView.y * 2.0, 0.0, 1.0);
+  gl_PointSize = max(1.5, 2.0 * uSize * uPx * grow);
+}
+`;
+
+export const POINTS_FRAG = /* glsl */ `
+precision highp float;
+varying vec3 vCol;
+void main() {
+  vec2 d = gl_PointCoord * 2.0 - 1.0;
+  float r2 = dot(d, d);
+  if (r2 > 1.0) discard;
+  // A flat-topped disc (few faint fragments: an 8-bit buffer would lose them). Its weight makes an even grid of
+  // them, two cells in radius, add up to the picture.
+  float k = 1.0 - smoothstep(0.4, 1.0, sqrt(r2));
+  gl_FragColor = vec4(vCol * k * 0.1567, 1.0);
 }
 `;
