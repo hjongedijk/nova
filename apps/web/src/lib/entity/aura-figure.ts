@@ -340,7 +340,8 @@ export function growHair(
       const l0 = Math.hypot(...d);
       d = [d[0] / l0, d[1] / l0, d[2] / l0];
     } else {
-      const u = rand() * 2 - 1;
+      // Denser toward the top: the whole dome is covered.
+      const u = 1 - 2 * Math.pow(rand(), 1.6);
       const phi = rand() * Math.PI * 2;
       const sn = Math.sqrt(1 - u * u);
       d = [sn * Math.cos(phi), u, sn * Math.sin(phi)];
@@ -348,7 +349,8 @@ export function growHair(
     if (d[1] < -0.05) continue;
     // Not on the face: in front, the hairline sits high and arches over the temples.
     const front = d[2];
-    if (!lock && front > 0.2 && d[1] < 0.55 + 0.25 * (1 - Math.abs(d[0]) * 1.3))
+    // The hairline: high on the forehead, framing it; everything above it carries hair.
+    if (!lock && front > 0.3 && d[1] < 0.42 + 0.12 * (1 - Math.abs(d[0]) * 1.3))
       continue;
     if (!lock && d[1] < 0.25 && Math.abs(d[0]) > 0.7 && front > -0.1) continue;
     let root = onEllipsoid(c, e, d, 1.0);

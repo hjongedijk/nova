@@ -456,6 +456,9 @@ async function createGlAura(
     uBreath: { value: 0 },
     uChest: { value: chest },
     uWaist: { value: fig.waist },
+    uChin: { value: fig.head.c[1] - fig.head.r[1] },
+    uBreastL: { value: new THREE.Vector3(...fig.breasts[0]!) },
+    uBreastR: { value: new THREE.Vector3(...fig.breasts[1]!) },
     uElbowL: { value: new THREE.Vector3(...fig.elbows[0]!) },
     uElbowR: { value: new THREE.Vector3(...fig.elbows[1]!) },
     uPx: { value: 1 },
@@ -660,6 +663,10 @@ async function createGlAura(
     fragmentShader: HAIR_FRAG,
     ...additive,
     side: THREE.DoubleSide,
+    // Strands lie a few millimetres off the scalp: pull them a hair toward the camera so the dome never hides them.
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -8,
   });
   const hairMesh = new THREE.Mesh(hairGeo, hairMat);
   hairMesh.frustumCulled = false;

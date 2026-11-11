@@ -181,6 +181,9 @@ varying float vWarm;
 uniform float uWaist;
 uniform vec3 uElbowL;
 uniform vec3 uElbowR;
+uniform float uChin;
+uniform vec3 uBreastL;
+uniform vec3 uBreastR;
 ${COMMON}
 ${MOOD}
 void main() {
@@ -203,8 +206,10 @@ void main() {
   vec3 c3 = ${rgb(SKIN.rimB)};
   vec3 base = ${rgb(SKIN.base)};
   // Soft diffuse from the violet key, so her volumes read (the bust, the shoulders), and a little from the rims.
-  vec3 col = base * 0.25 + c1 * 0.035 * pow(max(dot(N, L1), 0.0), 1.5);
-  col += c2 * 0.02 * max(dot(N, L2), 0.0) + c3 * 0.012 * max(dot(N, L3), 0.0);
+  // Form reads from the lines and the rims, not from shading: the body gets a whisper of light, the head none.
+  float lit = 1.0 - smoothstep(0.2, 0.6, vHead);
+  vec3 col = base * 0.25 + (c1 * 0.0175 * pow(max(dot(N, L1), 0.0), 1.5)
+    + c2 * 0.01 * max(dot(N, L2), 0.0) + c3 * 0.006 * max(dot(N, L3), 0.0)) * lit;
   // Clearcoat: sharp highlights and a strong fresnel.
   float F = 0.04 + 0.96 * pow(1.0 - NdV, 5.0);
   vec3 H1 = normalize(L1 + V);
@@ -214,7 +219,7 @@ void main() {
   vec3 spec = c1 * pow(max(dot(N, H1), 0.0), 220.0)
     + c2 * pow(max(dot(N, H2), 0.0), 120.0)
     + c3 * pow(max(dot(N, H3), 0.0), 120.0) * 0.6;
-  col += spec * F * ${f(SKIN.gloss)};
+  col += spec * F * ${f(SKIN.gloss)} * lit;
   // The light comes from the lines: skin near a line takes its colour.
   vec3 lineC = mix(mix(A, B, 0.4), ${rgb("#ffb27a")}, vWarm * 0.8);
   col += lineC * pow(vGlow, 2.6) * ${f(SKIN.lineGlow)} * glow * (0.55 + 0.45 * NdV);
@@ -228,7 +233,13 @@ void main() {
   vec3 edgeC = mix(mix(vec3(1.0, 0.82, 0.97), ${rgb("#ffc27a")}, goldZone * 0.7), vec3(1.0), 0.15);
   // Surfaces facing down (under the chin, under the bust) keep their edge dark: the light comes from above.
   float down = 1.0 - smoothstep(0.25, 0.75, -N.y);
-  col += (edgeC * edgeCore * 1.6 + mix(A, B, 0.35) * edgeHalo * ${f(SKIN.rim)}) * glow * down;
+  // No rim where the jaw meets the neck (it would read as a collar) ...
+  down *= 1.0 - smoothstep(uPivot.y - 0.03, uPivot.y, vObj.y) * (1.0 - smoothstep(uChin - 0.01, uChin + 0.035, vObj.y));
+  // ... nor along the breasts' sides against the torso (an inner edge, not her outline).
+  vec2 bl = vObj.xy - uBreastL.xy;
+  vec2 br = vObj.xy - uBreastR.xy;
+  down *= smoothstep(0.045, 0.075, min(length(bl), length(br)));
+  col += (edgeC * edgeCore * 1.6 + mix(A, B, 0.35) * edgeHalo * ${f(SKIN.rim)} * mix(1.0, 0.35, vHead)) * glow * down;
   // A faint inner glow, as if light lived under the glass.
   col += A * 0.01 * pow(NdV, 2.0) * glow;
 
@@ -516,7 +527,8 @@ void main() {
   // A few bright individual strands, most dim; the crown glows too (strand lines converging at the part).
   float bright = (0.12 + 0.88 * pow(vRand, 5.0)) * (0.8 + 0.5 * smoothstep(0.2, 0.9, vT));
   float run = pow(max(0.0, sin((vT * 3.0 - uT * 0.12 * uMotion + vRand2 * 6.0) * 6.2832)), 18.0);
-  float along = smoothstep(0.0, 0.02, vT) * (1.0 - smoothstep(0.88, 1.0, vT));
+  // Strands lying on the skull don't overlap the way the falling lengths do: lift them so the crown glows.
+  float along = smoothstep(0.0, 0.02, vT) * (1.0 - smoothstep(0.88, 1.0, vT)) * (1.0 + 2.6 * (1.0 - smoothstep(0.08, 0.35, vT)));
   vec3 col = base * bright * (0.6 + ${f(HAIRLOOK.sheen)} * sheen * 2.0) + vec3(1.0, 0.8, 1.0) * sheen * 0.25 * bright
     + ${rgb("#e05cf0")} * sheen2 * 0.4 * bright + mix(base, vec3(1.0), 0.5) * run * 0.6;
   col *= prof * along * vCover * ${f(HAIRLOOK.gain)} * glow;

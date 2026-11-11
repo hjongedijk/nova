@@ -696,7 +696,8 @@ function addLine(ctrl, weight, opts = {}) {
   for (const q of pts) q.n = norm(q.n);
   lines.push({
     w: weight,
-    warm: opts.warm ? 1 : 0,
+    // About a quarter of the body's lines run warm (gold, peach); the face stays violet.
+    warm: opts.warm || (!opts.face && rand() < 0.2) ? 1 : 0,
     face: opts.face ? 1 : 0,
     pts,
   });
@@ -856,22 +857,11 @@ for (const side of [1, -1]) {
   // touch lower (the breast's weight).
   for (let i = 0; i < 14; i++) {
     const r = lerp(0.5, 1.15, i / 13);
-    const arc = around(r, lerp(-40, -10, rand()), lerp(140, 165, rand()), 0);
+    const arc = around(r, lerp(-40, -10, rand()), lerp(80, 100, rand()), 0);
     addLine(arc, 0.3 + 0.55 * r * rand() + (r > 0.8 ? 0.2 : 0), {
       warm: i === 3 || i === 7 || i === 8,
     });
     companion(arc, side * 0.0028, 0.15 + 0.1 * rand());
-  }
-  // The undersides carry the light: short bright arcs, mostly warm.
-  for (let i = 0; i < 4; i++) {
-    const r = lerp(0.98, 1.15, i / 3);
-    const under = around(
-      r,
-      lerp(35, 50, rand()),
-      lerp(120, 140, rand()),
-      0.004,
-    );
-    addLine(under, 0.45 + 0.15 * rand(), { warm: i !== 1 });
   }
   // The heart: over the top of each breast and inward, meeting softly at the sternum below the cleavage.
   for (let i = 0; i < 4; i++) {
@@ -898,8 +888,8 @@ for (const side of [1, -1]) {
     );
   }
   // From the sternum point down and out over the ribs toward the waist.
-  for (let i = 0; i < 12; i++) {
-    const k = i / 11;
+  for (let i = 0; i < 4; i++) {
+    const k = i / 3;
     addLine(
       [
         [sternum[0], sternum[1]],
@@ -907,7 +897,7 @@ for (const side of [1, -1]) {
         [s(lerp(0.015, 0.1, k) + j(0.003)), by - bustR * 2.0],
         [s(lerp(0.02, 0.12, k)), WAIST_Y * SCALE + 0.03],
       ],
-      i % 3 === 0 ? 0.6 : 0.22 + 0.2 * rand(),
+      0.28 + 0.1 * rand(),
       { warm: i === 5 },
     );
   }
