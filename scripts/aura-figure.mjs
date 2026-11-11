@@ -106,6 +106,38 @@ for (const side of ["l", "r"]) {
   })();
 }
 
+/* ---------- shoulders: about 9% narrower and sloped, the upper arms slimmer ---------- */
+for (const i of bodyVerts) {
+  const p = P(i);
+  const ax = Math.abs(p[0]);
+  if (p[1] < SPINE1[1] - 2.6) continue;
+  const w = smooth(0.35, 1.0, ax);
+  const k = 1 - 0.09 * w;
+  // The outer shoulder sits a little lower: a soft feminine slope.
+  const slope =
+    0.16 *
+    smooth(0.5, 1.5, ax) *
+    smooth(SPINE1[1] - 0.6, SPINE1[1] + 0.6, p[1]);
+  setP(i, [p[0] * k, p[1] - slope, p[2]]);
+}
+for (const side of ["l", "r"]) {
+  SH[side] = [SH[side][0] * 0.91, SH[side][1] - 0.14, SH[side][2]];
+  EL[side] = [EL[side][0] * 0.91, EL[side][1], EL[side][2]];
+  const sign = side === "l" ? 1 : -1;
+  const axis = norm(sub(EL[side], SH[side]));
+  for (const i of bodyVerts) {
+    const p = P(i);
+    if (sign * p[0] < 0.8) continue;
+    const rel = sub(p, SH[side]);
+    const along = dot(rel, axis);
+    if (along < 0) continue;
+    const onAxis = add(SH[side], mul(axis, along));
+    // Toward the arm's own axis, fading in past the armpit.
+    const w = smooth(0.8, 1.3, sign * p[0]) * smooth(0.0, 0.6, along);
+    setP(i, add(onAxis, mul(sub(p, onAxis), 1 - 0.1 * w)));
+  }
+}
+
 /* ---------- the neck: a touch slimmer and shorter (the head comes down with it) ---------- */
 const NECK_DROP = 0.14;
 for (const i of bodyVerts) {
@@ -191,15 +223,16 @@ function eggSurface(dir) {
   const d = norm(dir);
   // A human oval: widest a little above the middle, a gentle taper to a soft chin.
   const taper =
-    1 - 0.24 * smooth(-0.05, -0.95, d[1]) - 0.05 * smooth(0.5, 1, d[1]);
+    1 - 0.28 * smooth(-0.05, -0.95, d[1]) - 0.1 * smooth(0.45, 1, d[1]);
   const rx = EGG.rx * taper;
   const rz = EGG.rz * (1 - 0.08 * smooth(0, -0.9, d[1]));
   const k =
     1 / Math.sqrt((d[0] / rx) ** 2 + (d[1] / EGG.ry) ** 2 + (d[2] / rz) ** 2);
   return add(EGG.c, mul(d, k));
 }
+// A long blend under the chin: the jaw flows into the neck, no collar.
 const headBlend = (p) =>
-  smooth(chinY - 0.25, chinY + 0.1, p[1]) *
+  smooth(chinY - 0.55, chinY + 0.15, p[1]) *
   smooth(NECK[1] + 0.2, NECK[1] + 0.55, p[1]);
 const orig = new Map(headVerts.map((i) => [i, P(i)]));
 for (const i of headVerts) {
@@ -318,9 +351,17 @@ function neighbours(n, fs_) {
   const n = P2.length / 3;
   const nb = neighbours(n, faces);
   const w = new Float64Array(n);
-  for (let i = 0; i < n; i++)
-    w[i] = headBlend([P2[i * 3], P2[i * 3 + 1], P2[i * 3 + 2]]) ** 0.5;
-  for (let it = 0; it < 60; it++)
+  for (let i = 0; i < n; i++) {
+    const p = [P2[i * 3], P2[i * 3 + 1], P2[i * 3 + 2]];
+    // The head, and the join under the chin where the ovoid meets the neck (no collar there).
+    w[i] = Math.max(
+      headBlend(p) ** 0.5,
+      0.8 *
+        Math.exp(-(((p[1] - chinY) / 0.3) ** 2)) *
+        smooth(-0.6, 0.2, p[2] - NECK[2]),
+    );
+  }
+  for (let it = 0; it < 90; it++)
     for (const lambda of [0.5, -0.53]) {
       const next = Float64Array.from(P2);
       for (let i = 0; i < n; i++) {
@@ -726,9 +767,9 @@ for (const side of [1, -1]) {
   };
   const sternum = [s(0.004), by - bustR * 0.35];
 
-  // Neck: nine fine strands down its sides, turning out along the collarbone.
-  for (let i = 0; i < 9; i++) {
-    const k = i / 8;
+  // Neck: eleven fine strands down its sides, turning out along the collarbone.
+  for (let i = 0; i < 11; i++) {
+    const k = i / 10;
     addLine(
       [
         [s(lerp(0.01, 0.032, k) + j(0.002)), nk[1] + 0.06],
@@ -772,8 +813,8 @@ for (const side of [1, -1]) {
   if (armRows.length > 4) {
     addLine(steady(armRows.map(([y, o]) => [o - side * 0.003, y])), 0.75);
     const rows = armRows.filter(([, o, n]) => Math.abs(o - n) < 0.075);
-    for (let i = 0; i < 3; i++) {
-      const f = 0.25 + 0.25 * i;
+    for (let i = 0; i < 4; i++) {
+      const f = 0.2 + 0.2 * i;
       addLine(
         steady(rows.slice(1 + i).map(([y, o, n]) => [lerp(o, n, f), y])),
         0.2 + 0.12 * rand(),
@@ -787,36 +828,35 @@ for (const side of [1, -1]) {
       const e = edgeX(y, s(0.05), side);
       if (e !== null && Math.abs(e) < 0.16) pts.push([e - side * 0.003, y]);
     }
-    const run = steady(pts, 0.008);
-    if (run.length > 4) addLine(run, 0.55);
+    // (The silhouette itself glows in the shader; this rim stays quiet and only on the flank below the bust.)
+    const run = steady(
+      pts.filter(([, y]) => y < B[1] - 0.075),
+      0.008,
+    );
+    if (run.length > 4) addLine(run, 0.3);
   }
   // From the collarbone down over the top of the breast and around it: flowing sweeps, each with a companion.
-  for (let i = 0; i < 5; i++) {
-    const k = i / 4;
-    const r = lerp(0.9, 1.25, k);
-    const a0 = lerp(-150, -115, k);
-    const start = around(r, a0, a0)[0];
-    const top = [s(lerp(0.022, 0.085, k)), nk[1] - 0.07 - 0.008 * k];
+  // Long S-curves: from the shoulder in over the top of the breast, round its outer side, under it, and into
+  // the convergence at the sternum.
+  for (let i = 0; i < 3; i++) {
+    const k = i / 2;
+    const r = lerp(1.08, 1.3, k);
+    const shoulder = [s(lerp(0.1, 0.135, k)), shL[1] + 0.01 - 0.012 * k];
     const sweep = [
-      top,
-      // straight down from the clavicle, easing into the curve over the top of the breast
-      [lerp(top[0], start[0], 0.35), lerp(top[1], start[1], 0.6)],
-      ...around(r, a0, lerp(55, 95, k), 0.004 * k),
+      shoulder,
+      [s(lerp(0.075, 0.1, k)), lerp(shoulder[1], by + bustR * r, 0.55)],
+      ...around(r, lerp(-110, -70, k), lerp(150, 165, k), 0),
+      [sternum[0] + j(0.002), sternum[1] - 0.004 * i],
     ];
-    addLine(sweep, i % 2 === 0 ? 0.9 : 0.4 + 0.25 * rand(), { warm: i === 2 });
+    addLine(sweep, i % 2 === 0 ? 0.85 : 0.4 + 0.2 * rand(), { warm: i === 2 });
     if (i % 2 === 0)
-      companion(sweep, side * (0.0035 + 0.002 * rand()), 0.18 + 0.12 * rand());
+      companion(sweep, side * (0.0032 + 0.0015 * rand()), 0.18 + 0.1 * rand());
   }
   // Contour arcs that follow the volume, from the top round the outer curve to the underside; each larger one a
   // touch lower (the breast's weight).
   for (let i = 0; i < 14; i++) {
     const r = lerp(0.5, 1.15, i / 13);
-    const arc = around(
-      r,
-      lerp(-60, -25, rand()),
-      lerp(115, 165, rand()),
-      (r - 0.6) * 0.008,
-    );
+    const arc = around(r, lerp(-40, -10, rand()), lerp(140, 165, rand()), 0);
     addLine(arc, 0.3 + 0.55 * r * rand() + (r > 0.8 ? 0.2 : 0), {
       warm: i === 3 || i === 7 || i === 8,
     });
@@ -827,12 +867,11 @@ for (const side of [1, -1]) {
     const r = lerp(0.98, 1.15, i / 3);
     const under = around(
       r,
-      lerp(15, 35, rand()),
+      lerp(35, 50, rand()),
       lerp(120, 140, rand()),
       0.004,
     );
-    addLine(under, 0.7 + 0.2 * rand(), { warm: i !== 1 });
-    companion(under, side * 0.003, 0.2 + 0.1 * rand());
+    addLine(under, 0.45 + 0.15 * rand(), { warm: i !== 1 });
   }
   // The heart: over the top of each breast and inward, meeting softly at the sternum below the cleavage.
   for (let i = 0; i < 4; i++) {
@@ -847,7 +886,7 @@ for (const side of [1, -1]) {
     companion(heart, side * 0.0035, 0.15);
   }
   // From the clavicle straight into the heart: calm, parallel.
-  for (let i = 0; i < 1; i++) {
+  for (let i = 0; i < 0; i++) {
     addLine(
       [
         [s(0.016 + 0.01 * i), nk[1] - 0.07],
@@ -859,8 +898,8 @@ for (const side of [1, -1]) {
     );
   }
   // From the sternum point down and out over the ribs toward the waist.
-  for (let i = 0; i < 9; i++) {
-    const k = i / 8;
+  for (let i = 0; i < 12; i++) {
+    const k = i / 11;
     addLine(
       [
         [sternum[0], sternum[1]],

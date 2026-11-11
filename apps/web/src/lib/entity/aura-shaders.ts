@@ -42,7 +42,7 @@ export const SKIN = {
 /** The hair. */
 export const HAIRLOOK = {
   width: 0.00045,
-  gain: 0.11,
+  gain: 0.16,
   sheen: 0.8,
 } as const;
 
@@ -219,8 +219,16 @@ void main() {
   vec3 lineC = mix(mix(A, B, 0.4), ${rgb("#ffb27a")}, vWarm * 0.8);
   col += lineC * pow(vGlow, 2.6) * ${f(SKIN.lineGlow)} * glow * (0.55 + 0.45 * NdV);
   // The rim: bright where the surface turns away.
-  float rimF = pow(1.0 - NdV, 4.0);
-  col += mix(c2, A, 0.4) * rimF * ${f(SKIN.rim)} * glow * (0.6 + 0.4 * max(dot(N, L2) + 0.5, 0.0));
+  // The silhouette is a line of light: a very narrow pink-white core inside a violet halo, gold in places on
+  // the shoulders and arms. Inside it the body stays near-black.
+  float edgeV = 1.0 - NdV;
+  float edgeCore = pow(edgeV, 14.0);
+  float edgeHalo = pow(edgeV, 5.0);
+  float goldZone = smoothstep(0.07, 0.13, abs(vObj.x)) * (0.5 + 0.5 * sin(vObj.y * 60.0 + vObj.x * 20.0));
+  vec3 edgeC = mix(mix(vec3(1.0, 0.82, 0.97), ${rgb("#ffc27a")}, goldZone * 0.7), vec3(1.0), 0.15);
+  // Surfaces facing down (under the chin, under the bust) keep their edge dark: the light comes from above.
+  float down = 1.0 - smoothstep(0.25, 0.75, -N.y);
+  col += (edgeC * edgeCore * 1.6 + mix(A, B, 0.35) * edgeHalo * ${f(SKIN.rim)}) * glow * down;
   // A faint inner glow, as if light lived under the glass.
   col += A * 0.01 * pow(NdV, 2.0) * glow;
 
@@ -302,7 +310,8 @@ void main() {
   float ppu = projectionMatrix[1][1] * uRes.y * 0.5 / cp.w;
   float code = aCode.x;
   float weight = (floor(code / 4.0) - 1.0) / 41.0;
-  float halfPx = max(${f(LINES.glow)} * (0.5 + 0.9 * weight) * ppu * 2.6, 3.0);
+  float steep = smoothstep(0.05, 0.45, dot(n, normalize(cameraPosition - p)));
+  float halfPx = max(${f(LINES.glow)} * (0.5 + 0.9 * weight) * ppu * 2.6 * (0.35 + 0.65 * steep), 3.0);
   cp.xy += perp * aInfo.x * halfPx / (uRes * 0.5) * cp.w;
   vAcross = aInfo.x * halfPx;
   vHalf = halfPx;
@@ -379,7 +388,7 @@ void main() {
     + mix(c, vec3(1.0), 0.6) * spark * ${f(LINES.sparks)}) * lit * glow;
   col *= mix(1.0, ${f(LINES.face)}, onFace);
   // Lines on the far side of a turned head or the arms' sides fade as the surface turns away.
-  col *= smoothstep(-0.12, 0.2, vFacing);
+  col *= smoothstep(0.08, 0.45, vFacing);
   col *= smoothstep(uWaist + 0.01, uWaist + 0.09, vWorld.y)
     * smoothstep(0.012, 0.075, min(distance(vWorld, uElbowL), distance(vWorld, uElbowR)));
   // Birth: a line appears once its part of the body has landed.
@@ -504,9 +513,10 @@ void main() {
   float sheen2 = pow(sqrt(max(0.0, 1.0 - th2 * th2)), 40.0);
   // Brighter strands now and then, a light running down them, dim at the root, fading at the tip.
   // Most strands are dim (the interior), some bright, a few gold; brighter toward the tips.
-  float bright = (0.18 + 0.82 * pow(vRand, 3.0)) * (0.6 + 0.7 * smoothstep(0.2, 0.9, vT));
+  // A few bright individual strands, most dim; the crown glows too (strand lines converging at the part).
+  float bright = (0.12 + 0.88 * pow(vRand, 5.0)) * (0.8 + 0.5 * smoothstep(0.2, 0.9, vT));
   float run = pow(max(0.0, sin((vT * 3.0 - uT * 0.12 * uMotion + vRand2 * 6.0) * 6.2832)), 18.0);
-  float along = smoothstep(0.0, 0.05, vT) * (1.0 - smoothstep(0.88, 1.0, vT));
+  float along = smoothstep(0.0, 0.02, vT) * (1.0 - smoothstep(0.88, 1.0, vT));
   vec3 col = base * bright * (0.6 + ${f(HAIRLOOK.sheen)} * sheen * 2.0) + vec3(1.0, 0.8, 1.0) * sheen * 0.25 * bright
     + ${rgb("#e05cf0")} * sheen2 * 0.4 * bright + mix(base, vec3(1.0), 0.5) * run * 0.6;
   col *= prof * along * vCover * ${f(HAIRLOOK.gain)} * glow;

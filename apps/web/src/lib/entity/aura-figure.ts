@@ -330,7 +330,8 @@ export function growHair(
     if (lock) {
       // Along the front hairline, from the parting down to the temples.
       const side = g % 2 ? 1 : -1;
-      const a = 0.12 + 0.75 * rand();
+      // From the temples only: hair from the parting falls behind; these frame the face.
+      const a = 0.55 + 0.4 * rand();
       d = [
         side * Math.sin(a * 1.35),
         Math.cos(a * 1.35) * 0.85 + 0.1,
@@ -371,12 +372,24 @@ export function growHair(
     // Combed out from the parting, over the temples: the back hair falls behind, the front locks forward of the
     // shoulders. The face stays free.
     const comb: V3 = lock
-      ? [side * (0.85 + 0.2 * rand()), -0.25, 0.25 + 0.2 * rand()]
+      ? [side * (0.4 + 0.15 * rand()), -0.7, 0.3 + 0.15 * rand()]
       : [
           side * (0.75 + 0.3 * rand()) + d[0] * 0.3,
           -0.1 + d[1] * 0.2,
           -0.35 + d[2] * 0.25 + (rand() - 0.5) * 0.4,
         ];
+    // Along the skull, not off it: keep only the part of the comb that is tangent to the head at the root (the
+    // front locks keep their sideways sweep, so they fall beside the face and over the shoulders).
+    if (!lock) {
+      const nx = (root[0] - c[0]) / (e[0] * e[0]);
+      const ny = (root[1] - c[1]) / (e[1] * e[1]);
+      const nz = (root[2] - c[2]) / (e[2] * e[2]);
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      const dn = (comb[0] * nx + comb[1] * ny + comb[2] * nz) / nl;
+      comb[0] -= (dn * nx) / nl;
+      comb[1] -= (dn * ny) / nl;
+      comb[2] -= (dn * nz) / nl;
+    }
     const l = Math.hypot(...comb);
     dir.set([comb[0] / l, comb[1] / l, comb[2] / l], g * 3);
     const length =
@@ -559,7 +572,7 @@ function keepOffFace(h: Hair, k: number, R: number[]): void {
   const top = c[1] + e[1] * 0.55;
   const bottom = c[1] - e[1] * 1.25;
   if (y > top || y < bottom || z < c[2] - e[2] * 0.15) return;
-  const half = e[0] * 1.08 * (y < c[1] - e[1] * 0.6 ? 1.15 : 1);
+  const half = e[0] * 0.86 * (y < c[1] - e[1] * 0.6 ? 1.12 : 1);
   if (Math.abs(x - c[0]) >= half) return;
   const nx = c[0] + Math.sign(x - c[0] || 1) * half;
   const ddx = nx - x;
@@ -572,7 +585,7 @@ function keepOffFace(h: Hair, k: number, R: number[]): void {
 /** Push a point out of the body along the distance field's gradient (the head's part turned with the head). */
 function collideSdf(h: Hair, k: number, R: number[]): void {
   const f = h.sdf!;
-  const margin = 0.004;
+  const margin = 0.0025;
   let x = h.pos[k]!;
   let y = h.pos[k + 1]!;
   let z = h.pos[k + 2]!;
