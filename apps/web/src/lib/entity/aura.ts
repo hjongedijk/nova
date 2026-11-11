@@ -2,35 +2,48 @@ import type * as ThreeModule from "three";
 import type { UiState } from "#lib/stores/chat.svelte.ts";
 import {
   AURA_ASSETS,
-  auraFraming,
+  auraCamera,
   BIRTH,
-  FACE,
-  gustAt,
+  headMatrix,
   idlePose,
+  windForce,
+  type FigureJson,
 } from "./aura-data.ts";
 import {
-  loadPixels,
-  sampleParticles,
-  type AuraParticles,
-} from "./aura-particles.ts";
+  buildRibbons,
+  decodeSdf,
+  growHair,
+  HAIR,
+  sampleSurface,
+  stepHair,
+  strandAttributes,
+  type Hair,
+} from "./aura-figure.ts";
 import {
-  PLATE_FRAG,
-  PLATE_VERT,
+  BODY_FRAG,
+  BODY_VERT,
+  HAIR_FRAG,
+  HAIR_VERT,
+  LINE_FRAG,
+  LINE_VERT,
   POINTS_FRAG,
   POINTS_VERT,
+  ROOM_FRAG,
+  ROOM_VERT,
+  STAR_FRAG,
+  STAR_VERT,
 } from "./aura-shaders.ts";
 
-export { BREATH, LIGHTS, LINES } from "./aura-shaders.ts";
+export { BREATH, HAIRLOOK, LINES, SKIN } from "./aura-shaders.ts";
 
 /**
- * AURA: the owner's artwork (a blank-faced figure of light, static/aura) brought to life on the GPU. The picture
- * is shown as it is, with neon stripes laid over the head and body that follow its rounded form; it is also
- * sampled into particles that fly in from a glow and settle into it at birth. Moods bloom out from the face; the
- * head turns toward the pointer as a depth illusion; the chest breathes. At rest, facing front, the frame is the
- * artwork plus its stripes.
+ * AURA: a real-time 3D being of light. A sculpted feminine bust of dark glossy glass (built from the CC0
+ * MakeHuman base mesh, with a blank, smooth ovoid head), light lines laid on her surface, hair of thousands of light
+ * strands moved by simulated guides, in a room of violet smoke. Her head truly turns toward the pointer and has
+ * its own small life; moods bloom out from her face; she is born from particles that settle onto her surface.
  *
  * Same contract as the Gestalte (entity.ts drives both): a canvas under the entity's 2D canvas, built lazily.
- * Without WebGL2 it is the still picture with a soft CSS glow. Nothing here waits on chat or audio: a frame only
+ * Without WebGL2 it is a still of the figure with a soft CSS glow. Nothing here waits on chat or audio: a frame only
  * reads the values it is handed.
  */
 
@@ -66,21 +79,28 @@ export interface Aura {
 
 export interface AuraStats {
   mode: "webgl" | "static";
+  /** What draws her now: the 3D mesh, the birth particles, or the still. */
+  figure: "mesh" | "particles" | "static";
   tier: GpuTier;
+  devicePixelRatio: number;
+  /** Device px per CSS px the canvas renders at. */
+  dpr: number;
+  /** The canvas's backing store and its CSS size. */
+  backing: string;
+  css: string;
+  renderer: string;
+  mobile: boolean;
+  triangles: number;
+  lines: number;
+  hairStrands: number;
+  hairGuides: number;
   scale: number;
-  pixels: number;
-  /** Particles drawn now, of those sampled. */
-  particles: number;
-  sampled: number;
-  /** Particle diameter on screen, CSS px. */
-  pointPx: number;
   /** Smoothed interval between rendered frames, ms. */
   frameMs: number;
 }
 
 export type GpuTier = "low" | "mid" | "high";
 
-/** Colours per mood, as sRGB hex; converted to linear once. */
 export interface Look {
   /** Main stripe colour (most stripes). */
   a: string;
@@ -168,53 +188,65 @@ export const LOOKS: Record<UiState | "alert", Look> = {
   },
 };
 
-/** The room around the picture where it does not reach (phones): the artwork's own darkness. */
-export const ROOM = "#040113";
-
-/** Particle and resolution budgets per GPU class. */
+/** Strand, particle and resolution budgets per GPU class. */
 export const BUDGET: Record<
   GpuTier,
-  { particles: number; dpr: number; image: "hi" | "lo" }
+  { particles: number; dpr: number; strands: number; guides: number }
 > = {
-  low: { particles: 70_000, dpr: 1, image: "lo" },
-  mid: { particles: 170_000, dpr: 1.5, image: "hi" },
-  high: { particles: 280_000, dpr: 2, image: "hi" },
+  low: {
+    particles: 40_000,
+    dpr: 1,
+    strands: HAIR.strands.low,
+    guides: HAIR.guides.low,
+  },
+  // Phones: full sharpness (device pixels up to 2x), lighter hair.
+  mid: {
+    particles: 90_000,
+    dpr: 2,
+    strands: HAIR.strands.mid,
+    guides: HAIR.guides.mid,
+  },
+  high: {
+    particles: 160_000,
+    dpr: 2,
+    strands: HAIR.strands.high,
+    guides: HAIR.guides.high,
+  },
 };
 
-/** Guess the GPU class from the renderer string; software renderers and old integrated parts get the low budget. */
-export function gpuTier(renderer: string, width: number): GpuTier {
+/** The least device pixels per CSS pixel the adaptive loop may fall to (it never goes below this). */
+export const MIN_DPR = { desktop: 1, phone: 1.5 } as const;
+
+/** The GPU class: only software rendering is "low"; a masked or unknown renderer is a real GPU. */
+export function gpuTier(renderer: string, mobile: boolean): GpuTier {
   const r = renderer.toLowerCase();
-  if (
-    /swiftshader|llvmpipe|software|softpipe|mali-[2-4]|adreno \(tm\) [2-5]\d\d|powervr|intel.*hd graphics [2-6]\d{2,3}\b/.test(
-      r,
-    )
-  )
+  if (/swiftshader|llvmpipe|software|softpipe|microsoft basic render/.test(r))
     return "low";
-  if (width < 700) return "low";
-  if (/rtx|radeon rx [6-9]|apple m[2-9]|rx 7|arc a7/.test(r)) return "high";
-  return "mid";
+  return mobile ? "mid" : "high";
 }
 
-/** Head turn limits toward the pointer, radians. */
-export const GAZE = { yaw: 0.3, pitch: 0.12 } as const;
+/** A phone or tablet browser (by its user agent, or a coarse pointer on a small screen). */
+export function isMobile(ua: string, coarse: boolean, width: number): boolean {
+  return /android|iphone|ipad|ipod|mobile/i.test(ua) || (coarse && width < 900);
+}
+
+/** Head turn limits toward the pointer, radians (a real rotation of the head about the neck). */
+export const GAZE = { yaw: 0.42, pitch: 0.16 } as const;
 
 /** Birth length, and how long a mood takes to bloom out from the face, seconds. */
 export const TIMING = { birth: BIRTH.total, bloom: 1.0 } as const;
 
-/** Ease of the bloom's radius: it gathers, spreads over the body, and settles as it reaches the edges. */
+/** Ease of the bloom's radius. */
 export function bloomFront(p: number): number {
   const x = Math.max(0, Math.min(1, p));
   return 0.5 - 0.5 * Math.cos(Math.PI * x);
 }
 
-/** The bloom has covered the whole frame (from the face past the farthest corner) when its radius reaches this. */
-export const BLOOM_REACH = 1.3;
+/** The bloom has passed over the whole figure (metres from the face) when its radius reaches this. */
+export const BLOOM_REACH = 0.75;
 
-/** Particle radius in grid cells (the fragment shader normalises its weight for this). */
-const KERNEL = 2;
-
-/** Dev only: which layers to show, to compare the particles and the artwork. */
-export type AuraView = "composed" | "artwork" | "particles";
+/** The room's ribbons. */
+export const ROOM = "#7f52d8";
 
 function webgl2Available(): boolean {
   try {
@@ -226,45 +258,6 @@ function webgl2Available(): boolean {
   } catch {
     return false;
   }
-}
-
-async function bitmap(url: string, raw: boolean): Promise<ImageBitmap> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${url}: ${res.status}`);
-  // Decoded off the main thread. Data stays exactly as stored; the picture is plain sRGB.
-  return createImageBitmap(await res.blob(), {
-    colorSpaceConversion: raw ? "none" : "default",
-    premultiplyAlpha: "none",
-  });
-}
-
-/** Sample the artwork into particles in a worker (on the page if workers are unavailable). */
-function loadParticles(image: string, count: number): Promise<AuraParticles> {
-  const local = async () =>
-    sampleParticles(
-      await loadPixels(image),
-      await loadPixels(AURA_ASSETS.data),
-      count,
-    );
-  return new Promise<AuraParticles>((resolve, reject) => {
-    try {
-      const w = new Worker(new URL("./aura.worker.ts", import.meta.url), {
-        type: "module",
-      });
-      w.onmessage = (e: MessageEvent<AuraParticles | { error: string }>) => {
-        w.terminate();
-        if ("error" in e.data) local().then(resolve, reject);
-        else resolve(e.data);
-      };
-      w.onerror = () => {
-        w.terminate();
-        local().then(resolve, reject);
-      };
-      w.postMessage({ image, data: AURA_ASSETS.data, count });
-    } catch {
-      local().then(resolve, reject);
-    }
-  });
 }
 
 /** A soft spring that overshoots a little and settles in about `settle` seconds: for the hair's lag. */
@@ -284,6 +277,14 @@ export function swing(
   }
 }
 
+/** The middle value (0 for none). */
+export function median(xs: readonly number[]): number {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+}
+
 /** Critically damped spring: glides toward the target, keeps its velocity through a retarget, never overshoots. */
 export function spring(
   s: { x: number; v: number },
@@ -300,30 +301,46 @@ export function spring(
   }
 }
 
+async function loadThree() {
+  const [three, gltf, meshopt] = await Promise.all([
+    import("three"),
+    import("three/examples/jsm/loaders/GLTFLoader.js"),
+    import("three/examples/jsm/libs/meshopt_decoder.module.js"),
+  ]);
+  return {
+    THREE: three as Three,
+    GLTFLoader: gltf.GLTFLoader,
+    MeshoptDecoder: meshopt.MeshoptDecoder,
+  };
+}
+
 export async function createAura(
   under: HTMLCanvasElement,
   options: { tier?: GpuTier; forceStatic?: boolean } = {},
 ): Promise<Aura | null> {
   if (typeof document === "undefined") return null;
   if (options.forceStatic || !webgl2Available()) return createStaticAura(under);
-  let THREE: Three;
+  let mods: Awaited<ReturnType<typeof loadThree>>;
   try {
-    THREE = (await import("three")) as Three;
+    mods = await loadThree();
   } catch {
     return createStaticAura(under);
   }
   try {
-    return await createGlAura(THREE, under, options.tier);
-  } catch {
+    return await createGlAura(mods, under, options.tier);
+  } catch (err) {
+    if (import.meta.env?.DEV)
+      console.warn("aura: falling back to the still", err);
     return createStaticAura(under);
   }
 }
 
 async function createGlAura(
-  THREE: Three,
+  mods: Awaited<ReturnType<typeof loadThree>>,
   under: HTMLCanvasElement,
   forcedTier: GpuTier | undefined,
 ): Promise<Aura> {
+  const { THREE, GLTFLoader, MeshoptDecoder } = mods;
   const canvas = document.createElement("canvas");
   canvas.className = "entity-gl entity-aura";
   canvas.setAttribute("aria-hidden", "true");
@@ -337,14 +354,14 @@ async function createGlAura(
   } satisfies Partial<CSSStyleDeclaration>);
   const renderer = new THREE.WebGLRenderer({
     canvas,
-    antialias: false,
+    antialias: true,
     alpha: false,
-    depth: false,
     stencil: false,
     powerPreference: "high-performance",
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NoToneMapping;
+  renderer.setClearColor(0x020108, 1);
 
   let rendererName = "";
   try {
@@ -354,59 +371,35 @@ async function createGlAura(
       gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? "",
     );
   } catch {
-    /* unknown GPU: mid budget */
+    /* unknown GPU: a real one */
   }
-  const tier = forcedTier ?? gpuTier(rendererName, window.innerWidth);
-  const budget = BUDGET[tier];
-  const wide =
-    window.innerWidth * Math.min(window.devicePixelRatio || 1, budget.dpr) >
-    1400;
-  const imageUrl =
-    budget.image === "hi" && wide ? AURA_ASSETS.hi : AURA_ASSETS.lo;
-
-  const particlesPromise = loadParticles(imageUrl, budget.particles).catch(
-    () => null,
+  const mobile = isMobile(
+    navigator.userAgent,
+    matchMedia?.("(pointer: coarse)").matches ?? false,
+    window.innerWidth,
   );
-  let imageBmp: ImageBitmap;
-  let dataBmp: ImageBitmap;
-  let linesBmp: ImageBitmap;
-  try {
-    [imageBmp, dataBmp, linesBmp] = await Promise.all([
-      bitmap(imageUrl, false),
-      bitmap(AURA_ASSETS.data, true),
-      bitmap(AURA_ASSETS.lines, true),
-    ]);
-  } catch (err) {
-    renderer.dispose();
-    throw err;
-  }
-  under.before(canvas);
+  const tier = forcedTier ?? gpuTier(rendererName, mobile);
+  const budget = BUDGET[tier];
+  const minDpr = mobile ? MIN_DPR.phone : MIN_DPR.desktop;
 
-  const imageTex = new THREE.Texture(imageBmp);
-  imageTex.colorSpace = THREE.SRGBColorSpace;
-  imageTex.flipY = false;
-  imageTex.generateMipmaps = true;
-  imageTex.minFilter = THREE.LinearMipmapLinearFilter;
-  imageTex.magFilter = THREE.LinearFilter;
-  imageTex.wrapS = imageTex.wrapT = THREE.ClampToEdgeWrapping;
-  imageTex.anisotropy = 4;
-  imageTex.needsUpdate = true;
-  const dataTex = new THREE.Texture(dataBmp);
-  dataTex.colorSpace = THREE.NoColorSpace;
-  dataTex.flipY = false;
-  dataTex.generateMipmaps = false;
-  dataTex.minFilter = THREE.LinearFilter;
-  dataTex.magFilter = THREE.LinearFilter;
-  dataTex.wrapS = dataTex.wrapT = THREE.ClampToEdgeWrapping;
-  dataTex.needsUpdate = true;
-  const linesTex = new THREE.Texture(linesBmp);
-  linesTex.colorSpace = THREE.NoColorSpace;
-  linesTex.flipY = false;
-  linesTex.generateMipmaps = false;
-  linesTex.minFilter = THREE.LinearFilter;
-  linesTex.magFilter = THREE.LinearFilter;
-  linesTex.wrapS = linesTex.wrapT = THREE.ClampToEdgeWrapping;
-  linesTex.needsUpdate = true;
+  /* the figure */
+  const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  const [gltf, fig] = await Promise.all([
+    loader.loadAsync(AURA_ASSETS.mesh),
+    fetch(AURA_ASSETS.figure).then((r) => {
+      if (!r.ok) throw new Error(`${AURA_ASSETS.figure}: ${r.status}`);
+      return r.json() as Promise<FigureJson>;
+    }),
+  ]);
+  let bodyGeo: ThreeModule.BufferGeometry | null = null;
+  gltf.scene.traverse((o) => {
+    const m = o as ThreeModule.Mesh;
+    if (m.isMesh && !bodyGeo) bodyGeo = m.geometry;
+  });
+  if (!bodyGeo) throw new Error("aura: no mesh");
+  const geo: ThreeModule.BufferGeometry = bodyGeo;
+  under.before(canvas);
 
   const lin = (hex: string) => {
     const c = new THREE.Color(hex);
@@ -428,23 +421,17 @@ async function createGlAura(
     }
   >;
   const ready = looks.ready;
-  const room = new THREE.Color(ROOM);
+  const pivot = new THREE.Vector3(...fig.neck);
+  const faceRest = new THREE.Vector3(...fig.face);
+  const chest = new THREE.Vector3(
+    0,
+    (fig.breasts[0]![1] + fig.neck[1]) / 2 - 0.02,
+    (fig.breasts[0]![2] + fig.neck[2]) / 2,
+  );
 
   const U = {
-    uImage: { value: imageTex },
-    uData: { value: dataTex },
-    uLines: { value: linesTex },
-    uFrame: { value: new THREE.Vector4(0, 0, 1, 1) },
-    uFade: { value: new THREE.Vector4(1e-4, 1e-4, 1e-4, 1e-4) },
-    uRes: { value: new THREE.Vector2(1, 1) },
-    uT: { value: 0 },
-    uMotion: { value: 1 },
-    uTurn: { value: new THREE.Vector2() },
-    uRoll: { value: 0 },
-    uWind: { value: new THREE.Vector4() },
-    uBreath: { value: 0 },
-    uTau: { value: 0 },
-    uRoom: { value: new THREE.Vector3(room.r, room.g, room.b) },
+    uHead: { value: new THREE.Matrix3() },
+    uPivot: { value: pivot },
     uA0: { value: ready.A.clone() },
     uA1: { value: ready.A.clone() },
     uB0: { value: ready.B.clone() },
@@ -458,135 +445,295 @@ async function createGlAura(
     uAccent: { value: new THREE.Vector2(ready.accent, ready.accent) },
     uBloomR: { value: 100 },
     uBloomEdge: { value: 0 },
-    uPulse: { value: ready.pulse },
+    uFace: { value: faceRest.clone() },
     uAudio: { value: 0 },
+    uPulse: { value: ready.pulse },
+    uT: { value: 0 },
+    uMotion: { value: 1 },
+    uTau: { value: 0 },
     uFloor: { value: -1 },
-    uView: { value: 0 },
-  };
-  const P = {
-    uFrame: { value: new THREE.Vector4(0, 0, 1, 1) },
-    uView: { value: new THREE.Vector2(1, 1) },
+    uRes: { value: new THREE.Vector2(1, 1) },
+    uBreath: { value: 0 },
+    uChest: { value: chest },
+    uWaist: { value: fig.waist },
+    uElbowL: { value: new THREE.Vector3(...fig.elbows[0]!) },
+    uElbowR: { value: new THREE.Vector3(...fig.elbows[1]!) },
     uPx: { value: 1 },
-    uSize: { value: 1 },
-    uT: U.uT,
-    uMotion: U.uMotion,
-    uTau: U.uTau,
-    uBreath: U.uBreath,
-    uTurn: U.uTurn,
-    uWind: U.uWind,
-    uGain: { value: 0 },
-    uTwinkle: { value: 0.15 },
-    uFly: { value: new THREE.Vector3(0.8, 0.6, 1) },
+    uFaceScreen: { value: new THREE.Vector2(0.5, 0.6) },
+    uRibbon: { value: lin(ROOM) },
+    uSource: {
+      value: new THREE.Vector3(
+        0,
+        fig.breasts[0]![1] + 0.03,
+        fig.breasts[0]![2] + 0.12,
+      ),
+    },
+    uSize: { value: 1.6 },
+    uGuides: { value: null as ThreeModule.DataTexture | null },
+    uPoints: { value: HAIR.points },
+    uGuideCount: { value: 1 },
   };
 
   const scene = new THREE.Scene();
-  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  const tri = new THREE.BufferGeometry();
-  tri.setAttribute(
+  const camera = new THREE.PerspectiveCamera(28, 1, 0.05, 20);
+
+  /* the room */
+  const quad = new THREE.BufferGeometry();
+  quad.setAttribute(
     "position",
     new THREE.BufferAttribute(
       new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]),
       3,
     ),
   );
-  const plateMat = new THREE.ShaderMaterial({
+  const roomMat = new THREE.ShaderMaterial({
     uniforms: U,
-    vertexShader: PLATE_VERT,
-    fragmentShader: PLATE_FRAG,
+    vertexShader: ROOM_VERT,
+    fragmentShader: ROOM_FRAG,
     depthTest: false,
     depthWrite: false,
   });
-  const plate = new THREE.Mesh(tri, plateMat);
-  plate.frustumCulled = false;
-  plate.renderOrder = 0;
-  scene.add(plate);
+  const room = new THREE.Mesh(quad, roomMat);
+  room.frustumCulled = false;
+  room.renderOrder = -10;
+  scene.add(room);
 
-  const pointsMat = new THREE.ShaderMaterial({
-    uniforms: P,
-    vertexShader: POINTS_VERT,
-    fragmentShader: POINTS_FRAG,
+  /* the body */
+  const bodyMat = new THREE.ShaderMaterial({
+    uniforms: U,
+    vertexShader: BODY_VERT,
+    fragmentShader: BODY_FRAG,
+    // Front faces only: where she fades out at the cuts, nothing of her inside shows through.
+    side: THREE.FrontSide,
+    // Opaque except where she fades out (waist, elbows): straight alpha over the room.
+    transparent: true,
+    depthWrite: true,
+  });
+  const body = new THREE.Mesh(geo, bodyMat);
+  body.frustumCulled = false;
+  body.renderOrder = 0;
+  scene.add(body);
+  const triangles = (geo.index?.count ?? 0) / 3;
+
+  /* the light lines */
+  const rib = buildRibbons(fig.lines);
+  const lineGeo = new THREE.BufferGeometry();
+  lineGeo.setAttribute("position", new THREE.BufferAttribute(rib.position, 3));
+  lineGeo.setAttribute("aNext", new THREE.BufferAttribute(rib.next, 3));
+  lineGeo.setAttribute("aPrev", new THREE.BufferAttribute(rib.prev, 3));
+  lineGeo.setAttribute("normal", new THREE.BufferAttribute(rib.normal, 3));
+  lineGeo.setAttribute("aInfo", new THREE.BufferAttribute(rib.info, 4));
+  lineGeo.setAttribute("aCode", new THREE.BufferAttribute(rib.code, 2));
+  lineGeo.setIndex(new THREE.BufferAttribute(rib.index, 1));
+  const additive = {
     transparent: true,
     blending: THREE.AdditiveBlending,
-    depthTest: false,
     depthWrite: false,
+    depthTest: true,
+  } as const;
+  const lineMat = new THREE.ShaderMaterial({
+    uniforms: U,
+    vertexShader: LINE_VERT,
+    fragmentShader: LINE_FRAG,
+    ...additive,
+    // Camera-facing ribbons would dip into the curved skin: they are hidden by turning away instead (vFacing).
+    depthTest: false,
+    side: THREE.DoubleSide,
   });
-  let pointsGeo: ThreeModule.BufferGeometry | null = null;
-  let points: ThreeModule.Points | null = null;
-  let sampled = 0;
-  let drawn = 0;
-  let cell = 0.002;
-  const setDrawn = (n: number) => {
-    drawn = Math.max(0, Math.min(sampled, Math.round(n)));
-    pointsGeo?.setDrawRange(0, drawn);
-  };
-  const particles = await particlesPromise;
-  if (particles && particles.count > 0) {
-    pointsGeo = new THREE.BufferGeometry();
-    // The home position doubles as `position` (two components): three counts vertices by it.
-    pointsGeo.setAttribute(
+  const lineMesh = new THREE.Mesh(lineGeo, lineMat);
+  lineMesh.frustumCulled = false;
+  lineMesh.renderOrder = 2;
+  scene.add(lineMesh);
+
+  /* star points where lines meet */
+  {
+    const [bl] = fig.breasts as [number, number, number][];
+    const [sl, sr] = fig.shoulders as [number, number, number][];
+    const n = fig.neck;
+    const pts = [
+      [0, n[1] - 0.065, n[2] + 0.06],
+      [sl![0] * 1.02, sl![1] + 0.015, sl![2] + 0.02],
+      [sr![0] * 1.02, sr![1] + 0.015, sr![2] + 0.02],
+      [0, bl![1] - 0.06, bl![2] - 0.035],
+      [bl![0] * 1.4, bl![1] + 0.01, bl![2] - 0.03],
+    ];
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute(
       "position",
-      new THREE.BufferAttribute(particles.home, 2),
+      new THREE.BufferAttribute(Float32Array.from(pts.flat()), 3),
     );
-    pointsGeo.setAttribute(
-      "aColor",
-      new THREE.BufferAttribute(particles.color, 4, true),
-    );
-    pointsGeo.setAttribute(
+    starGeo.setAttribute(
       "aSeed",
-      new THREE.BufferAttribute(particles.seed, 4),
+      new THREE.BufferAttribute(
+        Float32Array.from(pts.map((_, i) => i / pts.length)),
+        1,
+      ),
     );
-    // Two-component positions: give three the bounds instead of letting it compute them.
-    pointsGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
-    points = new THREE.Points(pointsGeo, pointsMat);
-    points.frustumCulled = false;
-    points.renderOrder = 1;
-    scene.add(points);
-    sampled = particles.count;
-    cell = particles.cell;
-    setDrawn(sampled);
+    starGeo.setAttribute(
+      "aHead",
+      new THREE.BufferAttribute(new Float32Array(pts.length), 1),
+    );
+    const stars = new THREE.Points(
+      starGeo,
+      new THREE.ShaderMaterial({
+        uniforms: U,
+        vertexShader: STAR_VERT,
+        fragmentShader: STAR_FRAG,
+        ...additive,
+        depthTest: false,
+      }),
+    );
+    stars.frustumCulled = false;
+    stars.renderOrder = 4;
+    scene.add(stars);
   }
 
-  /* sizing: the buffer is capped per GPU class and steps down while frames run long */
+  /* the hair */
+  const hair: Hair = growHair(fig, budget.guides, 11, decodeSdf(fig.sdf));
+  const P = HAIR.points;
+  const guideData = new Float32Array(P * hair.guides * 4);
+  const guideTex = new THREE.DataTexture(
+    guideData,
+    P,
+    hair.guides,
+    THREE.RGBAFormat,
+    THREE.FloatType,
+  );
+  guideTex.minFilter = guideTex.magFilter = THREE.NearestFilter;
+  guideTex.generateMipmaps = false;
+  U.uGuides.value = guideTex;
+  U.uGuideCount.value = hair.guides;
+  const uploadGuides = () => {
+    for (let g = 0; g < hair.guides; g++)
+      for (let i = 0; i < P; i++) {
+        const s = (g * P + i) * 3;
+        const d = (g * P + i) * 4;
+        guideData[d] = hair.pos[s]!;
+        guideData[d + 1] = hair.pos[s + 1]!;
+        guideData[d + 2] = hair.pos[s + 2]!;
+      }
+    guideTex.needsUpdate = true;
+  };
+  uploadGuides();
+  const SEG = 24;
+  const strandAttr = strandAttributes(hair, HAIR.strands.high);
+  const hairGeo = new THREE.BufferGeometry();
+  {
+    const maxStrands = HAIR.strands.high;
+    const vPer = (SEG + 1) * 2;
+    const aGuides = new Float32Array(maxStrands * vPer * 3);
+    const aW = new Float32Array(maxStrands * vPer * 4);
+    const aK = new Float32Array(maxStrands * vPer * 2);
+    const index = new Uint32Array(maxStrands * SEG * 6);
+    let ii = 0;
+    for (let s = 0; s < maxStrands; s++)
+      for (let k = 0; k <= SEG; k++)
+        for (const side of [-1, 1]) {
+          const v = s * vPer + k * 2 + (side > 0 ? 1 : 0);
+          aGuides.set(strandAttr.guides.subarray(s * 3, s * 3 + 3), v * 3);
+          aW.set(strandAttr.weights.subarray(s * 4, s * 4 + 4), v * 4);
+          aK.set([k / SEG, side], v * 2);
+          if (k < SEG && side > 0) {
+            const a = s * vPer + k * 2;
+            index.set([a, a + 1, a + 2, a + 1, a + 3, a + 2], ii);
+            ii += 6;
+          }
+        }
+    hairGeo.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(maxStrands * vPer * 3), 3),
+    );
+    hairGeo.setAttribute("aGuides", new THREE.BufferAttribute(aGuides, 3));
+    hairGeo.setAttribute("aW", new THREE.BufferAttribute(aW, 4));
+    hairGeo.setAttribute("aK", new THREE.BufferAttribute(aK, 2));
+    hairGeo.setIndex(new THREE.BufferAttribute(index, 1));
+  }
+  let strands = budget.strands;
+  const setStrands = (n: number) => {
+    strands = Math.max(500, Math.min(HAIR.strands.high, Math.round(n)));
+    hairGeo.setDrawRange(0, strands * SEG * 6);
+  };
+  setStrands(strands);
+  const hairMat = new THREE.ShaderMaterial({
+    uniforms: U,
+    vertexShader: HAIR_VERT,
+    fragmentShader: HAIR_FRAG,
+    ...additive,
+    side: THREE.DoubleSide,
+  });
+  const hairMesh = new THREE.Mesh(hairGeo, hairMat);
+  hairMesh.frustumCulled = false;
+  hairMesh.renderOrder = 3;
+  scene.add(hairMesh);
+
+  /* the birth particles, on the surface */
+  const posAttr = geo.getAttribute("position");
+  const nrmAttr = geo.getAttribute("normal");
+  const headAttr = geo.getAttribute("_head");
+  const headArr = new Float32Array(posAttr.count);
+  for (let i = 0; i < posAttr.count; i++)
+    headArr[i] = headAttr ? headAttr.getX(i) : 0;
+  const posArr = new Float32Array(posAttr.count * 3);
+  const nrmArr = new Float32Array(posAttr.count * 3);
+  for (let i = 0; i < posAttr.count; i++) {
+    posArr.set([posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)], i * 3);
+    nrmArr.set([nrmAttr.getX(i), nrmAttr.getY(i), nrmAttr.getZ(i)], i * 3);
+  }
+  const samples = sampleSurface(
+    posArr,
+    nrmArr,
+    headArr,
+    geo.index!.array,
+    budget.particles,
+  );
+  const pointsGeo = new THREE.BufferGeometry();
+  pointsGeo.setAttribute(
+    "position",
+    new THREE.BufferAttribute(samples.position, 3),
+  );
+  pointsGeo.setAttribute("aSeed", new THREE.BufferAttribute(samples.seed, 4));
+  const points = new THREE.Points(
+    pointsGeo,
+    new THREE.ShaderMaterial({
+      uniforms: U,
+      vertexShader: POINTS_VERT,
+      fragmentShader: POINTS_FRAG,
+      ...additive,
+    }),
+  );
+  points.frustumCulled = false;
+  points.renderOrder = 5;
+  scene.add(points);
+
+  /* sizing: native device pixels (capped at 2), never below MIN_DPR; the backing store follows the canvas */
   let W = 0;
   let H = 0;
-  let scale = tier === "low" ? 0.8 : 1;
+  let scale = 1;
   let pr = 1;
+  const faceNdc = new THREE.Vector3();
   function size(force = false) {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const dpr = Math.min(
-      window.devicePixelRatio || 1,
-      budget.dpr,
-      3840 / Math.max(1, w),
-      2160 / Math.max(1, h),
-    );
-    const next = Math.max(0.5, dpr * scale);
+    const w = canvas.clientWidth || window.innerWidth;
+    const h = canvas.clientHeight || window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, budget.dpr);
+    const floor = tier === "low" ? 0.75 : Math.min(dpr, minDpr);
+    const next = Math.max(floor, dpr * scale);
     if (!force && w === W && h === H && Math.abs(next - pr) < 0.01) return;
     W = w;
     H = h;
     pr = next;
     renderer.setPixelRatio(pr);
     renderer.setSize(W, H, false);
-    const fr = auraFraming(W, H);
-    U.uFrame.value.set(fr.x * pr, fr.y * pr, fr.w * pr, fr.h * pr);
-    P.uFrame.value.set(fr.x, fr.y, fr.w, fr.h);
-    P.uView.value.set(W, H);
-    P.uPx.value = pr;
-    U.uRes.value.set(Math.round(W * pr), Math.round(H * pr));
-    // Fade the picture into the room only along edges that are on screen.
-    const top = fr.y > 0.5 ? 0.07 : 1e-4;
-    const bottom = fr.y + fr.h < H - 0.5 ? 0.16 : 1e-4;
-    const side = fr.x > 0.5 ? 0.04 : 1e-4;
-    U.uFade.value.set(top, bottom, side, side);
-    sizePoints();
-  }
-  function sizePoints() {
-    // An even grid of kernels of the cell's size adds up to the picture; fewer drawn, each a little larger.
-    P.uSize.value =
-      KERNEL *
-      cell *
-      P.uFrame.value.z *
-      Math.sqrt(sampled / Math.max(1, drawn));
+    const cam = auraCamera(W, H);
+    camera.fov = cam.fov;
+    camera.aspect = W / Math.max(1, H);
+    camera.position.set(0, cam.targetY + 0.02, cam.distance);
+    camera.lookAt(0, cam.targetY, 0);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    U.uRes.value.set(canvas.width, canvas.height);
+    U.uPx.value = pr;
+    faceNdc.copy(faceRest).project(camera);
+    U.uFaceScreen.value.set(faceNdc.x * 0.5 + 0.5, faceNdc.y * 0.5 + 0.5);
   }
   size(true);
   try {
@@ -611,7 +758,6 @@ async function createGlAura(
   ] as const;
   let pulse0 = ready.pulse;
   function retarget(next: Key, instant: boolean) {
-    // Interrupted mid-bloom: start from what most of the figure shows now.
     const k = waveP >= 1 ? 1 : bloomFront(waveP);
     for (const [p0, p1, c] of pairs) {
       U[p0].value.lerp(U[p1].value, k);
@@ -634,67 +780,67 @@ async function createGlAura(
     pitch: { x: 0, v: 0 },
     roll: { x: 0, v: 0 },
   };
-  // The hair follows the head on its own springs, a little late, with a little overshoot.
-  const hairPose = {
-    yaw: { x: 0, v: 0 },
-    pitch: { x: 0, v: 0 },
-    roll: { x: 0, v: 0 },
-  };
   const weight = { listening: 0, thinking: 0, speaking: 0 };
   let tau = 0;
   let lastForm = 0;
   let lastT = -1;
-  let slow = 0;
-  let fast = 0;
+  let firstT = -1;
+  let judged = 0;
+  const gaps: number[] = [];
   let frameMs = 16.7;
-  let view: AuraView = "composed";
+  let simAcc = 0;
+  const Rm = new THREE.Matrix3();
+  const faceNow = new THREE.Vector3();
 
-  const aura: Aura & { view(v: AuraView): void; particles(n: number): void } = {
+  const aura: Aura = {
     canvas,
     get stats(): AuraStats {
       return {
         mode: "webgl",
+        figure: points.visible ? "particles" : "mesh",
         tier,
+        devicePixelRatio: window.devicePixelRatio || 1,
+        dpr: Math.round(pr * 100) / 100,
+        backing: `${canvas.width}x${canvas.height}`,
+        css: `${canvas.clientWidth}x${canvas.clientHeight}`,
+        renderer: rendererName,
+        mobile,
+        triangles,
+        lines: rib.lines,
+        hairStrands: strands,
+        hairGuides: hair.guides,
         scale,
-        pixels: Math.round(W * pr) * Math.round(H * pr),
-        particles: drawn,
-        sampled,
-        pointPx: Math.round(P.uSize.value * 200) / 100,
         frameMs: Math.round(frameMs * 10) / 10,
       };
-    },
-    particles(n) {
-      setDrawn(n);
-      sizePoints();
-    },
-    view(v) {
-      view = v;
-      U.uView.value = v === "artwork" ? 1 : v === "particles" ? 2 : 0;
-      P.uGain.value = v === "particles" ? 1 : 0;
-      if (points) points.visible = v !== "artwork";
     },
     render(f) {
       const { t } = f;
       const dt = Math.max(0, Math.min(0.1, f.dt));
-      // Adaptive quality: long frames first thin the particles, then lower the buffer, never the frame rate.
+      // Adaptive quality: judged on the median frame of the last 2 s, never in the first 3 s after load and never
+      // across a hidden tab or a hitch. Thinner hair first, then fewer device pixels, never below MIN_DPR.
+      if (firstT < 0) firstT = t;
       if (lastT >= 0) {
         const gap = (t - lastT) * 1000;
-        if (gap < 200) {
+        if (gap < 200 && !document.hidden) {
           frameMs = frameMs * 0.95 + gap * 0.05;
-          slow = slow * 0.97 + (gap > 22 ? 1 : 0) * 0.03;
-          fast = gap < 17.5 ? fast + gap / 1000 : 0;
+          gaps.push(gap);
+        } else gaps.length = 0;
+        if (t - judged >= 2) {
+          judged = t;
+          const m = median(gaps);
+          gaps.length = 0;
+          if (t - firstT > 3 && m > 0) {
+            if (m > 24) {
+              if (strands > BUDGET.low.strands) setStrands(strands * 0.75);
+              else scale = Math.max(0.5, scale * 0.85);
+            } else if (m < 17.5) {
+              if (scale < 1) scale = Math.min(1, scale / 0.85);
+              else if (strands < budget.strands)
+                setStrands(Math.min(budget.strands, strands / 0.85));
+            }
+          }
         }
-        if (slow > 0.6) {
-          slow = 0;
-          if (drawn > BUDGET.low.particles) {
-            setDrawn(Math.max(BUDGET.low.particles, drawn * 0.75));
-            sizePoints();
-          } else if (scale > 0.55) scale = Math.max(0.55, scale * 0.85);
-        } else if (fast > 12 && scale < 1) {
-          fast = 0;
-          scale = Math.min(1, scale / 0.85);
-        }
-      }
+      } else gaps.length = 0;
       lastT = t;
       size();
       canvas.style.display = "block";
@@ -709,7 +855,8 @@ async function createGlAura(
         tau = Math.min(BIRTH.total, tau + dt);
       else tau = Math.min(tau, f.form * BIRTH.total);
       lastForm = f.form;
-      U.uTau.value = view === "composed" ? tau : BIRTH.total;
+      U.uTau.value = tau;
+      points.visible = tau < BIRTH.total;
 
       const want: Key = f.alert ? "alert" : f.state;
       if (want !== key) retarget(want, f.reduceMotion);
@@ -740,7 +887,7 @@ async function createGlAura(
       weight.speaking +=
         ((f.state === "speaking" ? 1 : 0) - weight.speaking) * kw;
 
-      /* head: toward the pointer, plus its own idle life and the mood's posture, on springs; never a snap */
+      /* the head: a real rotation about the neck, toward the pointer, plus its own life and the mood's posture */
       const clamp = (x: number, m: number) => Math.max(-m, Math.min(m, x));
       const idle = idlePose(t, motion);
       const yawT =
@@ -748,48 +895,48 @@ async function createGlAura(
         clamp(
           f.gazeX * GAZE.yaw +
             idle.yaw +
-            weight.thinking * (0.05 + 0.03 * Math.sin(t * 0.23)),
+            weight.thinking * (0.06 + 0.03 * Math.sin(t * 0.23)),
           GAZE.yaw + 0.05,
         );
       const pitchT =
         motion *
         clamp(
-          -f.gazeY * GAZE.pitch +
-            idle.pitch +
-            // Listening leans in a touch; thinking drifts up; speaking nods with the voice.
-            weight.listening * 0.03 +
-            weight.thinking * (-0.035 + 0.015 * Math.sin(t * 0.31)) +
+          f.gazeY * GAZE.pitch +
+            idle.pitch -
+            weight.listening * 0.04 -
+            weight.thinking * (0.05 + 0.015 * Math.sin(t * 0.31)) +
             weight.speaking *
               f.audio *
-              (0.025 * Math.sin(t * 5.1) + 0.012 * Math.sin(t * 8.3)),
-          GAZE.pitch + 0.03,
+              (0.04 * Math.sin(t * 5.1) + 0.015 * Math.sin(t * 8.3)),
+          GAZE.pitch + 0.04,
         );
       const rollT =
         motion *
         (idle.roll +
-          weight.listening * 0.045 -
-          weight.thinking * 0.03 +
-          weight.speaking * f.audio * 0.01 * Math.sin(t * 3.7));
+          weight.listening * 0.07 -
+          weight.thinking * 0.04 +
+          weight.speaking * f.audio * 0.012 * Math.sin(t * 3.7));
       spring(pose.yaw, yawT, dt);
       spring(pose.pitch, pitchT, dt);
       spring(pose.roll, rollT, dt);
-      swing(hairPose.yaw, pose.yaw.x, dt);
-      swing(hairPose.pitch, pose.pitch.x, dt);
-      swing(hairPose.roll, pose.roll.x, dt);
-      const tiny = (v: number) => (Math.abs(v) < 2e-4 ? 0 : v);
-      U.uTurn.value.set(tiny(pose.yaw.x), tiny(pose.pitch.x));
-      U.uRoll.value = tiny(pose.roll.x);
-      // The hair's lag, in data px at the tips: behind the head's turn and tilt, swinging past and back.
-      const lagX =
-        (hairPose.yaw.x - pose.yaw.x) * 34 -
-        (hairPose.roll.x - pose.roll.x) * 70;
-      const lagY = (hairPose.pitch.x - pose.pitch.x) * 22;
-      U.uWind.value.set(
-        motion * gustAt(t),
-        motion * weight.speaking * f.audio * 0.6,
-        motion * lagX,
-        motion * lagY,
-      );
+      const R = headMatrix(pose.yaw.x, pose.pitch.x, pose.roll.x);
+      Rm.fromArray(R);
+      U.uHead.value.copy(Rm);
+      faceNow.copy(faceRest).sub(pivot).applyMatrix3(Rm).add(pivot);
+      U.uFace.value.copy(faceNow);
+
+      /* the hair: verlet at a fixed 60 Hz (the roots follow the head; the rest follows a little late) */
+      if (motion > 0) {
+        simAcc = Math.min(simAcc + dt, 0.05);
+        const wind = windForce(t, motion);
+        // Speaking lifts it a touch with the voice.
+        wind[1] -= weight.speaking * f.audio * 0.6;
+        while (simAcc >= 1 / 60) {
+          stepHair(hair, 1 / 60, R, wind, 1);
+          simAcc -= 1 / 60;
+        }
+        uploadGuides();
+      }
 
       U.uT.value = t;
       U.uMotion.value = motion;
@@ -806,27 +953,38 @@ async function createGlAura(
       lastT = -1;
     },
     dispose() {
-      tri.dispose();
-      pointsGeo?.dispose();
-      plateMat.dispose();
-      pointsMat.dispose();
-      imageTex.dispose();
-      dataTex.dispose();
-      linesTex.dispose();
-      imageBmp.close();
-      dataBmp.close();
-      linesBmp.close();
+      for (const g of [quad, geo, lineGeo, hairGeo, pointsGeo]) g.dispose();
+      for (const m of [roomMat, bodyMat, lineMat, hairMat]) m.dispose();
+      guideTex.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
       canvas.remove();
     },
   };
+  exposeStats(aura);
   if (import.meta.env?.DEV)
-    (window as unknown as { __novaAura?: typeof aura }).__novaAura = aura;
+    (window as unknown as { __novaAuraParts?: object }).__novaAuraParts = {
+      room,
+      body,
+      lineMesh,
+      hairMesh,
+      points,
+      hair,
+      renderer,
+      scene,
+    };
   return aura;
 }
 
-/** Without WebGL2: the picture itself, framed the same way, with a soft glow breathing at the face. */
+/** `__novaAura.stats()` in every build, so the owner can paste what his device does. */
+function exposeStats(aura: Aura): void {
+  (window as unknown as { __novaAura?: object }).__novaAura = {
+    stats: () => aura.stats,
+    aura,
+  };
+}
+
+/** Without WebGL2: a still of the 3D figure, framed the same way, with a soft glow breathing at the face. */
 function createStaticAura(under: HTMLCanvasElement): Aura {
   const root = document.createElement("div");
   root.className = "entity-gl entity-aura entity-aura-static";
@@ -837,23 +995,29 @@ function createStaticAura(under: HTMLCanvasElement): Aura {
     overflow: "hidden",
     display: "none",
     pointerEvents: "none",
-    background: ROOM,
+    background: "#030109",
   } satisfies Partial<CSSStyleDeclaration>);
   const img = document.createElement("img");
   img.alt = "";
   img.decoding = "async";
-  img.src =
-    window.innerWidth * (window.devicePixelRatio || 1) > 1400
-      ? AURA_ASSETS.hi
-      : AURA_ASSETS.lo;
+  img.src = AURA_ASSETS.still;
   Object.assign(img.style, {
     position: "absolute",
+    left: "50%",
+    top: "0",
+    height: "100%",
+    transform: "translateX(-50%)",
     maxWidth: "none",
     userSelect: "none",
   } satisfies Partial<CSSStyleDeclaration>);
   const glow = document.createElement("div");
   Object.assign(glow.style, {
     position: "absolute",
+    left: "50%",
+    top: "22%",
+    width: "40vmin",
+    height: "40vmin",
+    transform: "translate(-50%, -50%)",
     borderRadius: "50%",
     mixBlendMode: "screen",
     transition: "background 1s ease",
@@ -862,19 +1026,24 @@ function createStaticAura(under: HTMLCanvasElement): Aura {
   under.before(root);
   let breathing: Animation | null = null;
   let lastKey = "";
-  let W = 0;
-  let H = 0;
-  return {
+  const aura: Aura = {
     canvas: root,
     get stats(): AuraStats {
       return {
         mode: "static",
+        figure: "static",
         tier: "low",
+        devicePixelRatio: window.devicePixelRatio || 1,
+        dpr: 1,
+        backing: "",
+        css: `${window.innerWidth}x${window.innerHeight}`,
+        renderer: "",
+        mobile: false,
+        triangles: 0,
+        lines: 0,
+        hairStrands: 0,
+        hairGuides: 0,
         scale: 1,
-        pixels: 0,
-        particles: 0,
-        sampled: 0,
-        pointPx: 0,
         frameMs: 0,
       };
     },
@@ -883,28 +1052,10 @@ function createStaticAura(under: HTMLCanvasElement): Aura {
       root.style.opacity = String(
         Math.min(1, f.form / 0.3) * (0.35 + 0.65 * f.dim),
       );
-      if (window.innerWidth !== W || window.innerHeight !== H) {
-        W = window.innerWidth;
-        H = window.innerHeight;
-        const fr = auraFraming(W, H);
-        Object.assign(img.style, {
-          left: `${fr.x}px`,
-          top: `${fr.y}px`,
-          width: `${fr.w}px`,
-          height: `${fr.h}px`,
-        });
-        const r = fr.h * 0.34;
-        Object.assign(glow.style, {
-          left: `${fr.x + FACE.u * fr.w - r}px`,
-          top: `${fr.y + FACE.v * fr.h - r}px`,
-          width: `${2 * r}px`,
-          height: `${2 * r}px`,
-        });
-      }
       const k = f.alert ? "alert" : f.state;
       if (k !== lastKey) {
         lastKey = k;
-        glow.style.background = `radial-gradient(closest-side, ${LOOKS[k].a}55, ${LOOKS[k].b}22 55%, transparent)`;
+        glow.style.background = `radial-gradient(closest-side, ${LOOKS[k].a}40, ${LOOKS[k].b}18 55%, transparent)`;
       }
       if (!breathing && !f.reduceMotion && typeof glow.animate === "function")
         breathing = glow.animate([{ opacity: 0.55 }, { opacity: 1 }], {
@@ -922,4 +1073,6 @@ function createStaticAura(under: HTMLCanvasElement): Aura {
       root.remove();
     },
   };
+  exposeStats(aura);
+  return aura;
 }

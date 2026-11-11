@@ -1,89 +1,71 @@
 /**
- * The Aura artwork and what is known about it: where its files are, where the head and body sit in the picture,
- * how it is framed on screen, and the timing of the birth. Pure numbers and functions, shared by the renderer,
- * the particle worker and the tests.
+ * Aura as a real 3D figure: where her files are, how she is framed, and the timing of her birth and her small
+ * motions. Pure numbers and functions, shared by the renderer and the tests.
  *
- * The artwork (static/aura) was generated with FLUX.1 schnell (Apache-2.0) and approved by the owner; the data
- * atlas next to it is built from it by scripts/aura-assets.mjs.
+ * The figure (static/aura/aura-figure.glb and .json) is built by scripts/aura-figure.mjs from the MakeHuman base
+ * mesh and targets (CC0 1.0): an adult female bust with a blank, smooth ovoid head, and the light lines laid on it.
  */
 
 export const AURA_ASSETS = {
-  /** 2560x1440, desktop. */
-  hi: "/aura/aura-2560.webp",
-  /** 1280x720, low tier and phones. */
-  lo: "/aura/aura-1280.webp",
-  /** Three 960x540 RGB tiles stacked vertically, see AURA_DATA. */
-  data: "/aura/aura-data.png",
-  /** Four 1920x1080 RGB layers in a 2x2 sheet: distance to the nearest light line, place along it, its weight. */
-  lines: "/aura/aura-lines.png",
+  /** The mesh: glTF with EXT_meshopt_compression; position, normal, _HEAD and _BREATH weights. */
+  mesh: "/aura/aura-figure.glb",
+  /** Landmarks (metres) and the light lines on the surface. */
+  figure: "/aura/aura-figure.json",
+  /** A still of the 3D figure, for browsers without WebGL2. */
+  still: "/aura/aura-still.webp",
 } as const;
 
-/**
- * Measurements of the artwork, in picture units (u across 0..1 left to right, v down 0..1 top to bottom), written
- * by scripts/aura-assets.mjs. Atlas tiles: 0 = form, head, bright; 1 = hair weight, height, figure;
- * 2 = normal x, normal y, across the arm.
- */
-export const AURA_DATA = {
-  width: 960,
-  height: 540,
-  aspect: 16 / 9,
-  /** The body's vertical axis. */
-  axis: 0.4963,
-  head: { cx: 0.4967, cy: 0.289, top: 0.1426, bottom: 0.4389, radius: 0.0583 },
-  torsoHalf: 0.1705,
-  shoulderTop: 0.6111,
-  /** Height range, in data pixels. */
-  hmax: 128,
-} as const;
+export type AuraTier = "low" | "mid" | "high";
 
-/** Star points where the light lines meet (picture units), from scripts/aura-assets.mjs. */
-export const STARS: readonly (readonly [number, number])[] = [
-  [0.4963, 0.608],
-  [0.3493, 0.636],
-  [0.6463, 0.64],
-  [0.4903, 0.77],
-  [0.5263, 0.9],
-  [0.3933, 0.81],
-  [0.5863, 0.72],
-];
-
-/** The face, where moods bloom from and the birth's shockwave starts. */
-export const FACE = { u: AURA_DATA.head.cx, v: AURA_DATA.head.cy } as const;
-
-/** Room either side of the shoulders when a narrow screen zooms in on the bust (picture widths). */
-const BUST_MARGIN = 0.04;
-
-export interface Framing {
-  /** Top-left corner of the picture in CSS pixels; may be negative (cropped). */
-  x: number;
-  y: number;
-  /** Size of the whole picture in CSS pixels. */
+export interface FigureLine {
   w: number;
-  h: number;
+  warm: 0 | 1;
+  face: 0 | 1;
+  /** Per point: x, y, z, nx, ny, nz, head weight. */
+  p: number[];
 }
 
+export interface FigureJson {
+  source: string;
+  neck: [number, number, number];
+  head: { c: [number, number, number]; r: [number, number, number] };
+  face: [number, number, number];
+  breasts: [number, number, number][];
+  shoulders: [number, number, number][];
+  elbows: [number, number, number][];
+  waist: number;
+  bounds: { min: [number, number, number]; max: [number, number, number] };
+  lines: FigureLine[];
+  /** The body's signed distance field (int8 mm, base64), for the hair. */
+  sdf: { cell: number; min: number[]; dims: number[]; data: string };
+}
+
+/** The part of the figure that should fill the frame (metres): the head's top to below the bust. */
+export const VIEW = {
+  top: 0.83,
+  bottom: 0.25,
+  halfWidth: 0.31,
+  fov: 28,
+} as const;
+
 /**
- * Where the picture goes on a W x H screen. Wide screens cover the screen with the figure centred as in the
- * artwork; portrait screens (a phone at 390x844) zoom in on the bust so head and shoulders fill the width.
+ * Where the camera stands for a W x H screen. Wide screens frame head to bust; tall screens (phones) keep the
+ * shoulders in the width and the figure in the upper part of the screen, where the chat leaves room.
  */
-export function auraFraming(W: number, H: number): Framing {
-  W = Math.max(1, W);
-  H = Math.max(1, H);
-  // Cover: the picture fills the screen...
-  const cover = Math.max(W, H * AURA_DATA.aspect);
-  // ...unless that would crop the shoulders: then the bust (plus a margin) fills the width instead.
-  const bust = W / (2 * (AURA_DATA.torsoHalf + BUST_MARGIN));
-  const w = Math.min(cover, bust);
-  const h = w / AURA_DATA.aspect;
-  // The body's axis on the screen's centre line, as far as the picture reaches.
-  const x = Math.min(0, Math.max(W - w, W / 2 - AURA_DATA.axis * w));
-  // Covering, the face keeps its place in the frame; zoomed in on a phone, the bust sits in the upper part of
-  // the screen (the chat lives below) and fades into the room past the picture's edges.
-  const y =
-    h >= H
-      ? Math.min(0, Math.max(H - h, H * 0.42 - FACE.v * h))
-      : H * 0.3 - FACE.v * h;
-  return { x, y, w, h };
+export function auraCamera(
+  W: number,
+  H: number,
+): { distance: number; targetY: number; fov: number } {
+  const aspect = Math.max(0.1, W / Math.max(1, H));
+  const t = Math.tan(((VIEW.fov / 2) * Math.PI) / 180);
+  const halfH = (VIEW.top - VIEW.bottom) / 2;
+  const byHeight = halfH / t;
+  const byWidth = VIEW.halfWidth / (t * aspect);
+  const distance = Math.max(byHeight, byWidth);
+  const span = t * distance;
+  // Keep the head's top a little below the screen's top.
+  const targetY = VIEW.top + 0.035 - span;
+  return { distance, targetY, fov: VIEW.fov };
 }
 
 export function smoothstep(a: number, b: number, v: number): number {
@@ -92,58 +74,46 @@ export function smoothstep(a: number, b: number, v: number): number {
 }
 
 /**
- * The birth, in seconds: particles leave a glow low on the chest, fly up into the picture and settle, from the
- * bottom of the frame to the top; the face comes last and ignites, then one soft shockwave runs out from it.
+ * The birth, in seconds: particles leave a glow on the chest and fly to the surface, settling from the waist up;
+ * the face comes last and ignites, then one soft shockwave runs out from it.
  */
 export const BIRTH = {
-  /** Where the particles come from (picture units). */
-  source: { u: AURA_DATA.axis, v: 0.84 },
   /** The glow swells before the first particle leaves. */
   lead: 0.35,
   /** Flight time of one particle. */
   flight: 1.05,
-  /** Bottom-to-top spread of the launches (the body and hair). */
-  spread: 1.2,
-  /** How much later the sides land than the centre, per picture width. */
-  arch: 0.6,
-  /** The face's launches, after everything else. */
+  /** Bottom-to-top spread of the landings. */
+  spread: 1.25,
+  /** The face's landings, after everything else. */
   faceAt: 1.85,
   faceSpread: 0.3,
-  /** A landed particle hands over to the picture in this time. */
+  /** A landed part of the surface lights up in this time. */
   settle: 0.45,
   /** The shockwave. */
   ringAt: 3.25,
   ringTime: 1.0,
   /** All done: from here the frame is the rest frame. */
   total: 4.3,
+  /** Height range the landings sweep (metres). */
+  low: 0.25,
+  high: 0.8,
 } as const;
 
-/** When the particle (or picture pixel) at u, v lands. `head` 0..1 is how much of it is face; `jitter` 0..1. */
-export function arrival(
-  u: number,
-  v: number,
-  head: number,
-  jitter = 0.5,
-): number {
-  // Bottom to top, the centre a little ahead of the sides: the front rises as a soft arch.
-  const body =
-    BIRTH.lead +
-    BIRTH.spread * (1 - v) * (1 - v * 0.15) +
-    BIRTH.arch * Math.abs(u - AURA_DATA.axis) +
-    jitter * 0.18;
-  const r = Math.hypot((u - FACE.u) * AURA_DATA.aspect, v - FACE.v) / 0.16;
-  const face = BIRTH.faceAt + BIRTH.faceSpread * Math.min(1, r) + jitter * 0.08;
-  return body + (face - body) * head + BIRTH.flight;
+/** When the surface point at height y (metres) lands; `face` 0..1 is how much of it is face; `jitter` 0..1. */
+export function arrival(y: number, face: number, jitter = 0.5): number {
+  const h = smoothstep(BIRTH.low, BIRTH.high, y);
+  const body = BIRTH.lead + BIRTH.spread * h + jitter * 0.18;
+  const faceT = BIRTH.faceAt + BIRTH.faceSpread * (1 - h) + jitter * 0.08;
+  return body + (faceT - body) * face + BIRTH.flight;
 }
 
-/** The same timing in GLSL (keep in step with `arrival`). */
+/** The same in GLSL (keep in step with `arrival`). */
 export const ARRIVAL_GLSL = /* glsl */ `
-float arrival(vec2 p, float head, float jitter) {
-  float body = ${f(BIRTH.lead)} + ${f(BIRTH.spread)} * (1.0 - p.y) * (1.0 - p.y * 0.15)
-    + ${f(BIRTH.arch)} * abs(p.x - ${f(AURA_DATA.axis)}) + jitter * 0.18;
-  float r = length(vec2((p.x - ${f(FACE.u)}) * ${f(AURA_DATA.aspect)}, p.y - ${f(FACE.v)})) / 0.16;
-  float face = ${f(BIRTH.faceAt)} + ${f(BIRTH.faceSpread)} * min(1.0, r) + jitter * 0.08;
-  return mix(body, face, head) + ${f(BIRTH.flight)};
+float arrival(float y, float face, float jitter) {
+  float h = smoothstep(${f(BIRTH.low)}, ${f(BIRTH.high)}, y);
+  float body = ${f(BIRTH.lead)} + ${f(BIRTH.spread)} * h + jitter * 0.18;
+  float faceT = ${f(BIRTH.faceAt)} + ${f(BIRTH.faceSpread)} * (1.0 - h) + jitter * 0.08;
+  return mix(body, faceT, face) + ${f(BIRTH.flight)};
 }
 `;
 
@@ -153,60 +123,15 @@ export function f(n: number): string {
   return /[.e]/.test(s) ? s : `${s}.0`;
 }
 
-/**
- * The hair in the wind, in data pixels (the picture is 960 of them wide). `w` is the hair weight from the atlas:
- * 0 at the scalp (roots, parting, crown), rising toward the tips, so the roots stay put and the motion grows
- * smoothly along each strand. Slow sway (about 0.2 Hz) and a slower cross-wave, gusts, and a fine flutter at the
- * tips; mostly sideways, with a little lift. `motion` 0 (reduced motion) is a still rest pose.
- */
+/** The hair in the wind: gusts every 6 to 12 s, and the sway between them. */
 export const WIND = {
-  /** Largest sideways reach at the tips, data px. */
-  reach: 5.5,
-  sway: 0.21,
-  cross: 0.13,
-  flutter: 1.3,
-  /** Gusts: one every this many seconds (a range), each this long. */
   gustEvery: [6, 12] as const,
   gustLength: 2.6,
-  lift: 1.6,
+  /** Sideways push at full gust and at rest (m/s²), and the slow sway's frequency (Hz). */
+  gust: 1.6,
+  breeze: 0.35,
+  sway: 0.21,
 } as const;
-
-export function hairWind(
-  u: number,
-  v: number,
-  w: number,
-  t: number,
-  motion: number,
-  gust: number,
-  lift: number,
-): [number, number] {
-  if (motion <= 0 || w <= 0) return [0, 0];
-  const tau = 2 * Math.PI;
-  // A domain warp keeps neighbouring strands in phase but never in lockstep.
-  const vw = v + 0.05 * Math.sin(u * 9 + t * 0.4);
-  const dx =
-    (0.55 + 0.45 * gust) * Math.sin(tau * WIND.sway * t + vw * 3 + u * 2) +
-    0.35 * Math.sin(tau * WIND.cross * t + vw * 7 - u * 5 + 1.3) +
-    0.16 * w * Math.sin(tau * WIND.flutter * t + vw * 31 + u * 17);
-  const dy = -(0.3 * gust + 0.15 * Math.sin(tau * 0.17 * t + u * 6) + lift);
-  const k = WIND.reach * w * motion;
-  return [dx * k, dy * k * (WIND.lift / WIND.reach)];
-}
-
-/** The same in GLSL (keep in step with `hairWind`). */
-export const WIND_GLSL = /* glsl */ `
-vec2 hairWind(vec2 q, float w, float t, float motion, float gust, float lift) {
-  if (motion <= 0.0 || w <= 0.0) return vec2(0.0);
-  float tau = 6.28318;
-  float vw = q.y + 0.05 * sin(q.x * 9.0 + t * 0.4);
-  float dx = (0.55 + 0.45 * gust) * sin(tau * ${f(WIND.sway)} * t + vw * 3.0 + q.x * 2.0)
-    + 0.35 * sin(tau * ${f(WIND.cross)} * t + vw * 7.0 - q.x * 5.0 + 1.3)
-    + 0.16 * w * sin(tau * ${f(WIND.flutter)} * t + vw * 31.0 + q.x * 17.0);
-  float dy = -(0.3 * gust + 0.15 * sin(tau * 0.17 * t + q.x * 6.0) + lift);
-  float k = ${f(WIND.reach)} * w * motion;
-  return vec2(dx * k, dy * k * ${f(WIND.lift / WIND.reach)});
-}
-`;
 
 /** Gust strength 0..1 at time t: a soft swell every 6 to 12 s (deterministic). */
 export function gustAt(t: number): number {
@@ -225,6 +150,19 @@ export function gustAt(t: number): number {
   return 0;
 }
 
+/** The wind's force on the hair at time t (m/s², x and z), zero without motion. */
+export function windForce(t: number, motion: number): [number, number] {
+  if (motion <= 0) return [0, 0];
+  const g = gustAt(t);
+  const sway =
+    Math.sin(2 * Math.PI * WIND.sway * t) * 0.6 +
+    Math.sin(2 * Math.PI * 0.13 * t + 1.3) * 0.4;
+  return [
+    motion * (WIND.breeze * sway + WIND.gust * g),
+    motion * (0.15 * Math.sin(t * 0.7) - 0.3 * g),
+  ];
+}
+
 /**
  * The head's own life on top of following the pointer: slow, small turns and tilts from layered sines, and now and
  * then a gentle look aside that returns. Radians; all zero without motion.
@@ -240,7 +178,7 @@ export function idlePose(
     Math.sin(t * a) * 0.55 +
     Math.sin(t * b + 1.7) * 0.3 +
     Math.sin(t * c + 4.2) * 0.15;
-  // A look aside every 9 to 15 s, held for a couple of seconds, eased in and out.
+  // A look aside every 12 s or so, held for a couple of seconds, eased in and out.
   const period = 12;
   const cycle = Math.floor(t / period);
   const phase =
@@ -255,4 +193,29 @@ export function idlePose(
     pitch: motion * IDLE.pitch * n(0.17, 0.43, 0.89),
     roll: motion * IDLE.roll * n(0.13, 0.31, 0.67),
   };
+}
+
+/** Rotation matrix (column-major 3x3, as three's Matrix3.fromArray) for yaw (y), pitch (x), roll (z). */
+export function headMatrix(yaw: number, pitch: number, roll: number): number[] {
+  const cy = Math.cos(yaw);
+  const sy = Math.sin(yaw);
+  const cp = Math.cos(pitch);
+  const sp = Math.sin(pitch);
+  const cr = Math.cos(roll);
+  const sr = Math.sin(roll);
+  // R = Ry * Rx * Rz, row-major first.
+  const ry = [cy, 0, sy, 0, 1, 0, -sy, 0, cy];
+  const rx = [1, 0, 0, 0, cp, -sp, 0, sp, cp];
+  const rz = [cr, -sr, 0, sr, cr, 0, 0, 0, 1];
+  const m = (a: number[], b: number[]) => {
+    const o = new Array<number>(9).fill(0);
+    for (let i = 0; i < 3; i++)
+      for (let j = 0; j < 3; j++)
+        for (let k = 0; k < 3; k++)
+          o[i * 3 + j]! += a[i * 3 + k]! * b[k * 3 + j]!;
+    return o;
+  };
+  const r = m(m(ry, rx), rz);
+  // To column-major.
+  return [r[0]!, r[3]!, r[6]!, r[1]!, r[4]!, r[7]!, r[2]!, r[5]!, r[8]!];
 }
