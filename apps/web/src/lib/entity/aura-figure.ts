@@ -320,18 +320,36 @@ export function growHair(
   const seg = new Float32Array(guides);
   const pos = new Float32Array(guides * P * 3);
   let g = 0;
-  // Scalp directions: the top, sides and back; the hairline frames the face.
+  // Scalp directions: a centre parting at the top, the crown, the sides and the back; the hairline frames the
+  // face. About a third are front locks: from the hairline beside the face they fall over the shoulders onto the
+  // upper chest.
+  const frontLocks = Math.round(guides * 0.34);
   while (g < guides) {
-    const u = rand() * 2 - 1;
-    const phi = rand() * Math.PI * 2;
-    const s = Math.sqrt(1 - u * u);
-    const d: V3 = [s * Math.cos(phi), u, s * Math.sin(phi)];
+    const lock = g < frontLocks;
+    let d: V3;
+    if (lock) {
+      // Along the front hairline, from the parting down to the temples.
+      const side = g % 2 ? 1 : -1;
+      const a = 0.12 + 0.75 * rand();
+      d = [
+        side * Math.sin(a * 1.35),
+        Math.cos(a * 1.35) * 0.85 + 0.1,
+        0.32 + 0.15 * rand(),
+      ];
+      const l0 = Math.hypot(...d);
+      d = [d[0] / l0, d[1] / l0, d[2] / l0];
+    } else {
+      const u = rand() * 2 - 1;
+      const phi = rand() * Math.PI * 2;
+      const sn = Math.sqrt(1 - u * u);
+      d = [sn * Math.cos(phi), u, sn * Math.sin(phi)];
+    }
     if (d[1] < -0.05) continue;
     // Not on the face: in front, the hairline sits high and arches over the temples.
     const front = d[2];
-    if (front > 0.2 && d[1] < 0.55 + 0.25 * (1 - Math.abs(d[0]) * 1.3))
+    if (!lock && front > 0.2 && d[1] < 0.55 + 0.25 * (1 - Math.abs(d[0]) * 1.3))
       continue;
-    if (d[1] < 0.25 && Math.abs(d[0]) > 0.7 && front > -0.1) continue;
+    if (!lock && d[1] < 0.25 && Math.abs(d[0]) > 0.7 && front > -0.1) continue;
     let root = onEllipsoid(c, e, d, 1.0);
     if (sdf) {
       // Onto the real scalp: step along the direction until just outside the surface.
@@ -350,12 +368,15 @@ export function growHair(
     // Combed away from the parting, then falling.
     const side =
       Math.abs(d[0]) < 0.06 ? (rand() < 0.5 ? -1 : 1) : Math.sign(d[0]);
-    // Combed out from the parting, over the temples and back: the face stays free.
-    const comb: V3 = [
-      side * (0.75 + 0.3 * rand()) + d[0] * 0.3,
-      -0.1 + d[1] * 0.2,
-      -0.35 + d[2] * 0.25 + (rand() - 0.5) * 0.4,
-    ];
+    // Combed out from the parting, over the temples: the back hair falls behind, the front locks forward of the
+    // shoulders. The face stays free.
+    const comb: V3 = lock
+      ? [side * (0.85 + 0.2 * rand()), -0.25, 0.25 + 0.2 * rand()]
+      : [
+          side * (0.75 + 0.3 * rand()) + d[0] * 0.3,
+          -0.1 + d[1] * 0.2,
+          -0.35 + d[2] * 0.25 + (rand() - 0.5) * 0.4,
+        ];
     const l = Math.hypot(...comb);
     dir.set([comb[0] / l, comb[1] / l, comb[2] / l], g * 3);
     const length =
@@ -364,14 +385,15 @@ export function growHair(
         (0.4 + 0.6 * rand()) *
         (0.75 + 0.25 * (1 - Math.max(0, front)));
     seg[g] = length / (P - 1);
-    // Start along the head's surface, then down.
+    // Start along the head's surface, then down (front locks down in front of the shoulder).
     for (let i = 0; i < P; i++) {
       const k = i * seg[g]!;
       const dd = Math.min(k, 0.09);
+      const fall = Math.max(0, k - 0.09);
       const p: V3 = [
         root[0] + (comb[0] / l) * dd,
-        root[1] + (comb[1] / l) * dd - Math.max(0, k - 0.09),
-        root[2] + (comb[2] / l) * dd - Math.max(0, k - 0.09) * 0.25,
+        root[1] + (comb[1] / l) * dd - fall,
+        root[2] + (comb[2] / l) * dd + fall * (lock ? 0.35 : -0.25),
       ];
       pos.set(p, (g * P + i) * 3);
     }

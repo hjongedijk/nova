@@ -42,8 +42,8 @@ export interface FigureJson {
 
 /** The part of the figure that should fill the frame (metres): the head's top to below the bust. */
 export const VIEW = {
-  top: 0.83,
-  bottom: 0.25,
+  top: 0.775,
+  bottom: 0.19,
   halfWidth: 0.31,
   fov: 28,
 } as const;
@@ -61,6 +61,15 @@ export function auraCamera(
   const halfH = (VIEW.top - VIEW.bottom) / 2;
   const byHeight = halfH / t;
   const byWidth = VIEW.halfWidth / (t * aspect);
+  // Phones: head and bust fill about 85% of the height, centred (the arms may run off the sides).
+  if (aspect < 0.8) {
+    const d = halfH / 0.85 / t;
+    return {
+      distance: d,
+      targetY: (VIEW.top + VIEW.bottom) / 2,
+      fov: VIEW.fov,
+    };
+  }
   const distance = Math.max(byHeight, byWidth);
   const span = t * distance;
   // Keep the head's top a little below the screen's top.

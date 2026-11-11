@@ -11,8 +11,8 @@ export const LINES = {
   /** Half-width of the hot core and of the glow, for a line of weight 1. */
   core: 0.0007,
   glow: 0.003,
-  coreGain: 1.6,
-  glowGain: 0.7,
+  coreGain: 1.35,
+  glowGain: 0.5,
   /** How much the brightness wanders along a line. */
   vary: 0.5,
   swells: 6,
@@ -21,26 +21,28 @@ export const LINES = {
   travel: { speed: 0.09, gain: 0.9 },
   sparks: 0.45,
   /** Lines on the face: faint, never features. */
-  face: 0.4,
+  face: 0.24,
   warmColour: "#ffb27a",
   amberColour: "#ffcf73",
 } as const;
 
 /** The body: dark glossy violet glass. */
 export const SKIN = {
-  base: "#07020f",
+  base: "#06030c",
   key: "#9a7cff",
   rimA: "#e05cf0",
   rimB: "#ffb08a",
-  gloss: 0.9,
-  rim: 0.7,
-  sparkle: 0.9,
+  gloss: 0.18,
+  rim: 0.55,
+  sparkle: 0.75,
+  /** The lines' light on the skin within a centimetre or two. */
+  lineGlow: 0.32,
 } as const;
 
 /** The hair. */
 export const HAIRLOOK = {
   width: 0.00045,
-  gain: 0.1,
+  gain: 0.11,
   sheen: 0.8,
 } as const;
 
@@ -143,11 +145,15 @@ void main() {
 export const BODY_VERT = /* glsl */ `
 attribute float _head;
 attribute float _breath;
+attribute float _glow;
+attribute float _warm;
 uniform float uBreath;
 varying vec3 vWorld;
 varying vec3 vNormal;
 varying vec3 vObj;
 varying float vHead;
+varying float vGlow;
+varying float vWarm;
 ${COMMON}
 void main() {
   vec3 p = position + normal * _breath * uBreath * ${f(BREATH.amount)};
@@ -158,6 +164,8 @@ void main() {
   vNormal = normalize(mat3(modelMatrix) * n);
   vObj = position;
   vHead = _head;
+  vGlow = _glow;
+  vWarm = _warm;
   gl_Position = projectionMatrix * viewMatrix * w;
 }
 `;
@@ -168,6 +176,8 @@ varying vec3 vWorld;
 varying vec3 vNormal;
 varying vec3 vObj;
 varying float vHead;
+varying float vGlow;
+varying float vWarm;
 uniform float uWaist;
 uniform vec3 uElbowL;
 uniform vec3 uElbowR;
@@ -200,15 +210,19 @@ void main() {
   vec3 H1 = normalize(L1 + V);
   vec3 H2 = normalize(L2 + V);
   vec3 H3 = normalize(L3 + V);
-  vec3 spec = c1 * pow(max(dot(N, H1), 0.0), 140.0) * 0.9
-    + c2 * pow(max(dot(N, H2), 0.0), 90.0) * 1.1
-    + c3 * pow(max(dot(N, H3), 0.0), 90.0) * 0.6;
-  col += spec * (0.25 + F) * ${f(SKIN.gloss)};
+  // Specular only as a thin sheen at grazing angles: no glossy blobs on the head or shoulders.
+  vec3 spec = c1 * pow(max(dot(N, H1), 0.0), 220.0)
+    + c2 * pow(max(dot(N, H2), 0.0), 120.0)
+    + c3 * pow(max(dot(N, H3), 0.0), 120.0) * 0.6;
+  col += spec * F * ${f(SKIN.gloss)};
+  // The light comes from the lines: skin near a line takes its colour.
+  vec3 lineC = mix(mix(A, B, 0.4), ${rgb("#ffb27a")}, vWarm * 0.8);
+  col += lineC * pow(vGlow, 2.6) * ${f(SKIN.lineGlow)} * glow * (0.55 + 0.45 * NdV);
   // The rim: bright where the surface turns away.
   float rimF = pow(1.0 - NdV, 4.0);
   col += mix(c2, A, 0.4) * rimF * ${f(SKIN.rim)} * glow * (0.6 + 0.4 * max(dot(N, L2) + 0.5, 0.0));
   // A faint inner glow, as if light lived under the glass.
-  col += A * 0.025 * pow(NdV, 2.0) * glow;
+  col += A * 0.01 * pow(NdV, 2.0) * glow;
 
   // Starry sparkle inside: fixed to the body, fading at the rim.
   vec3 sp = vObj * 240.0;
@@ -217,7 +231,7 @@ void main() {
   vec3 pt = cell + 0.5 + (vec3(hash31(cell + 3.1), hash31(cell + 7.7), hash31(cell + 1.3)) - 0.5) * 0.7;
   float fw = max(length(fwidth(sp)), 1e-4);
   float sz = max(0.09, 0.75 * fw);
-  float spark = step(0.965, h) * exp(-dot(sp - pt, sp - pt) / (sz * sz)) * (1.0 - smoothstep(0.0, 0.7, F))
+  float spark = step(0.94, h) * (0.35 + 0.65 * smoothstep(0.0, 0.5, vGlow)) * exp(-dot(sp - pt, sp - pt) / (sz * sz)) * (1.0 - smoothstep(0.0, 0.7, F))
     * (0.5 + 0.5 * sin(uT * (0.7 + 2.0 * h) * uMotion + h * 60.0));
   col += mix(A, vec3(1.0), 0.55) * spark * ${f(SKIN.sparkle)} * (1.0 - vHead * 0.5);
 
@@ -338,7 +352,8 @@ void main() {
   float glow = mix(uGlow.x, uGlow.y, inside) * (1.0 + uAudio * 0.75);
   // Tapered ends.
   float taper = pow(clamp(sin(3.14159 * t), 0.0, 1.0), 0.55) * smoothstep(0.0, 0.04, t) * (1.0 - smoothstep(0.96, 1.0, t));
-  float w = (0.35 + 0.75 * weight) * (0.25 + 1.05 * taper);
+  // Thickness varies along each line as well as between lines.
+  float w = (0.3 + 0.8 * weight) * (0.25 + 1.05 * taper) * (0.75 + 0.5 * noise(vec2(t * 4.0 + h1 * 9.0, lineId)));
   // Widths in device px: the core never thinner than about a pixel (analytic anti-aliasing).
   float coreW = max(${f(LINES.core)} * w * vPpu, 0.55);
   float glowW = max(${f(LINES.glow)} * w * vPpu, 1.4);
@@ -352,7 +367,8 @@ void main() {
     warmLine * (0.6 + 0.4 * noise(vec2(along * 0.5, lineId + 2.0)))) * accent;
   c = mix(c, mix(${rgb(LINES.warmColour)}, ${rgb(LINES.amberColour)}, h2), warm * 0.9);
   // Sparks strung along the line every few millimetres, sized in device pixels.
-  float s = t * vLen / 0.0035;
+  // Sparks travel along the line.
+  float s = t * vLen / 0.0035 - uT * (0.8 + 1.6 * h1) * uMotion * (h2 > 0.5 ? 1.0 : -1.0);
   float cell = floor(s);
   float hs = hash11(cell * 1.37 + lineId * 7.0);
   float alongPx = (fract(s) - 0.5) * 0.0035 * vPpu;
@@ -363,7 +379,7 @@ void main() {
     + mix(c, vec3(1.0), 0.6) * spark * ${f(LINES.sparks)}) * lit * glow;
   col *= mix(1.0, ${f(LINES.face)}, onFace);
   // Lines on the far side of a turned head or the arms' sides fade as the surface turns away.
-  col *= smoothstep(0.02, 0.35, vFacing);
+  col *= smoothstep(-0.12, 0.2, vFacing);
   col *= smoothstep(uWaist + 0.01, uWaist + 0.09, vWorld.y)
     * smoothstep(0.012, 0.075, min(distance(vWorld, uElbowL), distance(vWorld, uElbowR)));
   // Birth: a line appears once its part of the body has landed.
@@ -419,8 +435,10 @@ vec3 strandAt(float u) {
   // A little volume: each strand drifts off its guides toward the tips, its own way.
   float a = aW.z * 6.2832;
   // A soft wave along the strand, and a spread toward the tips: hair, not a curtain.
-  float wave = sin(u * (7.0 + 5.0 * aW.w) + aW.z * 6.0 + uT * 0.6 * uMotion) * 0.006 * u;
-  return p + vec3(cos(a) * (0.016 * u * u * (0.5 + aW.w)) + wave, 0.0, sin(a) * 0.012 * u * u * (0.5 + aW.w));
+  // Gentle waves along the strand (each lock its own phase), and a spread toward the tips.
+  float ph = aGuides.x * 0.37 + aW.z * 1.5;
+  float wave = sin(u * 9.0 + ph + uT * 0.5 * uMotion) * 0.011 * smoothstep(0.1, 0.5, u);
+  return p + vec3(cos(a) * (0.014 * u * u * (0.5 + aW.w)) + wave, 0.0, sin(a) * 0.01 * u * u * (0.5 + aW.w) + wave * 0.6);
 }
 void main() {
   float u = aK.x;
@@ -474,6 +492,7 @@ void main() {
   float tint = mix(uTint.x, uTint.y, inside);
   float glow = mix(uGlow.x, uGlow.y, inside) * (1.0 + uAudio * 0.4);
   vec3 base = mix(${rgb("#8c5cff")}, Hc, 0.35 + 0.5 * tint);
+  base = mix(base, ${rgb("#ffc27a")}, step(0.86, vRand2) * 0.7);
   // Kajiya-Kay sheen from the violet key and the magenta rim.
   vec3 V = normalize(cameraPosition - vWorld);
   vec3 L = normalize(vec3(-0.55, 0.65, 0.75));
@@ -484,9 +503,10 @@ void main() {
   float th2 = dot(vTan, normalize(L2 + V));
   float sheen2 = pow(sqrt(max(0.0, 1.0 - th2 * th2)), 40.0);
   // Brighter strands now and then, a light running down them, dim at the root, fading at the tip.
-  float bright = 0.35 + 0.65 * pow(vRand, 3.0);
+  // Most strands are dim (the interior), some bright, a few gold; brighter toward the tips.
+  float bright = (0.18 + 0.82 * pow(vRand, 3.0)) * (0.6 + 0.7 * smoothstep(0.2, 0.9, vT));
   float run = pow(max(0.0, sin((vT * 3.0 - uT * 0.12 * uMotion + vRand2 * 6.0) * 6.2832)), 18.0);
-  float along = smoothstep(0.0, 0.06, vT) * (1.0 - smoothstep(0.6, 1.0, vT)) * (0.7 + 0.3 * smoothstep(0.0, 0.3, vT));
+  float along = smoothstep(0.0, 0.05, vT) * (1.0 - smoothstep(0.88, 1.0, vT));
   vec3 col = base * bright * (0.6 + ${f(HAIRLOOK.sheen)} * sheen * 2.0) + vec3(1.0, 0.8, 1.0) * sheen * 0.25 * bright
     + ${rgb("#e05cf0")} * sheen2 * 0.4 * bright + mix(base, vec3(1.0), 0.5) * run * 0.6;
   col *= prof * along * vCover * ${f(HAIRLOOK.gain)} * glow;

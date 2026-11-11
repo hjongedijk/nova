@@ -55,7 +55,14 @@ describe("aura figure", () => {
     const gltf = JSON.parse(glb.toString("utf8", 20, 20 + jsonLen));
     expect(gltf.extensionsRequired).toContain("EXT_meshopt_compression");
     const prim = gltf.meshes[0].primitives[0];
-    for (const a of ["POSITION", "NORMAL", "_HEAD", "_BREATH"])
+    for (const a of [
+      "POSITION",
+      "NORMAL",
+      "_HEAD",
+      "_BREATH",
+      "_GLOW",
+      "_WARM",
+    ])
       expect(prim.attributes[a]).toBeTypeOf("number");
     const tris = gltf.accessors[prim.indices].count / 3;
     expect(tris).toBeGreaterThan(20_000);
@@ -84,9 +91,9 @@ describe("aura figure", () => {
     const chin = head.c[1] - head.r[1];
     expect(chin - neck[1]).toBeGreaterThan(0.02);
     expect(chin - neck[1]).toBeLessThan(0.1);
-    // A head about 21 cm tall, narrower than it is deep.
-    expect(head.r[1] * 2).toBeGreaterThan(0.18);
-    expect(head.r[1] * 2).toBeLessThan(0.25);
+    // A head about 17 cm from crown to chin (13% smaller than the original skull), narrower than it is deep.
+    expect(head.r[1] * 2).toBeGreaterThan(0.15);
+    expect(head.r[1] * 2).toBeLessThan(0.2);
     expect(head.r[0]).toBeLessThan(head.r[2]);
     for (const b of breasts) {
       expect(b[2]).toBeGreaterThan(neck[2] + 0.12);
@@ -99,8 +106,12 @@ describe("aura figure", () => {
 
 describe("aura light lines", () => {
   it("lays about a hundred lines on the surface, 8-14 of them faint on the face", () => {
-    expect(fig.lines.length).toBeGreaterThanOrEqual(85);
-    expect(fig.lines.length).toBeLessThanOrEqual(115);
+    expect(fig.lines.length).toBeGreaterThanOrEqual(140);
+    expect(fig.lines.length).toBeLessThanOrEqual(210);
+    // About a quarter run warm (gold, peach).
+    const warm = fig.lines.filter((l) => l.warm).length / fig.lines.length;
+    expect(warm).toBeGreaterThan(0.12);
+    expect(warm).toBeLessThan(0.4);
     const face = fig.lines.filter((l) => l.face).length;
     expect(face).toBeGreaterThanOrEqual(8);
     expect(face).toBeLessThanOrEqual(14);
@@ -286,9 +297,12 @@ describe("aura motion", () => {
       (VIEW.top - VIEW.bottom) / 2 - 1e-6,
     );
     const phone = auraCamera(393, 852);
-    expect(t * phone.distance * (393 / 852)).toBeGreaterThanOrEqual(
-      VIEW.halfWidth - 1e-6,
+    // On a phone, head and bust fill about 85% of the height, centred.
+    expect((VIEW.top - VIEW.bottom) / (2 * t * phone.distance)).toBeCloseTo(
+      0.85,
+      2,
     );
+    expect(phone.targetY).toBeCloseTo((VIEW.top + VIEW.bottom) / 2, 5);
   });
 });
 
