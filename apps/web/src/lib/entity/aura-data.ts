@@ -42,7 +42,7 @@ export interface FigureJson {
 
 /** The part of the figure that should fill the frame (metres): the head's top to below the bust. */
 export const VIEW = {
-  top: 0.775,
+  top: 0.805,
   bottom: 0.19,
   halfWidth: 0.31,
   fov: 28,

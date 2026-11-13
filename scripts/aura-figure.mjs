@@ -138,19 +138,19 @@ for (const side of ["l", "r"]) {
   }
 }
 
-/* ---------- the neck: a touch slimmer and shorter (the head comes down with it) ---------- */
-const NECK_DROP = 0.14;
+/* ---------- the neck: natural, a touch slimmer ---------- */
+const NECK_DROP = 0;
 for (const i of bodyVerts) {
   const p = P(i);
   const wn =
     smooth(NECK[1] - 0.5, NECK[1] - 0.05, p[1]) *
     (1 - smooth(HEAD[1] - 0.3, HEAD[1] + 0.1, p[1]));
-  const k = 1 - 0.13 * wn;
+  const k = 1 - 0.04 * wn;
   const down = NECK_DROP * smooth(NECK[1] - 0.25, NECK[1] + 0.55, p[1]);
   setP(i, [
     p[0] * k,
     p[1] - down,
-    NECK[2] + (p[2] - NECK[2]) * (1 - 0.08 * wn),
+    NECK[2] + (p[2] - NECK[2]) * (1 - 0.02 * wn),
   ]);
 }
 HEAD[1] -= NECK_DROP;
@@ -191,48 +191,144 @@ HEAD[1] -= NECK_DROP;
   }
 }
 
-/* ---------- the head: a blank, smooth ovoid (no features), blended in above the jaw ---------- */
+/* ---------- the head: the real head, made faceless (features smoothed away, the shape kept) ---------- */
 const headVerts = bodyVerts.filter((i) => pos[i * 3 + 1] > NECK[1] + 0.35);
-let hx = 0;
 let hz0 = 1e9;
 let hz1 = -1e9;
 let hy1 = -1e9;
 let chinY = 1e9;
 for (const i of headVerts) {
   const p = P(i);
-  // The skull's width above the ears (the ears would make it far too wide).
-  if (p[1] > HEAD[1] + 0.45) hx = Math.max(hx, Math.abs(p[0]));
   hz0 = Math.min(hz0, p[2]);
   hz1 = Math.max(hz1, p[2]);
   hy1 = Math.max(hy1, p[1]);
   if (Math.abs(p[0]) < 0.08 && p[2] > HEAD[2] + 0.3)
     chinY = Math.min(chinY, p[1]);
 }
-// The egg: centred a little above the head joint, slightly narrower at the jaw, deeper than wide.
-// About 13% smaller than the original skull and a little narrower; the chin stays where the jaw met the neck.
-const HEAD_SCALE = 0.87;
+// The head as a radial surface about its centre: r(direction), fitted to the real skull, forehead, cheekbones,
+// jaw and chin with low-order polynomials (symmetric left-right). Nose, lips and ears stick out of that fit
+// and are trimmed away; eye sockets and the mouth lie inside it and are bridged. What remains is her own head
+// shape with a soft, blank face plane.
 const EGG = {
-  c: [0, 0, (hz0 + hz1) / 2 + 0.03],
-  rx: Math.min(hx, ((hy1 - chinY) / 2) * 0.7) * HEAD_SCALE * 0.94,
-  ry: ((hy1 - chinY) / 2) * HEAD_SCALE,
-  rz: ((hz1 - hz0) / 2) * 0.98 * HEAD_SCALE,
+  c: [0, (hy1 + chinY) / 2, (hz0 + hz1) / 2 + 0.03],
+  rx: 0,
+  ry: (hy1 - chinY) / 2,
+  rz: 0,
+  coef: null,
 };
-EGG.c[1] = chinY + 0.05 + EGG.ry;
-function eggSurface(dir) {
-  // Scale the radii toward the chin: an elegant tapered ovoid with a soft jaw.
-  const d = norm(dir);
-  // A human oval: widest a little above the middle, a gentle taper to a soft chin.
-  const taper =
-    1 - 0.28 * smooth(-0.05, -0.95, d[1]) - 0.1 * smooth(0.45, 1, d[1]);
-  const rx = EGG.rx * taper;
-  const rz = EGG.rz * (1 - 0.08 * smooth(0, -0.9, d[1]));
-  const k =
-    1 / Math.sqrt((d[0] / rx) ** 2 + (d[1] / EGG.ry) ** 2 + (d[2] / rz) ** 2);
-  return add(EGG.c, mul(d, k));
+const BASIS = [];
+for (const deg of [5, 6])
+  for (let a = 0; a <= deg; a += 2)
+    for (let b = 0; b <= deg - a; b++) BASIS.push([a, b, deg - a - b]);
+const fitAt = (d) => {
+  const phi = basisAt(d);
+  let r = 0;
+  for (let i = 0; i < phi.length; i++) r += EGG.coef[i] * phi[i];
+  return r;
+};
+const basisAt = (d) =>
+  BASIS.map(([a, b, c]) => d[0] ** a * d[1] ** b * d[2] ** c);
+{
+  // Vertex normals of the original head, to tell the outer surface from the cavities.
+  const vn = new Map(headVerts.map((i) => [i, [0, 0, 0]]));
+  for (const f of faces) {
+    if (!vn.has(f[0])) continue;
+    const a = P(f[0]);
+    let n = [0, 0, 0];
+    for (let k = 1; k + 1 < f.length; k++)
+      n = add(n, cross(sub(P(f[k]), a), sub(P(f[k + 1]), a)));
+    for (const i of f) if (vn.has(i)) vn.set(i, add(vn.get(i), n));
+  }
+  const samples = [];
+  for (const i of headVerts) {
+    const p = P(i);
+    if (p[1] < chinY - 0.12) continue;
+    const rel = sub(p, EGG.c);
+    const r = len(rel);
+    const d = mul(rel, 1 / r);
+    if (dot(norm(vn.get(i)), d) < 0.25) continue;
+    samples.push({ d, r, w: 1, real: true });
+  }
+  // Below the jaw there is no head to fit: keep the surface tame there (those points are blended out anyway).
+  for (let a = 0; a < 40; a++)
+    for (let b = 0; b < 6; b++) {
+      const y = -0.6 - 0.4 * (b / 5);
+      const s = Math.sqrt(1 - y * y);
+      const t = (a / 40) * 2 * Math.PI;
+      samples.push({
+        d: [s * Math.cos(t), y, s * Math.sin(t)],
+        r: EGG.ry * 0.62,
+        w: 0.15,
+        real: false,
+      });
+    }
+  console.log(
+    "head samples",
+    samples.filter((q) => q.real).length,
+    "of",
+    headVerts.length,
+    "chinY",
+    chinY,
+    "c",
+    EGG.c,
+    "ry",
+    EGG.ry,
+  );
+  const n = BASIS.length;
+  for (let it = 0; it < 6; it++) {
+    const A = Array.from({ length: n }, () => new Float64Array(n + 1));
+    for (const sm of samples) {
+      const phi = basisAt(sm.d);
+      for (let i = 0; i < n; i++) {
+        for (let k = 0; k < n; k++) A[i][k] += sm.w * phi[i] * phi[k];
+        A[i][n] += sm.w * phi[i] * sm.r;
+      }
+    }
+    for (let i = 0; i < n; i++) A[i][i] += 1e-6;
+    for (let c = 0; c < n; c++) {
+      let piv = c;
+      for (let r = c + 1; r < n; r++)
+        if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+      [A[c], A[piv]] = [A[piv], A[c]];
+      for (let r = 0; r < n; r++) {
+        if (r === c) continue;
+        const k = A[r][c] / A[c][c];
+        if (k !== 0) for (let q = c; q <= n; q++) A[r][q] -= k * A[c][q];
+      }
+    }
+    EGG.coef = A.map((row, i) => row[n] / row[i]);
+    // Trim what sticks out (nose, lips, ears) and what lies deep (sockets, mouth).
+    for (const sm of samples) {
+      if (!sm.real) continue;
+      const e = sm.r - fitAt(sm.d);
+      // Gently at first, then down to 6 mm: a hard trim on a rough first fit would eat the skull itself.
+      const out = [0.3, 0.2, 0.12, 0.09, 0.07, 0.06][it];
+      sm.w = e > out ? 0.01 : e < -out * 1.5 ? 0.05 : 1;
+    }
+  }
 }
-// A long blend under the chin: the jaw flows into the neck, no collar.
+function eggSurface(dir) {
+  const d = norm(dir);
+  const r = Math.max(EGG.ry * 0.4, Math.min(EGG.ry * 1.5, fitAt(d)));
+  return add(EGG.c, mul(d, r));
+}
+console.log(
+  "head fit (dm): side, front, top, back, chin-ish",
+  [
+    [1, 0, 0],
+    [0, 0, 1],
+    [0, 1, 0],
+    [0, 0, -1],
+    [0, -0.8, 0.6],
+  ]
+    .map((d) => fitAt(norm(d)).toFixed(3))
+    .join(" "),
+);
+EGG.rx = eggSurface([1, 0, 0])[0] - EGG.c[0];
+EGG.rz = eggSurface([0, 0, 1])[2] - EGG.c[2];
+// Blended in from under the chin up: the fit follows the real jaw, so there is no step at the neck.
 const headBlend = (p) =>
-  smooth(chinY - 0.55, chinY + 0.15, p[1]) *
+  smooth(chinY - 0.22, chinY + 0.3, p[1]) *
   smooth(NECK[1] + 0.2, NECK[1] + 0.55, p[1]);
 const orig = new Map(headVerts.map((i) => [i, P(i)]));
 for (const i of headVerts) {
@@ -673,6 +769,8 @@ function catmull(points, step) {
   return out;
 }
 const lines = [];
+// Only a few hand-laid lines remain, as accents (the collarbones); the weave itself comes from the surface fields.
+let accent = false;
 /** A line through 2D control points (x, y in metres, front view), laid on the surface. */
 function addLine(ctrl, weight, opts = {}) {
   const pts = [];
@@ -694,6 +792,7 @@ function addLine(ctrl, weight, opts = {}) {
         pts[i].n[k] = (pts[i - 1].n[k] + 2 * pts[i].n[k] + pts[i + 1].n[k]) / 4;
       }
   for (const q of pts) q.n = norm(q.n);
+  if (!accent) return;
   lines.push({
     w: weight,
     // About a quarter of the body's lines run warm (gold, peach); the face stays violet.
@@ -785,6 +884,7 @@ for (const side of [1, -1]) {
   }
   // Collarbones: two bold lines, each with a fine companion.
   const shx = Math.abs(shL[0]);
+  accent = true;
   for (let i = 0; i < 2; i++) {
     const c = [
       [s(0.012), nk[1] - 0.064 - 0.008 * i],
@@ -797,6 +897,7 @@ for (const side of [1, -1]) {
     companion(c, side * 0.004, 0.25);
     companion(c, -side * 0.0035, 0.18);
   }
+  accent = false;
   // The arm: its outer contour (a rim along the silhouette), the inner edge where it parts from the torso, and
   // three quiet lines between.
   const ex = Math.abs(elL[0]);
@@ -991,6 +1092,139 @@ const warmW = new Float32Array(nVerts);
   }
 }
 
+/* ---------- surface fields: their isolines are the light lines, drawn in the shader at native resolution ---------- */
+// Field A (metres): distance over the surface from the front midline, merged with the distance from each breast's
+// apex. Its isolines run down beside the midline (neck, sternum, the face's sides), ring each breast, and sweep
+// round the bust's outside in long arcs. Field B: the angle round each upper arm, so its isolines run along the
+// arm. Both follow the form by construction.
+const nbrs = Array.from({ length: nVerts }, () => new Set());
+for (let t = 0; t < tris.length; t += 3) {
+  const [a, b, c] = [tris[t], tris[t + 1], tris[t + 2]];
+  nbrs[a].add(b).add(c);
+  nbrs[b].add(a).add(c);
+  nbrs[c].add(a).add(b);
+}
+const nbrList = nbrs.map((s) => [...s]);
+const vAt = (i) => [V[i * 3], V[i * 3 + 1], V[i * 3 + 2]];
+function surfaceDistance(seeds) {
+  const dist = new Float64Array(nVerts).fill(Infinity);
+  // A binary heap of [distance, vertex].
+  const heap = [];
+  const push = (d, i) => {
+    heap.push([d, i]);
+    let k = heap.length - 1;
+    while (k > 0) {
+      const p = (k - 1) >> 1;
+      if (heap[p][0] <= heap[k][0]) break;
+      [heap[p], heap[k]] = [heap[k], heap[p]];
+      k = p;
+    }
+  };
+  const pop = () => {
+    const top = heap[0];
+    const last = heap.pop();
+    if (heap.length) {
+      heap[0] = last;
+      let k = 0;
+      for (;;) {
+        const l = 2 * k + 1;
+        const r = l + 1;
+        let m = k;
+        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+        if (m === k) break;
+        [heap[m], heap[k]] = [heap[k], heap[m]];
+        k = m;
+      }
+    }
+    return top;
+  };
+  for (const i of seeds) {
+    dist[i] = 0;
+    push(0, i);
+  }
+  while (heap.length) {
+    const [d, i] = pop();
+    if (d > dist[i]) continue;
+    const p = vAt(i);
+    for (const k of nbrList[i]) {
+      const nd = d + len(sub(vAt(k), p));
+      if (nd < dist[k]) {
+        dist[k] = nd;
+        push(nd, k);
+      }
+    }
+  }
+  // Graph distance zigzags along the edges: relax it into a smooth field (the seeds stay at zero).
+  const fixed = new Uint8Array(nVerts);
+  for (const i of seeds) fixed[i] = 1;
+  let f = dist;
+  for (let it = 0; it < 60; it++) {
+    const g = Float64Array.from(f);
+    for (let i = 0; i < nVerts; i++) {
+      if (fixed[i] || !nbrList[i].length) continue;
+      let s = 0;
+      for (const k of nbrList[i]) s += f[k];
+      g[i] = 0.5 * f[i] + (0.5 * s) / nbrList[i].length;
+    }
+    f = g;
+  }
+  return f;
+}
+const midSeeds = [];
+for (let i = 0; i < nVerts; i++)
+  if (Math.abs(V[i * 3]) < 0.0015 && N[i * 3 + 2] > 0.1) midSeeds.push(i);
+const nearestVertex = (p) => {
+  let best = 0;
+  let bd = Infinity;
+  for (let i = 0; i < nVerts; i++) {
+    const d = len(sub(vAt(i), p));
+    if (d < bd) {
+      bd = d;
+      best = i;
+    }
+  }
+  return best;
+};
+const dMid = surfaceDistance(midSeeds);
+const dBustL = surfaceDistance([nearestVertex(breast.l)]);
+const dBustR = surfaceDistance([nearestVertex(breast.r)]);
+const fieldA = new Float32Array(nVerts);
+const fieldB = new Float32Array(nVerts);
+const armW = new Float32Array(nVerts);
+{
+  const K = 0.014;
+  const BUST = 0.6;
+  for (let i = 0; i < nVerts; i++) {
+    const a = dMid[i];
+    const b = Math.min(dBustL[i], dBustR[i]) * BUST;
+    // Smooth minimum: where the families meet they flow into each other.
+    const body = -K * Math.log(Math.exp(-a / K) + Math.exp(-b / K));
+    // On the head the lines simply run down beside the midline: no trace of what the face once was.
+    fieldA[i] = body + (Math.abs(V[i * 3]) - body) * smooth(0.3, 0.8, headW[i]);
+  }
+  for (const side of ["l", "r"]) {
+    const sh = scaleP(SH[side]);
+    const el = scaleP(EL[side]);
+    const axis = norm(sub(el, sh));
+    const front = norm(sub([0, 0, 1], mul(axis, axis[2])));
+    const across = cross(axis, front);
+    const sign = side === "l" ? 1 : -1;
+    for (let i = 0; i < nVerts; i++) {
+      const p = vAt(i);
+      if (sign * p[0] < Math.abs(sh[0]) * 0.8) continue;
+      const rel = sub(p, sh);
+      const along = dot(rel, axis);
+      const radial = sub(rel, mul(axis, along));
+      const rd = len(radial);
+      const w = smooth(0.02, 0.1, along) * (1 - smooth(0.06, 0.08, rd));
+      if (w <= 0) continue;
+      armW[i] = w;
+      fieldB[i] = Math.atan2(dot(radial, across), dot(radial, front)) * 0.045;
+    }
+  }
+}
+
 /* ---------- a signed distance field of the body, for the hair to rest on ---------- */
 const SDF = {
   cell: 0.01,
@@ -1083,7 +1317,7 @@ function allHits(x, y) {
 await MeshoptEncoder.ready;
 const vcount = nVerts;
 // Position and normal as float, plus head and breath weights and the lines' light (nearness, warmth).
-const vstride = 32;
+const vstride = 44;
 const vbuf = new Uint8Array(vcount * vstride);
 const dv = new DataView(vbuf.buffer);
 let bbMin = [1e9, 1e9, 1e9];
@@ -1103,6 +1337,10 @@ for (let i = 0; i < vcount; i++) {
   );
   dv.setUint16(i * vstride + 28, Math.round(glowW[i] * 65535), true);
   dv.setUint16(i * vstride + 30, Math.round(warmW[i] * 65535), true);
+  dv.setFloat32(i * vstride + 32, fieldA[i], true);
+  dv.setFloat32(i * vstride + 36, fieldB[i], true);
+  dv.setUint16(i * vstride + 40, Math.round(armW[i] * 65535), true);
+  dv.setUint16(i * vstride + 42, 0, true);
 }
 let idx = Uint32Array.from(tris);
 // Cache-friendly order, then compress.
@@ -1216,6 +1454,28 @@ const gltf = {
       type: "SCALAR",
     },
     {
+      bufferView: 0,
+      byteOffset: 32,
+      componentType: 5126,
+      count: vcount,
+      type: "SCALAR",
+    },
+    {
+      bufferView: 0,
+      byteOffset: 36,
+      componentType: 5126,
+      count: vcount,
+      type: "SCALAR",
+    },
+    {
+      bufferView: 0,
+      byteOffset: 40,
+      componentType: 5123,
+      normalized: true,
+      count: vcount,
+      type: "SCALAR",
+    },
+    {
       bufferView: 1,
       byteOffset: 0,
       componentType: 5125,
@@ -1235,8 +1495,11 @@ const gltf = {
             _BREATH: 3,
             _GLOW: 4,
             _WARM: 5,
+            _FA: 6,
+            _FB: 7,
+            _ARM: 8,
           },
-          indices: 6,
+          indices: 9,
         },
       ],
     },

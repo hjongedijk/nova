@@ -280,7 +280,7 @@ export const HAIR = {
   guides: { low: 120, mid: 180, high: 240 },
   points: 16,
   /** Drawn strands interpolated from the guides. */
-  strands: { low: 1500, mid: 3200, high: 6000 },
+  strands: { low: 2000, mid: 5000, high: 12000 },
   /** Length range (m). */
   length: [0.26, 0.5] as const,
   gravity: 9.8,
@@ -323,7 +323,7 @@ export function growHair(
   // Scalp directions: a centre parting at the top, the crown, the sides and the back; the hairline frames the
   // face. About a third are front locks: from the hairline beside the face they fall over the shoulders onto the
   // upper chest.
-  const frontLocks = Math.round(guides * 0.34);
+  const frontLocks = Math.round(guides * 0.14);
   while (g < guides) {
     const lock = g < frontLocks;
     let d: V3;
@@ -374,7 +374,7 @@ export function growHair(
     // Combed out from the parting, over the temples: the back hair falls behind, the front locks forward of the
     // shoulders. The face stays free.
     const comb: V3 = lock
-      ? [side * (0.4 + 0.15 * rand()), -0.7, 0.3 + 0.15 * rand()]
+      ? [side * (0.75 + 0.15 * rand()), -0.5, 0.12 + 0.1 * rand()]
       : [
           side * (0.75 + 0.3 * rand()) + d[0] * 0.3,
           -0.1 + d[1] * 0.2,
@@ -587,10 +587,11 @@ function keepOffFace(h: Hair, k: number, R: number[]): void {
 /** Push a point out of the body along the distance field's gradient (the head's part turned with the head). */
 function collideSdf(h: Hair, k: number, R: number[]): void {
   const f = h.sdf!;
-  const margin = 0.0025;
   let x = h.pos[k]!;
   let y = h.pos[k + 1]!;
   let z = h.pos[k + 2]!;
+  // Off the skull by a centimetre: the hair has volume round the head.
+  const margin = y > h.pivot[1] + 0.03 ? 0.011 : 0.003;
   // Above the neck the body has turned with the head: look it up in the head's rest frame.
   const onHead = y > h.pivot[1] - 0.01;
   if (onHead) {

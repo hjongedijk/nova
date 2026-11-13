@@ -40,7 +40,13 @@ import {
   swing,
   TIMING,
 } from "./aura.ts";
-import { BODY_FRAG, HAIR_VERT, LINE_FRAG, LINE_VERT } from "./aura-shaders.ts";
+import {
+  BODY_FRAG,
+  HAIR_VERT,
+  LINE_FRAG,
+  LINE_VERT,
+  WEAVE,
+} from "./aura-shaders.ts";
 
 const STATIC = path.resolve(import.meta.dirname, "../../../static");
 const fig = JSON.parse(
@@ -91,10 +97,11 @@ describe("aura figure", () => {
     const chin = head.c[1] - head.r[1];
     expect(chin - neck[1]).toBeGreaterThan(0.02);
     expect(chin - neck[1]).toBeLessThan(0.1);
-    // A head about 17 cm from crown to chin (13% smaller than the original skull), narrower than it is deep.
-    expect(head.r[1] * 2).toBeGreaterThan(0.15);
-    expect(head.r[1] * 2).toBeLessThan(0.2);
-    expect(head.r[0]).toBeLessThan(head.r[2]);
+    // Her real head: about 21 cm from crown to chin, about 13 cm wide.
+    expect(head.r[1] * 2).toBeGreaterThan(0.18);
+    expect(head.r[1] * 2).toBeLessThan(0.24);
+    expect(head.r[0] * 2).toBeGreaterThan(0.11);
+    expect(head.r[0] * 2).toBeLessThan(0.16);
     for (const b of breasts) {
       expect(b[2]).toBeGreaterThan(neck[2] + 0.12);
       expect(b[1]).toBeLessThan(neck[1] - 0.12);
@@ -105,19 +112,29 @@ describe("aura figure", () => {
 });
 
 describe("aura light lines", () => {
-  it("lays about a hundred lines on the surface, 8-14 of them faint on the face", () => {
-    expect(fig.lines.length).toBeGreaterThanOrEqual(90);
-    expect(fig.lines.length).toBeLessThanOrEqual(210);
-    // About a quarter run warm (gold, peach).
-    const warm = fig.lines.filter((l) => l.warm).length / fig.lines.length;
-    expect(warm).toBeGreaterThan(0.12);
-    expect(warm).toBeLessThan(0.4);
-    const face = fig.lines.filter((l) => l.face).length;
-    expect(face).toBeGreaterThanOrEqual(8);
-    expect(face).toBeLessThanOrEqual(14);
-    // Each point lies on the surface: just outside the body (the field is 1 cm coarse).
+  it("weaves the body with isolines of surface fields baked on the mesh, drawn sharp in the shader", () => {
+    const glb = fs.readFileSync(path.join(STATIC, AURA_ASSETS.mesh));
+    const gltf = JSON.parse(
+      glb.toString("utf8", 20, 20 + glb.readUInt32LE(12)),
+    );
+    const attrs = gltf.meshes[0].primitives[0].attributes;
+    for (const a of ["_FA", "_FB", "_ARM"])
+      expect(attrs[a]).toBeTypeOf("number");
+    // Screen-space derivatives make every line about a device pixel wide at any resolution.
+    expect(BODY_FRAG).toContain("fwidth(g)");
+    expect(BODY_FRAG).toContain("weave(");
+    expect(WEAVE.spacing).toBeGreaterThan(0.003);
+    expect(WEAVE.spacing).toBeLessThan(0.012);
+    expect(WEAVE.warm).toBeGreaterThan(0.2);
+    expect(WEAVE.warm).toBeLessThan(0.4);
+    // Calm arms, a dense chest, a faint face.
+    expect(WEAVE.arms).toBeLessThan(WEAVE.chest);
+    expect(WEAVE.faceGain).toBeLessThan(0.6);
+    // A few hand-laid accents remain (the collarbones), each lying on the surface.
+    expect(fig.lines.length).toBeGreaterThanOrEqual(4);
+    expect(fig.lines.length).toBeLessThanOrEqual(40);
     const sdf = decodeSdf(fig.sdf);
-    for (const l of fig.lines.slice(0, 20))
+    for (const l of fig.lines)
       for (let i = 0; i < l.p.length; i += 7 * 5)
         expect(
           Math.abs(sdfAt(sdf, l.p[i]!, l.p[i + 1]!, l.p[i + 2]!)),
@@ -125,12 +142,9 @@ describe("aura light lines", () => {
   });
 
   it("draws no seam down the face and no facial features", () => {
-    for (const l of fig.lines.filter((x) => x.face)) {
-      let off = 0;
-      for (let i = 0; i < l.p.length; i += 7)
-        off = Math.max(off, Math.abs(l.p[i]!));
-      expect(off).toBeGreaterThan(0.015);
-    }
+    expect(fig.lines.filter((x) => x.face).length).toBe(0);
+    // The face's lines are masked away from its middle.
+    expect(BODY_FRAG).toContain("abs(vObj.x)");
     for (const src of [BODY_FRAG, LINE_FRAG])
       expect(src).not.toMatch(/\b(eyes?|mouth|lips?|nose|brows?|pupils?)\b/i);
   });

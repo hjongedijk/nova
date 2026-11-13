@@ -26,6 +26,26 @@ export const LINES = {
   amberColour: "#ffcf73",
 } as const;
 
+/** The weave: light lines drawn as isolines of fields baked on the surface (scripts/aura-figure.mjs). */
+export const WEAVE = {
+  /** Distance between neighbouring lines on the torso, neck and face (m), and round the arms. */
+  spacing: 0.0072,
+  armSpacing: 0.0075,
+  /** Line thickness range in CSS pixels, and core and halo strength. */
+  thin: 0.55,
+  thick: 1.35,
+  core: 1.5,
+  halo: 0.1,
+  /** Share of lines that run warm (gold, peach). */
+  warm: 0.3,
+  /** How much of the weave shows: chest, waist, arms, face. */
+  chest: 0.72,
+  waist: 0.35,
+  arms: 0.42,
+  face: 0.5,
+  faceGain: 0.4,
+} as const;
+
 /** The body: dark glossy violet glass. */
 export const SKIN = {
   base: "#06030c",
@@ -41,8 +61,8 @@ export const SKIN = {
 
 /** The hair. */
 export const HAIRLOOK = {
-  width: 0.00045,
-  gain: 0.16,
+  width: 0.00032,
+  gain: 0.13,
   sheen: 0.8,
 } as const;
 
@@ -147,6 +167,9 @@ attribute float _head;
 attribute float _breath;
 attribute float _glow;
 attribute float _warm;
+attribute float _fa;
+attribute float _fb;
+attribute float _arm;
 uniform float uBreath;
 varying vec3 vWorld;
 varying vec3 vNormal;
@@ -154,6 +177,9 @@ varying vec3 vObj;
 varying float vHead;
 varying float vGlow;
 varying float vWarm;
+varying float vFa;
+varying float vFb;
+varying float vArm;
 ${COMMON}
 void main() {
   vec3 p = position + normal * _breath * uBreath * ${f(BREATH.amount)};
@@ -166,6 +192,9 @@ void main() {
   vHead = _head;
   vGlow = _glow;
   vWarm = _warm;
+  vFa = _fa;
+  vFb = _fb;
+  vArm = _arm;
   gl_Position = projectionMatrix * viewMatrix * w;
 }
 `;
@@ -178,6 +207,11 @@ varying vec3 vObj;
 varying float vHead;
 varying float vGlow;
 varying float vWarm;
+varying float vFa;
+varying float vFb;
+varying float vArm;
+uniform float uPx;
+uniform vec3 uFaceRest;
 uniform float uWaist;
 uniform vec3 uElbowL;
 uniform vec3 uElbowR;
@@ -186,6 +220,38 @@ uniform vec3 uBreastL;
 uniform vec3 uBreastR;
 ${COMMON}
 ${MOOD}
+/*
+ * One family of light lines: the isolines of a surface field g (in line units). Measured with screen-space
+ * derivatives, so every line is about a device pixel wide and razor sharp at any resolution, and follows the form
+ * by construction. Each line has its own brightness, thickness and colour (a hash of its index); some are
+ * missing where the weave is sparse; light pulses travel along them; where they thin out they break into dashes.
+ */
+vec3 weave(float g, float fam, float density, float along, vec3 A, vec3 B, float accent) {
+  float id = floor(g + 0.5);
+  float fw = max(fwidth(g), 1e-6);
+  float dpx = abs(g - id) / fw;
+  float h1 = hash11(id * 3.71 + fam);
+  float h2 = hash11(id * 9.13 + fam * 2.0 + 0.3);
+  float h3 = hash11(id * 5.27 + fam * 3.0 + 0.7);
+  float h4 = hash11(id * 1.93 + fam * 5.0 + 0.1);
+  float keep = step(1.0 - density, h1);
+  float wpx = mix(${f(WEAVE.thin)}, ${f(WEAVE.thick)}, h2 * h2) * uPx;
+  float core = exp(-pow(dpx / wpx, 2.0));
+  float halo = exp(-pow(dpx / (wpx * 4.0 + 1.5 * uPx), 2.0));
+  // Lines closer together than a few pixels (grazing surfaces) fade instead of smearing.
+  float crowd = 1.0 - smoothstep(0.22, 0.5, fw);
+  float bright = 0.08 + 0.92 * h3 * h3 * h3;
+  float swell = 0.5 + 0.5 * noise(vec2(along * 0.3 + h1 * 20.0, id * 0.7));
+  float pulse = pow(max(0.0, sin(along * (0.5 + 0.6 * h2) - uT * uPulse * (0.7 + h1) * 1.6 * uMotion + h3 * 6.2832)), 12.0);
+  // Toward the sparse regions the lines break into dashes.
+  float dash = smoothstep(-0.05, 0.1, noise(vec2(along * 1.4 + h2 * 30.0, id * 1.7)) - (0.62 - density));
+  vec3 c = mix(A, B, h2);
+  float warmL = step(1.0 - ${f(WEAVE.warm)}, h4) * accent;
+  c = mix(c, mix(${rgb(LINES.warmColour)}, ${rgb(LINES.amberColour)}, h3) * 1.5, warmL);
+  return (mix(c, vec3(1.0, 0.92, 0.97), 0.6) * core * ${f(WEAVE.core)} + c * halo * ${f(WEAVE.halo)})
+    * keep * bright * swell * (1.0 + 1.5 * pulse) * dash * crowd;
+}
+
 void main() {
   vec3 N = normalize(vNormal);
   vec3 V = normalize(cameraPosition - vWorld);
@@ -240,17 +306,32 @@ void main() {
   vec2 br = vObj.xy - uBreastR.xy;
   down *= smoothstep(0.045, 0.075, min(length(bl), length(br)));
   col += (edgeC * edgeCore * 1.6 + mix(A, B, 0.35) * edgeHalo * ${f(SKIN.rim)} * mix(1.0, 0.35, vHead)) * glow * down;
+  /* the weave: her whole body woven with light */
+  {
+    float accent = mix(uAccent.x, uAccent.y, inside);
+    float along = vObj.y * 130.0 + vObj.x * 20.0;
+    // Dense over the chest, collarbones and neck, thinning toward the waist; calm on the arms.
+    float dens = mix(${f(WEAVE.waist)}, ${f(WEAVE.chest)}, smoothstep(uWaist + 0.04, uBreastL.y - 0.02, vObj.y));
+    // The face: faint lines down its sides only (never down the middle), none under the hair.
+    float onFace = smoothstep(0.0, 0.03, vObj.z - (uFaceRest.z - 0.075)) * (1.0 - smoothstep(uFaceRest.y + 0.07, uFaceRest.y + 0.095, vObj.y));
+    float headGain = mix(1.0, onFace * smoothstep(0.028, 0.045, abs(vObj.x)) * ${f(WEAVE.faceGain)}, smoothstep(0.3, 0.7, vHead));
+    dens = mix(dens, ${f(WEAVE.face)}, smoothstep(0.3, 0.7, vHead));
+    vec3 wv = weave(vFa / ${f(WEAVE.spacing)}, 1.0, dens, along, A, B, accent) * (1.0 - vArm) * headGain;
+    wv += weave(vFb / ${f(WEAVE.armSpacing)}, 7.0, ${f(WEAVE.arms)}, along, A, B, accent) * vArm;
+    // Lines turned edge-on dim a little; the rim takes over there.
+    col += wv * glow * (0.45 + 0.55 * NdV);
+  }
   // A faint inner glow, as if light lived under the glass.
   col += A * 0.01 * pow(NdV, 2.0) * glow;
 
   // Starry sparkle inside: fixed to the body, fading at the rim.
-  vec3 sp = vObj * 240.0;
+  vec3 sp = vObj * 420.0;
   vec3 cell = floor(sp);
   float h = hash31(cell);
   vec3 pt = cell + 0.5 + (vec3(hash31(cell + 3.1), hash31(cell + 7.7), hash31(cell + 1.3)) - 0.5) * 0.7;
   float fw = max(length(fwidth(sp)), 1e-4);
-  float sz = max(0.09, 0.75 * fw);
-  float spark = step(0.94, h) * (0.35 + 0.65 * smoothstep(0.0, 0.5, vGlow)) * exp(-dot(sp - pt, sp - pt) / (sz * sz)) * (1.0 - smoothstep(0.0, 0.7, F))
+  float sz = max(0.05, 0.42 * fw);
+  float spark = step(0.9, h) * (0.25 + 0.75 * pow(hash31(cell + 9.0), 3.0)) * exp(-dot(sp - pt, sp - pt) / (sz * sz)) * (1.0 - smoothstep(0.0, 0.7, F))
     * (0.5 + 0.5 * sin(uT * (0.7 + 2.0 * h) * uMotion + h * 60.0));
   col += mix(A, vec3(1.0), 0.55) * spark * ${f(SKIN.sparkle)} * (1.0 - vHead * 0.5);
 
@@ -458,7 +539,7 @@ vec3 strandAt(float u) {
   // Gentle waves along the strand (each lock its own phase), and a spread toward the tips.
   float ph = aGuides.x * 0.37 + aW.z * 1.5;
   float wave = sin(u * 9.0 + ph + uT * 0.5 * uMotion) * 0.011 * smoothstep(0.1, 0.5, u);
-  return p + vec3(cos(a) * (0.014 * u * u * (0.5 + aW.w)) + wave, 0.0, sin(a) * 0.01 * u * u * (0.5 + aW.w) + wave * 0.6);
+  return p + vec3(cos(a) * (0.02 * u * (0.3 + u) * (0.5 + aW.w)) + wave, 0.0, sin(a) * 0.016 * u * (0.3 + u) * (0.5 + aW.w) + wave * 0.6);
 }
 void main() {
   float u = aK.x;
@@ -477,8 +558,8 @@ void main() {
   float ppu = projectionMatrix[1][1] * uRes.y * 0.5 / cp.w;
   // A strand is about half a millimetre; never thinner than a pixel on screen (it then gets fainter instead).
   float px = ${f(HAIRLOOK.width)} * (0.6 + 0.8 * aW.z) * ppu;
-  float halfPx = max(px, 0.75) * 2.0;
-  vCover = min(1.0, px / 0.75);
+  float halfPx = max(px, 0.6) * 1.6;
+  vCover = min(1.0, px / 0.6);
   cp.xy += perp * aK.y * halfPx / (uRes * 0.5) * cp.w;
   vAcross = aK.y * halfPx;
   vHalf = halfPx;
@@ -505,7 +586,7 @@ ${COMMON}
 ${MOOD}
 void main() {
   float d = abs(vAcross) / vHalf;
-  float prof = exp(-d * d * 4.0);
+  float prof = exp(-d * d * 6.0);
   float dist = length(vWorld - uFace);
   float inside = 1.0 - smoothstep(uBloomR - 0.05, uBloomR, dist);
   vec3 Hc = mix(uH0, uH1, inside);
@@ -525,7 +606,7 @@ void main() {
   // Brighter strands now and then, a light running down them, dim at the root, fading at the tip.
   // Most strands are dim (the interior), some bright, a few gold; brighter toward the tips.
   // A few bright individual strands, most dim; the crown glows too (strand lines converging at the part).
-  float bright = (0.12 + 0.88 * pow(vRand, 5.0)) * (0.8 + 0.5 * smoothstep(0.2, 0.9, vT));
+  float bright = (0.05 + 0.95 * pow(vRand, 4.0)) * (0.8 + 0.6 * smoothstep(0.2, 0.9, vT));
   float run = pow(max(0.0, sin((vT * 3.0 - uT * 0.12 * uMotion + vRand2 * 6.0) * 6.2832)), 18.0);
   // Strands lying on the skull don't overlap the way the falling lengths do: lift them so the crown glows.
   float along = smoothstep(0.0, 0.02, vT) * (1.0 - smoothstep(0.88, 1.0, vT)) * (1.0 + 2.6 * (1.0 - smoothstep(0.08, 0.35, vT)));

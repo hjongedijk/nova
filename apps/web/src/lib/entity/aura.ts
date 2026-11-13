@@ -457,6 +457,7 @@ async function createGlAura(
     uChest: { value: chest },
     uWaist: { value: fig.waist },
     uChin: { value: fig.head.c[1] - fig.head.r[1] },
+    uFaceRest: { value: faceRest.clone() },
     uBreastL: { value: new THREE.Vector3(...fig.breasts[0]!) },
     uBreastR: { value: new THREE.Vector3(...fig.breasts[1]!) },
     uElbowL: { value: new THREE.Vector3(...fig.elbows[0]!) },
