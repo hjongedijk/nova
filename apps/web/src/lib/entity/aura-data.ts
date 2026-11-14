@@ -2,28 +2,21 @@
  * Aura as a real 3D figure: where her files are, how she is framed, and the timing of her birth and her small
  * motions. Pure numbers and functions, shared by the renderer and the tests.
  *
- * The figure (static/aura/aura-figure.glb and .json) is built by scripts/aura-figure.mjs from the MakeHuman base
- * mesh and targets (CC0 1.0): an adult female bust with a blank, smooth ovoid head, and the light lines laid on it.
+ * The figure (static/aura/aura-figure.glb and .json) is built by scripts/aura-figure.mjs from our own sculpt (a
+ * mesh generated with Hunyuan3D-2 from our own image): a woman's bust with long hair, made faceless and abstract,
+ * with the hair marked and the surface fields baked whose isolines are her light lines.
  */
 
 export const AURA_ASSETS = {
-  /** The mesh: glTF with EXT_meshopt_compression; position, normal, _HEAD and _BREATH weights. */
+  /** The mesh: glTF with EXT_meshopt_compression; position, normal, weights (_HEAD, _BREATH, _HAIR, _ARM), fields. */
   mesh: "/aura/aura-figure.glb",
-  /** Landmarks (metres) and the light lines on the surface. */
+  /** Landmarks (metres) and a distance field of the figure. */
   figure: "/aura/aura-figure.json",
   /** A still of the 3D figure, for browsers without WebGL2. */
   still: "/aura/aura-still.webp",
 } as const;
 
 export type AuraTier = "low" | "mid" | "high";
-
-export interface FigureLine {
-  w: number;
-  warm: 0 | 1;
-  face: 0 | 1;
-  /** Per point: x, y, z, nx, ny, nz, head weight. */
-  p: number[];
-}
 
 export interface FigureJson {
   source: string;
@@ -34,17 +27,18 @@ export interface FigureJson {
   shoulders: [number, number, number][];
   elbows: [number, number, number][];
   waist: number;
+  /** Where the hair starts above the face (height, m). */
+  hairline: number;
   bounds: { min: [number, number, number]; max: [number, number, number] };
-  lines: FigureLine[];
   /** The body's signed distance field (int8 mm, base64), for the hair. */
   sdf: { cell: number; min: number[]; dims: number[]; data: string };
 }
 
 /** The part of the figure that should fill the frame (metres): the head's top to below the bust. */
 export const VIEW = {
-  top: 0.805,
-  bottom: 0.19,
-  halfWidth: 0.31,
+  top: 0.96,
+  bottom: 0.3,
+  halfWidth: 0.27,
   fov: 28,
 } as const;
 
@@ -104,8 +98,8 @@ export const BIRTH = {
   /** All done: from here the frame is the rest frame. */
   total: 4.3,
   /** Height range the landings sweep (metres). */
-  low: 0.25,
-  high: 0.8,
+  low: 0.22,
+  high: 0.96,
 } as const;
 
 /** When the surface point at height y (metres) lands; `face` 0..1 is how much of it is face; `jitter` 0..1. */

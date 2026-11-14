@@ -10,7 +10,6 @@ import {
   type FigureJson,
 } from "./aura-data.ts";
 import {
-  buildRibbons,
   decodeSdf,
   growHair,
   HAIR,
@@ -24,22 +23,21 @@ import {
   BODY_VERT,
   HAIR_FRAG,
   HAIR_VERT,
-  LINE_FRAG,
-  LINE_VERT,
   POINTS_FRAG,
   POINTS_VERT,
   ROOM_FRAG,
   ROOM_VERT,
   STAR_FRAG,
   STAR_VERT,
+  SWAY,
 } from "./aura-shaders.ts";
 
-export { BREATH, HAIRLOOK, LINES, SKIN } from "./aura-shaders.ts";
+export { BREATH, HAIRLOOK, LINES, SKIN, SWAY } from "./aura-shaders.ts";
 
 /**
- * AURA: a real-time 3D being of light. A sculpted feminine bust of dark glossy glass (built from the CC0
- * MakeHuman base mesh, with a blank, smooth ovoid head), light lines laid on her surface, hair of thousands of light
- * strands moved by simulated guides, in a room of violet smoke. Her head truly turns toward the pointer and has
+ * AURA: a real-time 3D being of light. A sculpted feminine bust of dark glossy glass with long sculpted hair (our
+ * own sculpt, made faceless), light lines flowing over her surface, loose strands of light moved by simulated
+ * guides round her hair, in a room of violet smoke. Her head truly turns toward the pointer and has
  * its own small life; moods bloom out from her face; she is born from particles that settle onto her surface.
  *
  * Same contract as the Gestalte (entity.ts drives both): a canvas under the entity's 2D canvas, built lazily.
@@ -91,7 +89,6 @@ export interface AuraStats {
   renderer: string;
   mobile: boolean;
   triangles: number;
-  lines: number;
   hairStrands: number;
   hairGuides: number;
   scale: number;
@@ -456,6 +453,10 @@ async function createGlAura(
     uBreath: { value: 0 },
     uChest: { value: chest },
     uWaist: { value: fig.waist },
+    uShoulder: { value: fig.shoulders[0]![1] },
+    uCrown: { value: fig.head.c[1] + fig.head.r[1] },
+    uHeadLag: { value: new THREE.Matrix3() },
+    uSway: { value: new THREE.Vector2(0, 0) },
     uChin: { value: fig.head.c[1] - fig.head.r[1] },
     uFaceRest: { value: faceRest.clone() },
     uBreastL: { value: new THREE.Vector3(...fig.breasts[0]!) },
@@ -519,36 +520,12 @@ async function createGlAura(
   scene.add(body);
   const triangles = (geo.index?.count ?? 0) / 3;
 
-  /* the light lines */
-  const rib = buildRibbons(fig.lines);
-  const lineGeo = new THREE.BufferGeometry();
-  lineGeo.setAttribute("position", new THREE.BufferAttribute(rib.position, 3));
-  lineGeo.setAttribute("aNext", new THREE.BufferAttribute(rib.next, 3));
-  lineGeo.setAttribute("aPrev", new THREE.BufferAttribute(rib.prev, 3));
-  lineGeo.setAttribute("normal", new THREE.BufferAttribute(rib.normal, 3));
-  lineGeo.setAttribute("aInfo", new THREE.BufferAttribute(rib.info, 4));
-  lineGeo.setAttribute("aCode", new THREE.BufferAttribute(rib.code, 2));
-  lineGeo.setIndex(new THREE.BufferAttribute(rib.index, 1));
   const additive = {
     transparent: true,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     depthTest: true,
   } as const;
-  const lineMat = new THREE.ShaderMaterial({
-    uniforms: U,
-    vertexShader: LINE_VERT,
-    fragmentShader: LINE_FRAG,
-    ...additive,
-    // Camera-facing ribbons would dip into the curved skin: they are hidden by turning away instead (vFacing).
-    depthTest: false,
-    side: THREE.DoubleSide,
-  });
-  const lineMesh = new THREE.Mesh(lineGeo, lineMat);
-  lineMesh.frustumCulled = false;
-  lineMesh.renderOrder = 2;
-  scene.add(lineMesh);
-
   /* star points where lines meet */
   {
     const [bl] = fig.breasts as [number, number, number][];
@@ -654,7 +631,7 @@ async function createGlAura(
   }
   let strands = budget.strands;
   const setStrands = (n: number) => {
-    strands = Math.max(500, Math.min(HAIR.strands.high, Math.round(n)));
+    strands = Math.max(300, Math.min(HAIR.strands.high, Math.round(n)));
     hairGeo.setDrawRange(0, strands * SEG * 6);
   };
   setStrands(strands);
@@ -788,6 +765,15 @@ async function createGlAura(
     pitch: { x: 0, v: 0 },
     roll: { x: 0, v: 0 },
   };
+  // The hair's lengths: a copy of the head's turn that arrives late and overshoots a little, and the wind's push.
+  const lag = {
+    yaw: { x: 0, v: 0 },
+    pitch: { x: 0, v: 0 },
+    roll: { x: 0, v: 0 },
+    swayX: { x: 0, v: 0 },
+    swayZ: { x: 0, v: 0 },
+  };
+  const RmLag = new THREE.Matrix3();
   const weight = { listening: 0, thinking: 0, speaking: 0 };
   let tau = 0;
   let lastForm = 0;
@@ -814,7 +800,6 @@ async function createGlAura(
         renderer: rendererName,
         mobile,
         triangles,
-        lines: rib.lines,
         hairStrands: strands,
         hairGuides: hair.guides,
         scale,
@@ -933,7 +918,20 @@ async function createGlAura(
       faceNow.copy(faceRest).sub(pivot).applyMatrix3(Rm).add(pivot);
       U.uFace.value.copy(faceNow);
 
-      /* the hair: verlet at a fixed 60 Hz (the roots follow the head; the rest follows a little late) */
+      swing(lag.yaw, pose.yaw.x, dt);
+      swing(lag.pitch, pose.pitch.x, dt);
+      swing(lag.roll, pose.roll.x, dt);
+      RmLag.fromArray(headMatrix(lag.yaw.x, lag.pitch.x, lag.roll.x));
+      U.uHeadLag.value.copy(RmLag);
+      {
+        const wind = windForce(t, motion);
+        const cap = (v: number) => Math.max(-SWAY.most, Math.min(SWAY.most, v));
+        swing(lag.swayX, cap(wind[0] * SWAY.wind), dt, 1.6);
+        swing(lag.swayZ, cap(wind[1] * SWAY.wind), dt, 1.6);
+        U.uSway.value.set(lag.swayX.x * motion, lag.swayZ.x * motion);
+      }
+
+      /* the loose strands: verlet at a fixed 60 Hz (the roots follow the head; the rest follows a little late) */
       if (motion > 0) {
         simAcc = Math.min(simAcc + dt, 0.05);
         const wind = windForce(t, motion);
@@ -961,8 +959,8 @@ async function createGlAura(
       lastT = -1;
     },
     dispose() {
-      for (const g of [quad, geo, lineGeo, hairGeo, pointsGeo]) g.dispose();
-      for (const m of [roomMat, bodyMat, lineMat, hairMat]) m.dispose();
+      for (const g of [quad, geo, hairGeo, pointsGeo]) g.dispose();
+      for (const m of [roomMat, bodyMat, hairMat]) m.dispose();
       guideTex.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
@@ -974,7 +972,6 @@ async function createGlAura(
     (window as unknown as { __novaAuraParts?: object }).__novaAuraParts = {
       room,
       body,
-      lineMesh,
       hairMesh,
       points,
       hair,
@@ -1048,7 +1045,6 @@ function createStaticAura(under: HTMLCanvasElement): Aura {
         renderer: "",
         mobile: false,
         triangles: 0,
-        lines: 0,
         hairStrands: 0,
         hairGuides: 0,
         scale: 1,

@@ -6,40 +6,38 @@ The other shapes in the Gedaante selector ("Gestalte" and "Aura") also render lo
 
 ## Aura: a real-time 3D figure
 
-Aura is a sculpted feminine bust rendered in 3D in the browser (three.js). Her body is dark, glossy violet glass. Light lines lie on her surface, and her hair is made of thousands of light strands moved by a small physics simulation. Her head truly turns. No picture or artwork is shown.
+Aura is a sculpted feminine bust rendered in 3D in the browser (three.js). Her body and her long hair are one dark sculpt. Light lines lie on her surface, her hair is drawn by strands of light with loose strands moving round it, and her head truly turns. No picture or artwork is shown.
 
 | File                                    | What it is                                                         |
 | --------------------------------------- | ------------------------------------------------------------------ |
-| `apps/web/static/aura/aura-figure.glb`  | The mesh: glTF with `EXT_meshopt_compression`, about 42k triangles |
-| `apps/web/static/aura/aura-figure.json` | Landmarks, the light lines on the surface, and a distance field    |
+| `scripts/assets/aura-sculpt.glb`        | The source sculpt, decimated to about 180k triangles (positions)   |
+| `apps/web/static/aura/aura-figure.glb`  | The mesh: glTF with `EXT_meshopt_compression`, about 65k triangles |
+| `apps/web/static/aura/aura-figure.json` | Landmarks and a distance field of the figure                       |
 | `apps/web/static/aura/aura-still.webp`  | A still of the 3D figure, for browsers without WebGL2              |
 
 ### Source and licence
 
-- **Source:** the MakeHuman base mesh (`makehuman/data/3dobjs/base.obj`) and four of its targets, from the `makehumancommunity/makehuman` repository:
-  - `macrodetails/caucasian-female-young.target`;
-  - `macrodetails/universal-female-young-averagemuscle-minweight.target`;
-  - `breast/female-young-averagemuscle-averageweight-maxcup-averagefirmness.target`;
-  - `breast/female-young-averagemuscle-averageweight-averagecup-maxfirmness.target`.
-- **Licence:** the MakeHuman assets (the base mesh, proxies, targets and modifiers) are released under **CC0 1.0 Universal**. This is stated in the repository's `LICENSE.md` (section C) and `LICENSE.ASSETS.md`, and each target file repeats it ("This asset was explicitly released as CC0 in september 2020"). MakeHuman also states that it claims nothing over output made from these assets.
+- **Source:** our own sculpt. We made a picture of a clay sculpture of a woman's bust with FLUX.1 schnell, and turned that picture into a mesh with Hunyuan3D-2, both on our own machine. No third-party mesh, scan or artwork is part of it.
+- **Licence:** the picture and the mesh are our own output. The Hunyuan3D-2 model itself is released under the **Tencent Hunyuan 3D 2.0 Community License**; that licence applies to the model and its use, and should be read before the model is used for anything new (it restricts some territories and uses). FLUX.1 schnell is released under Apache 2.0.
 - **The still:** a rendering of our own figure.
 
 ### How it is built
 
-`scripts/aura-figure.mjs` builds the mesh and the JSON from those files. Run it as `capped 2G -- node scripts/aura-figure.mjs <folder with base.obj and the targets>`.
+`scripts/aura-figure.mjs` builds the mesh and the JSON. Run it as `capped 3G -- node scripts/aura-figure.mjs`. With the path of a raw sculpt as argument it first writes a new `scripts/assets/aura-sculpt.glb` from it.
 
-1. **Shape:** the targets make a young adult woman, slim, with a full bust; a sculpted offset makes the bust round. The arms are lowered from the A pose, and the shoulders are a little narrower.
-2. **Faceless head:** her real head shape is kept (skull, forehead, cheekbones, jaw, chin, neck). A smooth radial surface is fitted to it with low-order polynomials. Nose, lips and ears stick out of that fit and are trimmed away; eye sockets and the mouth lie inside it and are bridged. Folded faces are removed, their holes filled, and the head smoothed (Taubin). What remains is a soft, blank face plane.
-3. **Cut:** the figure is cut at the waist and at the elbows.
-4. **Subdivision and weights:** one Catmull-Clark step smooths the surface. Each vertex gets a head weight, for the real rotation about the neck, and a breath weight.
-5. **Surface fields:** two fields are baked per vertex. Their isolines are the light lines, drawn in the fragment shader at native resolution:
-   - field A: the distance over the surface from the front midline, merged with the distance from each breast's apex (lines beside the midline, rings round each breast, long arcs round the bust);
-   - field B: the angle round each upper arm (lines along the arm).
-6. **Accent lines:** a few hand-laid curves (the collarbones) are laid on the surface and drawn as ribbons.
-7. **Distance field:** a signed distance field of the body at 1 cm resolution, which the hair rests on.
+1. **Size:** the sculpt is simplified to the runtime triangle count, scaled to metres and cut below the waist line (the torso and the arms end there and fade out in the shader).
+2. **Hair and body:** skin is smooth, hair is ridged, and the sculpt has a crease where hair lies on skin. The body is grown from the middle of the chest over every edge that bends only a little; it stops at the hair. On the head, the face is the front below the hairline. Each vertex gets a hair weight.
+3. **Faceless and abstract:** the face's distance from the middle of the head is smoothed until eyes, nose and lips are gone; skull, cheekbones, jaw and chin stay. The chest and belly are smoothed until no anatomical detail is left.
+4. **Bust:** each breast is replaced by a round form (a ball set into the chest, with the join smoothed). `BUST.size` in the script is its radius and the one number to tune.
+5. **Weights:** a head weight for the real rotation about the neck (hair near the head goes with it), a breath weight, an arm weight.
+6. **Surface fields:** three fields are baked per vertex. Their isolines are the light lines, drawn in the fragment shader at native resolution:
+   - field A: the distance from each shoulder (long arcs from the collarbone round the bust and down the flank);
+   - field B: rings round the bust, lines along the arms, lines down the neck and up the sides of the face;
+   - field H: the hair's strands, which meet at the crown and fall down the lengths.
+7. **Distance field:** a signed distance field of the figure at 1 cm resolution, which the loose strands rest on.
 
 The renderer (`apps/web/src/lib/entity/aura*.ts`) handles the rest:
 
 - the weave of lines, with per-line brightness, thickness and colour, travelling pulses and star dust;
-- the hair, grown from the scalp with a centre parting and simulated as verlet guide strands, with thousands of thin strands drawn from those guides;
+- the hair: the sculpted mass sways in the wind toward its tips and follows the head a little late, and loose strands (verlet guide strands, with thin strands drawn from them) move round it;
 - the glowing silhouette.

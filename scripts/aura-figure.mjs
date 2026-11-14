@@ -1,61 +1,42 @@
-// Builds Aura's 3D figure from the MakeHuman base mesh (CC0, makehumancommunity/makehuman, data/3dobjs and
-// data/targets): an adult female bust (head, neck, shoulders, upper arms to the elbow, torso to the waist) with a
-// blank, smooth ovoid head, subdivided once, with head and breath weights, plus the light lines laid on its
-// surface and the landmarks the renderer needs (pivots, hair scalp, collision proxies).
+// Builds Aura's 3D figure from our own sculpt: a mesh generated with Hunyuan3D-2 from our own FLUX image (a clay
+// sculpt of a woman's bust with long hair). The sculpt is cleaned into an abstract, faceless figure, segmented
+// into hair and body, and given the weights and surface fields the renderer needs.
 //
-//   capped 2G -- node scripts/aura-figure.mjs <dir with base.obj and the targets>
+//   capped 2G -- node scripts/aura-figure.mjs [raw sculpt .glb]
 //
+// With a raw sculpt (hundreds of thousands of triangles) it first writes a decimated, compressed copy to
+// scripts/assets/aura-sculpt.glb; that copy is the committed source and is what a run without arguments reads.
 // Writes apps/web/static/aura/aura-figure.glb (EXT_meshopt_compression) and aura-figure.json.
 import fs from "node:fs";
 import path from "node:path";
-import { MeshoptEncoder } from "meshoptimizer";
-import { applyTarget, groupCentroid, readObj } from "./lib/mh.mjs";
+import {
+  MeshoptDecoder,
+  MeshoptEncoder,
+  MeshoptSimplifier,
+} from "meshoptimizer";
 
-const src = path.resolve(process.argv[2] ?? ".");
 const root = path.resolve(import.meta.dirname, "..");
 const outDir = path.join(root, "apps/web/static/aura");
+const sourceFile = path.join(root, "scripts/assets/aura-sculpt.glb");
 fs.mkdirSync(outDir, { recursive: true });
+fs.mkdirSync(path.dirname(sourceFile), { recursive: true });
+await Promise.all([
+  MeshoptEncoder.ready,
+  MeshoptDecoder.ready,
+  MeshoptSimplifier.ready,
+]);
 
-const { pos, groups } = readObj(path.join(src, "base.obj"));
-// A young adult woman, slim, with a full, firm bust.
-applyTarget(pos, path.join(src, "caucasian-female-young.target"), 1);
-applyTarget(
-  pos,
-  path.join(src, "universal-female-young-averagemuscle-minweight.target"),
-  0.45,
-);
-applyTarget(
-  pos,
-  path.join(
-    src,
-    "female-young-averagemuscle-averageweight-maxcup-averagefirmness.target",
-  ),
-  0.9,
-);
-applyTarget(
-  pos,
-  path.join(
-    src,
-    "female-young-averagemuscle-averageweight-averagecup-maxfirmness.target",
-  ),
-  1.0,
-);
-
-const J = (name) => groupCentroid(pos, groups.get(name));
-const NECK = J("joint-neck");
-const HEAD = J("joint-head");
-const SH = { l: J("joint-l-shoulder"), r: J("joint-r-shoulder") };
-const EL = { l: J("joint-l-elbow"), r: J("joint-r-elbow") };
-const SPINE1 = J("joint-spine-1");
+const SOURCE_TRIS = 180_000;
+const RUNTIME_TRIS = 70_000;
+/** Smoothing passes that make the face blank. */
+const FACE_SMOOTH = 500;
 
 const smooth = (a, b, v) => {
   const t = Math.max(0, Math.min(1, (v - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
-const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const len = (a) => Math.hypot(a[0], a[1], a[2]);
 const norm = (a) => mul(a, 1 / (len(a) || 1));
 const cross = (a, b) => [
@@ -63,627 +44,697 @@ const cross = (a, b) => [
   a[2] * b[0] - a[0] * b[2],
   a[0] * b[1] - a[1] * b[0],
 ];
-const P = (i) => [pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]];
-const setP = (i, p) => {
-  pos[i * 3] = p[0];
-  pos[i * 3 + 1] = p[1];
-  pos[i * 3 + 2] = p[2];
-};
+const pad4 = (n) => (n + 3) & ~3;
 
-let faces = groups.get("body").map((f) => f.slice());
-const bodyVerts = [...new Set(faces.flat())];
-
-/* ---------- arms: lowered from the A pose toward the body, about the shoulder ---------- */
-const ARM_DROP = 0.36; // radians
-for (const side of ["l", "r"]) {
-  const s = SH[side];
-  const sign = side === "l" ? 1 : -1;
-  const axis = norm(sub(EL[side], s));
-  const a = -sign * ARM_DROP;
-  for (const i of bodyVerts) {
-    const p = P(i);
-    if (sign * p[0] < 0.6) continue;
-    const along = dot(sub(p, s), axis);
-    const w = smooth(-0.45, 0.55, along) * smooth(0.6, 1.2, sign * p[0]);
-    if (w <= 0) continue;
-    const ang = a * w;
-    const dx = p[0] - s[0];
-    const dy = p[1] - s[1];
-    setP(i, [
-      s[0] + dx * Math.cos(ang) - dy * Math.sin(ang),
-      s[1] + dx * Math.sin(ang) + dy * Math.cos(ang),
-      p[2],
-    ]);
+/* ---------- glb in and out (positions and indices only) ---------- */
+function readGlb(file) {
+  const buf = fs.readFileSync(file);
+  const jl = buf.readUInt32LE(12);
+  const gltf = JSON.parse(buf.toString("utf8", 20, 20 + jl));
+  const bin = buf.subarray(20 + jl + 8);
+  const prim = gltf.meshes[0].primitives[0];
+  const view = (i, size) => {
+    const a = gltf.accessors[i];
+    const bv = gltf.bufferViews[a.bufferView];
+    const ext = bv.extensions?.EXT_meshopt_compression;
+    if (ext) {
+      const out = new Uint8Array(ext.count * ext.byteStride);
+      MeshoptDecoder.decodeGltfBuffer(
+        out,
+        ext.count,
+        ext.byteStride,
+        bin.subarray(
+          ext.byteOffset ?? 0,
+          (ext.byteOffset ?? 0) + ext.byteLength,
+        ),
+        ext.mode,
+        ext.filter,
+      );
+      return { a, data: out, stride: ext.byteStride };
+    }
+    const off = (bv.byteOffset ?? 0) + (a.byteOffset ?? 0);
+    const stride = bv.byteStride ?? size;
+    return { a, data: bin.subarray(off, off + a.count * stride), stride };
+  };
+  const p = view(prim.attributes.POSITION, 12);
+  const dvp = new DataView(p.data.buffer, p.data.byteOffset, p.data.byteLength);
+  const pos = new Float32Array(p.a.count * 3);
+  for (let i = 0; i < p.a.count; i++)
+    for (let k = 0; k < 3; k++)
+      pos[i * 3 + k] = dvp.getFloat32(i * p.stride + k * 4, true);
+  const ix = view(prim.indices, 4);
+  const dvi = new DataView(
+    ix.data.buffer,
+    ix.data.byteOffset,
+    ix.data.byteLength,
+  );
+  const idx = new Uint32Array(ix.a.count);
+  for (let i = 0; i < idx.length; i++) idx[i] = dvi.getUint32(i * 4, true);
+  return { pos, idx };
+}
+/** Simplify to about `target` triangles and drop unused vertices. */
+function decimate(pos, idx, target) {
+  const [simplified] = MeshoptSimplifier.simplify(
+    idx,
+    pos,
+    3,
+    target * 3,
+    0.01,
+  );
+  const map = new Int32Array(pos.length / 3).fill(-1);
+  const out = [];
+  const oi = new Uint32Array(simplified.length);
+  for (let i = 0; i < simplified.length; i++) {
+    const v = simplified[i];
+    if (map[v] < 0) {
+      map[v] = out.length / 3;
+      out.push(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]);
+    }
+    oi[i] = map[v];
   }
-  EL[side] = (() => {
-    const dx = EL[side][0] - s[0];
-    const dy = EL[side][1] - s[1];
-    return [
-      s[0] + dx * Math.cos(a) - dy * Math.sin(a),
-      s[1] + dx * Math.sin(a) + dy * Math.cos(a),
-      EL[side][2],
-    ];
-  })();
+  return { pos: Float32Array.from(out), idx: oi };
 }
-
-/* ---------- shoulders: about 9% narrower and sloped, the upper arms slimmer ---------- */
-for (const i of bodyVerts) {
-  const p = P(i);
-  const ax = Math.abs(p[0]);
-  if (p[1] < SPINE1[1] - 2.6) continue;
-  const w = smooth(0.35, 1.0, ax);
-  const k = 1 - 0.09 * w;
-  // The outer shoulder sits a little lower: a soft feminine slope.
-  const slope =
-    0.16 *
-    smooth(0.5, 1.5, ax) *
-    smooth(SPINE1[1] - 0.6, SPINE1[1] + 0.6, p[1]);
-  setP(i, [p[0] * k, p[1] - slope, p[2]]);
-}
-for (const side of ["l", "r"]) {
-  SH[side] = [SH[side][0] * 0.91, SH[side][1] - 0.14, SH[side][2]];
-  EL[side] = [EL[side][0] * 0.91, EL[side][1], EL[side][2]];
-  const sign = side === "l" ? 1 : -1;
-  const axis = norm(sub(EL[side], SH[side]));
-  for (const i of bodyVerts) {
-    const p = P(i);
-    if (sign * p[0] < 0.8) continue;
-    const rel = sub(p, SH[side]);
-    const along = dot(rel, axis);
-    if (along < 0) continue;
-    const onAxis = add(SH[side], mul(axis, along));
-    // Toward the arm's own axis, fading in past the armpit.
-    const w = smooth(0.8, 1.3, sign * p[0]) * smooth(0.0, 0.6, along);
-    setP(i, add(onAxis, mul(sub(p, onAxis), 1 - 0.1 * w)));
-  }
-}
-
-/* ---------- the neck: natural, a touch slimmer ---------- */
-const NECK_DROP = 0;
-for (const i of bodyVerts) {
-  const p = P(i);
-  const wn =
-    smooth(NECK[1] - 0.5, NECK[1] - 0.05, p[1]) *
-    (1 - smooth(HEAD[1] - 0.3, HEAD[1] + 0.1, p[1]));
-  const k = 1 - 0.04 * wn;
-  const down = NECK_DROP * smooth(NECK[1] - 0.25, NECK[1] + 0.55, p[1]);
-  setP(i, [
-    p[0] * k,
-    p[1] - down,
-    NECK[2] + (p[2] - NECK[2]) * (1 - 0.02 * wn),
+/** Write a glb: one interleaved vertex buffer (described by `attrs`) and 32-bit indices, both meshopt-compressed. */
+function writeGlb(file, vbuf, vcount, vstride, idx, attrs, generator) {
+  const vComp = MeshoptEncoder.encodeVertexBuffer(vbuf, vcount, vstride);
+  const iComp = MeshoptEncoder.encodeIndexBuffer(
+    new Uint8Array(idx.buffer),
+    idx.length,
+    4,
+  );
+  const bin = new Uint8Array(pad4(vComp.length) + pad4(iComp.length));
+  bin.set(vComp, 0);
+  bin.set(iComp, pad4(vComp.length));
+  const accessors = attrs.map((a) => ({
+    bufferView: 0,
+    byteOffset: a.offset,
+    componentType: a.type,
+    ...(a.normalized ? { normalized: true } : {}),
+    count: vcount,
+    type: a.kind,
+    ...(a.min ? { min: a.min, max: a.max } : {}),
+  }));
+  accessors.push({
+    bufferView: 1,
+    byteOffset: 0,
+    componentType: 5125,
+    count: idx.length,
+    type: "SCALAR",
+  });
+  const gltf = {
+    asset: { version: "2.0", generator },
+    extensionsUsed: ["EXT_meshopt_compression"],
+    extensionsRequired: ["EXT_meshopt_compression"],
+    buffers: [
+      { byteLength: bin.length },
+      {
+        byteLength: vbuf.length + idx.byteLength,
+        extensions: { EXT_meshopt_compression: { fallback: true } },
+      },
+    ],
+    bufferViews: [
+      {
+        buffer: 1,
+        byteOffset: 0,
+        byteLength: vbuf.length,
+        byteStride: vstride,
+        target: 34962,
+        extensions: {
+          EXT_meshopt_compression: {
+            buffer: 0,
+            byteOffset: 0,
+            byteLength: vComp.length,
+            byteStride: vstride,
+            count: vcount,
+            mode: "ATTRIBUTES",
+          },
+        },
+      },
+      {
+        buffer: 1,
+        byteOffset: vbuf.length,
+        byteLength: idx.byteLength,
+        target: 34963,
+        extensions: {
+          EXT_meshopt_compression: {
+            buffer: 0,
+            byteOffset: pad4(vComp.length),
+            byteLength: iComp.length,
+            byteStride: 4,
+            count: idx.length,
+            mode: "TRIANGLES",
+          },
+        },
+      },
+    ],
+    accessors,
+    meshes: [
+      {
+        name: "aura",
+        primitives: [
+          {
+            attributes: Object.fromEntries(attrs.map((a, i) => [a.name, i])),
+            indices: attrs.length,
+          },
+        ],
+      },
+    ],
+    nodes: [{ mesh: 0, name: "aura" }],
+    scenes: [{ nodes: [0] }],
+    scene: 0,
+  };
+  const jsonBuf = Buffer.from(JSON.stringify(gltf));
+  const jsonPad = Buffer.concat([
+    jsonBuf,
+    Buffer.alloc(pad4(jsonBuf.length) - jsonBuf.length, 0x20),
   ]);
+  const glb = Buffer.alloc(12 + 8 + jsonPad.length + 8 + bin.length);
+  glb.writeUInt32LE(0x46546c67, 0);
+  glb.writeUInt32LE(2, 4);
+  glb.writeUInt32LE(glb.length, 8);
+  glb.writeUInt32LE(jsonPad.length, 12);
+  glb.writeUInt32LE(0x4e4f534a, 16);
+  jsonPad.copy(glb, 20);
+  glb.writeUInt32LE(bin.length, 20 + jsonPad.length);
+  glb.writeUInt32LE(0x004e4942, 24 + jsonPad.length);
+  Buffer.from(bin).copy(glb, 28 + jsonPad.length);
+  fs.writeFileSync(file, glb);
+  return glb.length;
 }
-HEAD[1] -= NECK_DROP;
 
-/* ---------- the bust: round and clearly there, a sculpted volume on each side, fuller below ---------- */
+/* ---------- the source: a raw sculpt is decimated and committed once ---------- */
+if (process.argv[2]) {
+  const raw = readGlb(path.resolve(process.argv[2]));
+  const d = decimate(raw.pos, raw.idx, SOURCE_TRIS);
+  const vb = new Uint8Array(d.pos.buffer.slice(0));
+  const size = writeGlb(
+    sourceFile,
+    vb,
+    d.pos.length / 3,
+    12,
+    d.idx,
+    [
+      {
+        name: "POSITION",
+        offset: 0,
+        type: 5126,
+        kind: "VEC3",
+        min: [-1, -1, -1],
+        max: [1, 1, 1],
+      },
+    ],
+    "NOVA aura-figure.mjs (our own sculpt, Hunyuan3D-2)",
+  );
+  console.log("source", d.idx.length / 3, "triangles,", size, "bytes");
+}
+const srcMesh = readGlb(sourceFile);
+const run = decimate(srcMesh.pos, srcMesh.idx, RUNTIME_TRIS);
+
+/* ---------- to real-world size (metres): crown to chin is about 22.5 cm ---------- */
+// The sculpt is about 2 units tall, y up, facing +z. Landmarks below were read off the sculpt (units).
+const SCALE = 0.46;
+const Y0 = 0.5;
+const U = {
+  top: 0.988,
+  chin: 0.5,
+  hairline: 0.87,
+  neck: 0.4,
+  shoulder: 0.21,
+  shoulderX: 0.4,
+  cut: -0.62,
+  armInner: 0.3,
+  armpit: -0.3,
+};
+const toM = (yu) => yu * SCALE + Y0;
+const nVerts = run.pos.length / 3;
+const V = new Float64Array(nVerts * 3);
+for (let i = 0; i < nVerts; i++) {
+  V[i * 3] = run.pos[i * 3] * SCALE;
+  V[i * 3 + 1] = toM(run.pos[i * 3 + 1]);
+  V[i * 3 + 2] = run.pos[i * 3 + 2] * SCALE;
+}
+let tris = Array.from(run.idx);
+const M = {
+  top: toM(U.top),
+  chin: toM(U.chin),
+  hairline: toM(U.hairline),
+  neck: toM(U.neck),
+  shoulder: toM(U.shoulder),
+  shoulderX: U.shoulderX * SCALE,
+  cut: toM(U.cut),
+  armInner: U.armInner * SCALE,
+  armpit: toM(U.armpit),
+};
+const headC = [0, (M.top + M.chin) / 2, 0.012];
+const headR = [0.07, (M.top - M.chin) / 2, 0.092];
+
+/* ---------- cut: nothing below the waist line (torso and arms end there and fade in the shader) ---------- */
 {
-  for (const side of [1, -1]) {
-    let best = -1;
-    let bz = -1e9;
-    for (const i of bodyVerts) {
-      const x = pos[i * 3] * side;
-      const y = pos[i * 3 + 1];
-      const z = pos[i * 3 + 2];
+  const keep = [];
+  for (let t = 0; t < tris.length; t += 3) {
+    const ys = [tris[t], tris[t + 1], tris[t + 2]].map((i) => V[i * 3 + 1]);
+    if (Math.max(...ys) > M.cut - 0.012)
+      keep.push(tris[t], tris[t + 1], tris[t + 2]);
+  }
+  tris = keep;
+}
+
+/* ---------- adjacency and normals ---------- */
+const nbrSets = Array.from({ length: nVerts }, () => new Set());
+for (let t = 0; t < tris.length; t += 3) {
+  const [a, b, c] = [tris[t], tris[t + 1], tris[t + 2]];
+  nbrSets[a].add(b).add(c);
+  nbrSets[b].add(a).add(c);
+  nbrSets[c].add(a).add(b);
+}
+const nbrList = nbrSets.map((s) => [...s]);
+const vAt = (i) => [V[i * 3], V[i * 3 + 1], V[i * 3 + 2]];
+const N = new Float64Array(nVerts * 3);
+function computeNormals() {
+  N.fill(0);
+  for (let t = 0; t < tris.length; t += 3) {
+    const [a, b, c] = [tris[t], tris[t + 1], tris[t + 2]];
+    const pa = vAt(a);
+    const n = cross(sub(vAt(b), pa), sub(vAt(c), pa));
+    for (const i of [a, b, c]) {
+      N[i * 3] += n[0];
+      N[i * 3 + 1] += n[1];
+      N[i * 3 + 2] += n[2];
+    }
+  }
+  for (let i = 0; i < nVerts; i++) {
+    const l = Math.hypot(N[i * 3], N[i * 3 + 1], N[i * 3 + 2]) || 1;
+    N[i * 3] /= l;
+    N[i * 3 + 1] /= l;
+    N[i * 3 + 2] /= l;
+  }
+}
+computeNormals();
+
+/* ---------- segment: hair or body ---------- */
+// Skin is smooth, hair is ridged, and where hair lies on skin the sculpt has a crease. So the body is grown
+// from the middle of the chest over every edge that bends only a little: it covers chest, belly, shoulders,
+// arms and neck and stops at the hair. On the head the face is the front below the hairline. Everything else
+// is hair. The labels are then diffused a little so the border is soft.
+const SMOOTH_EDGE = 0.97;
+const faceW = new Float32Array(nVerts);
+const hair = new Float32Array(nVerts);
+{
+  const body = new Uint8Array(nVerts);
+  const stack = [];
+  for (let i = 0; i < nVerts; i++) {
+    const [x, y, z] = vAt(i);
+    if (
+      Math.abs(x) < 0.05 &&
+      z > 0.05 &&
+      y > M.shoulder - 0.15 &&
+      y < M.shoulder - 0.03
+    ) {
+      body[i] = 1;
+      stack.push(i);
+    }
+  }
+  while (stack.length) {
+    const i = stack.pop();
+    for (const k of nbrList[i]) {
+      const ax = Math.abs(V[k * 3]);
+      const ky = V[k * 3 + 1];
+      // Never above the line from the neck to the shoulder: what lies there beside the neck is hair.
       if (
-        x > 0.3 &&
-        x < 1.3 &&
-        y > SPINE1[1] - 1.2 &&
-        y < SPINE1[1] + 0.8 &&
-        z > bz
+        body[k] ||
+        ky > M.chin + 0.05 ||
+        V[k * 3 + 2] < -0.1 ||
+        (ax > 0.055 && ky > M.neck - 0.04 - 0.25 * (ax - 0.055))
+      )
+        continue;
+      const d =
+        N[i * 3] * N[k * 3] +
+        N[i * 3 + 1] * N[k * 3 + 1] +
+        N[i * 3 + 2] * N[k * 3 + 2];
+      if (d < SMOOTH_EDGE) continue;
+      body[k] = 1;
+      stack.push(k);
+    }
+  }
+  for (let i = 0; i < nVerts; i++) {
+    const [x, y, z] = vAt(i);
+    const d = norm(sub([x, y, z], headC));
+    const face =
+      y > M.chin - 0.01 &&
+      y < M.hairline &&
+      d[2] > 0.3 &&
+      Math.abs(x) < 0.066 - 0.03 * smooth(M.chin + 0.06, M.chin, y);
+    faceW[i] = face ? 1 : 0;
+    if (face) body[i] = 1;
+    else if (y > M.chin + 0.05) body[i] = 0;
+  }
+  // Small islands (a crease the growth could not cross, a stray bit of sculpt) take the label around them.
+  for (const label of [0, 1]) {
+    const seen = new Uint8Array(nVerts);
+    for (let s = 0; s < nVerts; s++) {
+      if (seen[s] || body[s] !== label || !nbrList[s].length) continue;
+      const comp = [s];
+      seen[s] = 1;
+      for (let q = 0; q < comp.length; q++)
+        for (const k of nbrList[comp[q]])
+          if (!seen[k] && body[k] === label) {
+            seen[k] = 1;
+            comp.push(k);
+          }
+      if (comp.length < 500) for (const i of comp) body[i] = 1 - label;
+    }
+  }
+  for (let i = 0; i < nVerts; i++) hair[i] = 1 - body[i];
+  const diffuse = (field, iterations) => {
+    for (let it = 0; it < iterations; it++) {
+      const g = Float32Array.from(field);
+      for (let i = 0; i < nVerts; i++) {
+        if (!nbrList[i].length) continue;
+        let s = 0;
+        for (const k of nbrList[i]) s += field[k];
+        g[i] = 0.4 * field[i] + (0.6 * s) / nbrList[i].length;
+      }
+      field.set(g);
+    }
+  };
+  diffuse(hair, 3);
+  diffuse(faceW, 8);
+}
+
+/* ---------- clean the sculpt into an abstract figure ---------- */
+// Weighted Laplacian smoothing takes the sculpting marks off the body and all anatomical detail off the chest
+// and belly. The face is made blank another way: its distance from the middle of the head is smoothed until
+// eyes, nose and lips are gone and only an even, convex plane between brow, cheekbones, jaw and chin is left.
+function relax(weight, iterations) {
+  const active = [];
+  for (let i = 0; i < nVerts; i++)
+    if (weight[i] > 0 && nbrList[i].length) active.push(i);
+  const g = new Float64Array(active.length * 3);
+  for (let it = 0; it < iterations; it++) {
+    for (let a = 0; a < active.length; a++) {
+      const i = active[a];
+      let x = 0;
+      let y = 0;
+      let z = 0;
+      for (const k of nbrList[i]) {
+        x += V[k * 3];
+        y += V[k * 3 + 1];
+        z += V[k * 3 + 2];
+      }
+      const n = nbrList[i].length;
+      const w = 0.5 * weight[i];
+      g[a * 3] = V[i * 3] + w * (x / n - V[i * 3]);
+      g[a * 3 + 1] = V[i * 3 + 1] + w * (y / n - V[i * 3 + 1]);
+      g[a * 3 + 2] = V[i * 3 + 2] + w * (z / n - V[i * 3 + 2]);
+    }
+    for (let a = 0; a < active.length; a++) {
+      const i = active[a];
+      V[i * 3] = g[a * 3];
+      V[i * 3 + 1] = g[a * 3 + 1];
+      V[i * 3 + 2] = g[a * 3 + 2];
+    }
+  }
+}
+const skin = Float32Array.from(hair, (h) => 1 - smooth(0.2, 0.6, h));
+const chestMask = (i) =>
+  skin[i] *
+  smooth(-0.02, 0.04, V[i * 3 + 2]) *
+  (Math.abs(V[i * 3]) < M.armInner - 0.02 ? 1 : 0);
+{
+  // The face.
+  const active = [];
+  for (let i = 0; i < nVerts; i++)
+    if (faceW[i] * skin[i] > 0.02) active.push(i);
+  const R = new Float64Array(nVerts);
+  for (let i = 0; i < nVerts; i++) R[i] = len(sub(vAt(i), headC));
+  const dir = active.map((i) => norm(sub(vAt(i), headC)));
+  const g = new Float64Array(active.length);
+  for (let it = 0; it < FACE_SMOOTH; it++) {
+    for (let a = 0; a < active.length; a++) {
+      const i = active[a];
+      let s = 0;
+      for (const k of nbrList[i]) s += R[k];
+      g[a] = R[i] + faceW[i] * skin[i] * (s / nbrList[i].length - R[i]);
+    }
+    for (let a = 0; a < active.length; a++) R[active[a]] = g[a];
+  }
+  active.forEach((i, a) => {
+    for (let k = 0; k < 3; k++) V[i * 3 + k] = headC[k] + dir[a][k] * R[i];
+  });
+  relax(
+    Float32Array.from(faceW, (f, i) => f * skin[i]),
+    12,
+  );
+  // The ears, where they show through the hair, become part of its mass.
+  relax(
+    Float32Array.from(hair, (h, i) => {
+      const [x, y, z] = vAt(i);
+      return Math.abs(x) > 0.055 &&
+        y > M.chin + 0.03 &&
+        y < M.chin + 0.14 &&
+        z > -0.04 &&
+        z < 0.06
+        ? 1
+        : 0;
+    }),
+    30,
+  );
+  // The whole body a little, the chest more, the belly most.
+  relax(
+    Float32Array.from(skin, (b, i) => b * (V[i * 3 + 1] < M.chin ? 1 : 0.4)),
+    8,
+  );
+  relax(
+    Float32Array.from(
+      skin,
+      (_, i) =>
+        chestMask(i) *
+        (1 - smooth(M.shoulder - 0.03, M.shoulder + 0.02, V[i * 3 + 1])),
+    ),
+    45,
+  );
+  relax(
+    Float32Array.from(
+      skin,
+      (_, i) =>
+        chestMask(i) * (1 - smooth(toM(-0.24), toM(-0.16), V[i * 3 + 1])),
+    ),
+    140,
+  );
+}
+computeNormals();
+
+/* ---------- the bust: fuller and rounder than the sculpt ---------- */
+// Each breast becomes a round form: a ball is set into the chest where the sculpt's breast is, the skin inside
+// it is pushed out onto it, and the join is smoothed until it flows into the chest (more above, so the upper
+// slope is gentle and the fullness sits low, as it does in nature). The balls stay apart: a soft cleavage.
+// BUST.size is the ball's radius in metres and is the one number to tune: about 4 mm per cup size; the
+// sculpt's own bust is about 0.045.
+const BUST = {
+  size: 0.061,
+  apart: 0.075,
+  lower: 0.008,
+  forward: 0.037,
+  join: 45,
+  blend: 6,
+  slope: 36,
+};
+function apexes() {
+  const out = {};
+  for (const side of [1, -1]) {
+    // The apex: the point furthest out to the front and a little to the side.
+    let best = 0;
+    let bz = -1e9;
+    for (let i = 0; i < nVerts; i++) {
+      const x = V[i * 3] * side;
+      const y = V[i * 3 + 1];
+      const out = V[i * 3 + 2] + 0.35 * x;
+      if (
+        hair[i] < 0.3 &&
+        x > 0.035 &&
+        x < M.armInner - 0.01 &&
+        y > toM(-0.26) &&
+        y < toM(0.08) &&
+        out > bz
       ) {
-        bz = z;
+        bz = out;
         best = i;
       }
     }
-    const c = P(best);
-    const R = 0.78;
-    const A = 0.3;
-    for (const i of bodyVerts) {
-      const p = P(i);
-      const dx = p[0] - c[0];
-      const dy = p[1] - (c[1] - 0.12);
-      const d = Math.hypot(dx, dy * (dy < 0 ? 0.92 : 1.05));
-      if (d >= R) continue;
-      const front = smooth(c[2] - 1.0, c[2] - 0.35, p[2]);
-      const h = A * Math.pow(1 - (d / R) ** 2, 1.4) * front;
-      setP(i, [p[0] + side * h * 0.12, p[1] - h * 0.15, p[2] + h]);
-    }
+    out[side > 0 ? "l" : "r"] = vAt(best);
   }
-}
-
-/* ---------- the head: the real head, made faceless (features smoothed away, the shape kept) ---------- */
-const headVerts = bodyVerts.filter((i) => pos[i * 3 + 1] > NECK[1] + 0.35);
-let hz0 = 1e9;
-let hz1 = -1e9;
-let hy1 = -1e9;
-let chinY = 1e9;
-for (const i of headVerts) {
-  const p = P(i);
-  hz0 = Math.min(hz0, p[2]);
-  hz1 = Math.max(hz1, p[2]);
-  hy1 = Math.max(hy1, p[1]);
-  if (Math.abs(p[0]) < 0.08 && p[2] > HEAD[2] + 0.3)
-    chinY = Math.min(chinY, p[1]);
-}
-// The head as a radial surface about its centre: r(direction), fitted to the real skull, forehead, cheekbones,
-// jaw and chin with low-order polynomials (symmetric left-right). Nose, lips and ears stick out of that fit
-// and are trimmed away; eye sockets and the mouth lie inside it and are bridged. What remains is her own head
-// shape with a soft, blank face plane.
-const EGG = {
-  c: [0, (hy1 + chinY) / 2, (hz0 + hz1) / 2 + 0.03],
-  rx: 0,
-  ry: (hy1 - chinY) / 2,
-  rz: 0,
-  coef: null,
-};
-const BASIS = [];
-for (const deg of [5, 6])
-  for (let a = 0; a <= deg; a += 2)
-    for (let b = 0; b <= deg - a; b++) BASIS.push([a, b, deg - a - b]);
-const fitAt = (d) => {
-  const phi = basisAt(d);
-  let r = 0;
-  for (let i = 0; i < phi.length; i++) r += EGG.coef[i] * phi[i];
-  return r;
-};
-const basisAt = (d) =>
-  BASIS.map(([a, b, c]) => d[0] ** a * d[1] ** b * d[2] ** c);
-{
-  // Vertex normals of the original head, to tell the outer surface from the cavities.
-  const vn = new Map(headVerts.map((i) => [i, [0, 0, 0]]));
-  for (const f of faces) {
-    if (!vn.has(f[0])) continue;
-    const a = P(f[0]);
-    let n = [0, 0, 0];
-    for (let k = 1; k + 1 < f.length; k++)
-      n = add(n, cross(sub(P(f[k]), a), sub(P(f[k + 1]), a)));
-    for (const i of f) if (vn.has(i)) vn.set(i, add(vn.get(i), n));
-  }
-  const samples = [];
-  for (const i of headVerts) {
-    const p = P(i);
-    if (p[1] < chinY - 0.12) continue;
-    const rel = sub(p, EGG.c);
-    const r = len(rel);
-    const d = mul(rel, 1 / r);
-    if (dot(norm(vn.get(i)), d) < 0.25) continue;
-    samples.push({ d, r, w: 1, real: true });
-  }
-  // Below the jaw there is no head to fit: keep the surface tame there (those points are blended out anyway).
-  for (let a = 0; a < 40; a++)
-    for (let b = 0; b < 6; b++) {
-      const y = -0.6 - 0.4 * (b / 5);
-      const s = Math.sqrt(1 - y * y);
-      const t = (a / 40) * 2 * Math.PI;
-      samples.push({
-        d: [s * Math.cos(t), y, s * Math.sin(t)],
-        r: EGG.ry * 0.62,
-        w: 0.15,
-        real: false,
-      });
-    }
-  console.log(
-    "head samples",
-    samples.filter((q) => q.real).length,
-    "of",
-    headVerts.length,
-    "chinY",
-    chinY,
-    "c",
-    EGG.c,
-    "ry",
-    EGG.ry,
-  );
-  const n = BASIS.length;
-  for (let it = 0; it < 6; it++) {
-    const A = Array.from({ length: n }, () => new Float64Array(n + 1));
-    for (const sm of samples) {
-      const phi = basisAt(sm.d);
-      for (let i = 0; i < n; i++) {
-        for (let k = 0; k < n; k++) A[i][k] += sm.w * phi[i] * phi[k];
-        A[i][n] += sm.w * phi[i] * sm.r;
-      }
-    }
-    for (let i = 0; i < n; i++) A[i][i] += 1e-6;
-    for (let c = 0; c < n; c++) {
-      let piv = c;
-      for (let r = c + 1; r < n; r++)
-        if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
-      [A[c], A[piv]] = [A[piv], A[c]];
-      for (let r = 0; r < n; r++) {
-        if (r === c) continue;
-        const k = A[r][c] / A[c][c];
-        if (k !== 0) for (let q = c; q <= n; q++) A[r][q] -= k * A[c][q];
-      }
-    }
-    EGG.coef = A.map((row, i) => row[n] / row[i]);
-    // Trim what sticks out (nose, lips, ears) and what lies deep (sockets, mouth).
-    for (const sm of samples) {
-      if (!sm.real) continue;
-      const e = sm.r - fitAt(sm.d);
-      // Gently at first, then down to 6 mm: a hard trim on a rough first fit would eat the skull itself.
-      const out = [0.3, 0.2, 0.12, 0.09, 0.07, 0.06][it];
-      sm.w = e > out ? 0.01 : e < -out * 1.5 ? 0.05 : 1;
-    }
-  }
-}
-function eggSurface(dir) {
-  const d = norm(dir);
-  const r = Math.max(EGG.ry * 0.4, Math.min(EGG.ry * 1.5, fitAt(d)));
-  return add(EGG.c, mul(d, r));
-}
-console.log(
-  "head fit (dm): side, front, top, back, chin-ish",
-  [
-    [1, 0, 0],
-    [0, 0, 1],
-    [0, 1, 0],
-    [0, 0, -1],
-    [0, -0.8, 0.6],
-  ]
-    .map((d) => fitAt(norm(d)).toFixed(3))
-    .join(" "),
-);
-EGG.rx = eggSurface([1, 0, 0])[0] - EGG.c[0];
-EGG.rz = eggSurface([0, 0, 1])[2] - EGG.c[2];
-// Blended in from under the chin up: the fit follows the real jaw, so there is no step at the neck.
-const headBlend = (p) =>
-  smooth(chinY - 0.22, chinY + 0.3, p[1]) *
-  smooth(NECK[1] + 0.2, NECK[1] + 0.55, p[1]);
-const orig = new Map(headVerts.map((i) => [i, P(i)]));
-for (const i of headVerts) {
-  const p = P(i);
-  const w = headBlend(p);
-  if (w <= 0) continue;
-  setP(i, add(mul(p, 1 - w), mul(eggSurface(sub(p, EGG.c)), w)));
-}
-// Faces that folded inward (inside the mouth, the eyes, the nostrils, behind the ears) go; their holes are filled.
-const faceNormal = (f) => {
-  const a = P(f[0]);
-  let n = [0, 0, 0];
-  for (let k = 1; k + 1 < f.length; k++)
-    n = add(n, cross(sub(P(f[k]), a), sub(P(f[k + 1]), a)));
-  return n;
-};
-faces = faces.filter((f) => {
-  const ws = f.map((i) => (orig.has(i) ? headBlend(orig.get(i)) : 0));
-  if (Math.max(...ws) < 0.5) return true;
-  const c = mul(f.map(P).reduce(add, [0, 0, 0]), 1 / f.length);
-  const radial = norm(sub(c, EGG.c));
-  const n = faceNormal(f);
-  const area = len(n);
-  return area > 1e-6 && dot(n, radial) / area > 0.35;
-});
-
-/* ---------- cut: torso to the waist, arms to the elbow ---------- */
-const WAIST_Y = SPINE1[1] - 2.4;
-const keepVert = (i) => {
-  const p = P(i);
-  if (p[1] < WAIST_Y) return false;
-  for (const side of ["l", "r"]) {
-    const sign = side === "l" ? 1 : -1;
-    if (sign * p[0] < 1.0) continue;
-    const axis = norm(sub(EL[side], SH[side]));
-    const along = dot(sub(p, SH[side]), axis);
-    if (along > len(sub(EL[side], SH[side])) + 0.05) return false;
-  }
-  return true;
-};
-faces = faces.filter((f) => f.every(keepVert));
-
-/* ---------- fill the holes the cleanup left in the head (not the cuts at waist and elbows) ---------- */
-function boundaryLoops(fs_) {
-  const edges = new Map();
-  for (const f of fs_)
-    for (let k = 0; k < f.length; k++) {
-      const a = f[k];
-      const b = f[(k + 1) % f.length];
-      const key = a < b ? `${a},${b}` : `${b},${a}`;
-      if (edges.has(key)) edges.delete(key);
-      else edges.set(key, [a, b]);
-    }
-  const next = new Map();
-  for (const [a, b] of edges.values()) next.set(a, b);
-  const loops = [];
-  const seen = new Set();
-  for (const start of next.keys()) {
-    if (seen.has(start)) continue;
-    const loop = [];
-    let v = start;
-    while (v !== undefined && !seen.has(v)) {
-      seen.add(v);
-      loop.push(v);
-      v = next.get(v);
-    }
-    loops.push(loop);
-  }
-  return loops;
-}
-const extra = [];
-const newPos = [];
-let nextIndex = pos.length / 3;
-for (const loop of boundaryLoops(faces)) {
-  const c = mul(loop.map(P).reduce(add, [0, 0, 0]), 1 / loop.length);
-  if (c[1] < NECK[1] + 0.3) continue;
-  const centre = eggSurface(sub(c, EGG.c));
-  const ci = nextIndex++;
-  newPos.push(...centre);
-  // The loop runs along the hole's edge in the faces' winding: reverse it for the fan.
-  for (let k = 0; k < loop.length; k++)
-    extra.push([loop[(k + 1) % loop.length], loop[k], ci]);
-}
-let P2 = new Float64Array(pos.length + newPos.length);
-P2.set(pos);
-P2.set(newPos, pos.length);
-faces = faces.concat(extra);
-
-/* ---------- compact ---------- */
-{
-  const map = new Map();
-  const out = [];
-  for (const f of faces)
-    for (const i of f)
-      if (!map.has(i)) {
-        map.set(i, map.size);
-        out.push(P2[i * 3], P2[i * 3 + 1], P2[i * 3 + 2]);
-      }
-  faces = faces.map((f) => f.map((i) => map.get(i)));
-  P2 = Float64Array.from(out);
-}
-
-/* ---------- smooth the head (Taubin, so it does not shrink) where the ovoid was blended in ---------- */
-function neighbours(n, fs_) {
-  const nb = Array.from({ length: n }, () => new Set());
-  for (const f of fs_)
-    for (let k = 0; k < f.length; k++) {
-      const a = f[k];
-      const b = f[(k + 1) % f.length];
-      nb[a].add(b);
-      nb[b].add(a);
-    }
-  return nb.map((s) => [...s]);
+  // The sculpt is not quite symmetric; the two apexes are evened out.
+  const x = (out.l[0] - out.r[0]) / 2;
+  const y = (out.l[1] + out.r[1]) / 2;
+  const z = (out.l[2] + out.r[2]) / 2;
+  return { l: [x, y, z], r: [-x, y, z] };
 }
 {
-  const n = P2.length / 3;
-  const nb = neighbours(n, faces);
-  const w = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    const p = [P2[i * 3], P2[i * 3 + 1], P2[i * 3 + 2]];
-    // The head, and the join under the chin where the ovoid meets the neck (no collar there).
-    w[i] = Math.max(
-      headBlend(p) ** 0.5,
-      0.8 *
-        Math.exp(-(((p[1] - chinY) / 0.3) ** 2)) *
-        smooth(-0.6, 0.2, p[2] - NECK[2]),
-    );
-  }
-  for (let it = 0; it < 90; it++)
-    for (const lambda of [0.5, -0.53]) {
-      const next = Float64Array.from(P2);
-      for (let i = 0; i < n; i++) {
-        if (w[i] <= 0 || nb[i].length === 0) continue;
-        let x = 0;
-        let y = 0;
-        let z = 0;
-        for (const j of nb[i]) {
-          x += P2[j * 3];
-          y += P2[j * 3 + 1];
-          z += P2[j * 3 + 2];
-        }
-        const k = nb[i].length;
-        next[i * 3] += lambda * w[i] * (x / k - P2[i * 3]);
-        next[i * 3 + 1] += lambda * w[i] * (y / k - P2[i * 3 + 1]);
-        next[i * 3 + 2] += lambda * w[i] * (z / k - P2[i * 3 + 2]);
-      }
-      P2 = next;
-    }
-  // And settle the head back onto the ovoid where it is fully head.
-  for (let i = 0; i < n; i++) {
-    const p = [P2[i * 3], P2[i * 3 + 1], P2[i * 3 + 2]];
-    const b = headBlend(p) ** 2;
-    if (b <= 0) continue;
-    const q = add(mul(p, 1 - b), mul(eggSurface(sub(p, EGG.c)), b));
-    P2[i * 3] = q[0];
-    P2[i * 3 + 1] = q[1];
-    P2[i * 3 + 2] = q[2];
-  }
-}
-
-/* ---------- one Catmull-Clark step: smooth curvature at close range ---------- */
-function catmullClark(V, F) {
-  const n = V.length / 3;
-  const v = (i) => [V[i * 3], V[i * 3 + 1], V[i * 3 + 2]];
-  const out = Array.from(V);
-  const facePts = F.map((f) =>
-    mul(f.map(v).reduce(add, [0, 0, 0]), 1 / f.length),
-  );
-  const fi0 = n;
-  for (const fp of facePts) out.push(...fp);
-  const edges = new Map();
-  F.forEach((f, fi) => {
-    for (let k = 0; k < f.length; k++) {
-      const a = f[k];
-      const b = f[(k + 1) % f.length];
-      const key = a < b ? `${a},${b}` : `${b},${a}`;
-      if (!edges.has(key)) edges.set(key, { a, b, faces: [] });
-      edges.get(key).faces.push(fi);
-    }
-  });
-  const edgeIndex = new Map();
-  let next = out.length / 3;
-  for (const [key, e] of edges) {
-    const mid = mul(add(v(e.a), v(e.b)), 0.5);
-    const p =
-      e.faces.length === 2
-        ? mul(
-            add(
-              add(v(e.a), v(e.b)),
-              add(facePts[e.faces[0]], facePts[e.faces[1]]),
-            ),
-            0.25,
-          )
-        : mid;
-    out.push(...p);
-    edgeIndex.set(key, next++);
-  }
-  // Move the original vertices.
-  const vf = Array.from({ length: n }, () => []);
-  const ve = Array.from({ length: n }, () => []);
-  F.forEach((f, fi) => f.forEach((i) => vf[i].push(fi)));
-  for (const e of edges.values()) {
-    ve[e.a].push(e);
-    ve[e.b].push(e);
-  }
-  for (let i = 0; i < n; i++) {
-    const boundary = ve[i].filter((e) => e.faces.length < 2);
-    let p;
-    if (boundary.length >= 2) {
-      const m = boundary
-        .map((e) => mul(add(v(e.a), v(e.b)), 0.5))
-        .reduce(add, [0, 0, 0]);
-      p = add(mul(v(i), 0.5), mul(m, 0.25 / (boundary.length / 2)));
-    } else if (vf[i].length > 0) {
-      const k = vf[i].length;
-      const F_ = mul(
-        vf[i].map((fi) => facePts[fi]).reduce(add, [0, 0, 0]),
-        1 / k,
-      );
-      const R_ = mul(
-        ve[i].map((e) => mul(add(v(e.a), v(e.b)), 0.5)).reduce(add, [0, 0, 0]),
-        1 / ve[i].length,
-      );
-      p = mul(add(add(F_, mul(R_, 2)), mul(v(i), k - 3)), 1 / k);
-    } else p = v(i);
-    out[i * 3] = p[0];
-    out[i * 3 + 1] = p[1];
-    out[i * 3 + 2] = p[2];
-  }
-  const quads = [];
-  F.forEach((f, fi) => {
-    for (let k = 0; k < f.length; k++) {
-      const a = f[k];
-      const prev = f[(k + f.length - 1) % f.length];
-      const nxt = f[(k + 1) % f.length];
-      const ek = (x, y) => edgeIndex.get(x < y ? `${x},${y}` : `${y},${x}`);
-      quads.push([a, ek(a, nxt), fi0 + fi, ek(prev, a)]);
-    }
-  });
-  return { V: Float64Array.from(out), F: quads };
-}
-const cc = catmullClark(P2, faces);
-let V = cc.V;
-const tris = [];
-for (const f of cc.F) tris.push(f[0], f[1], f[2], f[0], f[2], f[3]);
-
-/* ---------- normalise: metres-ish units, neck pivot known, figure centred ---------- */
-const SCALE = 0.1; // MakeHuman decimetres to metres
-for (let i = 0; i < V.length; i++) V[i] *= SCALE;
-const scaleP = (p) => mul(p, SCALE);
-
-/* ---------- normals ---------- */
-const nVerts = V.length / 3;
-const N = new Float64Array(nVerts * 3);
-for (let t = 0; t < tris.length; t += 3) {
-  const [a, b, c] = [tris[t], tris[t + 1], tris[t + 2]];
-  const pa = [V[a * 3], V[a * 3 + 1], V[a * 3 + 2]];
-  const n = cross(
-    sub([V[b * 3], V[b * 3 + 1], V[b * 3 + 2]], pa),
-    sub([V[c * 3], V[c * 3 + 1], V[c * 3 + 2]], pa),
-  );
-  for (const i of [a, b, c]) {
-    N[i * 3] += n[0];
-    N[i * 3 + 1] += n[1];
-    N[i * 3 + 2] += n[2];
-  }
-}
-for (let i = 0; i < nVerts; i++) {
-  const l = Math.hypot(N[i * 3], N[i * 3 + 1], N[i * 3 + 2]) || 1;
-  N[i * 3] /= l;
-  N[i * 3 + 1] /= l;
-  N[i * 3 + 2] /= l;
-}
-
-// On the head, the ovoid's own smooth normals (no trace of the old features' seams).
-for (let i = 0; i < nVerts; i++) {
-  const p = [V[i * 3] / SCALE, V[i * 3 + 1] / SCALE, V[i * 3 + 2] / SCALE];
-  const b = headBlend(p) ** 2;
-  if (b <= 0) continue;
-  const e = 1e-3;
-  const f0 = (q) =>
-    len(sub(q, EGG.c)) - len(sub(eggSurface(sub(q, EGG.c)), EGG.c));
-  const g = norm([
-    f0(add(p, [e, 0, 0])) - f0(add(p, [-e, 0, 0])),
-    f0(add(p, [0, e, 0])) - f0(add(p, [0, -e, 0])),
-    f0(add(p, [0, 0, e])) - f0(add(p, [0, 0, -e])),
-  ]);
-  const n = norm([
-    N[i * 3] * (1 - b) + g[0] * b,
-    N[i * 3 + 1] * (1 - b) + g[1] * b,
-    N[i * 3 + 2] * (1 - b) + g[2] * b,
-  ]);
-  N[i * 3] = n[0];
-  N[i * 3 + 1] = n[1];
-  N[i * 3 + 2] = n[2];
-}
-
-/* ---------- landmarks (metres) ---------- */
-const neckP = scaleP(NECK);
-const egg = {
-  c: scaleP(EGG.c),
-  r: [EGG.rx * SCALE, EGG.ry * SCALE, EGG.rz * SCALE],
-};
-// Breasts: the most forward points either side of the sternum, at bust height.
-const breast = {};
-for (const side of [1, -1]) {
-  let best = -1;
-  let bz = -1e9;
-  for (let i = 0; i < nVerts; i++) {
-    const x = V[i * 3] * side;
-    const y = V[i * 3 + 1];
-    const z = V[i * 3 + 2];
+  const first = apexes();
+  // The chest wall: the breastbone at the height of the apexes.
+  let wall = -1e9;
+  for (let i = 0; i < nVerts; i++)
     if (
-      x > 0.03 &&
-      x < 0.16 &&
-      y > SPINE1[1] * SCALE - 0.12 &&
-      y < SPINE1[1] * SCALE + 0.08 &&
-      z > bz
-    ) {
-      bz = z;
-      best = i;
+      skin[i] > 0.5 &&
+      Math.abs(V[i * 3]) < 0.008 &&
+      Math.abs(V[i * 3 + 1] - first.l[1]) < 0.01
+    )
+      wall = Math.max(wall, V[i * 3 + 2]);
+  const cy = first.l[1] - BUST.lower;
+  for (const side of [1, -1]) {
+    // The ball's front is BUST.forward in front of the breastbone.
+    const c = [side * BUST.apart, cy, wall + BUST.forward - BUST.size];
+    const back = [c[0], c[1], c[2] - BUST.size];
+    for (let i = 0; i < nVerts; i++) {
+      if (skin[i] <= 0.5 || Math.abs(V[i * 3]) > M.armInner) continue;
+      // Skin inside the ball moves out onto it, along the ray from the ball's back pole.
+      const d = sub(vAt(i), back);
+      const t =
+        (2 * BUST.size * d[2]) / (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+      if (!(t > 1)) continue;
+      for (let k = 0; k < 3; k++) V[i * 3 + k] = back[k] + d[k] * t;
     }
   }
-  breast[side > 0 ? "l" : "r"] = [
-    V[best * 3],
-    V[best * 3 + 1],
-    V[best * 3 + 2],
-  ];
+  const chest = (i) =>
+    chestMask(i) * (1 - smooth(M.shoulder - 0.05, M.shoulder, V[i * 3 + 1]));
+  // How far a point is from the nearer ball's middle, in radii (seen from the front).
+  const inBall = (i) =>
+    Math.min(
+      Math.hypot(V[i * 3] - BUST.apart, V[i * 3 + 1] - cy),
+      Math.hypot(V[i * 3] + BUST.apart, V[i * 3 + 1] - cy),
+    ) / BUST.size;
+  // The join is smoothed well, the ball itself hardly: it stays round.
+  relax(
+    Float32Array.from(skin, (_, i) => chest(i) * smooth(0.55, 0.9, inBall(i))),
+    BUST.join,
+  );
+  relax(
+    Float32Array.from(skin, (_, i) => chest(i)),
+    BUST.blend,
+  );
+  relax(
+    Float32Array.from(
+      skin,
+      (_, i) => chest(i) * smooth(cy - 0.005, cy + 0.035, V[i * 3 + 1]),
+    ),
+    BUST.slope,
+  );
 }
+computeNormals();
 
-/* ---------- weights: head (rotates with the neck pivot), breath (the chest swells) ---------- */
+/* ---------- landmarks ---------- */
+const breast = apexes();
+const neckP = [0, M.neck, -0.01];
+
+/* ---------- weights ---------- */
+// Head: the head turns about the neck; hair near the head goes with it, the lengths only partly (they lag).
+// Breath: the chest swells. Arm: the upper arms, for their own lines.
 const headW = new Float32Array(nVerts);
 const breathW = new Float32Array(nVerts);
+const armW = new Float32Array(nVerts);
 const chestC = [
   0,
-  (breast.l[1] + neckP[1]) / 2 - 0.02,
+  (breast.l[1] + M.neck) / 2 - 0.02,
   (breast.l[2] + neckP[2]) / 2,
 ];
 for (let i = 0; i < nVerts; i++) {
-  const p = [V[i * 3], V[i * 3 + 1], V[i * 3 + 2]];
-  headW[i] = smooth(neckP[1] + 0.005, neckP[1] + 0.075, p[1]);
+  const p = vAt(i);
+  const h = smooth(0.25, 0.75, hair[i]);
+  const bodyHead = smooth(M.neck + 0.005, M.neck + 0.075, p[1]);
+  const hairHead = smooth(M.shoulder + 0.01, M.chin + 0.02, p[1]);
+  headW[i] = bodyHead + (hairHead - bodyHead) * h;
   const d = len(sub(p, chestC));
   breathW[i] =
     Math.exp(-(d * d) / (2 * 0.11 * 0.11)) *
     smooth(-0.05, 0.05, p[2] - chestC[2] + 0.06) *
-    (1 - headW[i]);
+    (1 - headW[i]) *
+    (1 - h);
+  const armFrom = M.armInner + 0.03 * smooth(M.armpit, M.shoulder, p[1]);
+  armW[i] =
+    (1 - h) *
+    smooth(armFrom - 0.015, armFrom + 0.015, Math.abs(p[0])) *
+    (1 - smooth(M.shoulder - 0.03, M.shoulder + 0.02, p[1]));
 }
 
-/* ---------- the light lines, laid on the surface (front projection, then onto the nearest triangle) ---------- */
-// A simple BVH-less raycaster over a grid of triangles in x,y.
+/* ---------- surface fields: their isolines are the light lines, drawn in the shader ---------- */
+// A: a flow of lines over the torso, as a stream of light would run: it springs from the base of the neck,
+//    fans out along the collarbones and down the chest, parts round each breast and closes again below
+//    it, and runs on down the belly and the flanks. (The stream function of a flow past two round forms,
+//    in the front view.) Half a line off centre, so no line runs down the middle.
+// B: three things, each where the shader asks for it: on the arms the angle round the arm (lines along it),
+//    on the neck the distance from the midline (lines running down it), on the face a fan that opens from
+//    under the chin (lines up the cheeks and temples). On the chest it holds the distance from the nearer
+//    breast's apex, which the shader uses to keep the middle of each breast calm.
+// H: the hair's strands: the angle round a vertical axis. On top of the head the axis stands in the crown, so
+//    the strands meet there and at the parting; lower down it stands well behind her, so the strands fall
+//    straight down every lock, also the ones in front of the shoulders. The field is then smoothed over
+//    the surface, so the strands run over the sculpted ridges instead of tracing every one of them.
+const FLOW = {
+  source: [0, M.neck + 0.02],
+  scale: 0.12,
+  round: 1.0,
+  offset: 0.5 * 0.0125,
+};
+const STRANDS = { scale: 0.2, behind: 0.25, smooth: 30 };
+const fieldA = new Float32Array(nVerts);
+const fieldB = new Float32Array(nVerts);
+const fieldH = new Float32Array(nVerts);
+{
+  const from = (p, c, flat) =>
+    Math.hypot(p[0] - c[0], p[1] - c[1], (p[2] - c[2]) * flat);
+  const [sx, sy] = FLOW.source;
+  const a2 = (BUST.size * FLOW.round) ** 2;
+  for (let i = 0; i < nVerts; i++) {
+    const p = vAt(i);
+    let f =
+      Math.atan2(p[0], Math.max(0.01, sy - p[1])) * FLOW.scale + FLOW.offset;
+    for (const c of [breast.l, breast.r]) {
+      // The flow's direction at this breast, and how far the point lies to its side.
+      const dl = Math.hypot(c[0] - sx, c[1] - sy);
+      const d = [(c[0] - sx) / dl, (c[1] - sy) / dl];
+      const rx = p[0] - c[0];
+      const ry = p[1] - c[1];
+      const s = rx * d[1] - ry * d[0];
+      f += ((FLOW.scale / dl) * s * a2) / (a2 + rx * rx + ry * ry);
+    }
+    fieldA[i] = f;
+    const ax = Math.abs(p[0]);
+    const side = p[0] > 0 ? 1 : -1;
+    const round = Math.atan2(p[0] - side * (M.armInner + 0.045), p[2]) * 0.045;
+    const ring = Math.min(from(p, breast.l, 0.55), from(p, breast.r, 0.55));
+    const fan = (ax / Math.max(0.03, p[1] - M.chin + 0.06)) * 0.12;
+    const neck = ax + (fan - ax) * smooth(M.chin - 0.02, M.chin + 0.02, p[1]);
+    const torso =
+      ring + (neck - ring) * smooth(M.shoulder - 0.03, M.shoulder + 0.02, p[1]);
+    // No blend at the arm: the shader draws nothing in the band where the two meet.
+    fieldB[i] = armW[i] > 0.5 ? round : torso;
+    const q = p;
+    const onTop = smooth(M.chin + 0.1, M.top - 0.03, q[1]);
+    const axis = -STRANDS.behind + (headC[2] - 0.02 + STRANDS.behind) * onTop;
+    fieldH[i] = Math.atan2(q[0], q[2] - axis) * STRANDS.scale;
+  }
+  for (let it = 0; it < STRANDS.smooth; it++) {
+    const g = Float32Array.from(fieldH);
+    for (let i = 0; i < nVerts; i++) {
+      if (hair[i] < 0.3) continue;
+      let sum = 0;
+      let n = 0;
+      for (const j of nbrList[i]) {
+        // Not across the seam at the back of the head, where the angle jumps.
+        if (Math.abs(fieldH[j] - fieldH[i]) > 0.2) continue;
+        sum += fieldH[j];
+        n++;
+      }
+      if (n) g[i] = 0.5 * fieldH[i] + (0.5 * sum) / n;
+    }
+    fieldH.set(g);
+  }
+}
+
+/* ---------- a grid of triangles in the front view, for the distance field ---------- */
 const GRID = 0.01;
-const gx0 =
-  Math.min(...Array.from({ length: nVerts }, (_, i) => V[i * 3])) - 0.01;
-const gy0 =
-  Math.min(...Array.from({ length: nVerts }, (_, i) => V[i * 3 + 1])) - 0.01;
+const gx0 = bbMinOf(0) - 0.01;
+const gy0 = bbMinOf(1) - 0.01;
 const cells = new Map();
 for (let t = 0; t < tris.length; t += 3) {
   const xs = [tris[t], tris[t + 1], tris[t + 2]].map((i) => V[i * 3]);
@@ -703,529 +754,8 @@ for (let t = 0; t < tris.length; t += 3) {
       cells.get(key).push(t);
     }
 }
-/** The frontmost surface point under (x, y), seen along -z, and its smooth normal. */
-function project(x, y) {
-  const key =
-    Math.floor((x - gx0) / GRID) * 100000 + Math.floor((y - gy0) / GRID);
-  let best = null;
-  for (const t of cells.get(key) ?? []) {
-    const [a, b, c] = [tris[t], tris[t + 1], tris[t + 2]];
-    const ax = V[a * 3];
-    const ay = V[a * 3 + 1];
-    const bx = V[b * 3];
-    const by = V[b * 3 + 1];
-    const cx = V[c * 3];
-    const cy = V[c * 3 + 1];
-    const det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
-    if (Math.abs(det) < 1e-14) continue;
-    const l1 = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / det;
-    const l2 = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / det;
-    const l3 = 1 - l1 - l2;
-    if (l1 < -1e-6 || l2 < -1e-6 || l3 < -1e-6) continue;
-    const z = l1 * V[a * 3 + 2] + l2 * V[b * 3 + 2] + l3 * V[c * 3 + 2];
-    if (!best || z > best.z) {
-      const n = norm(
-        [0, 1, 2].map(
-          (k) => l1 * N[a * 3 + k] + l2 * N[b * 3 + k] + l3 * N[c * 3 + k],
-        ),
-      );
-      best = { z, n, hw: l1 * headW[a] + l2 * headW[b] + l3 * headW[c] };
-    }
-  }
-  return best;
-}
-function mulberry(seed) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-const rand = mulberry(20261111);
-function catmull(points, step) {
-  const Q = [points[0], ...points, points[points.length - 1]];
-  const out = [];
-  for (let i = 1; i < Q.length - 2; i++) {
-    const [p0, p1, p2, p3] = [Q[i - 1], Q[i], Q[i + 1], Q[i + 2]];
-    const n = Math.max(
-      3,
-      Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / step),
-    );
-    for (let j = 0; j < n; j++) {
-      const t = j / n;
-      const c = (a, b, cc, d) =>
-        0.5 *
-        (2 * b +
-          (-a + cc) * t +
-          (2 * a - 5 * b + 4 * cc - d) * t * t +
-          (-a + 3 * b - 3 * cc + d) * t * t * t);
-      out.push([c(p0[0], p1[0], p2[0], p3[0]), c(p0[1], p1[1], p2[1], p3[1])]);
-    }
-  }
-  out.push(points[points.length - 1]);
-  return out;
-}
-const lines = [];
-// Only a few hand-laid lines remain, as accents (the collarbones); the weave itself comes from the surface fields.
-let accent = false;
-/** A line through 2D control points (x, y in metres, front view), laid on the surface. */
-function addLine(ctrl, weight, opts = {}) {
-  const pts = [];
-  for (const [x, y] of catmull(ctrl, 0.004)) {
-    const hit = project(x, y);
-    if (!hit) {
-      if (pts.length > 4) break;
-      continue;
-    }
-    pts.push({ p: [x, y, hit.z], n: hit.n, hw: hit.hw });
-  }
-  if (pts.length < 6) return;
-  // Smooth the laid line (front projection can jitter on steep surfaces), then drop any point that still
-  // jumps in depth.
-  for (let it = 0; it < 4; it++)
-    for (let i = 1; i < pts.length - 1; i++)
-      for (let k = 0; k < 3; k++) {
-        pts[i].p[k] = (pts[i - 1].p[k] + 2 * pts[i].p[k] + pts[i + 1].p[k]) / 4;
-        pts[i].n[k] = (pts[i - 1].n[k] + 2 * pts[i].n[k] + pts[i + 1].n[k]) / 4;
-      }
-  for (const q of pts) q.n = norm(q.n);
-  if (!accent) return;
-  lines.push({
-    w: weight,
-    // About a quarter of the body's lines run warm (gold, peach); the face stays violet.
-    warm: opts.warm || (!opts.face && rand() < 0.2) ? 1 : 0,
-    face: opts.face ? 1 : 0,
-    pts,
-  });
-}
-function companion(ctrl, off, weight) {
-  // A finer strand beside a line: offset sideways in the front view.
-  const c = catmull(ctrl, 0.01);
-  const out = [];
-  for (let i = 0; i < c.length; i++) {
-    const a = c[Math.max(0, i - 1)];
-    const b = c[Math.min(c.length - 1, i + 1)];
-    const dx = b[0] - a[0];
-    const dy = b[1] - a[1];
-    const l = Math.hypot(dx, dy) || 1;
-    const k = off * (0.8 + 0.4 * Math.sin(i * 0.4));
-    out.push([c[i][0] - (dy / l) * k, c[i][1] + (dx / l) * k]);
-  }
-  const from = Math.floor(out.length * (0.05 + 0.2 * rand()));
-  const to = Math.min(
-    out.length,
-    from + Math.floor(out.length * (0.45 + 0.4 * rand())),
-  );
-  addLine(out.slice(from, to), weight);
-}
 
-// Landmarks in the front view (metres).
-const nk = neckP;
-const shL = scaleP(SH.l);
-const elL = scaleP(EL.l);
-const B = breast.l;
-// The breast seen from the front: a circle a little below its most forward point.
-const bustR = 0.05;
-const lerp = (a, b, t) => a + (b - a) * t;
-const j = (a) => (rand() - 0.5) * 2 * a;
-/** Where the surface ends, scanning sideways at height y from x0 (front view): the silhouette or a gap. */
-function edgeX(y, x0, dir, step = 0.002) {
-  let x = x0;
-  if (!project(x, y)) return null;
-  while (Math.abs(x) < 0.4 && project(x + dir * step, y)) x += dir * step;
-  return x;
-}
-/** The longest run of a polyline without a sideways jump (where a scan slipped from arm to torso). */
-function steady(pts, jump = 0.01) {
-  let best = [];
-  let cur = [];
-  for (const p of pts) {
-    if (cur.length && Math.abs(p[0] - cur[cur.length - 1][0]) > jump) cur = [];
-    cur.push(p);
-    if (cur.length > best.length) best = cur.slice();
-  }
-  return best;
-}
-for (const side of [1, -1]) {
-  const s = (x) => side * x;
-  const bx = side * Math.abs(B[0]);
-  const by = B[1] - 0.034;
-  const around = (r, a0, a1, dy = 0, cx = bx) => {
-    const out = [];
-    const n = Math.max(6, Math.ceil(Math.abs(a1 - a0) / 18));
-    for (let k = 0; k <= n; k++) {
-      const t = ((a0 + ((a1 - a0) * k) / n) * Math.PI) / 180;
-      out.push([
-        cx + side * bustR * r * Math.cos(t),
-        by + dy - bustR * r * Math.sin(t),
-      ]);
-    }
-    return out;
-  };
-  const sternum = [s(0.004), by - bustR * 0.35];
-
-  // Neck: eleven fine strands down its sides, turning out along the collarbone.
-  for (let i = 0; i < 11; i++) {
-    const k = i / 10;
-    addLine(
-      [
-        [s(lerp(0.01, 0.032, k) + j(0.002)), nk[1] + 0.06],
-        [s(lerp(0.012, 0.034, k)), nk[1] + 0.02],
-        [s(lerp(0.02, 0.044, k)), nk[1] - 0.022],
-        [s(lerp(0.055, 0.085, k)), nk[1] - 0.045],
-        [s(lerp(0.095, 0.13, k) + j(0.004)), nk[1] - 0.054],
-      ],
-      i % 3 === 1 ? 0.7 : 0.22 + 0.2 * rand(),
-      { warm: i === 4 },
-    );
-  }
-  // Collarbones: two bold lines, each with a fine companion.
-  const shx = Math.abs(shL[0]);
-  accent = true;
-  for (let i = 0; i < 2; i++) {
-    const c = [
-      [s(0.012), nk[1] - 0.064 - 0.008 * i],
-      [s(0.06), nk[1] - 0.06 - 0.008 * i],
-      [s(shx - 0.02), shL[1] + 0.028 - 0.01 * i],
-      [s(shx + 0.03), shL[1] + 0.004 - 0.01 * i],
-      [s(shx + 0.05), shL[1] - 0.04],
-    ];
-    addLine(c, i === 0 ? 1.0 : 0.6, { warm: i === 1 });
-    companion(c, side * 0.004, 0.25);
-    companion(c, -side * 0.0035, 0.18);
-  }
-  accent = false;
-  // The arm: its outer contour (a rim along the silhouette), the inner edge where it parts from the torso, and
-  // three quiet lines between.
-  const ex = Math.abs(elL[0]);
-  const armRows = [];
-  for (let y = shL[1] - 0.03; y > elL[1] + 0.02; y -= 0.012) {
-    const outer = edgeX(
-      y,
-      s(lerp(shx, ex, (shL[1] - y) / (shL[1] - elL[1]))),
-      side,
-    );
-    if (outer === null) continue;
-    const inner = edgeX(y, outer - side * 0.004, -side);
-    armRows.push([y, outer, inner ?? outer - side * 0.05]);
-  }
-  if (armRows.length > 4) {
-    addLine(steady(armRows.map(([y, o]) => [o - side * 0.003, y])), 0.75);
-    const rows = armRows.filter(([, o, n]) => Math.abs(o - n) < 0.075);
-    for (let i = 0; i < 4; i++) {
-      const f = 0.2 + 0.2 * i;
-      addLine(
-        steady(rows.slice(1 + i).map(([y, o, n]) => [lerp(o, n, f), y])),
-        0.2 + 0.12 * rand(),
-      );
-    }
-  }
-  // The torso's side, from under the arm to the waist: a rim.
-  {
-    const pts = [];
-    for (let y = shL[1] - 0.09; y > WAIST_Y * SCALE + 0.02; y -= 0.012) {
-      const e = edgeX(y, s(0.05), side);
-      if (e !== null && Math.abs(e) < 0.16) pts.push([e - side * 0.003, y]);
-    }
-    // (The silhouette itself glows in the shader; this rim stays quiet and only on the flank below the bust.)
-    const run = steady(
-      pts.filter(([, y]) => y < B[1] - 0.075),
-      0.008,
-    );
-    if (run.length > 4) addLine(run, 0.3);
-  }
-  // From the collarbone down over the top of the breast and around it: flowing sweeps, each with a companion.
-  // Long S-curves: from the shoulder in over the top of the breast, round its outer side, under it, and into
-  // the convergence at the sternum.
-  for (let i = 0; i < 3; i++) {
-    const k = i / 2;
-    const r = lerp(1.08, 1.3, k);
-    const shoulder = [s(lerp(0.1, 0.135, k)), shL[1] + 0.01 - 0.012 * k];
-    const sweep = [
-      shoulder,
-      [s(lerp(0.075, 0.1, k)), lerp(shoulder[1], by + bustR * r, 0.55)],
-      ...around(r, lerp(-110, -70, k), lerp(150, 165, k), 0),
-      [sternum[0] + j(0.002), sternum[1] - 0.004 * i],
-    ];
-    addLine(sweep, i % 2 === 0 ? 0.85 : 0.4 + 0.2 * rand(), { warm: i === 2 });
-    if (i % 2 === 0)
-      companion(sweep, side * (0.0032 + 0.0015 * rand()), 0.18 + 0.1 * rand());
-  }
-  // Contour arcs that follow the volume, from the top round the outer curve to the underside; each larger one a
-  // touch lower (the breast's weight).
-  for (let i = 0; i < 14; i++) {
-    const r = lerp(0.5, 1.15, i / 13);
-    const arc = around(r, lerp(-40, -10, rand()), lerp(80, 100, rand()), 0);
-    addLine(arc, 0.3 + 0.55 * r * rand() + (r > 0.8 ? 0.2 : 0), {
-      warm: i === 3 || i === 7 || i === 8,
-    });
-    companion(arc, side * 0.0028, 0.15 + 0.1 * rand());
-  }
-  // The heart: over the top of each breast and inward, meeting softly at the sternum below the cleavage.
-  for (let i = 0; i < 4; i++) {
-    const r = lerp(0.9, 1.2, i / 3);
-    const heart = [
-      ...around(r, -55, -170, 0),
-      [s(0.012 + 0.004 * i), by - bustR * 0.15],
-      [sternum[0] + j(0.002), sternum[1] - 0.006 * i],
-    ];
-    addLine(heart, i === 0 ? 1.0 : 0.45 + 0.2 * rand(), { warm: i === 2 });
-    companion(heart, -side * 0.003, 0.2);
-    companion(heart, side * 0.0035, 0.15);
-  }
-  // From the clavicle straight into the heart: calm, parallel.
-  for (let i = 0; i < 0; i++) {
-    addLine(
-      [
-        [s(0.016 + 0.01 * i), nk[1] - 0.07],
-        [s(0.012 + 0.008 * i), lerp(nk[1] - 0.07, by, 0.5)],
-        [s(0.01 + 0.006 * i), by + bustR * 0.2],
-        [sternum[0], sternum[1]],
-      ],
-      0.25 + 0.15 * rand(),
-    );
-  }
-  // From the sternum point down and out over the ribs toward the waist.
-  for (let i = 0; i < 4; i++) {
-    const k = i / 3;
-    addLine(
-      [
-        [sternum[0], sternum[1]],
-        [s(lerp(0.01, 0.05, k)), by - bustR * 1.3],
-        [s(lerp(0.015, 0.1, k) + j(0.003)), by - bustR * 2.0],
-        [s(lerp(0.02, 0.12, k)), WAIST_Y * SCALE + 0.03],
-      ],
-      0.28 + 0.1 * rand(),
-      { warm: i === 5 },
-    );
-  }
-
-  // The blank face: faint contours that follow its form; never a feature, never down the middle.
-  const fx = (u) => side * u * egg.r[0];
-  const fy = (v) => egg.c[1] + egg.r[1] - v * 2 * egg.r[1];
-  const face = [
-    // jaw: two contours from below the ear to the chin
-    [
-      [fx(0.92), fy(0.58)],
-      [fx(0.82), fy(0.8)],
-      [fx(0.5), fy(0.95)],
-      [fx(0.18), fy(0.995)],
-    ],
-    [
-      [fx(0.86), fy(0.52)],
-      [fx(0.72), fy(0.76)],
-      [fx(0.42), fy(0.9)],
-      [fx(0.16), fy(0.94)],
-    ],
-    // cheekbone
-    [
-      [fx(0.9), fy(0.42)],
-      [fx(0.7), fy(0.5)],
-      [fx(0.42), fy(0.58)],
-    ],
-    // brow ridge
-    [
-      [fx(0.82), fy(0.3)],
-      [fx(0.5), fy(0.27)],
-      [fx(0.2), fy(0.3)],
-    ],
-    // down the face's sides, from the temple toward the chin (well away from the middle)
-    [
-      [fx(0.5), fy(0.16)],
-      [fx(0.46), fy(0.45)],
-      [fx(0.38), fy(0.72)],
-      [fx(0.26), fy(0.9)],
-    ],
-  ];
-  for (const c of face) addLine(c, 0.28 + 0.1 * rand(), { face: true });
-}
-{
-  const fx = (u) => u * egg.r[0];
-  const fy = (v) => egg.c[1] + egg.r[1] - v * 2 * egg.r[1];
-  addLine(
-    [
-      [fx(-0.62), fy(0.15)],
-      [fx(-0.25), fy(0.1)],
-      [fx(0.22), fy(0.095)],
-      [fx(0.6), fy(0.15)],
-    ],
-    0.3,
-    { face: true },
-  );
-}
-
-/* ---------- the lines' light on the skin: per vertex, how near a line is and how warm ---------- */
-const glowW = new Float32Array(nVerts);
-const warmW = new Float32Array(nVerts);
-{
-  const C = 0.01;
-  const grid = new Map();
-  for (const l of lines)
-    for (const q of l.pts) {
-      const key = q.p.map((v) => Math.floor(v / C)).join(",");
-      if (!grid.has(key)) grid.set(key, []);
-      grid.get(key).push([q.p, l.w * (l.face ? 0.35 : 1), l.warm]);
-    }
-  for (let i = 0; i < nVerts; i++) {
-    const p = [V[i * 3], V[i * 3 + 1], V[i * 3 + 2]];
-    const c = p.map((v) => Math.floor(v / C));
-    let g = 0;
-    let w = 0;
-    for (let a = -2; a <= 2; a++)
-      for (let b = -2; b <= 2; b++)
-        for (let d = -2; d <= 2; d++)
-          for (const [q, wt, warm] of grid.get(
-            `${c[0] + a},${c[1] + b},${c[2] + d}`,
-          ) ?? []) {
-            const dist = len(sub(p, q));
-            const v = Math.min(1, wt) * Math.exp(-dist / 0.009);
-            if (v > g * 0.3) {
-              w = w + (warm - w) * (v / (g + v + 1e-9));
-              g = Math.max(g, v) + 0.15 * Math.min(g, v);
-            }
-          }
-    glowW[i] = Math.min(1, g);
-    warmW[i] = Math.max(0, Math.min(1, w));
-  }
-}
-
-/* ---------- surface fields: their isolines are the light lines, drawn in the shader at native resolution ---------- */
-// Field A (metres): distance over the surface from the front midline, merged with the distance from each breast's
-// apex. Its isolines run down beside the midline (neck, sternum, the face's sides), ring each breast, and sweep
-// round the bust's outside in long arcs. Field B: the angle round each upper arm, so its isolines run along the
-// arm. Both follow the form by construction.
-const nbrs = Array.from({ length: nVerts }, () => new Set());
-for (let t = 0; t < tris.length; t += 3) {
-  const [a, b, c] = [tris[t], tris[t + 1], tris[t + 2]];
-  nbrs[a].add(b).add(c);
-  nbrs[b].add(a).add(c);
-  nbrs[c].add(a).add(b);
-}
-const nbrList = nbrs.map((s) => [...s]);
-const vAt = (i) => [V[i * 3], V[i * 3 + 1], V[i * 3 + 2]];
-function surfaceDistance(seeds) {
-  const dist = new Float64Array(nVerts).fill(Infinity);
-  // A binary heap of [distance, vertex].
-  const heap = [];
-  const push = (d, i) => {
-    heap.push([d, i]);
-    let k = heap.length - 1;
-    while (k > 0) {
-      const p = (k - 1) >> 1;
-      if (heap[p][0] <= heap[k][0]) break;
-      [heap[p], heap[k]] = [heap[k], heap[p]];
-      k = p;
-    }
-  };
-  const pop = () => {
-    const top = heap[0];
-    const last = heap.pop();
-    if (heap.length) {
-      heap[0] = last;
-      let k = 0;
-      for (;;) {
-        const l = 2 * k + 1;
-        const r = l + 1;
-        let m = k;
-        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
-        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
-        if (m === k) break;
-        [heap[m], heap[k]] = [heap[k], heap[m]];
-        k = m;
-      }
-    }
-    return top;
-  };
-  for (const i of seeds) {
-    dist[i] = 0;
-    push(0, i);
-  }
-  while (heap.length) {
-    const [d, i] = pop();
-    if (d > dist[i]) continue;
-    const p = vAt(i);
-    for (const k of nbrList[i]) {
-      const nd = d + len(sub(vAt(k), p));
-      if (nd < dist[k]) {
-        dist[k] = nd;
-        push(nd, k);
-      }
-    }
-  }
-  // Graph distance zigzags along the edges: relax it into a smooth field (the seeds stay at zero).
-  const fixed = new Uint8Array(nVerts);
-  for (const i of seeds) fixed[i] = 1;
-  let f = dist;
-  for (let it = 0; it < 60; it++) {
-    const g = Float64Array.from(f);
-    for (let i = 0; i < nVerts; i++) {
-      if (fixed[i] || !nbrList[i].length) continue;
-      let s = 0;
-      for (const k of nbrList[i]) s += f[k];
-      g[i] = 0.5 * f[i] + (0.5 * s) / nbrList[i].length;
-    }
-    f = g;
-  }
-  return f;
-}
-const midSeeds = [];
-for (let i = 0; i < nVerts; i++)
-  if (Math.abs(V[i * 3]) < 0.0015 && N[i * 3 + 2] > 0.1) midSeeds.push(i);
-const nearestVertex = (p) => {
-  let best = 0;
-  let bd = Infinity;
-  for (let i = 0; i < nVerts; i++) {
-    const d = len(sub(vAt(i), p));
-    if (d < bd) {
-      bd = d;
-      best = i;
-    }
-  }
-  return best;
-};
-const dMid = surfaceDistance(midSeeds);
-const dBustL = surfaceDistance([nearestVertex(breast.l)]);
-const dBustR = surfaceDistance([nearestVertex(breast.r)]);
-const fieldA = new Float32Array(nVerts);
-const fieldB = new Float32Array(nVerts);
-const armW = new Float32Array(nVerts);
-{
-  const K = 0.014;
-  const BUST = 0.6;
-  for (let i = 0; i < nVerts; i++) {
-    const a = dMid[i];
-    const b = Math.min(dBustL[i], dBustR[i]) * BUST;
-    // Smooth minimum: where the families meet they flow into each other.
-    const body = -K * Math.log(Math.exp(-a / K) + Math.exp(-b / K));
-    // On the head the lines simply run down beside the midline: no trace of what the face once was.
-    fieldA[i] = body + (Math.abs(V[i * 3]) - body) * smooth(0.3, 0.8, headW[i]);
-  }
-  for (const side of ["l", "r"]) {
-    const sh = scaleP(SH[side]);
-    const el = scaleP(EL[side]);
-    const axis = norm(sub(el, sh));
-    const front = norm(sub([0, 0, 1], mul(axis, axis[2])));
-    const across = cross(axis, front);
-    const sign = side === "l" ? 1 : -1;
-    for (let i = 0; i < nVerts; i++) {
-      const p = vAt(i);
-      if (sign * p[0] < Math.abs(sh[0]) * 0.8) continue;
-      const rel = sub(p, sh);
-      const along = dot(rel, axis);
-      const radial = sub(rel, mul(axis, along));
-      const rd = len(radial);
-      const w = smooth(0.02, 0.1, along) * (1 - smooth(0.06, 0.08, rd));
-      if (w <= 0) continue;
-      armW[i] = w;
-      fieldB[i] = Math.atan2(dot(radial, across), dot(radial, front)) * 0.045;
-    }
-  }
-}
-
-/* ---------- a signed distance field of the body, for the hair to rest on ---------- */
+/* ---------- a signed distance field of the figure, for the loose strands to rest on ---------- */
 const SDF = {
   cell: 0.01,
   min: [bbMinOf(0) - 0.06, bbMinOf(1) - 0.02, bbMinOf(2) - 0.06],
@@ -1313,262 +843,108 @@ function allHits(x, y) {
   return out.filter((z, i) => i === 0 || z - out[i - 1] > 1e-5);
 }
 
-/* ---------- write the glTF (EXT_meshopt_compression) ---------- */
-await MeshoptEncoder.ready;
-const vcount = nVerts;
-// Position and normal as float, plus head and breath weights and the lines' light (nearness, warmth).
+/* ---------- write the runtime mesh ---------- */
+const usedMap = new Int32Array(nVerts).fill(-1);
+let vcount = 0;
+for (const i of tris) if (usedMap[i] < 0) usedMap[i] = vcount++;
 const vstride = 44;
 const vbuf = new Uint8Array(vcount * vstride);
 const dv = new DataView(vbuf.buffer);
-let bbMin = [1e9, 1e9, 1e9];
-let bbMax = [-1e9, -1e9, -1e9];
-for (let i = 0; i < vcount; i++) {
+const bbMin = [1e9, 1e9, 1e9];
+const bbMax = [-1e9, -1e9, -1e9];
+const u16 = (v) => Math.round(Math.max(0, Math.min(1, v)) * 65535);
+for (let i = 0; i < nVerts; i++) {
+  const o = usedMap[i] * vstride;
+  if (o < 0) continue;
   for (let k = 0; k < 3; k++) {
-    dv.setFloat32(i * vstride + k * 4, V[i * 3 + k], true);
-    dv.setFloat32(i * vstride + 12 + k * 4, N[i * 3 + k], true);
+    dv.setFloat32(o + k * 4, V[i * 3 + k], true);
+    dv.setFloat32(o + 12 + k * 4, N[i * 3 + k], true);
     bbMin[k] = Math.min(bbMin[k], V[i * 3 + k]);
     bbMax[k] = Math.max(bbMax[k], V[i * 3 + k]);
   }
-  dv.setUint16(i * vstride + 24, Math.round(headW[i] * 65535), true);
-  dv.setUint16(
-    i * vstride + 26,
-    Math.round(Math.min(1, breathW[i]) * 65535),
-    true,
-  );
-  dv.setUint16(i * vstride + 28, Math.round(glowW[i] * 65535), true);
-  dv.setUint16(i * vstride + 30, Math.round(warmW[i] * 65535), true);
-  dv.setFloat32(i * vstride + 32, fieldA[i], true);
-  dv.setFloat32(i * vstride + 36, fieldB[i], true);
-  dv.setUint16(i * vstride + 40, Math.round(armW[i] * 65535), true);
-  dv.setUint16(i * vstride + 42, 0, true);
+  dv.setUint16(o + 24, u16(headW[i]), true);
+  dv.setUint16(o + 26, u16(breathW[i]), true);
+  dv.setUint16(o + 28, u16(hair[i]), true);
+  dv.setUint16(o + 30, u16(armW[i]), true);
+  dv.setFloat32(o + 32, fieldA[i], true);
+  dv.setFloat32(o + 36, fieldB[i], true);
+  dv.setFloat32(o + 40, fieldH[i], true);
 }
-let idx = Uint32Array.from(tris);
-// Cache-friendly order, then compress.
-idx = MeshoptEncoder.reorderMesh ? idx : idx;
-const vComp = MeshoptEncoder.encodeVertexBuffer(vbuf, vcount, vstride);
-const iComp = MeshoptEncoder.encodeIndexBuffer(
-  new Uint8Array(idx.buffer),
-  idx.length,
-  4,
-);
-const pad4 = (n) => (n + 3) & ~3;
-const bin = new Uint8Array(pad4(vComp.length) + pad4(iComp.length));
-bin.set(vComp, 0);
-bin.set(iComp, pad4(vComp.length));
-const gltf = {
-  asset: {
-    version: "2.0",
-    generator: "NOVA aura-figure.mjs (MakeHuman CC0 base mesh)",
-  },
-  extensionsUsed: ["EXT_meshopt_compression"],
-  extensionsRequired: ["EXT_meshopt_compression"],
-  buffers: [
-    { byteLength: bin.length },
+const idx = Uint32Array.from(tris, (i) => usedMap[i]);
+const glbSize = writeGlb(
+  path.join(outDir, "aura-figure.glb"),
+  vbuf,
+  vcount,
+  vstride,
+  idx,
+  [
     {
-      byteLength: vbuf.length + idx.byteLength,
-      extensions: { EXT_meshopt_compression: { fallback: true } },
-    },
-  ],
-  bufferViews: [
-    {
-      buffer: 1,
-      byteOffset: 0,
-      byteLength: vbuf.length,
-      byteStride: vstride,
-      target: 34962,
-      extensions: {
-        EXT_meshopt_compression: {
-          buffer: 0,
-          byteOffset: 0,
-          byteLength: vComp.length,
-          byteStride: vstride,
-          count: vcount,
-          mode: "ATTRIBUTES",
-        },
-      },
-    },
-    {
-      buffer: 1,
-      byteOffset: vbuf.length,
-      byteLength: idx.byteLength,
-      target: 34963,
-      extensions: {
-        EXT_meshopt_compression: {
-          buffer: 0,
-          byteOffset: pad4(vComp.length),
-          byteLength: iComp.length,
-          byteStride: 4,
-          count: idx.length,
-          mode: "TRIANGLES",
-        },
-      },
-    },
-  ],
-  accessors: [
-    {
-      bufferView: 0,
-      byteOffset: 0,
-      componentType: 5126,
-      count: vcount,
-      type: "VEC3",
+      name: "POSITION",
+      offset: 0,
+      type: 5126,
+      kind: "VEC3",
       min: bbMin,
       max: bbMax,
     },
+    { name: "NORMAL", offset: 12, type: 5126, kind: "VEC3" },
+    { name: "_HEAD", offset: 24, type: 5123, kind: "SCALAR", normalized: true },
     {
-      bufferView: 0,
-      byteOffset: 12,
-      componentType: 5126,
-      count: vcount,
-      type: "VEC3",
-    },
-    {
-      bufferView: 0,
-      byteOffset: 24,
-      componentType: 5123,
+      name: "_BREATH",
+      offset: 26,
+      type: 5123,
+      kind: "SCALAR",
       normalized: true,
-      count: vcount,
-      type: "SCALAR",
     },
-    {
-      bufferView: 0,
-      byteOffset: 26,
-      componentType: 5123,
-      normalized: true,
-      count: vcount,
-      type: "SCALAR",
-    },
-    {
-      bufferView: 0,
-      byteOffset: 28,
-      componentType: 5123,
-      normalized: true,
-      count: vcount,
-      type: "SCALAR",
-    },
-    {
-      bufferView: 0,
-      byteOffset: 30,
-      componentType: 5123,
-      normalized: true,
-      count: vcount,
-      type: "SCALAR",
-    },
-    {
-      bufferView: 0,
-      byteOffset: 32,
-      componentType: 5126,
-      count: vcount,
-      type: "SCALAR",
-    },
-    {
-      bufferView: 0,
-      byteOffset: 36,
-      componentType: 5126,
-      count: vcount,
-      type: "SCALAR",
-    },
-    {
-      bufferView: 0,
-      byteOffset: 40,
-      componentType: 5123,
-      normalized: true,
-      count: vcount,
-      type: "SCALAR",
-    },
-    {
-      bufferView: 1,
-      byteOffset: 0,
-      componentType: 5125,
-      count: idx.length,
-      type: "SCALAR",
-    },
+    { name: "_HAIR", offset: 28, type: 5123, kind: "SCALAR", normalized: true },
+    { name: "_ARM", offset: 30, type: 5123, kind: "SCALAR", normalized: true },
+    { name: "_FA", offset: 32, type: 5126, kind: "SCALAR" },
+    { name: "_FB", offset: 36, type: 5126, kind: "SCALAR" },
+    { name: "_FH", offset: 40, type: 5126, kind: "SCALAR" },
   ],
-  meshes: [
-    {
-      name: "aura",
-      primitives: [
-        {
-          attributes: {
-            POSITION: 0,
-            NORMAL: 1,
-            _HEAD: 2,
-            _BREATH: 3,
-            _GLOW: 4,
-            _WARM: 5,
-            _FA: 6,
-            _FB: 7,
-            _ARM: 8,
-          },
-          indices: 9,
-        },
-      ],
-    },
-  ],
-  nodes: [{ mesh: 0, name: "aura" }],
-  scenes: [{ nodes: [0] }],
-  scene: 0,
-};
-const jsonBuf = Buffer.from(JSON.stringify(gltf));
-const jsonPad = Buffer.concat([
-  jsonBuf,
-  Buffer.alloc(pad4(jsonBuf.length) - jsonBuf.length, 0x20),
-]);
-const glb = Buffer.alloc(12 + 8 + jsonPad.length + 8 + bin.length);
-glb.writeUInt32LE(0x46546c67, 0);
-glb.writeUInt32LE(2, 4);
-glb.writeUInt32LE(glb.length, 8);
-glb.writeUInt32LE(jsonPad.length, 12);
-glb.writeUInt32LE(0x4e4f534a, 16);
-jsonPad.copy(glb, 20);
-glb.writeUInt32LE(bin.length, 20 + jsonPad.length);
-glb.writeUInt32LE(0x004e4942, 24 + jsonPad.length);
-Buffer.from(bin).copy(glb, 28 + jsonPad.length);
-fs.writeFileSync(path.join(outDir, "aura-figure.glb"), glb);
+  "NOVA aura-figure.mjs (our own sculpt, Hunyuan3D-2)",
+);
 
-/* ---------- the figure's landmarks and lines ---------- */
+/* ---------- the figure's landmarks ---------- */
 const r4 = (v) => +v.toFixed(4);
 const r3v = (p) => p.map(r4);
 const figure = {
   source:
-    "MakeHuman base mesh and targets (CC0 1.0), makehumancommunity/makehuman",
+    "Our own sculpt: generated with Hunyuan3D-2 from our own FLUX image, cleaned by scripts/aura-figure.mjs",
   neck: r3v(neckP),
-  head: { c: r3v(egg.c), r: r3v(egg.r) },
-  face: r3v([0, egg.c[1] - egg.r[1] * 0.1, egg.c[2] + egg.r[2] * 0.95]),
+  head: { c: r3v(headC), r: r3v(headR) },
+  face: r3v([0, headC[1] - headR[1] * 0.1, headC[2] + headR[2]]),
   breasts: [r3v(breast.l), r3v(breast.r)],
-  shoulders: [r3v(scaleP(SH.l)), r3v(scaleP(SH.r))],
-  elbows: [r3v(scaleP(EL.l)), r3v(scaleP(EL.r))],
-  waist: r4(WAIST_Y * SCALE),
-  // Signed distance to the body in mm (int8), x fastest, then z, then y; for the hair's collisions.
+  shoulders: [
+    r3v([M.shoulderX, M.shoulder, 0]),
+    r3v([-M.shoulderX, M.shoulder, 0]),
+  ],
+  elbows: [
+    r3v([M.armInner + 0.045, M.cut, 0]),
+    r3v([-(M.armInner + 0.045), M.cut, 0]),
+  ],
+  waist: r4(M.cut),
+  hairline: r4(M.hairline),
+  bounds: { min: r3v(bbMin), max: r3v(bbMax) },
   sdf: {
     cell: SDF.cell,
     min: r3v(SDF.min),
     dims: SDF.dims,
     data: Buffer.from(sdf.buffer).toString("base64"),
   },
-  bounds: { min: r3v(bbMin), max: r3v(bbMax) },
-  lines: lines.map((l) => ({
-    w: r4(l.w),
-    warm: l.warm,
-    face: l.face,
-    // x, y, z, nx, ny, nz, head weight per point
-    p: l.pts.flatMap((q) => [
-      ...r3v(q.p),
-      ...q.n.map((v) => +v.toFixed(3)),
-      +q.hw.toFixed(3),
-    ]),
-  })),
 };
 fs.writeFileSync(path.join(outDir, "aura-figure.json"), JSON.stringify(figure));
+let hairShare = 0;
+for (let i = 0; i < nVerts; i++) hairShare += hair[i] > 0.5 ? 1 : 0;
 console.log(
   JSON.stringify({
     verts: vcount,
     tris: idx.length / 3,
-    glb: glb.length,
-    lines: lines.length,
-    faceLines: lines.filter((l) => l.face).length,
+    glb: glbSize,
+    hairShare: r4(hairShare / nVerts),
     neck: figure.neck,
     head: figure.head,
     breasts: figure.breasts,
+    waist: figure.waist,
     bounds: figure.bounds,
   }),
 );

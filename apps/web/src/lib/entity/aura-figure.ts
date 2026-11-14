@@ -1,9 +1,9 @@
-import type { FigureJson, FigureLine } from "./aura-data.ts";
+import type { FigureJson } from "./aura-data.ts";
 
 /**
- * Geometry for the 3D Aura, built at load from the figure's mesh and landmarks: the light lines as ribbons, the
- * birth particles on the surface, and the hair (guide strands with verlet physics, drawn as many interpolated
- * strands). Pure; no three.js and no DOM, so it can be tested.
+ * Geometry for the 3D Aura, built at load from the figure's mesh and landmarks: the birth particles on the
+ * surface, and the loose strands of hair (guide strands with verlet physics, drawn as many interpolated strands).
+ * Pure; no three.js and no DOM, so it can be tested.
  */
 
 export type V3 = [number, number, number];
@@ -16,100 +16,6 @@ function mulberry(seed: number) {
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Weight (6 bits), warm and face flags in one exact float: the shaders decode it. */
-export function lineCode(w: number, warm: boolean, face: boolean): number {
-  return (
-    (1 + Math.min(62, Math.round(w * 41))) * 4 + (warm ? 2 : 0) + (face ? 1 : 0)
-  );
-}
-
-export interface Ribbons {
-  /** Per vertex: position (3), the next point along the line (3), normal (3), across (-1/1), t, line info. */
-  position: Float32Array;
-  next: Float32Array;
-  prev: Float32Array;
-  normal: Float32Array;
-  /** across (-1 or 1), t along 0..1, head weight, line length (m). */
-  info: Float32Array;
-  /** line code, line id. */
-  code: Float32Array;
-  index: Uint32Array;
-  lines: number;
-  faceLines: number;
-}
-
-/** The lines on the surface as camera-facing ribbons: two vertices per point, widened in the vertex shader. */
-export function buildRibbons(lines: readonly FigureLine[]): Ribbons {
-  let n = 0;
-  for (const l of lines) n += l.p.length / 7;
-  const position = new Float32Array(n * 2 * 3);
-  const next = new Float32Array(n * 2 * 3);
-  const prev = new Float32Array(n * 2 * 3);
-  const normal = new Float32Array(n * 2 * 3);
-  const info = new Float32Array(n * 2 * 4);
-  const code = new Float32Array(n * 2 * 2);
-  const index: number[] = [];
-  let v = 0;
-  lines.forEach((line, li) => {
-    const m = line.p.length / 7;
-    const pt = (i: number): V3 => [
-      line.p[i * 7]!,
-      line.p[i * 7 + 1]!,
-      line.p[i * 7 + 2]!,
-    ];
-    const cum = [0];
-    for (let i = 1; i < m; i++) {
-      const a = pt(i - 1);
-      const b = pt(i);
-      cum.push(cum[i - 1]! + Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]));
-    }
-    const total = cum[m - 1] || 1;
-    const c = lineCode(line.w, !!line.warm, !!line.face);
-    for (let i = 0; i < m; i++) {
-      const p = pt(i);
-      // The neighbour that gives the direction: the next point (the previous one, mirrored, at the end).
-      const q =
-        i < m - 1
-          ? pt(i + 1)
-          : ((): V3 => {
-              const a = pt(i - 1);
-              return [2 * p[0] - a[0], 2 * p[1] - a[1], 2 * p[2] - a[2]];
-            })();
-      const r =
-        i > 0
-          ? pt(i - 1)
-          : ((): V3 => [2 * p[0] - q[0], 2 * p[1] - q[1], 2 * p[2] - q[2]])();
-      for (const side of [-1, 1]) {
-        position.set(p, v * 3);
-        next.set(q, v * 3);
-        prev.set(r, v * 3);
-        normal.set(
-          [line.p[i * 7 + 3]!, line.p[i * 7 + 4]!, line.p[i * 7 + 5]!],
-          v * 3,
-        );
-        info.set([side, cum[i]! / total, line.p[i * 7 + 6]!, total], v * 4);
-        code.set([c, li], v * 2);
-        v++;
-      }
-      if (i < m - 1) {
-        const a = v - 2;
-        index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
-      }
-    }
-  });
-  return {
-    position,
-    next,
-    prev,
-    normal,
-    info,
-    code,
-    index: Uint32Array.from(index),
-    lines: lines.length,
-    faceLines: lines.filter((l) => l.face).length,
   };
 }
 
@@ -280,7 +186,7 @@ export const HAIR = {
   guides: { low: 120, mid: 180, high: 240 },
   points: 16,
   /** Drawn strands interpolated from the guides. */
-  strands: { low: 2000, mid: 5000, high: 12000 },
+  strands: { low: 1500, mid: 4500, high: 9000 },
   /** Length range (m). */
   length: [0.26, 0.5] as const,
   gravity: 9.8,
@@ -323,7 +229,7 @@ export function growHair(
   // Scalp directions: a centre parting at the top, the crown, the sides and the back; the hairline frames the
   // face. About a third are front locks: from the hairline beside the face they fall over the shoulders onto the
   // upper chest.
-  const frontLocks = Math.round(guides * 0.14);
+  const frontLocks = Math.round(guides * 0.05);
   while (g < guides) {
     const lock = g < frontLocks;
     let d: V3;

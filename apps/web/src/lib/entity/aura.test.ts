@@ -15,10 +15,9 @@ import {
   type FigureJson,
 } from "./aura-data.ts";
 import {
-  buildRibbons,
   decodeSdf,
   growHair,
-  lineCode,
+  HAIR,
   sampleSurface,
   sdfAt,
   stepHair,
@@ -32,7 +31,6 @@ import {
   GAZE,
   gpuTier,
   isMobile,
-  LINES,
   LOOKS,
   median,
   MIN_DPR,
@@ -42,9 +40,9 @@ import {
 } from "./aura.ts";
 import {
   BODY_FRAG,
+  BODY_VERT,
   HAIR_VERT,
-  LINE_FRAG,
-  LINE_VERT,
+  SWAY,
   WEAVE,
 } from "./aura-shaders.ts";
 
@@ -53,59 +51,59 @@ const fig = JSON.parse(
   fs.readFileSync(path.join(STATIC, AURA_ASSETS.figure), "utf8"),
 ) as FigureJson;
 
+const glb = fs.readFileSync(path.join(STATIC, AURA_ASSETS.mesh));
+const gltf = JSON.parse(glb.toString("utf8", 20, 20 + glb.readUInt32LE(12)));
+const attrs = gltf.meshes[0].primitives[0].attributes as Record<string, number>;
+
 describe("aura figure", () => {
-  it("ships a compressed glTF of a bust: 20-60k triangles with normals and head and breath weights", () => {
-    const glb = fs.readFileSync(path.join(STATIC, AURA_ASSETS.mesh));
+  it("ships a compressed glTF of a bust: 50-80k triangles with normals and head, breath and hair weights", () => {
     expect(glb.readUInt32LE(0)).toBe(0x46546c67);
-    const jsonLen = glb.readUInt32LE(12);
-    const gltf = JSON.parse(glb.toString("utf8", 20, 20 + jsonLen));
     expect(gltf.extensionsRequired).toContain("EXT_meshopt_compression");
-    const prim = gltf.meshes[0].primitives[0];
-    for (const a of [
-      "POSITION",
-      "NORMAL",
-      "_HEAD",
-      "_BREATH",
-      "_GLOW",
-      "_WARM",
-    ])
-      expect(prim.attributes[a]).toBeTypeOf("number");
-    const tris = gltf.accessors[prim.indices].count / 3;
-    expect(tris).toBeGreaterThan(20_000);
-    expect(tris).toBeLessThan(60_000);
+    for (const a of ["POSITION", "NORMAL", "_HEAD", "_BREATH", "_HAIR"])
+      expect(attrs[a]).toBeTypeOf("number");
+    const tris = gltf.accessors[gltf.meshes[0].primitives[0].indices].count / 3;
+    expect(tris).toBeGreaterThanOrEqual(50_000);
+    expect(tris).toBeLessThanOrEqual(80_000);
     expect(glb.length).toBeLessThan(1_500_000);
   });
 
-  it("is documented: MakeHuman base mesh, CC0", () => {
+  it("is documented: our own sculpt, generated with Hunyuan3D-2, with the model's licence noted", () => {
+    const root = path.resolve(import.meta.dirname, "../../../../..");
     const doc = fs.readFileSync(
-      path.resolve(
-        import.meta.dirname,
-        "../../../../../docs/third-party-assets.md",
-      ),
+      path.join(root, "docs/third-party-assets.md"),
       "utf8",
     );
-    expect(doc).toMatch(/MakeHuman/);
-    expect(doc).toMatch(/CC0/);
+    expect(doc).toMatch(/Hunyuan3D-2/);
+    expect(doc).toMatch(/Tencent Hunyuan 3D 2\.0 Community License/);
     expect(doc).toMatch(/aura-figure\.glb/);
-    expect(fig.source).toMatch(/CC0/);
+    expect(doc).not.toMatch(/MakeHuman/);
+    expect(fig.source).toMatch(/Hunyuan3D-2/);
+    // The committed source the build reads: a few megabytes at most.
+    const source = fs.statSync(
+      path.join(root, "scripts/assets/aura-sculpt.glb"),
+    );
+    expect(source.size).toBeGreaterThan(200_000);
+    expect(source.size).toBeLessThan(4_000_000);
   });
 
-  it("has natural proportions: a head above a short neck, round breasts in front, a waist below", () => {
-    const { head, neck, breasts, waist } = fig;
+  it("has natural proportions: a head above a short neck, a full round bust in front, a waist below", () => {
+    const { head, neck, breasts, waist, bounds } = fig;
     expect(head.c[1]).toBeGreaterThan(neck[1]);
     // A short, graceful neck: the chin a few centimetres above the neck joint.
     const chin = head.c[1] - head.r[1];
     expect(chin - neck[1]).toBeGreaterThan(0.02);
     expect(chin - neck[1]).toBeLessThan(0.1);
-    // Her real head: about 21 cm from crown to chin, about 13 cm wide.
+    // Real size: about 22 cm from crown to chin, about 14 cm wide.
     expect(head.r[1] * 2).toBeGreaterThan(0.18);
     expect(head.r[1] * 2).toBeLessThan(0.24);
     expect(head.r[0] * 2).toBeGreaterThan(0.11);
     expect(head.r[0] * 2).toBeLessThan(0.16);
     for (const b of breasts) {
-      expect(b[2]).toBeGreaterThan(neck[2] + 0.12);
+      expect(b[2]).toBeGreaterThan(neck[2] + 0.14);
       expect(b[1]).toBeLessThan(neck[1] - 0.12);
     }
+    // The bust is the figure's most forward point, and even on both sides.
+    expect(bounds.max[2] - breasts[0]![2]).toBeLessThan(0.01);
     expect(Math.abs(breasts[0]![0] + breasts[1]![0])).toBeLessThan(1e-6);
     expect(waist).toBeLessThan(breasts[0]![1] - 0.05);
   });
@@ -113,52 +111,40 @@ describe("aura figure", () => {
 
 describe("aura light lines", () => {
   it("weaves the body with isolines of surface fields baked on the mesh, drawn sharp in the shader", () => {
-    const glb = fs.readFileSync(path.join(STATIC, AURA_ASSETS.mesh));
-    const gltf = JSON.parse(
-      glb.toString("utf8", 20, 20 + glb.readUInt32LE(12)),
-    );
-    const attrs = gltf.meshes[0].primitives[0].attributes;
-    for (const a of ["_FA", "_FB", "_ARM"])
+    for (const a of ["_FA", "_FB", "_FH", "_ARM"])
       expect(attrs[a]).toBeTypeOf("number");
     // Screen-space derivatives make every line about a device pixel wide at any resolution.
     expect(BODY_FRAG).toContain("fwidth(g)");
     expect(BODY_FRAG).toContain("weave(");
-    expect(WEAVE.spacing).toBeGreaterThan(0.003);
-    expect(WEAVE.spacing).toBeLessThan(0.012);
+    // Few, long lines rather than a dense mesh of them.
+    expect(WEAVE.spacing).toBeGreaterThan(0.008);
+    expect(WEAVE.spacing).toBeLessThan(0.02);
     expect(WEAVE.warm).toBeGreaterThan(0.2);
     expect(WEAVE.warm).toBeLessThan(0.4);
-    // Calm arms, a dense chest, a faint face.
-    expect(WEAVE.arms).toBeLessThan(WEAVE.chest);
+    // Calm arms and a faint face; the middle of each breast stays free of lines.
+    expect(WEAVE.armGain).toBeLessThan(0.7);
     expect(WEAVE.faceGain).toBeLessThan(0.6);
-    // A few hand-laid accents remain (the collarbones), each lying on the surface.
-    expect(fig.lines.length).toBeGreaterThanOrEqual(4);
-    expect(fig.lines.length).toBeLessThanOrEqual(40);
-    const sdf = decodeSdf(fig.sdf);
-    for (const l of fig.lines)
-      for (let i = 0; i < l.p.length; i += 7 * 5)
-        expect(
-          Math.abs(sdfAt(sdf, l.p[i]!, l.p[i + 1]!, l.p[i + 2]!)),
-        ).toBeLessThan(0.015);
+    expect(WEAVE.calm).toBeGreaterThan(0.02);
   });
 
   it("draws no seam down the face and no facial features", () => {
-    expect(fig.lines.filter((x) => x.face).length).toBe(0);
     // The face's lines are masked away from its middle.
     expect(BODY_FRAG).toContain("abs(vObj.x)");
-    for (const src of [BODY_FRAG, LINE_FRAG])
-      expect(src).not.toMatch(/\b(eyes?|mouth|lips?|nose|brows?|pupils?)\b/i);
+    expect(BODY_FRAG).not.toMatch(
+      /\b(eyes?|mouth|lips?|nose|brows?|pupils?)\b/i,
+    );
   });
+});
 
-  it("builds camera-facing ribbons: two vertices per point, widened in the shader at native resolution", () => {
-    const r = buildRibbons(fig.lines.slice(0, 3));
-    const pts = fig.lines.slice(0, 3).reduce((n, l) => n + l.p.length / 7, 0);
-    expect(r.position.length).toBe(pts * 2 * 3);
-    expect(r.index.length).toBe((pts - 3) * 6);
-    expect(LINE_VERT).toContain("uRes");
-    // Analytic anti-aliasing: the core never thinner than about a device pixel.
-    expect(LINE_FRAG).toContain("max(");
-    expect(lineCode(1, true, true) % 4).toBe(3);
-    expect(LINES.core).toBeLessThan(LINES.glow);
+describe("aura sculpted hair", () => {
+  it("is part of the mesh: drawn by strand lines, swaying toward the tips, following the head late", () => {
+    expect(BODY_FRAG).toContain("vFh");
+    expect(BODY_VERT).toContain("uHeadLag");
+    expect(BODY_VERT).toContain("uSway");
+    // A sway you notice but that never tears the hair off her shoulders: at most a few centimetres at the tips.
+    expect(SWAY.most).toBeGreaterThan(0.005);
+    expect(SWAY.most).toBeLessThan(0.04);
+    expect(HAIR.strands.low).toBeLessThan(HAIR.strands.high);
   });
 });
 
