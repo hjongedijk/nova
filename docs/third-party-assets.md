@@ -6,7 +6,7 @@ The other shapes in the Gedaante selector ("Gestalte" and "Aura") also render lo
 
 ## Aura: a real-time 3D figure
 
-Aura is a sculpted feminine bust rendered in 3D in the browser (three.js). Her body and her long hair are one dark sculpt. Light lines lie on her surface, her hair is drawn by strands of light with loose strands moving round it, and her head truly turns. No picture or artwork is shown.
+Aura is a sculpted feminine bust rendered in 3D in the browser (three.js). Her body and her long hair are one dark sculpt. Her body is a hologram of light: a glow that is brightest at her silhouette and a dust of light living on her surface. Her hair is drawn by strands of light with loose strands moving round it. Her head truly turns, and her upper body goes a little with it. No picture or artwork is shown.
 
 | File                                    | What it is                                                         |
 | --------------------------------------- | ------------------------------------------------------------------ |
@@ -30,8 +30,8 @@ Aura is a sculpted feminine bust rendered in 3D in the browser (three.js). Her b
 2. **Hair and body:** skin is smooth, hair is ridged, and the sculpt has a crease where hair lies on skin. The body is grown from the middle of the chest over every edge that bends only a little; it stops at the hair. On the head, the face is the front below the hairline. Each vertex gets a hair weight.
 3. **Faceless and abstract:** the face's distance from the middle of the head is smoothed until eyes, nose and lips are gone; skull, cheekbones, jaw and chin stay. The chest and belly are smoothed until no anatomical detail is left.
 4. **Bust:** each breast is replaced by a round form (a ball set into the chest, with the join smoothed). `BUST.size` in the script is its radius and the one number to tune.
-5. **Weights:** a head weight for the real rotation about the neck (hair near the head goes with it), a breath weight, an arm weight.
-6. **Surface fields:** two fields are baked per vertex. Their isolines are the light lines on the body, drawn in the fragment shader at native resolution:
+5. **Weights:** a head weight for the real rotation about the neck (the whole head and the hair on it turn as one; the hair's lengths go part of the way), a breath weight, an arm weight, and a bust weight for each breast's own soft motion.
+6. **Surface fields:** two fields are baked per vertex. Their isolines are accent lines on the body, which the current look leaves off (`HOLO.lines`):
    - field A: a flow that springs from the base of the neck, fans along the collarbones, parts round each breast and runs down the belly;
    - field B: lines along the arms, down the neck and up the sides of the face.
 7. **Hair strands:** a root-to-tip field is grown over the hair from the centre parting. Along its smoothed gradient, strands are traced over the hair's surface from evenly spread seeds, up to the parting and down to the tips. Each is resampled, smoothed and lifted a little off the surface.
@@ -39,6 +39,7 @@ Aura is a sculpted feminine bust rendered in 3D in the browser (three.js). Her b
 
 The renderer (`apps/web/src/lib/entity/aura*.ts`) handles the rest:
 
-- the weave of lines, with per-line brightness, thickness and colour, travelling pulses and star dust;
+- the hologram body: the glow shell, a slow shimmer, and tens of thousands of motes of light on the surface that drift, twinkle and gather where the form turns away;
+- the motion: the head's turn, the upper body following it a little, the breath, and a soft spring per breast;
 - the hair: the baked strands are drawn as thin ribbons of light on the dark, matte sculpted mass; both sway in the wind toward the tips and follow the head a little late, and loose strands (verlet guide strands, with thin strands drawn from them) move round them;
 - the glowing silhouette.

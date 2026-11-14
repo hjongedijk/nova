@@ -532,10 +532,10 @@ computeNormals();
 // BUST.size is the ball's radius in metres and is the one number to tune: about 4 mm per cup size; the
 // sculpt's own bust is about 0.045.
 const BUST = {
-  size: 0.061,
-  apart: 0.075,
-  lower: 0.008,
-  forward: 0.037,
+  size: 0.071,
+  apart: 0.08,
+  lower: 0.012,
+  forward: 0.046,
   join: 45,
   blend: 6,
   slope: 36,
@@ -642,7 +642,11 @@ for (let i = 0; i < nVerts; i++) {
   const p = vAt(i);
   const h = smooth(0.25, 0.75, hair[i]);
   const bodyHead = smooth(M.neck + 0.005, M.neck + 0.075, p[1]);
-  const hairHead = smooth(M.shoulder + 0.01, M.chin + 0.02, p[1]);
+  // The whole head turns as one: face, skull, scalp and the hair on it. Below the jaw the hair's lengths
+  // still go a good part of the way (they hang from the head), less toward the tips.
+  const lengths = 0.12 + 0.3 * smooth(M.cut + 0.1, M.shoulder, p[1]);
+  const hairHead =
+    lengths + (1 - lengths) * smooth(M.shoulder + 0.02, M.chin - 0.01, p[1]);
   headW[i] = bodyHead + (hairHead - bodyHead) * h;
   const d = len(sub(p, chestC));
   breathW[i] =
@@ -655,6 +659,22 @@ for (let i = 0; i < nVerts; i++) {
     (1 - h) *
     smooth(armFrom - 0.015, armFrom + 0.015, Math.abs(p[0])) *
     (1 - smooth(M.shoulder - 0.03, M.shoulder + 0.02, p[1]));
+}
+
+/* ---------- the bust's own weight: how far each point goes along when a breast moves ---------- */
+// Signed: positive on her left breast, negative on her right, most at the apex and nothing at the chest wall.
+const bustW = new Float32Array(nVerts);
+for (let i = 0; i < nVerts; i++) {
+  const p = vAt(i);
+  if (hair[i] > 0.5 || Math.abs(p[0]) > M.armInner + 0.01) continue;
+  for (const c of [breast.l, breast.r]) {
+    const d =
+      Math.hypot(p[0] - c[0], p[1] - c[1], (p[2] - c[2]) * 0.8) / BUST.size;
+    const w =
+      (1 - smooth(0.15, 1.15, d)) *
+      smooth(c[2] - BUST.size * 1.1, c[2] - BUST.size * 0.35, p[2]);
+    bustW[i] += w * Math.sign(c[0]) * (1 - smooth(0.2, 0.6, hair[i]));
+  }
 }
 
 /* ---------- surface fields: their isolines are the light lines, drawn in the shader ---------- */
@@ -670,7 +690,7 @@ const FLOW = {
   source: [0, M.neck + 0.02],
   scale: 0.12,
   round: 1.0,
-  offset: 0.5 * 0.0065,
+  offset: 0.5 * 0.02,
 };
 const fieldA = new Float32Array(nVerts);
 const fieldB = new Float32Array(nVerts);
@@ -1071,7 +1091,7 @@ function allHits(x, y) {
 const usedMap = new Int32Array(nVerts).fill(-1);
 let vcount = 0;
 for (const i of tris) if (usedMap[i] < 0) usedMap[i] = vcount++;
-const vstride = 40;
+const vstride = 44;
 const vbuf = new Uint8Array(vcount * vstride);
 const dv = new DataView(vbuf.buffer);
 const bbMin = [1e9, 1e9, 1e9];
@@ -1092,6 +1112,7 @@ for (let i = 0; i < nVerts; i++) {
   dv.setUint16(o + 30, u16(armW[i]), true);
   dv.setFloat32(o + 32, fieldA[i], true);
   dv.setFloat32(o + 36, fieldB[i], true);
+  dv.setUint16(o + 40, u16(0.5 + 0.5 * bustW[i]), true);
 }
 const idx = Uint32Array.from(tris, (i) => usedMap[i]);
 const glbSize = writeGlb(
@@ -1122,6 +1143,7 @@ const glbSize = writeGlb(
     { name: "_ARM", offset: 30, type: 5123, kind: "SCALAR", normalized: true },
     { name: "_FA", offset: 32, type: 5126, kind: "SCALAR" },
     { name: "_FB", offset: 36, type: 5126, kind: "SCALAR" },
+    { name: "_BUST", offset: 40, type: 5123, kind: "SCALAR", normalized: true },
   ],
   "NOVA aura-figure.mjs (our own sculpt, Hunyuan3D-2)",
 );

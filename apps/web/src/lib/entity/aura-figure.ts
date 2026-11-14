@@ -118,7 +118,14 @@ export function sampleSurface(
   index: ArrayLike<number>,
   count: number,
   seed = 7,
-): { position: Float32Array; normal: Float32Array; seed: Float32Array } {
+  /** Up to four more per-vertex weights to carry along (interpolated). */
+  more: readonly ArrayLike<number>[] = [],
+): {
+  position: Float32Array;
+  normal: Float32Array;
+  seed: Float32Array;
+  extra: Float32Array;
+} {
   const rand = mulberry(seed);
   const tris = index.length / 3;
   const area = new Float64Array(tris + 1);
@@ -139,6 +146,7 @@ export function sampleSurface(
   const position = new Float32Array(count * 3);
   const normal = new Float32Array(count * 3);
   const seeds = new Float32Array(count * 4);
+  const extra = new Float32Array(count * 4);
   for (let k = 0; k < count; k++) {
     // Stratified: one sample per equal slice of the total area.
     const target = ((k + rand()) / count) * total;
@@ -170,6 +178,10 @@ export function sampleSurface(
       normal[k * 3 + c] = n;
     }
     for (let j = 0; j < 3; j++) hw += head[ids[j]!]! * w[j]!;
+    more.slice(0, 4).forEach((m, c) => {
+      for (let j = 0; j < 3; j++)
+        extra[k * 4 + c] = extra[k * 4 + c]! + m[ids[j]!]! * w[j]!;
+    });
     seeds.set([rand(), hw, rand(), rand()], k * 4);
   }
   // Shuffle so any prefix is an even sample (a lower budget draws fewer).
@@ -179,6 +191,7 @@ export function sampleSurface(
       [position, 3],
       [normal, 3],
       [seeds, 4],
+      [extra, 4],
     ] as const)
       for (let c = 0; c < k; c++) {
         const tmp = arr[i * k + c]!;
@@ -186,7 +199,7 @@ export function sampleSurface(
         arr[j * k + c] = tmp;
       }
   }
-  return { position, normal, seed: seeds };
+  return { position, normal, seed: seeds, extra };
 }
 
 /* ---------------------------------------------------------------- hair ---------------------------------------------------------------- */

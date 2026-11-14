@@ -12,7 +12,7 @@ export const LINES = { warmColour: "#ffb27a", amberColour: "#ffcf73" } as const;
 /** The weave: light lines drawn as isolines of fields baked on the surface (scripts/aura-figure.mjs). */
 export const WEAVE = {
   /** Distance between neighbouring lines on the torso, neck and face (m), and round the arms. */
-  spacing: 0.0065,
+  spacing: 0.02,
   armSpacing: 0.03,
   neckSpacing: 0.0075,
   /** The middle of each breast stays calm: no lines nearer its apex than this (m). */
@@ -25,12 +25,50 @@ export const WEAVE = {
   /** Share of lines that run warm (gold, peach). */
   warm: 0.3,
   /** How much of the weave shows: chest, waist, arms, face. */
-  chest: 0.8,
-  waist: 0.62,
+  chest: 0.55,
+  waist: 0.45,
   arms: 0.85,
   armGain: 0.8,
   face: 0.45,
   faceGain: 0.45,
+} as const;
+
+/** Breath: how far the chest rises along its normal (m). */
+export const BREATH = { amount: 0.0035 } as const;
+
+/**
+ * The hologram: her body is a volume of light. A glow shell (brightest at the silhouette, falling off inward), a
+ * dense dust of light living on her surface, a slow shimmer travelling up her, and at most a few soft accent lines.
+ */
+export const HOLO = {
+  /** The glow shell: strength, and how fast it falls off inward (higher is thinner). */
+  shell: 1.7,
+  shellPower: 2.2,
+  /** The accent lines' strength (0: none). */
+  lines: 0.0,
+  /** The shimmer: strength, seconds per pass, width of the band (m). */
+  shimmer: 1.0,
+  period: 6.5,
+  band: 0.05,
+  /** The dust: strength, size range in device pixels, how far a mote drifts in its life (m), lives per second. */
+  dust: 1.7,
+  dustSize: [1.1, 2.6],
+  drift: 0.016,
+  pace: 0.07,
+  /** How much the dust gathers where the form turns away (it sculpts her). */
+  gather: 1.7,
+} as const;
+
+/** The upper body goes a little with the head when she turns to look: share of the head's yaw, and a slight lean. */
+export const FOLLOW = { yaw: 0.18, lean: 0.06, pitch: 0.08 } as const;
+
+/** The bust's own motion: a soft spring per breast. Period (s), damping ratio, gain, and the most it moves (m). */
+export const JIGGLE = {
+  period: 0.46,
+  damping: 0.3,
+  gain: 1.5,
+  most: 0.011,
+  phase: 0.07,
 } as const;
 
 /** The hair mass: how far the tips sway in the wind (m per unit of wind) and ripple on their own (m). */
@@ -40,7 +78,7 @@ export const SWAY = { wind: 0.0045, most: 0.022, ripple: 0.0022 } as const;
 export const SKIN = {
   base: "#06030c",
   rim: 1.1,
-  sparkle: 1.3,
+  sparkle: 0.6,
 } as const;
 
 /** The hair's strands: streamlines baked on the sculpted hair, drawn as thin ribbons of light. */
@@ -64,9 +102,6 @@ export const HAIRLOOK = {
   sheen: 0.8,
 } as const;
 
-/** Breath: how far the chest rises along its normal (m). */
-export const BREATH = { amount: 0.0035 } as const;
-
 export function rgb(hex: string): string {
   // sRGB hex to a linear vec3 literal.
   const n = parseInt(hex.slice(1), 16);
@@ -88,6 +123,9 @@ float noise(vec2 p) {
 uniform mat3 uHead;
 uniform vec3 uPivot;
 vec3 headXform(vec3 p, float w) { return mix(p, uPivot + uHead * (p - uPivot), w); }
+uniform mat3 uBody;
+uniform vec3 uBodyPivot;
+vec3 bodyXform(vec3 p) { return uBodyPivot + uBody * (p - uBodyPivot); }
 ${ARRIVAL_GLSL}
 `;
 
@@ -100,6 +138,13 @@ const HAIRMOVE = /* glsl */ `
 uniform mat3 uHeadLag;
 uniform vec2 uSway;
 uniform float uWaist;
+uniform float uBreath;
+uniform vec3 uJigL;
+uniform vec3 uJigR;
+// The skin's own motion: the breath, and each breast's spring (bust is signed: her left positive).
+vec3 skinMove(vec3 p, vec3 n, float breath, float bust) {
+  return p + n * breath * uBreath * ${f(BREATH.amount)} + uJigL * max(bust, 0.0) + uJigR * max(-bust, 0.0);
+}
 vec3 hairMove(vec3 p, vec3 rest, float head, float hair) {
   vec3 hp = headXform(p, head);
   float lengths = hair * (1.0 - smoothstep(uPivot.y - 0.02, uPivot.y + 0.16, rest.y));
@@ -188,7 +233,7 @@ attribute float _hair;
 attribute float _fa;
 attribute float _fb;
 attribute float _arm;
-uniform float uBreath;
+attribute float _bust;
 uniform float uT;
 uniform float uMotion;
 varying vec3 vWorld;
@@ -202,12 +247,12 @@ varying float vArm;
 ${COMMON}
 ${HAIRMOVE}
 void main() {
-  vec3 p = position + normal * _breath * uBreath * ${f(BREATH.amount)};
+  vec3 p = skinMove(position, normal, _breath, _bust * 2.0 - 1.0);
   vec3 hp = hairMove(p, position, _head, _hair);
   vec3 n = normalize(mix(normal, uHead * normal, _head));
-  vec4 w = modelMatrix * vec4(hp, 1.0);
+  vec4 w = modelMatrix * vec4(bodyXform(hp), 1.0);
   vWorld = w.xyz;
-  vNormal = normalize(mat3(modelMatrix) * n);
+  vNormal = normalize(mat3(modelMatrix) * (uBody * n));
   vObj = position;
   vHead = _head;
   vHair = _hair;
@@ -230,6 +275,9 @@ varying float vFb;
 varying float vArm;
 uniform float uPx;
 uniform float uShoulder;
+uniform float uShell;
+uniform float uLines;
+uniform float uShimmer;
 uniform vec3 uFaceRest;
 uniform float uWaist;
 uniform vec3 uElbowL;
@@ -304,8 +352,17 @@ void main() {
   float inner = mix(0.25, 1.0, smoothstep(0.03, 0.1, min(length(bl), length(br))));
   // The hair mass has only a soft violet rim: its light is its strands.
   col += (edgeC * edgeCore * 4.2 * inner * (1.0 - hairM) + mix(A, B, 0.35) * edgeHalo * ${f(SKIN.rim)} * mix(1.0, 0.16, hairM)) * glow * down;
-  /* the weave: her whole body woven with light */
-  {
+  /* the glow shell: she is a volume of light, brightest where she turns away, violet into magenta, gold in places */
+  vec3 shellC = mix(mix(A, Rc, 0.35 + 0.4 * edgeV), ${rgb("#ffc27a")}, goldZone * 0.25);
+  float shell = pow(edgeV, ${f(HOLO.shellPower)}) * (0.35 + 0.65 * down) * mix(1.0, 0.3, hairM);
+  // A slow band of light travels up her, and a whisper of fine scan texture rides on the shell.
+  float pass = fract(uT * uMotion / ${f(HOLO.period)});
+  float bandY = mix(uWaist - 0.05, uPivot.y + 0.36, pass);
+  float band = exp(-pow((vObj.y - bandY) / ${f(HOLO.band)}, 2.0)) * uShimmer * uMotion * (1.0 - hairM);
+  float scan = 1.0 + 0.05 * uShimmer * sin(gl_FragCoord.y * 2.4 / uPx);
+  col += shellC * (shell * scan * (1.0 + 1.4 * band) + 0.07 * band) * 0.3 * uShell * glow;
+  /* a few accent lines, where the look asks for them */
+  if (uLines > 0.001) {
     float accent = mix(uAccent.x, uAccent.y, inside);
     float along = vObj.y * 130.0 + vObj.x * 20.0;
     // Dense over the chest, collarbones and neck, thinning toward the waist; calm on the arms.
@@ -328,7 +385,7 @@ void main() {
     wv += weave(vFb / ${f(WEAVE.neckSpacing)}, 9.0, ${f(WEAVE.face)}, along, A, B, accent) * (neckLines + faceLines) * armBand;
     wv *= 1.0 - hairM;
     // Lines turned edge-on dim a little; the rim takes over there.
-    col += wv * glow * (0.45 + 0.55 * NdV);
+    col += wv * glow * (0.45 + 0.55 * NdV) * uLines;
   }
   // A faint inner glow, as if light lived under the glass.
   col += A * 0.01 * pow(NdV, 2.0) * glow;
@@ -390,9 +447,9 @@ ${COMMON}
 ${MOOD}
 ${HAIRMOVE}
 void main() {
-  vec3 p = hairMove(position, position, aInfo.w, 1.0);
+  vec3 p = bodyXform(hairMove(position, position, aInfo.w, 1.0));
   vec3 q = position + aTan * 0.01;
-  q = hairMove(q, q, aInfo.w, 1.0);
+  q = bodyXform(hairMove(q, q, aInfo.w, 1.0));
   vec4 wp = modelMatrix * vec4(p, 1.0);
   vec4 cp = projectionMatrix * viewMatrix * wp;
   vec4 cq = projectionMatrix * viewMatrix * modelMatrix * vec4(q, 1.0);
@@ -493,9 +550,9 @@ vec3 strandAt(float u) {
 void main() {
   float u = aK.x;
   float du = 1.0 / 24.0;
-  vec3 p = strandAt(u);
-  vec3 q = strandAt(min(1.0, u + du));
-  vec3 r = strandAt(max(0.0, u - du));
+  vec3 p = bodyXform(strandAt(u));
+  vec3 q = bodyXform(strandAt(min(1.0, u + du)));
+  vec3 r = bodyXform(strandAt(max(0.0, u - du)));
   vec3 tg = normalize(u < 1.0 ? q - p : p - r);
   vec4 cp = projectionMatrix * viewMatrix * vec4(p, 1.0);
   vec4 cq = projectionMatrix * viewMatrix * vec4(p + tg * 0.01, 1.0);
@@ -584,7 +641,7 @@ varying float vTw;
 ${COMMON}
 ${MOOD}
 void main() {
-  vec3 p = headXform(position, aHead);
+  vec3 p = bodyXform(headXform(position, aHead));
   vec4 cp = projectionMatrix * viewMatrix * vec4(p, 1.0);
   vTw = 0.7 + 0.3 * sin(uT * (0.9 + aSeed * 1.7) * uMotion + aSeed * 20.0);
   if (uTau < ${f(BIRTH.total)}) vTw *= smoothstep(${f(BIRTH.ringAt - 0.6)}, ${f(BIRTH.ringAt)}, uTau);
@@ -607,18 +664,28 @@ void main() {
 }
 `;
 
-/* ---------------- the birth particles ---------------- */
+/* ---------------- the dust of light: she is born from it, and it stays on her ---------------- */
 
 export const POINTS_VERT = /* glsl */ `
 attribute vec4 aSeed;   // random, head weight, random, random
+attribute vec4 aExtra;  // hair, breath weight, bust weight (signed), arm
 uniform vec3 uSource;
 uniform float uPx;
 uniform float uSize;
+uniform float uDust;
 varying vec3 vCol;
 ${COMMON}
 ${MOOD}
+${HAIRMOVE}
 void main() {
-  vec3 home = headXform(position, aSeed.y);
+  // Living on the surface: each mote fades in, drifts a little along her (down and outward, in the surface) and
+  // fades out, then starts again. Without motion it rests.
+  float life = fract(uT * uMotion * ${f(HOLO.pace)} * (0.6 + 0.8 * aSeed.z) + aSeed.x * 7.0);
+  vec3 way = vec3(sign(position.x) * 0.35, -1.0, 0.0);
+  way = normalize(way - normal * dot(way, normal) + 1e-5);
+  vec3 rest = position + normal * 0.0012 + way * (life - 0.5) * ${f(HOLO.drift)} * uMotion;
+  vec3 home = bodyXform(hairMove(skinMove(rest, normal, aExtra.y, aExtra.z), rest, aSeed.y, aExtra.x));
+  vec3 n = uBody * mix(normal, uHead * normal, aSeed.y);
   float face = aSeed.y * smoothstep(0.0, 0.05, position.z - uFace.z + 0.06);
   float ar = arrival(position.y, face, aSeed.w);
   float launch = ar - ${f(BIRTH.flight)};
@@ -628,11 +695,33 @@ void main() {
   float ek = 1.0 - pow(1.0 - k, 3.0);
   vec3 pos = mix(mix(src, mid, ek), mix(mid, home, ek), ek);
   float landed = smoothstep(ar, ar + ${f(BIRTH.settle)}, uTau);
-  float gain = step(launch, uTau) * (1.0 - landed);
-  vCol = mix(mix(uA1, vec3(1.0), 0.4), mix(uB1, vec3(1.0), 0.3), aSeed.z) * gain * (0.5 + 0.8 * face);
-  vec4 cp = projectionMatrix * viewMatrix * vec4(pos, 1.0);
-  gl_Position = gain < 0.003 ? vec4(2.0, 2.0, 2.0, 1.0) : cp;
-  gl_PointSize = gain < 0.003 ? 0.0 : uSize * uPx * (1.0 + (1.0 - k) * 1.5);
+  float flying = step(launch, uTau) * (1.0 - landed);
+  vec3 flight = mix(mix(uA1, vec3(1.0), 0.4), mix(uB1, vec3(1.0), 0.3), aSeed.z) * flying * (0.5 + 0.8 * face);
+  // Landed, a mote is dust: brighter where she turns away from the eye (it sculpts her form), twinkling.
+  vec3 V = normalize(cameraPosition - home);
+  float NdV = dot(normalize(n), V);
+  float edge = pow(1.0 - clamp(NdV, 0.0, 1.0), 1.6);
+  float dist = length(home - uFace);
+  float inside = 1.0 - smoothstep(uBloomR - 0.05, uBloomR, dist);
+  vec3 A = mix(uA0, uA1, inside);
+  vec3 B = mix(uB0, uB1, inside);
+  float glow = mix(uGlow.x, uGlow.y, inside) * (1.0 + uAudio * 0.5);
+  float h = hash11(aSeed.x * 53.0 + 1.7);
+  vec3 c = mix(mix(A, B, aSeed.z), ${rgb("#ffc27a")}, step(0.84, h));
+  c = mix(c, vec3(1.0, 0.92, 1.0), 0.35 + 0.4 * edge);
+  float twinkle = 0.55 + 0.45 * sin(uT * (1.2 + 3.0 * h) * uMotion + h * 40.0);
+  float fade = mix(1.0, sin(3.14159 * life), uMotion);
+  float bright = 0.06 + 0.94 * pow(aSeed.w, 3.0);
+  float dust = landed * (1.0 - aExtra.x) * step(0.0, NdV) * (0.22 + ${f(HOLO.gather)} * edge) * twinkle * fade * (0.35 + bright)
+    * uDust * ${f(HOLO.dust)} * glow;
+  // Where she ends (the waist, the elbows) the dust thins out with her.
+  dust *= smoothstep(uWaist + 0.005, uWaist + 0.09, position.y);
+  vCol = flight * 0.5 + c * dust * 0.55;
+  float any = flying + dust;
+  vec4 cp = projectionMatrix * viewMatrix * vec4(mix(pos, home, landed), 1.0);
+  gl_Position = any < 0.003 ? vec4(2.0, 2.0, 2.0, 1.0) : cp;
+  float size = mix(uSize * (1.0 + (1.0 - k) * 1.5), mix(${f(HOLO.dustSize[0])}, ${f(HOLO.dustSize[1])}, bright), landed);
+  gl_PointSize = any < 0.003 ? 0.0 : size * uPx;
 }
 `;
 
@@ -643,6 +732,6 @@ void main() {
   vec2 d = gl_PointCoord * 2.0 - 1.0;
   float r2 = dot(d, d);
   if (r2 > 1.0) discard;
-  gl_FragColor = vec4(vCol * (1.0 - r2) * (1.0 - r2) * 0.5, 1.0);
+  gl_FragColor = vec4(vCol * (1.0 - r2) * (1.0 - r2), 1.0);
 }
 `;
