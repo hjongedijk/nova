@@ -13,6 +13,7 @@ Aura is a sculpted feminine bust rendered in 3D in the browser (three.js). Her b
 | `scripts/assets/aura-sculpt.glb`        | The source sculpt, decimated to about 180k triangles (positions)   |
 | `apps/web/static/aura/aura-figure.glb`  | The mesh: glTF with `EXT_meshopt_compression`, about 65k triangles |
 | `apps/web/static/aura/aura-figure.json` | Landmarks and a distance field of the figure                       |
+| `apps/web/static/aura/aura-strands.bin` | The hair's strands: about 1,700 lines over the sculpted hair       |
 | `apps/web/static/aura/aura-still.webp`  | A still of the 3D figure, for browsers without WebGL2              |
 
 ### Source and licence
@@ -30,14 +31,14 @@ Aura is a sculpted feminine bust rendered in 3D in the browser (three.js). Her b
 3. **Faceless and abstract:** the face's distance from the middle of the head is smoothed until eyes, nose and lips are gone; skull, cheekbones, jaw and chin stay. The chest and belly are smoothed until no anatomical detail is left.
 4. **Bust:** each breast is replaced by a round form (a ball set into the chest, with the join smoothed). `BUST.size` in the script is its radius and the one number to tune.
 5. **Weights:** a head weight for the real rotation about the neck (hair near the head goes with it), a breath weight, an arm weight.
-6. **Surface fields:** three fields are baked per vertex. Their isolines are the light lines, drawn in the fragment shader at native resolution:
-   - field A: the distance from each shoulder (long arcs from the collarbone round the bust and down the flank);
-   - field B: rings round the bust, lines along the arms, lines down the neck and up the sides of the face;
-   - field H: the hair's strands, which meet at the crown and fall down the lengths.
-7. **Distance field:** a signed distance field of the figure at 1 cm resolution, which the loose strands rest on.
+6. **Surface fields:** two fields are baked per vertex. Their isolines are the light lines on the body, drawn in the fragment shader at native resolution:
+   - field A: a flow that springs from the base of the neck, fans along the collarbones, parts round each breast and runs down the belly;
+   - field B: lines along the arms, down the neck and up the sides of the face.
+7. **Hair strands:** a root-to-tip field is grown over the hair from the centre parting. Along its smoothed gradient, strands are traced over the hair's surface from evenly spread seeds, up to the parting and down to the tips. Each is resampled, smoothed and lifted a little off the surface.
+8. **Distance field:** a signed distance field of the figure at 1 cm resolution, which the loose strands rest on.
 
 The renderer (`apps/web/src/lib/entity/aura*.ts`) handles the rest:
 
 - the weave of lines, with per-line brightness, thickness and colour, travelling pulses and star dust;
-- the hair: the sculpted mass sways in the wind toward its tips and follows the head a little late, and loose strands (verlet guide strands, with thin strands drawn from them) move round it;
+- the hair: the baked strands are drawn as thin ribbons of light on the dark, matte sculpted mass; both sway in the wind toward the tips and follow the head a little late, and loose strands (verlet guide strands, with thin strands drawn from them) move round them;
 - the glowing silhouette.

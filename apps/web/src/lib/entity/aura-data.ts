@@ -12,6 +12,8 @@ export const AURA_ASSETS = {
   mesh: "/aura/aura-figure.glb",
   /** Landmarks (metres) and a distance field of the figure. */
   figure: "/aura/aura-figure.json",
+  /** The hair's strands: baked streamlines (see decodeStrands). */
+  strands: "/aura/aura-strands.bin",
   /** A still of the 3D figure, for browsers without WebGL2. */
   still: "/aura/aura-still.webp",
 } as const;
@@ -29,6 +31,8 @@ export interface FigureJson {
   waist: number;
   /** Where the hair starts above the face (height, m). */
   hairline: number;
+  /** The box the strands' points are stored in. */
+  strands: { min: [number, number, number]; max: [number, number, number] };
   bounds: { min: [number, number, number]; max: [number, number, number] };
   /** The body's signed distance field (int8 mm, base64), for the hair. */
   sdf: { cell: number; min: number[]; dims: number[]; data: string };

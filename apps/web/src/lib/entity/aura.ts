@@ -10,7 +10,9 @@ import {
   type FigureJson,
 } from "./aura-data.ts";
 import {
+  buildStrandRibbons,
   decodeSdf,
+  decodeStrands,
   growHair,
   HAIR,
   sampleSurface,
@@ -29,15 +31,25 @@ import {
   ROOM_VERT,
   STAR_FRAG,
   STAR_VERT,
+  STRAND_FRAG,
+  STRAND_VERT,
+  STRANDLOOK,
   SWAY,
 } from "./aura-shaders.ts";
 
-export { BREATH, HAIRLOOK, LINES, SKIN, SWAY } from "./aura-shaders.ts";
+export {
+  BREATH,
+  HAIRLOOK,
+  LINES,
+  SKIN,
+  STRANDLOOK,
+  SWAY,
+} from "./aura-shaders.ts";
 
 /**
- * AURA: a real-time 3D being of light. A sculpted feminine bust of dark glossy glass with long sculpted hair (our
- * own sculpt, made faceless), light lines flowing over her surface, loose strands of light moved by simulated
- * guides round her hair, in a room of violet smoke. Her head truly turns toward the pointer and has
+ * AURA: a real-time 3D being of light. A sculpted feminine bust, near-black, with long sculpted hair (our own
+ * sculpt, made faceless), a silhouette of light, light lines flowing over her surface, hair drawn by strands of
+ * light with loose strands moved by simulated guides round it, in a room of violet smoke. Her head truly turns toward the pointer and has
  * its own small life; moods bloom out from her face; she is born from particles that settle onto her surface.
  *
  * Same contract as the Gestalte (entity.ts drives both): a canvas under the entity's 2D canvas, built lazily.
@@ -89,6 +101,8 @@ export interface AuraStats {
   renderer: string;
   mobile: boolean;
   triangles: number;
+  /** Baked strands drawn on the sculpted hair. */
+  hairLines: number;
   hairStrands: number;
   hairGuides: number;
   scale: number;
@@ -382,11 +396,15 @@ async function createGlAura(
   /* the figure */
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
-  const [gltf, fig] = await Promise.all([
+  const [gltf, fig, strandData] = await Promise.all([
     loader.loadAsync(AURA_ASSETS.mesh),
     fetch(AURA_ASSETS.figure).then((r) => {
       if (!r.ok) throw new Error(`${AURA_ASSETS.figure}: ${r.status}`);
       return r.json() as Promise<FigureJson>;
+    }),
+    fetch(AURA_ASSETS.strands).then((r) => {
+      if (!r.ok) throw new Error(`${AURA_ASSETS.strands}: ${r.status}`);
+      return r.arrayBuffer();
     }),
   ]);
   let bodyGeo: ThreeModule.BufferGeometry | null = null;
@@ -454,7 +472,6 @@ async function createGlAura(
     uChest: { value: chest },
     uWaist: { value: fig.waist },
     uShoulder: { value: fig.shoulders[0]![1] },
-    uCrown: { value: fig.head.c[1] + fig.head.r[1] },
     uHeadLag: { value: new THREE.Matrix3() },
     uSway: { value: new THREE.Vector2(0, 0) },
     uChin: { value: fig.head.c[1] - fig.head.r[1] },
@@ -526,6 +543,38 @@ async function createGlAura(
     depthWrite: false,
     depthTest: true,
   } as const;
+  /* the hair's strands: baked streamlines over the sculpted hair, as ribbons of light */
+  const strandSet = decodeStrands(strandData, fig.strands);
+  const ribbons = buildStrandRibbons(strandSet);
+  const strandGeo = new THREE.BufferGeometry();
+  strandGeo.setAttribute(
+    "position",
+    new THREE.BufferAttribute(ribbons.position, 3),
+  );
+  strandGeo.setAttribute("aTan", new THREE.BufferAttribute(ribbons.tangent, 3));
+  strandGeo.setAttribute("aInfo", new THREE.BufferAttribute(ribbons.info, 4));
+  strandGeo.setIndex(new THREE.BufferAttribute(ribbons.index, 1));
+  const hairLines = Math.max(
+    1,
+    Math.round(strandSet.lines * STRANDLOOK.share[tier]),
+  );
+  strandGeo.setDrawRange(0, ribbons.ends[hairLines - 1] ?? 0);
+  const strandMat = new THREE.ShaderMaterial({
+    uniforms: U,
+    vertexShader: STRAND_VERT,
+    fragmentShader: STRAND_FRAG,
+    ...additive,
+    side: THREE.DoubleSide,
+    // They lie a couple of millimetres off the hair: a small pull toward the camera keeps its ridges from cutting them.
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -6,
+  });
+  const strandMesh = new THREE.Mesh(strandGeo, strandMat);
+  strandMesh.frustumCulled = false;
+  strandMesh.renderOrder = 2;
+  scene.add(strandMesh);
+
   /* star points where lines meet */
   {
     const [bl] = fig.breasts as [number, number, number][];
@@ -800,6 +849,7 @@ async function createGlAura(
         renderer: rendererName,
         mobile,
         triangles,
+        hairLines,
         hairStrands: strands,
         hairGuides: hair.guides,
         scale,
@@ -959,8 +1009,8 @@ async function createGlAura(
       lastT = -1;
     },
     dispose() {
-      for (const g of [quad, geo, hairGeo, pointsGeo]) g.dispose();
-      for (const m of [roomMat, bodyMat, hairMat]) m.dispose();
+      for (const g of [quad, geo, strandGeo, hairGeo, pointsGeo]) g.dispose();
+      for (const m of [roomMat, bodyMat, strandMat, hairMat]) m.dispose();
       guideTex.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
@@ -972,6 +1022,7 @@ async function createGlAura(
     (window as unknown as { __novaAuraParts?: object }).__novaAuraParts = {
       room,
       body,
+      strandMesh,
       hairMesh,
       points,
       hair,
@@ -1045,6 +1096,7 @@ function createStaticAura(under: HTMLCanvasElement): Aura {
         renderer: "",
         mobile: false,
         triangles: 0,
+        hairLines: 0,
         hairStrands: 0,
         hairGuides: 0,
         scale: 1,

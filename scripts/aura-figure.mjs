@@ -6,7 +6,8 @@
 //
 // With a raw sculpt (hundreds of thousands of triangles) it first writes a decimated, compressed copy to
 // scripts/assets/aura-sculpt.glb; that copy is the committed source and is what a run without arguments reads.
-// Writes apps/web/static/aura/aura-figure.glb (EXT_meshopt_compression) and aura-figure.json.
+// Writes apps/web/static/aura/aura-figure.glb (EXT_meshopt_compression), aura-figure.json and
+// aura-strands.bin (the hair's strands).
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -497,7 +498,7 @@ const chestMask = (i) =>
         ? 1
         : 0;
     }),
-    30,
+    160,
   );
   // The whole body a little, the chest more, the belly most.
   relax(
@@ -665,20 +666,14 @@ for (let i = 0; i < nVerts; i++) {
 //    on the neck the distance from the midline (lines running down it), on the face a fan that opens from
 //    under the chin (lines up the cheeks and temples). On the chest it holds the distance from the nearer
 //    breast's apex, which the shader uses to keep the middle of each breast calm.
-// H: the hair's strands: the angle round a vertical axis. On top of the head the axis stands in the crown, so
-//    the strands meet there and at the parting; lower down it stands well behind her, so the strands fall
-//    straight down every lock, also the ones in front of the shoulders. The field is then smoothed over
-//    the surface, so the strands run over the sculpted ridges instead of tracing every one of them.
 const FLOW = {
   source: [0, M.neck + 0.02],
   scale: 0.12,
   round: 1.0,
-  offset: 0.5 * 0.0125,
+  offset: 0.5 * 0.0065,
 };
-const STRANDS = { scale: 0.2, behind: 0.25, smooth: 30 };
 const fieldA = new Float32Array(nVerts);
 const fieldB = new Float32Array(nVerts);
-const fieldH = new Float32Array(nVerts);
 {
   const from = (p, c, flat) =>
     Math.hypot(p[0] - c[0], p[1] - c[1], (p[2] - c[2]) * flat);
@@ -708,26 +703,255 @@ const fieldH = new Float32Array(nVerts);
       ring + (neck - ring) * smooth(M.shoulder - 0.03, M.shoulder + 0.02, p[1]);
     // No blend at the arm: the shader draws nothing in the band where the two meet.
     fieldB[i] = armW[i] > 0.5 ? round : torso;
-    const q = p;
-    const onTop = smooth(M.chin + 0.1, M.top - 0.03, q[1]);
-    const axis = -STRANDS.behind + (headC[2] - 0.02 + STRANDS.behind) * onTop;
-    fieldH[i] = Math.atan2(q[0], q[2] - axis) * STRANDS.scale;
+  }
+  // The flow is smoothed over the skin, so no line kinks where the mesh is stretched.
+  for (let it = 0; it < 12; it++) {
+    const g = Float32Array.from(fieldA);
+    for (let i = 0; i < nVerts; i++) {
+      if (hair[i] > 0.5 || !nbrList[i].length) continue;
+      let sum = 0;
+      for (const j of nbrList[i]) sum += fieldA[j];
+      g[i] = 0.5 * fieldA[i] + (0.5 * sum) / nbrList[i].length;
+    }
+    fieldA.set(g);
+  }
+}
+
+/* ---------- the hair's strands: streamlines from the parting to the tips ---------- */
+// A root-to-tip field is grown over the hair (the distance over the surface from the parting); its gradient,
+// smoothed heavily, is the way the hair flows. Strands are traced along it over the surface, up to the
+// parting and down to the tips, from seeds spread evenly over the hair; each is resampled, smoothed and
+// lifted a little off the surface. The renderer draws them as thin ribbons of light.
+const STRANDS = {
+  count: 1700,
+  seedGap: 0.0085,
+  step: 0.004,
+  spacing: 0.018,
+  lift: 0.0025,
+  reach: 0.012,
+  smooth: 40,
+  longest: 0.95,
+  shortest: 0.08,
+};
+const strands = [];
+{
+  const isHair = (i) => hair[i] > 0.5 && nbrList[i].length > 0;
+  // The root-to-tip field.
+  const phi = new Float64Array(nVerts).fill(Infinity);
+  const queue = [];
+  for (let i = 0; i < nVerts; i++) {
+    if (!isHair(i)) continue;
+    const [x, y, z] = vAt(i);
+    if (Math.abs(x) < 0.007 && y > M.hairline - 0.015 && z > headC[2] - 0.07) {
+      phi[i] = 0;
+      queue.push(i);
+    }
+  }
+  for (let q = 0; q < queue.length; q++) {
+    const i = queue[q];
+    for (const j of nbrList[i]) {
+      if (!isHair(j)) continue;
+      const d = phi[i] + len(sub(vAt(j), vAt(i)));
+      if (d < phi[j] - 1e-9) {
+        phi[j] = d;
+        queue.push(j);
+      }
+    }
+  }
+  // Its gradient in the surface, smoothed: the flow.
+  const flow = new Float64Array(nVerts * 3);
+  const tangent = (i) => {
+    const d =
+      flow[i * 3] * N[i * 3] +
+      flow[i * 3 + 1] * N[i * 3 + 1] +
+      flow[i * 3 + 2] * N[i * 3 + 2];
+    let l = 0;
+    for (let k = 0; k < 3; k++) {
+      flow[i * 3 + k] -= d * N[i * 3 + k];
+      l += flow[i * 3 + k] ** 2;
+    }
+    l = Math.sqrt(l) || 1;
+    for (let k = 0; k < 3; k++) flow[i * 3 + k] /= l;
+  };
+  for (let i = 0; i < nVerts; i++) {
+    if (!isHair(i) || !isFinite(phi[i])) continue;
+    const p = vAt(i);
+    for (const j of nbrList[i]) {
+      if (!isFinite(phi[j])) continue;
+      const e = sub(vAt(j), p);
+      const l2 = e[0] * e[0] + e[1] * e[1] + e[2] * e[2] || 1;
+      for (let k = 0; k < 3; k++)
+        flow[i * 3 + k] += ((phi[j] - phi[i]) * e[k]) / l2;
+    }
+    tangent(i);
   }
   for (let it = 0; it < STRANDS.smooth; it++) {
-    const g = Float32Array.from(fieldH);
+    const g = Float64Array.from(flow);
     for (let i = 0; i < nVerts; i++) {
-      if (hair[i] < 0.3) continue;
-      let sum = 0;
-      let n = 0;
-      for (const j of nbrList[i]) {
-        // Not across the seam at the back of the head, where the angle jumps.
-        if (Math.abs(fieldH[j] - fieldH[i]) > 0.2) continue;
-        sum += fieldH[j];
-        n++;
-      }
-      if (n) g[i] = 0.5 * fieldH[i] + (0.5 * sum) / n;
+      if (!isHair(i)) continue;
+      for (const j of nbrList[i])
+        for (let k = 0; k < 3; k++) g[i * 3 + k] += flow[j * 3 + k];
     }
-    fieldH.set(g);
+    flow.set(g);
+    for (let i = 0; i < nVerts; i++) if (isHair(i)) tangent(i);
+  }
+  // The hair's vertices in a grid, for a smooth local picture of the surface round any point.
+  const R = STRANDS.reach;
+  const grid = new Map();
+  const cellOf = (p) =>
+    `${Math.floor(p[0] / R)},${Math.floor(p[1] / R)},${Math.floor(p[2] / R)}`;
+  for (let i = 0; i < nVerts; i++) {
+    if (!isHair(i) || !isFinite(phi[i])) continue;
+    const key = cellOf(vAt(i));
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key).push(i);
+  }
+  const around = (p) => {
+    const c = [
+      Math.floor(p[0] / R),
+      Math.floor(p[1] / R),
+      Math.floor(p[2] / R),
+    ];
+    const q = [0, 0, 0];
+    const n = [0, 0, 0];
+    const d = [0, 0, 0];
+    let w = 0;
+    let f = 0;
+    let h = 0;
+    for (let a = -1; a <= 1; a++)
+      for (let b = -1; b <= 1; b++)
+        for (let e = -1; e <= 1; e++)
+          for (const i of grid.get(`${c[0] + a},${c[1] + b},${c[2] + e}`) ??
+            []) {
+            const dx = V[i * 3] - p[0];
+            const dy = V[i * 3 + 1] - p[1];
+            const dz = V[i * 3 + 2] - p[2];
+            const t = 1 - (dx * dx + dy * dy + dz * dz) / (R * R);
+            if (t <= 0) continue;
+            const wi = t * t;
+            w += wi;
+            f += wi * phi[i];
+            h += wi * headW[i];
+            for (let k = 0; k < 3; k++) {
+              q[k] += wi * V[i * 3 + k];
+              n[k] += wi * N[i * 3 + k];
+              d[k] += wi * flow[i * 3 + k];
+            }
+          }
+    if (w < 1e-6) return null;
+    return {
+      q: mul(q, 1 / w),
+      n: norm(n),
+      d: norm(d),
+      phi: f / w,
+      head: h / w,
+    };
+  };
+  const trace = (seed, sign) => {
+    const out = [];
+    let p = seed;
+    let last = sign > 0 ? -Infinity : Infinity;
+    for (let s = 0; s * STRANDS.step < STRANDS.longest; s++) {
+      const m = around(p);
+      if (!m) break;
+      // Onto the surface, then on along the flow.
+      const off =
+        (p[0] - m.q[0]) * m.n[0] +
+        (p[1] - m.q[1]) * m.n[1] +
+        (p[2] - m.q[2]) * m.n[2];
+      p = [p[0] - m.n[0] * off, p[1] - m.n[1] * off, p[2] - m.n[2] * off];
+      // The tip (the field stops growing) or the parting (it has run out).
+      if (sign > 0 ? m.phi < last - 0.004 : m.phi > last + 0.004) break;
+      if (p[1] < M.cut + 0.01) break;
+      last = m.phi;
+      out.push([
+        p[0] + m.n[0] * STRANDS.lift,
+        p[1] + m.n[1] * STRANDS.lift,
+        p[2] + m.n[2] * STRANDS.lift,
+        m.head,
+      ]);
+      if (sign < 0 && m.phi < 0.003) break;
+      const dt = m.d[0] * m.n[0] + m.d[1] * m.n[1] + m.d[2] * m.n[2];
+      const dir = norm([
+        m.d[0] - m.n[0] * dt,
+        m.d[1] - m.n[1] * dt,
+        m.d[2] - m.n[2] * dt,
+      ]);
+      p = [
+        p[0] + dir[0] * STRANDS.step * sign,
+        p[1] + dir[1] * STRANDS.step * sign,
+        p[2] + dir[2] * STRANDS.step * sign,
+      ];
+    }
+    return out;
+  };
+  // Seeds: hair vertices in a random order, none nearer another than the gap; the back of the hair, which
+  // is never seen, gets none.
+  let seedState = 20261114;
+  const rand = () => {
+    seedState = (seedState * 1664525 + 1013904223) >>> 0;
+    return seedState / 4294967296;
+  };
+  const order = [];
+  for (let i = 0; i < nVerts; i++)
+    if (isHair(i) && isFinite(phi[i]) && N[i * 3 + 2] > -0.25) order.push(i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  const taken = new Map();
+  const G = STRANDS.seedGap;
+  for (const i of order) {
+    if (strands.length >= STRANDS.count) break;
+    const p = vAt(i);
+    const c = p.map((v) => Math.floor(v / G));
+    let free = true;
+    for (let a = -1; a <= 1 && free; a++)
+      for (let b = -1; b <= 1 && free; b++)
+        for (let e = -1; e <= 1 && free; e++)
+          for (const q of taken.get(`${c[0] + a},${c[1] + b},${c[2] + e}`) ??
+            [])
+            if (len(sub(p, q)) < G) {
+              free = false;
+              break;
+            }
+    if (!free) continue;
+    const key = c.join(",");
+    if (!taken.has(key)) taken.set(key, []);
+    taken.get(key).push(p);
+    const up = trace(p, -1).reverse();
+    const line = up.concat(trace(p, 1).slice(1));
+    // Resample evenly, then smooth.
+    let total = 0;
+    for (let k = 1; k < line.length; k++)
+      total += len(sub(line[k], line[k - 1]));
+    if (total < STRANDS.shortest) continue;
+    const n = Math.max(4, Math.round(total / STRANDS.spacing) + 1);
+    const pts = [];
+    let k = 1;
+    let walked = 0;
+    for (let s = 0; s < n; s++) {
+      const want = (s / (n - 1)) * total;
+      while (
+        k < line.length - 1 &&
+        walked + len(sub(line[k], line[k - 1])) < want
+      ) {
+        walked += len(sub(line[k], line[k - 1]));
+        k++;
+      }
+      const seg = len(sub(line[k], line[k - 1])) || 1;
+      const t = Math.max(0, Math.min(1, (want - walked) / seg));
+      pts.push(line[k - 1].map((v, c2) => v + (line[k][c2] - v) * t));
+    }
+    for (let pass = 0; pass < 3; pass++) {
+      const g = pts.map((q) => q.slice());
+      for (let s = 1; s < n - 1; s++)
+        for (let c2 = 0; c2 < 4; c2++)
+          g[s][c2] =
+            0.25 * pts[s - 1][c2] + 0.5 * pts[s][c2] + 0.25 * pts[s + 1][c2];
+      for (let s = 0; s < n; s++) pts[s] = g[s];
+    }
+    strands.push(pts);
   }
 }
 
@@ -847,7 +1071,7 @@ function allHits(x, y) {
 const usedMap = new Int32Array(nVerts).fill(-1);
 let vcount = 0;
 for (const i of tris) if (usedMap[i] < 0) usedMap[i] = vcount++;
-const vstride = 44;
+const vstride = 40;
 const vbuf = new Uint8Array(vcount * vstride);
 const dv = new DataView(vbuf.buffer);
 const bbMin = [1e9, 1e9, 1e9];
@@ -868,7 +1092,6 @@ for (let i = 0; i < nVerts; i++) {
   dv.setUint16(o + 30, u16(armW[i]), true);
   dv.setFloat32(o + 32, fieldA[i], true);
   dv.setFloat32(o + 36, fieldB[i], true);
-  dv.setFloat32(o + 40, fieldH[i], true);
 }
 const idx = Uint32Array.from(tris, (i) => usedMap[i]);
 const glbSize = writeGlb(
@@ -899,10 +1122,41 @@ const glbSize = writeGlb(
     { name: "_ARM", offset: 30, type: 5123, kind: "SCALAR", normalized: true },
     { name: "_FA", offset: 32, type: 5126, kind: "SCALAR" },
     { name: "_FB", offset: 36, type: 5126, kind: "SCALAR" },
-    { name: "_FH", offset: 40, type: 5126, kind: "SCALAR" },
   ],
   "NOVA aura-figure.mjs (our own sculpt, Hunyuan3D-2)",
 );
+
+/* ---------- write the hair's strands ---------- */
+// Line count, then each line's point count (16 bit), then per point x, y, z as 16 bits over the figure's
+// bounds (grown by a centimetre) and the head weight in 8 bits.
+const strandBounds = {
+  min: bbMin.map((v) => v - 0.01),
+  max: bbMax.map((v) => v + 0.01),
+};
+{
+  const points = strands.reduce((n, l) => n + l.length, 0);
+  const head = 4 + pad4(strands.length * 2);
+  const out = Buffer.alloc(head + points * 8);
+  out.writeUInt32LE(strands.length, 0);
+  strands.forEach((l, i) => out.writeUInt16LE(l.length, 4 + i * 2));
+  let o = head;
+  for (const l of strands)
+    for (const q of l) {
+      for (let k = 0; k < 3; k++) {
+        const t =
+          (q[k] - strandBounds.min[k]) /
+          (strandBounds.max[k] - strandBounds.min[k]);
+        out.writeUInt16LE(
+          Math.round(Math.max(0, Math.min(1, t)) * 65535),
+          o + k * 2,
+        );
+      }
+      out.writeUInt8(Math.round(Math.max(0, Math.min(1, q[3])) * 255), o + 6);
+      o += 8;
+    }
+  fs.writeFileSync(path.join(outDir, "aura-strands.bin"), out);
+  console.log("strands", strands.length, "points", points, "bytes", out.length);
+}
 
 /* ---------- the figure's landmarks ---------- */
 const r4 = (v) => +v.toFixed(4);
@@ -924,6 +1178,7 @@ const figure = {
   ],
   waist: r4(M.cut),
   hairline: r4(M.hairline),
+  strands: { min: r3v(strandBounds.min), max: r3v(strandBounds.max) },
   bounds: { min: r3v(bbMin), max: r3v(bbMax) },
   sdf: {
     cell: SDF.cell,

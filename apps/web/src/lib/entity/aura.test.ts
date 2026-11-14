@@ -15,7 +15,9 @@ import {
   type FigureJson,
 } from "./aura-data.ts";
 import {
+  buildStrandRibbons,
   decodeSdf,
+  decodeStrands,
   growHair,
   HAIR,
   sampleSurface,
@@ -42,6 +44,9 @@ import {
   BODY_FRAG,
   BODY_VERT,
   HAIR_VERT,
+  STRAND_FRAG,
+  STRAND_VERT,
+  STRANDLOOK,
   SWAY,
   WEAVE,
 } from "./aura-shaders.ts";
@@ -111,18 +116,18 @@ describe("aura figure", () => {
 
 describe("aura light lines", () => {
   it("weaves the body with isolines of surface fields baked on the mesh, drawn sharp in the shader", () => {
-    for (const a of ["_FA", "_FB", "_FH", "_ARM"])
+    for (const a of ["_FA", "_FB", "_ARM"])
       expect(attrs[a]).toBeTypeOf("number");
     // Screen-space derivatives make every line about a device pixel wide at any resolution.
     expect(BODY_FRAG).toContain("fwidth(g)");
     expect(BODY_FRAG).toContain("weave(");
-    // Few, long lines rather than a dense mesh of them.
-    expect(WEAVE.spacing).toBeGreaterThan(0.008);
-    expect(WEAVE.spacing).toBeLessThan(0.02);
+    // Many long lines, a few millimetres apart.
+    expect(WEAVE.spacing).toBeGreaterThan(0.004);
+    expect(WEAVE.spacing).toBeLessThan(0.01);
     expect(WEAVE.warm).toBeGreaterThan(0.2);
     expect(WEAVE.warm).toBeLessThan(0.4);
     // Calm arms and a faint face; the middle of each breast stays free of lines.
-    expect(WEAVE.armGain).toBeLessThan(0.7);
+    expect(WEAVE.armSpacing).toBeGreaterThan(WEAVE.spacing * 3);
     expect(WEAVE.faceGain).toBeLessThan(0.6);
     expect(WEAVE.calm).toBeGreaterThan(0.02);
   });
@@ -137,14 +142,76 @@ describe("aura light lines", () => {
 });
 
 describe("aura sculpted hair", () => {
-  it("is part of the mesh: drawn by strand lines, swaying toward the tips, following the head late", () => {
-    expect(BODY_FRAG).toContain("vFh");
-    expect(BODY_VERT).toContain("uHeadLag");
-    expect(BODY_VERT).toContain("uSway");
+  const set = decodeStrands(
+    new Uint8Array(fs.readFileSync(path.join(STATIC, AURA_ASSETS.strands)))
+      .buffer,
+    fig.strands,
+  );
+
+  it("is drawn by baked strands: over a thousand long lines from the parting down, lying on the hair", () => {
+    expect(set.lines).toBeGreaterThan(1000);
+    expect(set.lines).toBeLessThan(3000);
+    const sdf = decodeSdf(fig.sdf);
+    const crown = fig.head.c[1] + fig.head.r[1];
+    let atParting = 0;
+    let off = 0;
+    let p = 0;
+    for (let l = 0; l < set.lines; l++) {
+      const n = set.counts[l]!;
+      expect(n).toBeGreaterThanOrEqual(4);
+      // A strand starts higher than it ends, and many start at the parting on top of the head.
+      const y0 = set.position[p * 3 + 1]!;
+      const y1 = set.position[(p + n - 1) * 3 + 1]!;
+      expect(y0).toBeGreaterThan(y1);
+      if (Math.abs(set.position[p * 3]!) < 0.02 && y0 > crown - 0.06)
+        atParting++;
+      for (let i = 0; i < n; i += 5) {
+        const k = (p + i) * 3;
+        const d = sdfAt(
+          sdf,
+          set.position[k]!,
+          set.position[k + 1]!,
+          set.position[k + 2]!,
+        );
+        if (Math.abs(d) > 0.02) off++;
+      }
+      p += n;
+    }
+    expect(atParting / set.lines).toBeGreaterThan(0.5);
+    expect(off / (p / 5)).toBeLessThan(0.02);
+    expect(
+      fs.statSync(path.join(STATIC, AURA_ASSETS.strands)).size,
+    ).toBeLessThan(900_000);
+  });
+
+  it("becomes ribbons: two vertices per point, and any first share of the lines can be drawn alone", () => {
+    const r = buildStrandRibbons(set);
+    const points = set.position.length / 3;
+    expect(r.position.length).toBe(points * 2 * 3);
+    expect(r.index.length).toBe((points - set.lines) * 6);
+    expect(r.ends[set.lines - 1]).toBe(r.index.length);
+    expect(r.ends[0]).toBe((set.counts[0]! - 1) * 6);
+    expect(STRANDLOOK.share.low).toBeLessThan(STRANDLOOK.share.high);
+    expect(STRANDLOOK.gold).toBeGreaterThan(0.1);
+    expect(STRANDLOOK.gold).toBeLessThan(0.3);
+    expect(STRAND_FRAG).toContain("pulse");
+  });
+
+  it("moves as the hair mesh does: with the head, late along the lengths, swaying toward the tips", () => {
+    for (const src of [BODY_VERT, STRAND_VERT]) {
+      expect(src).toContain("hairMove(");
+      expect(src).toContain("uHeadLag");
+      expect(src).toContain("uSway");
+    }
     // A sway you notice but that never tears the hair off her shoulders: at most a few centimetres at the tips.
     expect(SWAY.most).toBeGreaterThan(0.005);
     expect(SWAY.most).toBeLessThan(0.04);
     expect(HAIR.strands.low).toBeLessThan(HAIR.strands.high);
+  });
+
+  it("is matte and near-black underneath, as the body is: no light falls on her", () => {
+    expect(BODY_FRAG).not.toMatch(/spec|gloss/i);
+    expect(BODY_FRAG).not.toContain("vFh");
   });
 });
 

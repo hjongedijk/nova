@@ -19,6 +19,97 @@ function mulberry(seed: number) {
   };
 }
 
+/** The hair's strands as baked by scripts/aura-figure.mjs: polylines over the hair, from the parting to the tips. */
+export interface Strands {
+  lines: number;
+  /** Points per line. */
+  counts: Uint16Array;
+  /** Per point: x, y, z (m). */
+  position: Float32Array;
+  /** Per point: head weight. */
+  head: Float32Array;
+}
+
+/**
+ * Decode aura-strands.bin: the line count, each line's point count (16 bit), then per point x, y, z as 16 bits
+ * over the box and the head weight in 8 bits.
+ */
+export function decodeStrands(
+  buf: ArrayBuffer,
+  box: { min: readonly number[]; max: readonly number[] },
+): Strands {
+  const dv = new DataView(buf);
+  const lines = dv.getUint32(0, true);
+  const counts = new Uint16Array(lines);
+  let points = 0;
+  for (let i = 0; i < lines; i++) {
+    counts[i] = dv.getUint16(4 + i * 2, true);
+    points += counts[i]!;
+  }
+  let o = 4 + ((lines * 2 + 3) & ~3);
+  const position = new Float32Array(points * 3);
+  const head = new Float32Array(points);
+  for (let i = 0; i < points; i++, o += 8) {
+    for (let k = 0; k < 3; k++)
+      position[i * 3 + k] =
+        box.min[k]! +
+        (dv.getUint16(o + k * 2, true) / 65535) * (box.max[k]! - box.min[k]!);
+    head[i] = dv.getUint8(o + 6) / 255;
+  }
+  return { lines, counts, position, head };
+}
+
+export interface StrandRibbons {
+  position: Float32Array;
+  tangent: Float32Array;
+  /** Along the strand (0..1), side (-1/1), random, head weight. */
+  info: Float32Array;
+  index: Uint32Array;
+  /** Index count up to and including each line, for drawing only the first n lines. */
+  ends: Uint32Array;
+}
+
+/** The strands as ribbons: two vertices per point, widened toward the camera in the vertex shader. */
+export function buildStrandRibbons(s: Strands, seed = 5): StrandRibbons {
+  const rand = mulberry(seed);
+  const points = s.position.length / 3;
+  const position = new Float32Array(points * 2 * 3);
+  const tangent = new Float32Array(points * 2 * 3);
+  const info = new Float32Array(points * 2 * 4);
+  const index = new Uint32Array(Math.max(0, points - s.lines) * 6);
+  const ends = new Uint32Array(s.lines);
+  let p = 0;
+  let ii = 0;
+  for (let l = 0; l < s.lines; l++) {
+    const n = s.counts[l]!;
+    const r = rand();
+    for (let i = 0; i < n; i++, p++) {
+      const a = Math.max(0, i - 1) + (p - i);
+      const b = Math.min(n - 1, i + 1) + (p - i);
+      let tx = s.position[b * 3]! - s.position[a * 3]!;
+      let ty = s.position[b * 3 + 1]! - s.position[a * 3 + 1]!;
+      let tz = s.position[b * 3 + 2]! - s.position[a * 3 + 2]!;
+      const tl = Math.hypot(tx, ty, tz) || 1;
+      tx /= tl;
+      ty /= tl;
+      tz /= tl;
+      for (const side of [0, 1]) {
+        const v = p * 2 + side;
+        position.set(s.position.subarray(p * 3, p * 3 + 3), v * 3);
+        tangent.set([tx, ty, tz], v * 3);
+        info.set([i / (n - 1), side ? 1 : -1, r, s.head[p]!], v * 4);
+      }
+      if (i < n - 1) {
+        const v = p * 2;
+        index.set([v, v + 1, v + 2, v + 1, v + 3, v + 2], ii);
+        ii += 6;
+      }
+    }
+    ends[l] = ii;
+  }
+  return { position, tangent, info, index, ends };
+}
+
 /** Points spread evenly over the surface (area weighted), for the birth: position, normal, head weight, random. */
 export function sampleSurface(
   pos: ArrayLike<number>,

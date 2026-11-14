@@ -1,7 +1,7 @@
 import { ARRIVAL_GLSL, BIRTH, f } from "./aura-data.ts";
 
 /**
- * Shaders for the 3D Aura: the room behind her, her body and hair of dark glossy glass with the light lines on it
+ * Shaders for the 3D Aura: the room behind her, her near-black, matte body and hair with the light lines on it
  * (isolines of fields baked on the surface, drawn at native resolution), the loose strands of hair, the star
  * points, and the birth particles. Everything here is meant to be tuned by eye.
  */
@@ -12,50 +12,52 @@ export const LINES = { warmColour: "#ffb27a", amberColour: "#ffcf73" } as const;
 /** The weave: light lines drawn as isolines of fields baked on the surface (scripts/aura-figure.mjs). */
 export const WEAVE = {
   /** Distance between neighbouring lines on the torso, neck and face (m), and round the arms. */
-  spacing: 0.0125,
-  armSpacing: 0.0075,
+  spacing: 0.0065,
+  armSpacing: 0.03,
+  neckSpacing: 0.0075,
   /** The middle of each breast stays calm: no lines nearer its apex than this (m). */
   calm: 0.03,
   /** Line thickness range in CSS pixels, and core and halo strength. */
   thin: 0.55,
-  thick: 1.35,
+  thick: 1.7,
   core: 1.5,
-  halo: 0.22,
+  halo: 0.17,
   /** Share of lines that run warm (gold, peach). */
   warm: 0.3,
   /** How much of the weave shows: chest, waist, arms, face. */
-  chest: 0.78,
-  waist: 0.5,
-  arms: 0.62,
-  armGain: 0.5,
-  face: 0.35,
-  faceGain: 0.4,
-  /** The hair: distance between fine strand lines and between the bold ones (m), and how much of each shows. */
-  hairFine: 0.0045,
-  hairBold: 0.0135,
-  hairFineGain: 0.16,
-  hairBoldGain: 0.22,
-  /** The crown and the parting glow brighter than the lengths. */
-  crown: 1.3,
+  chest: 0.8,
+  waist: 0.62,
+  arms: 0.85,
+  armGain: 0.8,
+  face: 0.45,
+  faceGain: 0.45,
 } as const;
 
 /** The hair mass: how far the tips sway in the wind (m per unit of wind) and ripple on their own (m). */
 export const SWAY = { wind: 0.0045, most: 0.022, ripple: 0.0022 } as const;
 
-/** The body: dark glossy violet glass. */
+/** The body: near-black and matte; only its silhouette and its star dust light it. */
 export const SKIN = {
   base: "#06030c",
-  key: "#9a7cff",
-  rimA: "#e05cf0",
-  rimB: "#ffb08a",
-  gloss: 0.18,
-  rim: 0.95,
-  sparkle: 1.1,
-  /** The lines' light on the skin within a centimetre or two. */
-  lineGlow: 0.32,
+  rim: 1.1,
+  sparkle: 1.3,
 } as const;
 
-/** The hair. */
+/** The hair's strands: streamlines baked on the sculpted hair, drawn as thin ribbons of light. */
+export const STRANDLOOK = {
+  /** Core width range in device pixels, and overall strength. */
+  thin: 0.5,
+  thick: 0.95,
+  gain: 0.3,
+  /** Share of strands that are gold. */
+  gold: 0.2,
+  /** How much brighter the tips are than the lengths. */
+  tips: 0.9,
+  /** Share of the strands each GPU class draws. */
+  share: { low: 0.4, mid: 0.75, high: 1 },
+} as const;
+
+/** The loose strands of hair. */
 export const HAIRLOOK = {
   width: 0.00032,
   gain: 0.2,
@@ -87,6 +89,27 @@ uniform mat3 uHead;
 uniform vec3 uPivot;
 vec3 headXform(vec3 p, float w) { return mix(p, uPivot + uHead * (p - uPivot), w); }
 ${ARRIVAL_GLSL}
+`;
+
+/**
+ * How the hair moves, for the sculpted mass and for its strands alike: on the skull it turns with the head; its
+ * lengths follow a little late (a lagging copy of the head's turn) and sway in the wind, more toward the tips.
+ * `rest` is the point at rest, `head` its head weight, `hair` 1 for hair. Needs uT and uMotion.
+ */
+const HAIRMOVE = /* glsl */ `
+uniform mat3 uHeadLag;
+uniform vec2 uSway;
+uniform float uWaist;
+vec3 hairMove(vec3 p, vec3 rest, float head, float hair) {
+  vec3 hp = headXform(p, head);
+  float lengths = hair * (1.0 - smoothstep(uPivot.y - 0.02, uPivot.y + 0.16, rest.y));
+  hp = mix(hp, mix(p, uPivot + uHeadLag * (p - uPivot), head), lengths);
+  float tip = hair * (1.0 - smoothstep(uWaist + 0.1, uPivot.y + 0.08, rest.y));
+  tip *= tip;
+  hp.xz += uSway * tip;
+  hp.x += sin(uT * 1.3 + rest.y * 14.0 + rest.x * 5.0) * ${f(SWAY.ripple)} * tip * uMotion;
+  return hp;
+}
 `;
 
 /** The mood's colours, blooming out from the face. */
@@ -164,12 +187,8 @@ attribute float _breath;
 attribute float _hair;
 attribute float _fa;
 attribute float _fb;
-attribute float _fh;
 attribute float _arm;
 uniform float uBreath;
-uniform mat3 uHeadLag;
-uniform vec2 uSway;
-uniform float uWaist;
 uniform float uT;
 uniform float uMotion;
 varying vec3 vWorld;
@@ -179,20 +198,12 @@ varying float vHead;
 varying float vHair;
 varying float vFa;
 varying float vFb;
-varying float vFh;
 varying float vArm;
 ${COMMON}
+${HAIRMOVE}
 void main() {
   vec3 p = position + normal * _breath * uBreath * ${f(BREATH.amount)};
-  vec3 hp = headXform(p, _head);
-  // The hair on the skull turns with the head; its lengths follow a little late (a lagging copy of the head's
-  // turn) and sway in the wind, more toward the tips.
-  float lengths = _hair * (1.0 - smoothstep(uPivot.y - 0.02, uPivot.y + 0.16, position.y));
-  hp = mix(hp, mix(p, uPivot + uHeadLag * (p - uPivot), _head), lengths);
-  float tip = _hair * (1.0 - smoothstep(uWaist + 0.1, uPivot.y + 0.08, position.y));
-  tip *= tip;
-  hp.xz += uSway * tip;
-  hp.x += sin(uT * 1.3 + position.y * 14.0 + position.x * 5.0) * ${f(SWAY.ripple)} * tip * uMotion;
+  vec3 hp = hairMove(p, position, _head, _hair);
   vec3 n = normalize(mix(normal, uHead * normal, _head));
   vec4 w = modelMatrix * vec4(hp, 1.0);
   vWorld = w.xyz;
@@ -202,7 +213,6 @@ void main() {
   vHair = _hair;
   vFa = _fa;
   vFb = _fb;
-  vFh = _fh;
   vArm = _arm;
   gl_Position = projectionMatrix * viewMatrix * w;
 }
@@ -217,11 +227,9 @@ varying float vHead;
 varying float vHair;
 varying float vFa;
 varying float vFb;
-varying float vFh;
 varying float vArm;
 uniform float uPx;
 uniform float uShoulder;
-uniform float uCrown;
 uniform vec3 uFaceRest;
 uniform float uWaist;
 uniform vec3 uElbowL;
@@ -248,7 +256,7 @@ vec3 weave(float g, float fam, float density, float along, vec3 A, vec3 B, float
   float keep = step(1.0 - density, h1);
   float wpx = mix(${f(WEAVE.thin)}, ${f(WEAVE.thick)}, h2 * h2) * uPx;
   float core = exp(-pow(dpx / wpx, 2.0));
-  float halo = exp(-pow(dpx / (wpx * 4.0 + 1.5 * uPx), 2.0));
+  float halo = exp(-pow(dpx / (wpx * 2.5 + 1.5), 2.0));
   // Lines closer together than a few pixels (grazing surfaces) fade instead of smearing.
   float crowd = 1.0 - smoothstep(0.22, 0.5, fw);
   float bright = 0.08 + 0.92 * h3 * h3 * h3;
@@ -274,46 +282,28 @@ void main() {
   vec3 Rc = mix(uR0, uR1, inside);
   float glow = mix(uGlow.x, uGlow.y, inside) * (1.0 + uAudio * 0.5);
 
-  // Three lights: a violet key from the front left, magenta and peach rims from behind.
-  vec3 L1 = normalize(vec3(-0.55, 0.65, 0.75));
-  vec3 L2 = normalize(vec3(0.85, 0.25, -0.45));
-  vec3 L3 = normalize(vec3(-0.85, 0.1, -0.35));
-  vec3 c1 = ${rgb(SKIN.key)};
-  vec3 c2 = mix(${rgb(SKIN.rimA)}, Rc, 0.5);
-  vec3 c3 = ${rgb(SKIN.rimB)};
   vec3 base = ${rgb(SKIN.base)};
-  // Soft diffuse from the violet key, so her volumes read (the bust, the shoulders), and a little from the rims.
-  // Form reads from the lines and the rims, not from shading: the body gets a whisper of light, the head none.
-  float lit = 1.0 - smoothstep(0.2, 0.6, vHead);
-  vec3 col = base * 0.25 + (c1 * 0.0175 * pow(dot(N, L1) * 0.5 + 0.5, 2.5)
-    + c2 * 0.01 * max(dot(N, L2), 0.0) + c3 * 0.006 * max(dot(N, L3), 0.0)) * lit;
-  // Clearcoat: sharp highlights and a strong fresnel.
+  // Near-black and matte on every device: no light falls on her, nothing shines. Her form reads from the
+  // silhouette and the lines alone.
+  vec3 col = base * 0.25;
   float F = 0.04 + 0.96 * pow(1.0 - NdV, 5.0);
-  vec3 H1 = normalize(L1 + V);
-  vec3 H2 = normalize(L2 + V);
-  vec3 H3 = normalize(L3 + V);
-  // Specular only as a thin sheen at grazing angles: no glossy blobs on the head or shoulders.
-  vec3 spec = c1 * pow(max(dot(N, H1), 0.0), 220.0)
-    + c2 * pow(max(dot(N, H2), 0.0), 120.0)
-    + c3 * pow(max(dot(N, H3), 0.0), 120.0) * 0.6;
-  col += spec * F * ${f(SKIN.gloss)} * lit;
+  float hairM = smoothstep(0.35, 0.65, vHair);
   // The rim: bright where the surface turns away.
   // The silhouette is a line of light: a very narrow pink-white core inside a violet halo, gold in places on
   // the shoulders and arms. Inside it the body stays near-black.
   float edgeV = 1.0 - NdV;
-  float edgeCore = pow(edgeV, 7.0);
-  float edgeHalo = pow(edgeV, 3.5);
+  float edgeCore = pow(edgeV, 9.0);
+  float edgeHalo = pow(edgeV, 5.0);
   float goldZone = smoothstep(0.07, 0.13, abs(vObj.x)) * (0.5 + 0.5 * sin(vObj.y * 60.0 + vObj.x * 20.0));
   vec3 edgeC = mix(mix(vec3(1.0, 0.82, 0.97), ${rgb("#ffc27a")}, goldZone * 0.7), vec3(1.0), 0.15);
   // Surfaces facing down (under the chin, under the bust) keep their edge dark: the light comes from above.
   float down = 1.0 - smoothstep(0.25, 0.75, -N.y);
-  // No rim where the jaw meets the neck (it would read as a collar) ...
-  down *= 1.0 - smoothstep(uPivot.y - 0.03, uPivot.y, vObj.y) * (1.0 - smoothstep(uChin - 0.01, uChin + 0.035, vObj.y));
-  // ... nor along the breasts' sides against the torso (an inner edge, not her outline).
+  // Not along the breasts' sides against the torso (an inner edge, not her outline).
   vec2 bl = vObj.xy - uBreastL.xy;
   vec2 br = vObj.xy - uBreastR.xy;
   float inner = mix(0.25, 1.0, smoothstep(0.03, 0.1, min(length(bl), length(br))));
-  col += (edgeC * edgeCore * 2.6 * inner + mix(A, B, 0.35) * edgeHalo * ${f(SKIN.rim)} * mix(1.0, 0.35, vHead)) * glow * down;
+  // The hair mass has only a soft violet rim: its light is its strands.
+  col += (edgeC * edgeCore * 4.2 * inner * (1.0 - hairM) + mix(A, B, 0.35) * edgeHalo * ${f(SKIN.rim)} * mix(1.0, 0.16, hairM)) * glow * down;
   /* the weave: her whole body woven with light */
   {
     float accent = mix(uAccent.x, uAccent.y, inside);
@@ -322,34 +312,21 @@ void main() {
     float dens = mix(${f(WEAVE.waist)}, ${f(WEAVE.chest)}, smoothstep(uWaist + 0.04, uBreastL.y - 0.02, vObj.y));
     // The face: faint lines down its sides only (never down the middle), none under the hair.
     float onFace = smoothstep(0.0, 0.03, vObj.z - (uFaceRest.z - 0.075)) * (1.0 - smoothstep(uFaceRest.y + 0.07, uFaceRest.y + 0.095, vObj.y));
-    float headGain = mix(1.0, onFace * smoothstep(0.034, 0.048, abs(vObj.x)) * ${f(WEAVE.faceGain)}, smoothstep(0.3, 0.7, vHead));
     // The bust's rings and arcs end at the collarbones; the neck and the face's sides carry their own lines,
     // running down beside the midline (never on it).
     float neckUp = smoothstep(uShoulder + 0.03, uPivot.y + 0.02, vObj.y);
     // The flow parts round each breast; its middle stays calm.
     float calm = mix(smoothstep(${f(WEAVE.calm - 0.008)}, ${f(WEAVE.calm + 0.004)}, vFb), 1.0, smoothstep(uShoulder - 0.06, uShoulder - 0.035, vObj.y));
     vec3 wv = weave(vFa / ${f(WEAVE.spacing)}, 1.0, dens, along, A, B, accent) * (1.0 - smoothstep(0.03, 0.2, vArm)) * (1.0 - neckUp) * calm;
-    float sideGain = headGain * smoothstep(0.004, 0.01, abs(vObj.x));
-    wv += weave(vFb / ${f(WEAVE.armSpacing)}, 7.0, mix(${f(WEAVE.face)}, ${f(WEAVE.arms)}, vArm), along, A, B, accent)
-      * max(smoothstep(0.8, 0.97, vArm) * smoothstep(0.25, 0.6, NdV) * ${f(WEAVE.armGain)}, neckUp * sideGain * (1.0 - smoothstep(0.03, 0.2, vArm)));
-    float hairM = smoothstep(0.35, 0.65, vHair);
+    float armBand = 1.0 - smoothstep(0.03, 0.2, vArm);
+    // The arms: a few calm lines along them.
+    wv += weave(vFb / ${f(WEAVE.armSpacing)}, 7.0, ${f(WEAVE.arms)}, along, A, B, accent)
+      * smoothstep(0.8, 0.97, vArm) * smoothstep(0.2, 0.5, NdV) * ${f(WEAVE.armGain)};
+    // The neck's lines fade out before its top (no knot under the chin); the face's sides carry a few faint ones.
+    float neckLines = neckUp * (1.0 - smoothstep(uPivot.y - 0.03, uPivot.y + 0.015, vObj.y)) * smoothstep(0.004, 0.01, abs(vObj.x));
+    float faceLines = onFace * smoothstep(uChin + 0.012, uChin + 0.045, vObj.y) * (1.0 - smoothstep(uChin + 0.05, uChin + 0.085, vObj.y)) * smoothstep(0.03, 0.045, abs(vObj.x)) * ${f(WEAVE.faceGain)};
+    wv += weave(vFb / ${f(WEAVE.neckSpacing)}, 9.0, ${f(WEAVE.face)}, along, A, B, accent) * (neckLines + faceLines) * armBand;
     wv *= 1.0 - hairM;
-    // The hair: a dark mass drawn by its strands of light, fine ones and a few bold ones, some of them gold;
-    // they meet at the parting, where the crown glows.
-    if (hairM > 0.0) {
-      float tint = mix(uTint.x, uTint.y, inside);
-      vec3 hA = mix(${rgb("#8c5cff")}, mix(uH0, uH1, inside), 0.35 + 0.5 * tint);
-      vec3 hB = mix(A, vec3(1.0, 0.82, 1.0), 0.35);
-      float alongH = vObj.y * 90.0;
-      // Three sizes of strand; the finest only show where there are pixels enough for them.
-      vec3 hv = weave(vFh / ${f(WEAVE.hairFine)}, 13.0, 0.9, alongH, hA, hB, accent) * ${f(WEAVE.hairFineGain)}
-        + weave(vFh / ${f(WEAVE.hairFine * 0.5)}, 23.0, 0.9, alongH, hA, hB, accent) * ${f(WEAVE.hairFineGain)}
-        + weave(vFh / ${f(WEAVE.hairBold)}, 17.0, 0.7, alongH, hB, hA, 1.0) * ${f(WEAVE.hairBoldGain)};
-      hv *= 1.0 + ${f(WEAVE.crown)} * smoothstep(uCrown - 0.09, uCrown, vObj.y);
-      // The sculpted locks catch a little of the key light, so the mass has form between the strands.
-      hv += hA * 0.035 * pow(max(dot(N, L1), 0.0), 2.0) + hA * 0.05 * pow(1.0 - NdV, 3.0);
-      wv += hv * hairM;
-    }
     // Lines turned edge-on dim a little; the rim takes over there.
     col += wv * glow * (0.45 + 0.55 * NdV);
   }
@@ -357,7 +334,7 @@ void main() {
   col += A * 0.01 * pow(NdV, 2.0) * glow;
 
   // Starry sparkle inside: fixed to the body, fading at the rim.
-  vec3 sp = vObj * 420.0;
+  vec3 sp = vObj * 520.0;
   vec3 cell = floor(sp);
   float h = hash31(cell);
   vec3 pt = cell + 0.5 + (vec3(hash31(cell + 3.1), hash31(cell + 7.7), hash31(cell + 1.3)) - 0.5) * 0.7;
@@ -365,7 +342,10 @@ void main() {
   float sz = max(0.05, 0.42 * fw);
   // More of it inside the bust, where the lines leave room.
   float dusty = (1.0 - smoothstep(0.02, 0.07, vFb)) * (1.0 - vArm) * (1.0 - vHair) * (1.0 - smoothstep(uShoulder - 0.06, uShoulder - 0.035, vObj.y));
-  float spark = step(0.9 - 0.14 * dusty, h) * (0.25 + 0.75 * pow(hash31(cell + 9.0), 3.0)) * exp(-dot(sp - pt, sp - pt) / (sz * sz)) * (1.0 - smoothstep(0.0, 0.7, F))
+  // ... and near the lines, as if they shed it.
+  float gA = vFa / ${f(WEAVE.spacing)};
+  float nearLine = (1.0 - smoothstep(0.0, 0.3, abs(gA - floor(gA + 0.5)))) * (1.0 - hairM) * (1.0 - vArm);
+  float spark = step(0.87 - 0.14 * dusty - 0.1 * nearLine, h) * (0.25 + 0.75 * pow(hash31(cell + 9.0), 3.0)) * exp(-dot(sp - pt, sp - pt) / (sz * sz)) * (1.0 - smoothstep(0.0, 0.7, F))
     * (0.5 + 0.5 * sin(uT * (0.7 + 2.0 * h) * uMotion + h * 60.0));
   col += mix(A, vec3(1.0), 0.55) * spark * ${f(SKIN.sparkle)} * (1.0 - vHead * 0.5);
 
@@ -392,6 +372,74 @@ void main() {
   gl_FragColor = linearToOutputTexel(vec4(col, 1.0));
   gl_FragColor.a = fade;
   gl_FragColor.rgb += (hash21(gl_FragCoord.xy + fract(uT) * 37.0) - 0.5) / 255.0;
+}
+`;
+
+/* ---------------- the hair's strands: baked streamlines as camera-facing ribbons ---------------- */
+
+export const STRAND_VERT = /* glsl */ `
+attribute vec3 aTan;
+attribute vec4 aInfo;   // along the strand (0..1), side (-1/1), random, head weight
+uniform vec2 uRes;
+uniform float uPx;
+varying float vAcross;
+varying float vT;
+varying float vSeed;
+varying vec3 vWorld;
+${COMMON}
+${MOOD}
+${HAIRMOVE}
+void main() {
+  vec3 p = hairMove(position, position, aInfo.w, 1.0);
+  vec3 q = position + aTan * 0.01;
+  q = hairMove(q, q, aInfo.w, 1.0);
+  vec4 wp = modelMatrix * vec4(p, 1.0);
+  vec4 cp = projectionMatrix * viewMatrix * wp;
+  vec4 cq = projectionMatrix * viewMatrix * modelMatrix * vec4(q, 1.0);
+  vec2 dir = cq.xy / cq.w * uRes - cp.xy / cp.w * uRes;
+  dir = length(dir) > 1e-5 ? normalize(dir) : vec2(0.0, 1.0);
+  // Wide enough for the core and its soft edge, in device pixels.
+  float halfPx = 2.4 * uPx;
+  cp.xy += vec2(-dir.y, dir.x) * aInfo.y * halfPx / (uRes * 0.5) * cp.w;
+  vAcross = aInfo.y * 2.4;
+  vT = aInfo.x;
+  vSeed = aInfo.z;
+  vWorld = wp.xyz;
+  gl_Position = cp;
+}
+`;
+
+export const STRAND_FRAG = /* glsl */ `
+precision highp float;
+varying float vAcross;
+varying float vT;
+varying float vSeed;
+varying vec3 vWorld;
+${COMMON}
+${MOOD}
+void main() {
+  float h1 = hash11(vSeed * 71.3 + 0.7);
+  float h2 = hash11(vSeed * 13.7 + 3.1);
+  float h3 = hash11(vSeed * 37.9 + 5.3);
+  float w = mix(${f(STRANDLOOK.thin)}, ${f(STRANDLOOK.thick)}, h2 * h2);
+  float core = exp(-pow(vAcross / w, 2.0));
+  float dist = length(vWorld - uFace);
+  float inside = 1.0 - smoothstep(uBloomR - 0.05, uBloomR, dist);
+  float tint = mix(uTint.x, uTint.y, inside);
+  float glow = mix(uGlow.x, uGlow.y, inside) * (1.0 + uAudio * 0.4);
+  vec3 c = mix(${rgb("#8c5cff")}, mix(uH0, uH1, inside), 0.35 + 0.5 * tint);
+  c = mix(c, ${rgb("#ffc27a")} * 1.3, step(1.0 - ${f(STRANDLOOK.gold)}, h3));
+  // Most strands are dim, some bright, a few white-hot; all brighter toward the tips.
+  float bright = 0.1 + 0.9 * h1 * h1 * h1;
+  c = mix(c, vec3(1.0, 0.9, 1.0), 0.55 * h1 * h1);
+  float taper = smoothstep(0.0, 0.04, vT) * (1.0 - smoothstep(0.9, 1.0, vT));
+  float tips = 1.0 + ${f(STRANDLOOK.tips)} * smoothstep(0.45, 1.0, vT);
+  float pulse = pow(max(0.0, sin((vT * 2.2 - uT * 0.09 * uPulse * uMotion + h2 * 7.0) * 6.2832)), 16.0);
+  vec3 col = c * core * bright * taper * tips * (1.0 + 1.6 * pulse) * ${f(STRANDLOOK.gain)} * glow;
+  if (uTau < ${f(BIRTH.total)}) col *= smoothstep(${f(BIRTH.faceAt)}, ${f(BIRTH.faceAt + 1.2)}, uTau);
+  float below = 1.0 - smoothstep(uFloor - 90.0, uFloor, gl_FragCoord.y);
+  col *= mix(1.0, 0.42, below * step(0.0, uFloor));
+  gl_FragColor = vec4(col, 1.0);
 }
 `;
 
