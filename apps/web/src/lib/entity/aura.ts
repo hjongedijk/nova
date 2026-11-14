@@ -22,9 +22,13 @@ import {
 } from "./aura-figure.ts";
 import {
   BODY_FRAG,
+  BREATH,
   BODY_VERT,
+  FOLLOW,
   HAIR_FRAG,
   HAIR_VERT,
+  HOLO,
+  JIGGLE,
   POINTS_FRAG,
   POINTS_VERT,
   ROOM_FRAG,
@@ -39,7 +43,10 @@ import {
 
 export {
   BREATH,
+  FOLLOW,
   HAIRLOOK,
+  HOLO,
+  JIGGLE,
   LINES,
   SKIN,
   STRANDLOOK,
@@ -469,6 +476,14 @@ async function createGlAura(
     uFloor: { value: -1 },
     uRes: { value: new THREE.Vector2(1, 1) },
     uBreath: { value: 0 },
+    uBody: { value: new THREE.Matrix3() },
+    uBodyPivot: { value: new THREE.Vector3(0, fig.waist, 0) },
+    uJigL: { value: new THREE.Vector3() },
+    uJigR: { value: new THREE.Vector3() },
+    uShell: { value: HOLO.shell },
+    uLines: { value: HOLO.lines },
+    uShimmer: { value: HOLO.shimmer },
+    uDust: { value: 1 },
     uChest: { value: chest },
     uWaist: { value: fig.waist },
     uShoulder: { value: fig.shoulders[0]![1] },
@@ -713,19 +728,80 @@ async function createGlAura(
     posArr.set([posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)], i * 3);
     nrmArr.set([nrmAttr.getX(i), nrmAttr.getY(i), nrmAttr.getZ(i)], i * 3);
   }
-  const samples = sampleSurface(
-    posArr,
-    nrmArr,
-    headArr,
-    geo.index!.array,
-    budget.particles,
-  );
+  // Three in four on the skin, where they stay as her dust; the rest on the hair, for the birth only.
+  const weights = (name: string, map = (v: number) => v) => {
+    const a = geo.getAttribute(name);
+    const out = new Float32Array(posAttr.count);
+    for (let i = 0; i < posAttr.count; i++) out[i] = a ? map(a.getX(i)) : 0;
+    return out;
+  };
+  const hairArr = weights("_hair");
+  const more = [
+    hairArr,
+    weights("_breath"),
+    weights("_bust", (v) => v * 2 - 1),
+    weights("_arm"),
+  ];
+  const allTris = geo.index!.array;
+  const skinTris: number[] = [];
+  const hairTris: number[] = [];
+  for (let t = 0; t < allTris.length; t += 3) {
+    const [a, b, c] = [allTris[t]!, allTris[t + 1]!, allTris[t + 2]!];
+    (hairArr[a]! + hairArr[b]! + hairArr[c]! > 1.5 ? hairTris : skinTris).push(
+      a,
+      b,
+      c,
+    );
+  }
+  const onSkin = Math.round(budget.particles * 0.75);
+  const sampled = [
+    sampleSurface(posArr, nrmArr, headArr, skinTris, onSkin, 7, more),
+    sampleSurface(
+      posArr,
+      nrmArr,
+      headArr,
+      hairTris,
+      budget.particles - onSkin,
+      9,
+      more,
+    ),
+  ];
+  const join = (pick: (s: (typeof sampled)[number]) => Float32Array) => {
+    const [a, b] = [pick(sampled[0]!), pick(sampled[1]!)];
+    const out = new Float32Array(a.length + b.length);
+    out.set(a, 0);
+    out.set(b, a.length);
+    return out;
+  };
   const pointsGeo = new THREE.BufferGeometry();
   pointsGeo.setAttribute(
     "position",
-    new THREE.BufferAttribute(samples.position, 3),
+    new THREE.BufferAttribute(
+      join((x) => x.position),
+      3,
+    ),
   );
-  pointsGeo.setAttribute("aSeed", new THREE.BufferAttribute(samples.seed, 4));
+  pointsGeo.setAttribute(
+    "normal",
+    new THREE.BufferAttribute(
+      join((x) => x.normal),
+      3,
+    ),
+  );
+  pointsGeo.setAttribute(
+    "aSeed",
+    new THREE.BufferAttribute(
+      join((x) => x.seed),
+      4,
+    ),
+  );
+  pointsGeo.setAttribute(
+    "aExtra",
+    new THREE.BufferAttribute(
+      join((x) => x.extra),
+      4,
+    ),
+  );
   const points = new THREE.Points(
     pointsGeo,
     new THREE.ShaderMaterial({
@@ -833,6 +909,21 @@ async function createGlAura(
   let frameMs = 16.7;
   let simAcc = 0;
   const Rm = new THREE.Matrix3();
+  const Rb = new THREE.Matrix3();
+  const bodyPivot = U.uBodyPivot.value;
+  // The bust: each breast hangs on a soft spring from its place on the chest.
+  const bust = [0, 1].map((i) => ({
+    rest: new THREE.Vector3(...fig.breasts[i]!),
+    at: new THREE.Vector3(),
+    v: new THREE.Vector3(),
+    anchor: new THREE.Vector3(),
+    live: false,
+    out: i === 0 ? U.uJigL.value : U.uJigR.value,
+    w:
+      (2 * Math.PI) /
+      (JIGGLE.period * (i === 0 ? 1 - JIGGLE.phase : 1 + JIGGLE.phase)),
+  }));
+  let settled = false;
   const faceNow = new THREE.Vector3();
 
   const aura: Aura = {
@@ -840,7 +931,7 @@ async function createGlAura(
     get stats(): AuraStats {
       return {
         mode: "webgl",
-        figure: points.visible ? "particles" : "mesh",
+        figure: tau < BIRTH.total ? "particles" : "mesh",
         tier,
         devicePixelRatio: window.devicePixelRatio || 1,
         dpr: Math.round(pr * 100) / 100,
@@ -899,7 +990,6 @@ async function createGlAura(
       else tau = Math.min(tau, f.form * BIRTH.total);
       lastForm = f.form;
       U.uTau.value = tau;
-      points.visible = tau < BIRTH.total;
 
       const want: Key = f.alert ? "alert" : f.state;
       if (want !== key) retarget(want, f.reduceMotion);
@@ -965,7 +1055,23 @@ async function createGlAura(
       const R = headMatrix(pose.yaw.x, pose.pitch.x, pose.roll.x);
       Rm.fromArray(R);
       U.uHead.value.copy(Rm);
-      faceNow.copy(faceRest).sub(pivot).applyMatrix3(Rm).add(pivot);
+      // The upper body goes a little with the head: a person turning to look, not a head on a statue.
+      Rb.fromArray(
+        headMatrix(
+          pose.yaw.x * FOLLOW.yaw,
+          pose.pitch.x * FOLLOW.pitch,
+          pose.roll.x * 0.3 - pose.yaw.x * FOLLOW.lean,
+        ),
+      );
+      U.uBody.value.copy(Rb);
+      faceNow
+        .copy(faceRest)
+        .sub(pivot)
+        .applyMatrix3(Rm)
+        .add(pivot)
+        .sub(bodyPivot)
+        .applyMatrix3(Rb)
+        .add(bodyPivot);
       U.uFace.value.copy(faceNow);
 
       swing(lag.yaw, pose.yaw.x, dt);
@@ -998,6 +1104,45 @@ async function createGlAura(
       U.uMotion.value = motion;
       // A slow breath, about eleven a minute.
       U.uBreath.value = motion * Math.sin((t * 2 * Math.PI) / 5.4);
+      // The bust follows its place on the chest (which moves with the body's turn, the breath and the voice)
+      // a little late, overshoots a little and settles. The birth's end gives it one soft start.
+      const landing = tau >= BIRTH.total - 0.6;
+      for (const b of bust) {
+        b.anchor.copy(b.rest).sub(bodyPivot).applyMatrix3(Rb).add(bodyPivot);
+        b.anchor.z += U.uBreath.value * BREATH.amount;
+        b.anchor.y +=
+          U.uBreath.value * BREATH.amount * 0.6 +
+          weight.speaking * f.audio * 0.0025 * Math.sin(t * 5.1);
+        if (motion <= 0 || !b.live) {
+          b.at.copy(b.anchor);
+          b.v.set(0, 0, 0);
+          b.live = motion > 0;
+          b.out.set(0, 0, 0);
+          continue;
+        }
+        if (landing && !settled) b.v.y -= 0.06;
+        const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
+        const hStep = dt / steps;
+        for (let i = 0; i < steps; i++) {
+          b.v.x +=
+            (b.w * b.w * (b.anchor.x - b.at.x) -
+              2 * JIGGLE.damping * b.w * b.v.x) *
+            hStep;
+          b.v.y +=
+            (b.w * b.w * (b.anchor.y - b.at.y) -
+              2 * JIGGLE.damping * b.w * b.v.y) *
+            hStep;
+          b.v.z +=
+            (b.w * b.w * (b.anchor.z - b.at.z) -
+              2 * JIGGLE.damping * b.w * b.v.z) *
+            hStep;
+          b.at.addScaledVector(b.v, hStep);
+        }
+        b.out.copy(b.at).sub(b.anchor).multiplyScalar(JIGGLE.gain);
+        if (b.out.length() > JIGGLE.most) b.out.setLength(JIGGLE.most);
+      }
+      if (landing) settled = true;
+      else if (tau < 0.1) settled = false;
       U.uAudio.value = f.audio * weight.speaking;
       U.uFloor.value = f.floor > H ? -1 : (H - f.floor) * pr;
 
@@ -1023,6 +1168,7 @@ async function createGlAura(
       room,
       body,
       strandMesh,
+      U,
       hairMesh,
       points,
       hair,

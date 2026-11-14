@@ -43,7 +43,11 @@ import {
 import {
   BODY_FRAG,
   BODY_VERT,
+  FOLLOW,
   HAIR_VERT,
+  HOLO,
+  JIGGLE,
+  POINTS_VERT,
   STRAND_FRAG,
   STRAND_VERT,
   STRANDLOOK,
@@ -64,7 +68,14 @@ describe("aura figure", () => {
   it("ships a compressed glTF of a bust: 50-80k triangles with normals and head, breath and hair weights", () => {
     expect(glb.readUInt32LE(0)).toBe(0x46546c67);
     expect(gltf.extensionsRequired).toContain("EXT_meshopt_compression");
-    for (const a of ["POSITION", "NORMAL", "_HEAD", "_BREATH", "_HAIR"])
+    for (const a of [
+      "POSITION",
+      "NORMAL",
+      "_HEAD",
+      "_BREATH",
+      "_HAIR",
+      "_BUST",
+    ])
       expect(attrs[a]).toBeTypeOf("number");
     const tris = gltf.accessors[gltf.meshes[0].primitives[0].indices].count / 3;
     expect(tris).toBeGreaterThanOrEqual(50_000);
@@ -114,22 +125,49 @@ describe("aura figure", () => {
   });
 });
 
-describe("aura light lines", () => {
-  it("weaves the body with isolines of surface fields baked on the mesh, drawn sharp in the shader", () => {
+describe("aura hologram body", () => {
+  it("is a volume of light, not a body with wires: a glow shell, dust on the surface, a slow shimmer", () => {
+    // The accent lines are off; what remains of them is drawn sharp from fields baked on the mesh.
+    expect(HOLO.lines).toBe(0);
     for (const a of ["_FA", "_FB", "_ARM"])
       expect(attrs[a]).toBeTypeOf("number");
-    // Screen-space derivatives make every line about a device pixel wide at any resolution.
     expect(BODY_FRAG).toContain("fwidth(g)");
-    expect(BODY_FRAG).toContain("weave(");
-    // Many long lines, a few millimetres apart.
-    expect(WEAVE.spacing).toBeGreaterThan(0.004);
-    expect(WEAVE.spacing).toBeLessThan(0.01);
-    expect(WEAVE.warm).toBeGreaterThan(0.2);
-    expect(WEAVE.warm).toBeLessThan(0.4);
-    // Calm arms and a faint face; the middle of each breast stays free of lines.
-    expect(WEAVE.armSpacing).toBeGreaterThan(WEAVE.spacing * 3);
+    expect(BODY_FRAG).toContain("uLines > 0.001");
+    expect(WEAVE.spacing).toBeGreaterThan(0.01);
     expect(WEAVE.faceGain).toBeLessThan(0.6);
-    expect(WEAVE.calm).toBeGreaterThan(0.02);
+    // The shell is brightest at the silhouette and falls off inward.
+    expect(HOLO.shell).toBeGreaterThan(0.5);
+    expect(HOLO.shellPower).toBeGreaterThan(1.5);
+    expect(BODY_FRAG).toContain("shellC");
+    // The shimmer passes every few seconds; never without motion.
+    expect(HOLO.period).toBeGreaterThan(4);
+    expect(HOLO.period).toBeLessThan(12);
+    expect(BODY_FRAG).toContain("uShimmer * uMotion");
+  });
+
+  it("lives as dust on her surface: tens of thousands of motes that drift, twinkle and sculpt her form", () => {
+    expect(BUDGET.high.particles).toBeGreaterThanOrEqual(100_000);
+    expect(BUDGET.low.particles).toBeGreaterThanOrEqual(20_000);
+    // Sized in device pixels; they gather where the form turns away from the eye; they rest without motion.
+    expect(POINTS_VERT).toContain("* uPx");
+    expect(HOLO.gather).toBeGreaterThan(1);
+    expect(HOLO.drift).toBeGreaterThan(0.005);
+    expect(HOLO.drift).toBeLessThan(0.04);
+    expect(POINTS_VERT).toContain("* uMotion");
+    // They move with her: the head, the breath, the bust, the body's turn.
+    for (const f of ["skinMove(", "hairMove(", "bodyXform("])
+      expect(POINTS_VERT).toContain(f);
+    // The weights they need are carried along when the surface is sampled.
+    const pos = [0, 0, 0, 1, 0, 0, 0, 1, 0];
+    const nrm = [0, 0, 1, 0, 0, 1, 0, 0, 1];
+    const s = sampleSurface(pos, nrm, [0, 0, 0], [0, 1, 2], 50, 7, [
+      [1, 1, 1],
+      [0, 1, 0],
+    ]);
+    for (let i = 0; i < 50; i++) {
+      expect(s.extra[i * 4]).toBeCloseTo(1, 5);
+      expect(s.extra[i * 4 + 1]).toBeCloseTo(s.position[i * 3]!, 5);
+    }
   });
 
   it("draws no seam down the face and no facial features", () => {
@@ -138,6 +176,42 @@ describe("aura light lines", () => {
     expect(BODY_FRAG).not.toMatch(
       /\b(eyes?|mouth|lips?|nose|brows?|pupils?)\b/i,
     );
+  });
+});
+
+describe("aura body motion", () => {
+  it("turns the whole head as one, the hair's lengths part of the way, and the upper body a little", () => {
+    const set = decodeStrands(
+      new Uint8Array(fs.readFileSync(path.join(STATIC, AURA_ASSETS.strands)))
+        .buffer,
+      fig.strands,
+    );
+    const chin = fig.head.c[1] - fig.head.r[1];
+    let low = 1;
+    for (let i = 0; i < set.head.length; i++) {
+      const y = set.position[i * 3 + 1]!;
+      // Hair on the skull is rigid with the head.
+      if (y > chin + 0.03) expect(set.head[i]).toBeGreaterThan(0.97);
+      low = Math.min(low, set.head[i]!);
+    }
+    // Even the tips go some of the way.
+    expect(low).toBeGreaterThan(0.08);
+    expect(low).toBeLessThan(0.4);
+    expect(FOLLOW.yaw).toBeGreaterThanOrEqual(0.15);
+    expect(FOLLOW.yaw).toBeLessThanOrEqual(0.2);
+    for (const src of [BODY_VERT, STRAND_VERT, HAIR_VERT, POINTS_VERT])
+      expect(src).toContain("bodyXform(");
+  });
+
+  it("gives each breast a soft spring: small, quick to settle, the two a little out of step", () => {
+    expect(JIGGLE.most).toBeLessThan(0.015);
+    expect(JIGGLE.period).toBeGreaterThan(0.25);
+    expect(JIGGLE.period).toBeLessThan(0.7);
+    expect(JIGGLE.damping).toBeGreaterThan(0.2);
+    expect(JIGGLE.damping).toBeLessThan(0.6);
+    expect(JIGGLE.phase).toBeGreaterThan(0);
+    expect(BODY_VERT).toContain("uJigL");
+    expect(BODY_VERT).toContain("uJigR");
   });
 });
 
