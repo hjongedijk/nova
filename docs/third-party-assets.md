@@ -2,39 +2,43 @@
 
 NOVA's default shape is its original procedural orb on the website, wallpaper and helper. It renders locally and uses NOVA's existing voice playback and state palette. It does not use a separate avatar service.
 
-The other shapes in the Gedaante selector ("Gestalte" and "Aura") also render locally in the browser. Only Aura uses an image asset.
+The other shapes in the Gedaante selector ("Gestalte" and "Aura") also render locally in the browser.
 
-## Aura artwork
+## Aura: a real-time 3D figure
 
-| File                                  | What it is                                      | Size         |
-| ------------------------------------- | ----------------------------------------------- | ------------ |
-| `apps/web/static/aura/aura-2560.webp` | The artwork for desktop (2560x1440, WebP q90)   | about 270 KB |
-| `apps/web/static/aura/aura-1280.webp` | The same for the low tier and phones (1280x720) | about 110 KB |
-| `apps/web/static/aura/aura-data.png`  | A data atlas built from it (see below)          | about 330 KB |
-| `apps/web/static/aura/aura-lines.png` | The light lines drawn over the figure           | about 900 KB |
+Aura is a sculpted feminine bust rendered in 3D in the browser (three.js). Her body and her long hair are one dark sculpt. Light lines lie on her surface, her hair is drawn by strands of light with loose strands moving round it, and her head truly turns. No picture or artwork is shown.
 
-- **Origin:** generated with **FLUX.1 schnell** on the owner's own PC. The owner approved it as Aura's figure ("ja b5-7").
-- **Licence:** FLUX.1 schnell is released under **Apache-2.0**. Its outputs carry no extra restriction, so the artwork is ours to ship.
-- **Content:** a front-facing feminine bust with a short natural neck and a dark indigo body outlined by a thin rim of light. The head is blank and smooth, with no face. She has full, flowing hair of violet light strands, and violet ribbons drift behind her.
-- **Source file:** the 3840x2160 original (`aura-base5-4k.png`) is kept outside the repository, with the owner's previews.
-- **Style reference:** the look of the light lines was matched by eye to a commercial reference (MIRA). That reference is never used as a texture, sampled or traced; the lines, their paths and the figure are our own.
+| File                                    | What it is                                                         |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| `scripts/assets/aura-sculpt.glb`        | The source sculpt, decimated to about 180k triangles (positions)   |
+| `apps/web/static/aura/aura-figure.glb`  | The mesh: glTF with `EXT_meshopt_compression`, about 65k triangles |
+| `apps/web/static/aura/aura-figure.json` | Landmarks and a distance field of the figure                       |
+| `apps/web/static/aura/aura-strands.bin` | The hair's strands: about 1,700 lines over the sculpted hair       |
+| `apps/web/static/aura/aura-still.webp`  | A still of the 3D figure, for browsers without WebGL2              |
 
-`scripts/aura-assets.mjs` builds all four files from the original: `capped 2G -- node scripts/aura-assets.mjs path/to/aura-base5-4k.png`. The WebP files come from the browser's own encoder, because the host has no native image tools.
+### Source and licence
 
-The data atlas has three 960x540 RGB tiles stacked vertically. Every value in it is derived from the artwork itself:
+- **Source:** our own sculpt. We made a picture of a clay sculpture of a woman's bust with FLUX.1 schnell, and turned that picture into a mesh with Hunyuan3D-2, both on our own machine. No third-party mesh, scan or artwork is part of it.
+- **Licence:** the picture and the mesh are our own output. The Hunyuan3D-2 model itself is released under the **Tencent Hunyuan 3D 2.0 Community License**; that licence applies to the model and its use, and should be read before the model is used for anything new (it restricts some territories and uses). FLUX.1 schnell is released under Apache 2.0.
+- **The still:** a rendering of our own figure.
 
-1. **Masks:**
-   - the form: the head plus the body (neck, torso, arms), flood-filled over the dark skin and bounded by its rim lines;
-   - the head: the dark blank face, bounded by its rim and the hair;
-   - "bright": what the artwork already lights, which is the hair, the rims and the ribbons.
-2. **Hair weight, height and figure:**
-   - the hair weight: 0 at the scalp (roots, parting, crown), rising toward the tips; the wind and the hair's lag behind the head scale with it, so the roots never move;
-   - the height is the silhouette inflated into a rounded form (the solution of a Poisson equation), with round breasts added;
-   - the figure mask marks what the particles build at birth.
-3. **Normal x and normal y** of that rounded form, and the position across each arm (for the sheen down its length and the dark gap between arm and torso).
+### How it is built
 
-The lines raster has four 1920x1080 RGBA layers in a 2x2 sheet. Each layer holds some of the light lines: per pixel, the distance to its nearest line, the place along that line, and the line's weight and flags (warm, on the face). Lines that cross or run close lie in different layers. The alpha holds the soft halo of all lines summed, so it never cuts off. A tEXt chunk records the counts.
+`scripts/aura-figure.mjs` builds the mesh and the JSON. Run it as `capped 3G -- node scripts/aura-figure.mjs`. With the path of a raw sculpt as argument it first writes a new `scripts/assets/aura-sculpt.glb` from it.
 
-The lines are about 100 Catmull-Rom curves of our own composition, generated per side with their own random draw: fine strands down the neck, one smooth deltoid curve over each shoulder, a few quiet lines along each arm with a rim on both edges, long sweeps from the collarbones and shoulders down over and around each breast with fine companion strands, open contour arcs at different radii (the undersides brightest, some warm), bundles that gather at the sternum and part toward the ribs, and a few strands from the parting down into the long hair. The face has about nine faint lines that follow the head's form (temples over the cheeks to the jaw, along the jaw into the neck, one arc under the hairline). None of them forms a feature or runs down the centre.
+1. **Size:** the sculpt is simplified to the runtime triangle count, scaled to metres and cut below the waist line (the torso and the arms end there and fade out in the shader).
+2. **Hair and body:** skin is smooth, hair is ridged, and the sculpt has a crease where hair lies on skin. The body is grown from the middle of the chest over every edge that bends only a little; it stops at the hair. On the head, the face is the front below the hairline. Each vertex gets a hair weight.
+3. **Faceless and abstract:** the face's distance from the middle of the head is smoothed until eyes, nose and lips are gone; skull, cheekbones, jaw and chin stay. The chest and belly are smoothed until no anatomical detail is left.
+4. **Bust:** each breast is replaced by a round form (a ball set into the chest, with the join smoothed). `BUST.size` in the script is its radius and the one number to tune.
+5. **Weights:** a head weight for the real rotation about the neck (hair near the head goes with it), a breath weight, an arm weight.
+6. **Surface fields:** two fields are baked per vertex. Their isolines are the light lines on the body, drawn in the fragment shader at native resolution:
+   - field A: a flow that springs from the base of the neck, fans along the collarbones, parts round each breast and runs down the belly;
+   - field B: lines along the arms, down the neck and up the sides of the face.
+7. **Hair strands:** a root-to-tip field is grown over the hair from the centre parting. Along its smoothed gradient, strands are traced over the hair's surface from evenly spread seeds, up to the parting and down to the tips. Each is resampled, smoothed and lifted a little off the surface.
+8. **Distance field:** a signed distance field of the figure at 1 cm resolution, which the loose strands rest on.
 
-The renderer (`apps/web/src/lib/entity/aura*.ts`) grades the picture deep violet and draws those lines as neon light over it. It also samples the picture into particles for the birth. The face is never given features.
+The renderer (`apps/web/src/lib/entity/aura*.ts`) handles the rest:
+
+- the weave of lines, with per-line brightness, thickness and colour, travelling pulses and star dust;
+- the hair: the baked strands are drawn as thin ribbons of light on the dark, matte sculpted mass; both sway in the wind toward the tips and follow the head a little late, and loose strands (verlet guide strands, with thin strands drawn from them) move round them;
+- the glowing silhouette.
